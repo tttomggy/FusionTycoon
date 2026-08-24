@@ -3,7 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
-local Remotes = require(ReplicatedStorage.Shared.Remotes)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
@@ -28,32 +28,30 @@ local function pickRewardItem(tier: string)
 end
 
 local function onFusionRequest(player: Player, tier: unknown)
-	local fusionResult = Remotes.Get("FusionResult")
-
 	if typeof(tier) ~= "string" or not FusionConfig.DropRates[tier] then
-		fusionResult:FireClient(player, { Success = false, Reason = "InvalidTier" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InvalidTier" })
 		return
 	end
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		fusionResult:FireClient(player, { Success = false, Reason = "DataNotLoaded" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "DataNotLoaded" })
 		return
 	end
 
 	if isOnCooldown(player.UserId) then
-		fusionResult:FireClient(player, { Success = false, Reason = "OnCooldown" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "OnCooldown" })
 		return
 	end
 
 	local nextTier = FusionConfig.GetNextTier(tier)
 	local requiredCount = FusionConfig.ItemsRequiredForFusion[tier]
 	if not nextTier or not requiredCount then
-		fusionResult:FireClient(player, { Success = false, Reason = "TierNotFusible" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "TierNotFusible" })
 		return
 	end
 
 	if PlayerDataService.CountItemsOfTier(player, tier) < requiredCount then
-		fusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
 		return
 	end
 
@@ -61,15 +59,16 @@ local function onFusionRequest(player: Player, tier: unknown)
 
 	local removed, removedUids = PlayerDataService.RemoveItemsOfTier(player, tier, requiredCount)
 	if not removed then
-		fusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
+		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
 		return
 	end
 
 	-- Inputs are consumed before the roll: fusion is a gamble, failure loses the items.
 	local succeeded, resolvedNextTier = FusionConfig.AttemptFusion(tier)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
 	if not succeeded then
-		fusionResult:FireClient(player, {
+		RemoteEvents.FusionResult:FireClient(player, {
 			Success = false,
 			Reason = "FusionFailed",
 			ConsumedUids = removedUids,
@@ -80,7 +79,7 @@ local function onFusionRequest(player: Player, tier: unknown)
 	local rewardItem = pickRewardItem(resolvedNextTier :: string)
 	if not rewardItem then
 		warn(("FusionService: no ItemConfig entry found for tier %s"):format(resolvedNextTier :: string))
-		fusionResult:FireClient(player, {
+		RemoteEvents.FusionResult:FireClient(player, {
 			Success = false,
 			Reason = "MissingRewardItem",
 			ConsumedUids = removedUids,
@@ -89,8 +88,9 @@ local function onFusionRequest(player: Player, tier: unknown)
 	end
 
 	local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
-	fusionResult:FireClient(player, {
+	RemoteEvents.FusionResult:FireClient(player, {
 		Success = true,
 		ConsumedUids = removedUids,
 		NewItem = newEntry,
@@ -98,8 +98,7 @@ local function onFusionRequest(player: Player, tier: unknown)
 end
 
 function FusionService.Init()
-	local fusionRequest = Remotes.Get("FusionRequest")
-	fusionRequest.OnServerEvent:Connect(onFusionRequest)
+	RemoteEvents.RequestFusion.OnServerEvent:Connect(onFusionRequest)
 end
 
 return FusionService

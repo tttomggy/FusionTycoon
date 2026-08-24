@@ -1,6 +1,9 @@
 local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 local PlayerDataService = {}
 
@@ -147,6 +150,7 @@ end
 
 local function onPlayerAdded(player: Player)
 	loadData(player)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 end
 
 local function onPlayerRemoving(player: Player)
