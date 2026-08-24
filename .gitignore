@@ -1,0 +1,29 @@
+# Rojo build output
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+
+# Rojo sourcemap
+sourcemap.json
+
+# Wally packages
+Packages/
+wally.lock
+DevPackages/
+
+# Aftman/Foreman tool caches
+.aftman/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+
+# Logs
+*.log
