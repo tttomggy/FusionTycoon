@@ -16,6 +16,7 @@ local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 local DEFAULT_DATA = {
 	Cash = 0,
 	Inventory = {}, -- array of { Uid: string, ItemId: string, Tier: string }
+	Generators = {}, -- map of generatorId -> level
 }
 
 -- In-memory cache keyed by UserId; the source of truth while a player is in-session.
@@ -91,6 +92,34 @@ function PlayerDataService.AddCash(player: Player, amount: number)
 	data.Cash = math.max(0, data.Cash + amount)
 end
 
+-- Atomically checks-and-deducts; fails (no mutation) if funds are insufficient.
+function PlayerDataService.SpendCash(player: Player, amount: number): boolean
+	local data = sessionCache[player.UserId]
+	if not data or data.Cash < amount then
+		return false
+	end
+	data.Cash -= amount
+	return true
+end
+
+function PlayerDataService.GetGenerators(player: Player): { [string]: number }?
+	local data = sessionCache[player.UserId]
+	return data and data.Generators or nil
+end
+
+function PlayerDataService.GetGeneratorLevel(player: Player, generatorId: string): number
+	local generators = PlayerDataService.GetGenerators(player)
+	return generators and generators[generatorId] or 0
+end
+
+function PlayerDataService.SetGeneratorLevel(player: Player, generatorId: string, level: number)
+	local data = sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	data.Generators[generatorId] = level
+end
+
 function PlayerDataService.GetInventory(player: Player): { any }?
 	local data = sessionCache[player.UserId]
 	return data and data.Inventory or nil
@@ -151,6 +180,10 @@ end
 local function onPlayerAdded(player: Player)
 	loadData(player)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	RemoteEvents.SyncTycoon:FireClient(player, {
+		Cash = PlayerDataService.GetCash(player),
+		Generators = PlayerDataService.GetGenerators(player) or {},
+	})
 end
 
 local function onPlayerRemoving(player: Player)

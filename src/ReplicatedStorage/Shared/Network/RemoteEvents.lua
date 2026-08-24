@@ -7,6 +7,9 @@ local REMOTE_EVENT_NAMES = {
 	"RequestFusion", -- client -> server: attempt a fusion for a given tier
 	"FusionResult", -- server -> client: validated outcome of a fusion attempt
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
+	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
+	"UpgradeResult", -- server -> client: validated outcome of an upgrade attempt
+	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
 }
 
 local function getOrCreateFolder(): Folder
