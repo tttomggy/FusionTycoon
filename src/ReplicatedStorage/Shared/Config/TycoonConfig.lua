@@ -2,6 +2,10 @@ local TycoonConfig = {}
 
 TycoonConfig.PassiveIncomeIntervalSeconds = 1
 
+-- Physical cash items spawned by a claimed plot's Dropper1.
+TycoonConfig.DropperCashValue = 5
+TycoonConfig.DropperIntervalSeconds = 3
+
 -- Multiplies a generator's BaseCashPerSecond according to its Tier.
 TycoonConfig.TierMultipliers = {
 	Common = 1,

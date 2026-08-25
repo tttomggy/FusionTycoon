@@ -1,11 +1,23 @@
 local ServerScriptService = game:GetService("ServerScriptService")
 local Services = ServerScriptService.Services
 
-local PlayerDataService = require(Services.PlayerDataService)
-local FusionService = require(Services.FusionService)
-local TycoonService = require(Services.TycoonService)
+print("=== BOOTSTRAP SCRIPT STARTED ===")
 
--- PlayerDataService must be ready before other services start accepting requests.
+print("Loading PlayerDataService...")
+local PlayerDataService = require(Services.PlayerDataService)
+print("PlayerDataService Loaded!")
+
+print("Loading FusionService...")
+local FusionService = require(Services.FusionService)
+print("FusionService Loaded!")
+
+print("Loading TycoonService...")
+local TycoonService = require(Services.TycoonService)
+print("TycoonService Loaded!")
+
+print("Initializing Services...")
 PlayerDataService.Init()
 FusionService.Init()
 TycoonService.Init()
+
+print("=== ALL SERVICES INITIALIZED SUCCESSFULLY ===")
