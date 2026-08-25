@@ -79,6 +79,15 @@ function PlayerDataService.GetData(player: Player): any
 	return sessionCache[player.UserId]
 end
 
+-- Mirrors the authoritative Cash value onto the player's leaderstats display.
+local function updateLeaderstatsCash(player: Player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
+	if cashValue then
+		(cashValue :: IntValue).Value = math.floor(PlayerDataService.GetCash(player))
+	end
+end
+
 function PlayerDataService.GetCash(player: Player): number
 	local data = sessionCache[player.UserId]
 	return data and data.Cash or 0
@@ -90,6 +99,7 @@ function PlayerDataService.AddCash(player: Player, amount: number)
 		return
 	end
 	data.Cash = math.max(0, data.Cash + amount)
+	updateLeaderstatsCash(player)
 end
 
 -- Atomically checks-and-deducts; fails (no mutation) if funds are insufficient.
@@ -99,6 +109,7 @@ function PlayerDataService.SpendCash(player: Player, amount: number): boolean
 		return false
 	end
 	data.Cash -= amount
+	updateLeaderstatsCash(player)
 	return true
 end
 
@@ -177,8 +188,23 @@ function PlayerDataService.AddItem(player: Player, itemId: string, tier: string)
 	return entry
 end
 
+local function createLeaderstats(player: Player)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+
+	local cashValue = Instance.new("IntValue")
+	cashValue.Name = "Cash"
+	cashValue.Value = 0
+	cashValue.Parent = leaderstats
+
+	leaderstats.Parent = player
+end
+
 local function onPlayerAdded(player: Player)
 	loadData(player)
+	createLeaderstats(player)
+	updateLeaderstatsCash(player)
+
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	RemoteEvents.SyncTycoon:FireClient(player, {
 		Cash = PlayerDataService.GetCash(player),
