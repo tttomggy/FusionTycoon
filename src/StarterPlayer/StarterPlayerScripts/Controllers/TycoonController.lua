@@ -7,6 +7,7 @@ local TycoonController = {}
 -- Local cache of the server-authoritative tycoon state; never mutated optimistically.
 local cash = 0
 local generatorLevels: { [string]: number } = {}
+local pedestalDisplays: { [number]: string } = {}
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -30,6 +31,11 @@ function TycoonController.IsUpgradePending(generatorId: string): boolean
 	return pendingUpgrades[generatorId] == true
 end
 
+-- Uid of the item displayed on `pedestalIndex`, or nil if it's empty.
+function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
+	return pedestalDisplays[pedestalIndex]
+end
+
 -- Called by UI when the player clicks the upgrade button for `generatorId`.
 -- Fire-and-forget: does not yield, and returns immediately.
 function TycoonController.RequestUpgrade(generatorId: string): boolean
@@ -45,6 +51,7 @@ end
 local function onSyncTycoon(snapshot: any)
 	cash = snapshot.Cash
 	generatorLevels = snapshot.Generators
+	pedestalDisplays = snapshot.PedestalDisplays or {}
 	tycoonChanged:Fire(cash, generatorLevels)
 end
 

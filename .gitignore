@@ -4,6 +4,11 @@
 *.rbxm
 *.rbxmx
 
+# TycoonTemplate.rbxm is source content (default.project.json maps it to
+# ReplicatedStorage.TycoonTemplate), not a build artifact - excluding it
+# would leave the plot-cloning system unreproducible on a fresh clone.
+!TycoonTemplate.rbxm
+
 # Rojo sourcemap
 sourcemap.json
 

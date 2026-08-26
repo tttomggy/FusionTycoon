@@ -6,6 +6,15 @@ TycoonConfig.PassiveIncomeIntervalSeconds = 1
 TycoonConfig.DropperCashValue = 5
 TycoonConfig.DropperIntervalSeconds = 3
 
+-- Multiplier Pad: each purchase doubles the cash value of every item a
+-- dropper produces (level 0 = x1, level 1 = x2, level 2 = x4, ...), up to
+-- MaxLevel. Cost grows the same way generator upgrades do.
+TycoonConfig.CashMultiplier = {
+	BaseCost = 150,
+	CostGrowth = 1.6,
+	MaxLevel = 10,
+}
+
 -- Multiplies a generator's BaseCashPerSecond according to its Tier.
 TycoonConfig.TierMultipliers = {
 	Common = 1,
@@ -88,6 +97,17 @@ end
 function TycoonConfig.GetGeneratorCashPerSecond(generator, level: number): number
 	local multiplier = TycoonConfig.TierMultipliers[generator.Tier] or 1
 	return generator.BaseCashPerSecond * multiplier * level
+end
+
+-- Cash multiplier applied per dropped item at a given Multiplier Pad level.
+function TycoonConfig.GetCashMultiplierValue(level: number): number
+	return 2 ^ level
+end
+
+-- Cost to purchase the level after `currentLevel`.
+function TycoonConfig.GetCashMultiplierUpgradeCost(currentLevel: number): number
+	local multiplier = TycoonConfig.CashMultiplier
+	return math.floor(multiplier.BaseCost * (multiplier.CostGrowth ^ currentLevel))
 end
 
 function TycoonConfig.IsUnlocked(generator, generatorLevels: { [string]: number }): boolean

@@ -4,12 +4,16 @@ local RunService = game:GetService("RunService")
 local FOLDER_NAME = "RemoteEvents"
 
 local REMOTE_EVENT_NAMES = {
-	"RequestFusion", -- client -> server: attempt a fusion for a given tier
+	"RequestFusion", -- client -> server: attempt to fuse two owned items (by Uid)
 	"FusionResult", -- server -> client: validated outcome of a fusion attempt
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
 	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
 	"UpgradeResult", -- server -> client: validated outcome of an upgrade attempt
 	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
+	"RequestPlaceItem", -- client -> server: attempt to display an owned item (by Uid) on one of the player's own pedestals
+	"PlaceItemResult", -- server -> client: validated outcome of a place-item attempt
+	"RareFusionAnnouncement", -- server -> all clients: a Legendary/Mythic item was just displayed
+	"MultiplierUpgraded", -- server -> client: the local player's cash multiplier purchase succeeded
 }
 
 local function getOrCreateFolder(): Folder

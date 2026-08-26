@@ -15,8 +15,10 @@ local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 
 local DEFAULT_DATA = {
 	Cash = 0,
-	Inventory = {}, -- array of { Uid: string, ItemId: string, Tier: string }
+	Inventory = {}, -- array of { Uid: string, ItemId: string, Tier: string, InUse: boolean }
 	Generators = {}, -- map of generatorId -> level
+	CashMultiplierLevel = 0, -- Multiplier Pad level; see TycoonConfig.GetCashMultiplierValue
+	PedestalDisplays = {}, -- map of pedestalIndex -> displayed item's Uid
 }
 
 -- In-memory cache keyed by UserId; the source of truth while a player is in-session.
@@ -131,46 +133,67 @@ function PlayerDataService.SetGeneratorLevel(player: Player, generatorId: string
 	data.Generators[generatorId] = level
 end
 
+-- Falls back to 0 so saves from before the Multiplier Pad existed still work.
+function PlayerDataService.GetCashMultiplierLevel(player: Player): number
+	local data = sessionCache[player.UserId]
+	return data and data.CashMultiplierLevel or 0
+end
+
+function PlayerDataService.SetCashMultiplierLevel(player: Player, level: number)
+	local data = sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	data.CashMultiplierLevel = level
+end
+
 function PlayerDataService.GetInventory(player: Player): { any }?
 	local data = sessionCache[player.UserId]
 	return data and data.Inventory or nil
 end
 
-function PlayerDataService.CountItemsOfTier(player: Player, tier: string): number
+-- Looks up a single inventory entry by its Uid, or nil if the player doesn't
+-- currently own an item with that Uid (already consumed, never owned, etc).
+function PlayerDataService.GetItemByUid(player: Player, uid: string): any
 	local inventory = PlayerDataService.GetInventory(player)
 	if not inventory then
-		return 0
+		return nil
 	end
-
-	local count = 0
 	for _, item in inventory do
-		if item.Tier == tier then
-			count += 1
+		if item.Uid == uid then
+			return item
 		end
 	end
-	return count
+	return nil
 end
 
--- Removes up to `count` items of `tier`. Fails atomically: if the player doesn't have
--- enough, nothing is removed.
-function PlayerDataService.RemoveItemsOfTier(player: Player, tier: string, count: number): (boolean, { string })
+-- Atomically removes the exact items named by `uids`. Fails (no mutation) if
+-- any uid isn't currently in the player's inventory - e.g. it was already
+-- consumed by an earlier request.
+function PlayerDataService.RemoveItemsByUid(player: Player, uids: { string }): (boolean, { any })
 	local inventory = PlayerDataService.GetInventory(player)
-	if not inventory or PlayerDataService.CountItemsOfTier(player, tier) < count then
+	if not inventory then
 		return false, {}
 	end
 
-	local removedUids = {}
-	for index = #inventory, 1, -1 do
-		if #removedUids >= count then
-			break
-		end
-		if inventory[index].Tier == tier then
-			table.insert(removedUids, inventory[index].Uid)
-			table.remove(inventory, index)
+	for _, uid in uids do
+		if not PlayerDataService.GetItemByUid(player, uid) then
+			return false, {}
 		end
 	end
 
-	return true, removedUids
+	local removedEntries = {}
+	for _, uid in uids do
+		for index = #inventory, 1, -1 do
+			if inventory[index].Uid == uid then
+				table.insert(removedEntries, inventory[index])
+				table.remove(inventory, index)
+				break
+			end
+		end
+	end
+
+	return true, removedEntries
 end
 
 function PlayerDataService.AddItem(player: Player, itemId: string, tier: string): any
@@ -183,9 +206,44 @@ function PlayerDataService.AddItem(player: Player, itemId: string, tier: string)
 		Uid = HttpService:GenerateGUID(false),
 		ItemId = itemId,
 		Tier = tier,
+		InUse = false,
 	}
 	table.insert(data.Inventory, entry)
 	return entry
+end
+
+-- Marks/unmarks an inventory item as "in use" (e.g. currently displayed on a
+-- pedestal) so other systems - fusion in particular - can refuse to consume
+-- an item that's doing something else elsewhere. Returns false if the uid
+-- isn't currently owned.
+function PlayerDataService.SetItemInUse(player: Player, uid: string, inUse: boolean): boolean
+	local item = PlayerDataService.GetItemByUid(player, uid)
+	if not item then
+		return false
+	end
+	item.InUse = inUse
+	return true
+end
+
+-- Lazily initializes PedestalDisplays so saves from before the Pedestal
+-- Showcase existed still work.
+function PlayerDataService.GetPedestalDisplays(player: Player): { [number]: string }
+	local data = sessionCache[player.UserId]
+	if not data then
+		return {}
+	end
+	data.PedestalDisplays = data.PedestalDisplays or {}
+	return data.PedestalDisplays
+end
+
+-- Sets pedestalIndex's displayed item Uid, or clears it if uid is nil.
+function PlayerDataService.SetPedestalDisplay(player: Player, pedestalIndex: number, uid: string?)
+	local data = sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	data.PedestalDisplays = data.PedestalDisplays or {}
+	data.PedestalDisplays[pedestalIndex] = uid
 end
 
 local function createLeaderstats(player: Player)
@@ -209,6 +267,8 @@ local function onPlayerAdded(player: Player)
 	RemoteEvents.SyncTycoon:FireClient(player, {
 		Cash = PlayerDataService.GetCash(player),
 		Generators = PlayerDataService.GetGenerators(player) or {},
+		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
+		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
 	})
 end
 

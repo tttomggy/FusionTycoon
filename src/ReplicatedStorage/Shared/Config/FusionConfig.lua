@@ -2,7 +2,9 @@ local FusionConfig = {}
 
 FusionConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
 
--- Chance of a drop landing on each tier; must sum to 1.
+-- Chance a fusion's output lands on each tier; must sum to 1. Independent of
+-- which tier the two consumed items were - the Fusion Machine is a gamble,
+-- not a guaranteed step up.
 FusionConfig.DropRates = {
 	Common = 0.60,
 	Rare = 0.25,
@@ -19,33 +21,31 @@ do
 	assert(math.abs(total - 1) < 1e-6, "FusionConfig.DropRates must sum to 1")
 end
 
--- Items of a tier consumed to attempt a fusion into the next tier.
-FusionConfig.ItemsRequiredForFusion = {
-	Common = 3,
-	Rare = 3,
-	Epic = 4,
-	Legendary = 5,
+-- The Fusion Machine always consumes exactly this many same-tier items per attempt.
+FusionConfig.ItemsRequiredPerFusion = 2
+
+-- Per-tier accent color, shared by the machine's own styling, the odds panel,
+-- and the client's reveal effects, so a given tier always reads the same
+-- color everywhere it shows up.
+FusionConfig.TierAccentColors = {
+	Common = Color3.fromRGB(200, 200, 200),
+	Rare = Color3.fromRGB(60, 160, 255),
+	Epic = Color3.fromRGB(190, 60, 255),
+	Legendary = Color3.fromRGB(255, 190, 40),
+	Mythic = Color3.fromRGB(255, 60, 90),
 }
 
--- Chance a fusion attempt succeeds and yields the next tier's item.
-FusionConfig.FusionSuccessRate = {
-	Common = 0.75,
-	Rare = 0.55,
-	Epic = 0.35,
-	Legendary = 0.15,
+-- Tiers dramatic enough to warrant the "big reveal" treatment (longer pause,
+-- screen shake, bigger particle burst, distinct sound) instead of the quick,
+-- understated one. See RevealEffects.PlayReveal.
+FusionConfig.MajorRevealTiers = {
+	Epic = true,
+	Legendary = true,
+	Mythic = true,
 }
 
-function FusionConfig.GetNextTier(tier: string): string?
-	for index, currentTier in FusionConfig.TierOrder do
-		if currentTier == tier then
-			return FusionConfig.TierOrder[index + 1]
-		end
-	end
-	return nil
-end
-
--- Rolls a drop tier using cumulative-weight RNG against DropRates.
-function FusionConfig.RollDropTier(randomInstance: Random?): string
+-- Rolls a result tier using cumulative-weight RNG against DropRates.
+function FusionConfig.RollResultTier(randomInstance: Random?): string
 	local rng = randomInstance or Random.new()
 	local roll = rng:NextNumber()
 	local cumulative = 0
@@ -56,21 +56,6 @@ function FusionConfig.RollDropTier(randomInstance: Random?): string
 		end
 	end
 	return FusionConfig.TierOrder[#FusionConfig.TierOrder]
-end
-
--- Attempts to fuse ItemsRequiredForFusion[tier] items of `tier` into the next tier.
--- Returns (success: boolean, nextTier: string?).
-function FusionConfig.AttemptFusion(tier: string, randomInstance: Random?): (boolean, string?)
-	local nextTier = FusionConfig.GetNextTier(tier)
-	local successRate = FusionConfig.FusionSuccessRate[tier]
-	if not nextTier or not successRate then
-		return false, nil
-	end
-
-	local rng = randomInstance or Random.new()
-	local success = rng:NextNumber() <= successRate
-
-	return success, nextTier
 end
 
 return FusionConfig

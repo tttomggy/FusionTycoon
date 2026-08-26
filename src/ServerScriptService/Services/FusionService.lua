@@ -27,72 +27,94 @@ local function pickRewardItem(tier: string)
 	return itemsOfTier[math.random(1, #itemsOfTier)]
 end
 
-local function onFusionRequest(player: Player, tier: unknown)
-	if typeof(tier) ~= "string" or not FusionConfig.DropRates[tier] then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InvalidTier" })
+-- Every reject path fires a (Success = false) FusionResult so the client's
+-- pending-request flag always resolves. `isSuspicious` marks rejections that
+-- indicate a modified/exploited client rather than an ordinary race (e.g. two
+-- rapid clicks) - those get a server-side warn so they're visible in logs
+-- without telling the client anything it could use to probe further.
+local function reject(player: Player, reason: string, isSuspicious: boolean?)
+	if isSuspicious then
+		warn(("FusionService: rejected fusion request from %s (%s)"):format(player.Name, reason))
+	end
+	RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = reason })
+end
+
+-- Validates and resolves a fusion attempt entirely synchronously (no yields
+-- between the ownership check and the inventory mutation), so two requests
+-- from the same player can never both pass validation against the same items.
+local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknown)
+	if typeof(rawUidA) ~= "string" or typeof(rawUidB) ~= "string" then
+		reject(player, "InvalidItems", true)
+		return
+	end
+	local uidA, uidB = rawUidA :: string, rawUidB :: string
+
+	if uidA == uidB then
+		reject(player, "DuplicateItem", true)
 		return
 	end
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "DataNotLoaded" })
+		reject(player, "DataNotLoaded")
 		return
 	end
 
 	if isOnCooldown(player.UserId) then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "OnCooldown" })
+		reject(player, "OnCooldown")
 		return
 	end
 
-	local nextTier = FusionConfig.GetNextTier(tier)
-	local requiredCount = FusionConfig.ItemsRequiredForFusion[tier]
-	if not nextTier or not requiredCount then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "TierNotFusible" })
+	-- Never trust client-supplied tiers/ownership: look both items up fresh
+	-- from the player's authoritative server-side inventory.
+	local itemA = PlayerDataService.GetItemByUid(player, uidA)
+	local itemB = PlayerDataService.GetItemByUid(player, uidB)
+	if not itemA or not itemB then
+		reject(player, "ItemNotOwned", true)
 		return
 	end
 
-	if PlayerDataService.CountItemsOfTier(player, tier) < requiredCount then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
+	if itemA.Tier ~= itemB.Tier then
+		reject(player, "TierMismatch", true)
+		return
+	end
+
+	-- An item on display on a Pedestal Showcase can't also be fused away -
+	-- otherwise the pedestal would be left showing an item that no longer
+	-- exists in the player's inventory.
+	if itemA.InUse or itemB.InUse then
+		reject(player, "ItemInUse", true)
 		return
 	end
 
 	lastFusionAt[player.UserId] = os.clock()
+	local consumedTier = itemA.Tier :: string
 
-	local removed, removedUids = PlayerDataService.RemoveItemsOfTier(player, tier, requiredCount)
+	-- Inputs are consumed before the roll: fusion is a gamble, and a failed
+	-- roll still costs the two items.
+	local removed = PlayerDataService.RemoveItemsByUid(player, { uidA, uidB })
 	if not removed then
-		RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = "InsufficientItems" })
+		reject(player, "ItemNotOwned")
 		return
 	end
-
-	-- Inputs are consumed before the roll: fusion is a gamble, failure loses the items.
-	local succeeded, resolvedNextTier = FusionConfig.AttemptFusion(tier)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
-	if not succeeded then
-		RemoteEvents.FusionResult:FireClient(player, {
-			Success = false,
-			Reason = "FusionFailed",
-			ConsumedUids = removedUids,
-		})
-		return
-	end
-
-	local rewardItem = pickRewardItem(resolvedNextTier :: string)
+	local resultTier = FusionConfig.RollResultTier()
+	local rewardItem = pickRewardItem(resultTier)
 	if not rewardItem then
-		warn(("FusionService: no ItemConfig entry found for tier %s"):format(resolvedNextTier :: string))
-		RemoteEvents.FusionResult:FireClient(player, {
-			Success = false,
-			Reason = "MissingRewardItem",
-			ConsumedUids = removedUids,
-		})
+		warn(("FusionService: no ItemConfig entry found for tier %s"):format(resultTier))
+		reject(player, "MissingRewardItem")
 		return
 	end
 
 	local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
+	print(("FusionService: %s fused 2x %s into %s (%s)"):format(player.Name, consumedTier, rewardItem.Name, resultTier))
+
 	RemoteEvents.FusionResult:FireClient(player, {
 		Success = true,
-		ConsumedUids = removedUids,
+		ConsumedUids = { uidA, uidB },
+		ConsumedTier = consumedTier,
 		NewItem = newEntry,
 	})
 end
