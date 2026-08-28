@@ -114,8 +114,57 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	end
 end
 
+local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
+	if typeof(rawPedestalIndex) ~= "number" then
+		reject(player, "InvalidArguments", true)
+		return
+	end
+	local pedestalIndex = math.floor(rawPedestalIndex :: number)
+
+	if not PlayerDataService.IsDataLoaded(player) then
+		reject(player, "DataNotLoaded")
+		return
+	end
+
+	-- Same non-negotiable rule as placement: the pedestal is only ever
+	-- resolved from the requesting player's own server-tracked plot.
+	local plot = TycoonService.GetPlotForPlayer(player)
+	if not plot then
+		reject(player, "NoPlot")
+		return
+	end
+
+	local pedestal = getPedestalPart(plot, pedestalIndex)
+	if not pedestal then
+		reject(player, "InvalidPedestal", true)
+		return
+	end
+
+	local pedestalDisplays = PlayerDataService.GetPedestalDisplays(player)
+	local uid = pedestalDisplays[pedestalIndex]
+	if not uid then
+		reject(player, "PedestalEmpty")
+		return
+	end
+
+	PlayerDataService.SetItemInUse(player, uid, false)
+	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
+	syncTycoon(player)
+
+	PedestalVisuals.Clear(pedestal)
+
+	print(("ItemService: %s picked an item back up from pedestal %d"):format(player.Name, pedestalIndex))
+
+	RemoteEvents.PlaceItemResult:FireClient(player, {
+		Success = true,
+		PedestalIndex = pedestalIndex,
+		Removed = true,
+	})
+end
+
 function ItemService.Init()
 	RemoteEvents.RequestPlaceItem.OnServerEvent:Connect(onRequestPlaceItem)
+	RemoteEvents.RequestRemoveItem.OnServerEvent:Connect(onRequestRemoveItem)
 end
 
 return ItemService

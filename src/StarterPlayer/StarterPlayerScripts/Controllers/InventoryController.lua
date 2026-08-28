@@ -34,6 +34,19 @@ function InventoryController.CountItemsOfTier(tier: string): number
 	return count
 end
 
+-- Every item not currently displayed on a pedestal (or otherwise in use) -
+-- the candidate list both the pedestal item picker and the persistent
+-- Inventory button's browse view draw from.
+function InventoryController.GetDisplayableItems(): { any }
+	local displayable = {}
+	for _, item in inventory do
+		if not item.InUse then
+			table.insert(displayable, item)
+		end
+	end
+	return displayable
+end
+
 local function onSyncInventory(newInventory: { any })
 	inventory = newInventory
 	inventoryChanged:Fire(inventory)

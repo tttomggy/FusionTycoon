@@ -11,9 +11,11 @@ local REMOTE_EVENT_NAMES = {
 	"UpgradeResult", -- server -> client: validated outcome of an upgrade attempt
 	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
 	"RequestPlaceItem", -- client -> server: attempt to display an owned item (by Uid) on one of the player's own pedestals
-	"PlaceItemResult", -- server -> client: validated outcome of a place-item attempt
+	"PlaceItemResult", -- server -> client: validated outcome of a place-item or remove-item attempt
+	"RequestRemoveItem", -- client -> server: attempt to pick an item back up off one of the player's own pedestals
 	"RareFusionAnnouncement", -- server -> all clients: a Legendary/Mythic item was just displayed
 	"MultiplierUpgraded", -- server -> client: the local player's cash multiplier purchase succeeded
+	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)
 }
 
 local function getOrCreateFolder(): Folder

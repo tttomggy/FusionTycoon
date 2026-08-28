@@ -38,7 +38,12 @@ local MAJOR_SHAKE_MAGNITUDE_STUDS = 0.35
 local MAJOR_SHAKE_DURATION_SECONDS = 0.5
 
 local MINOR_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
-local MAJOR_SOUND_ID = "rbxasset://sounds/bell.wav"
+-- TODO(asset gap, not a code bug): rbxasset://sounds/bell.wav fails to load
+-- in this project ("Temp read failed"), so this deliberately reuses
+-- MINOR_SOUND_ID for now - accepted tradeoff until a distinct "big reveal"
+-- sound is sourced/uploaded. Major/minor reveals sound identical in the
+-- meantime (Volume still differs).
+local MAJOR_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 
 -- Randomized, decaying screen shake via small Camera CFrame offsets. Safe to
 -- call for any "impactful moment," not just a fusion reveal.

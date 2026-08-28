@@ -9,6 +9,8 @@ local Config = ReplicatedStorage.Shared.Config
 local TycoonConfig = require(Config.TycoonConfig)
 local PlotNaming = require(Config.PlotNaming)
 local PlotLayout = require(Config.PlotLayout)
+local FusionConfig = require(Config.FusionConfig)
+local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PadStyler = require(ReplicatedStorage.Shared.Modules.PadStyler)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
@@ -77,12 +79,30 @@ local MULTIPLIER_PAD_DEBOUNCE_SECONDS = 1
 -- succeeds - purely presentational, doesn't touch SpendCash/SetCashMultiplierLevel.
 local MULTIPLIER_UPGRADE_ACCENT_COLOR = Color3.fromRGB(200, 60, 255)
 local MULTIPLIER_UPGRADE_BURST_COUNT = 30
-local MULTIPLIER_UPGRADE_SOUND_ID = "rbxasset://sounds/bell.wav"
+-- rbxasset://sounds/bell.wav fails to load in this project ("Temp read
+-- failed") - reusing DROPPER_POP_SOUND_ID's electronicpingshort.wav instead,
+-- since that one's already confirmed working (it plays on every dropper pop).
+local MULTIPLIER_UPGRADE_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 
 -- Dropper idle glow + per-drop "pop" feedback. Matches the falling cash
 -- part's own color so the dropper visually reads as the source of that cash.
 local DROPPER_ACCENT_COLOR = Color3.fromRGB(85, 255, 127)
 local DROPPER_IDLE_PULSE_SECONDS = 2.2
+
+-- Gacha Pad: the only source of fusable items. Sits one row-slot past the
+-- Pedestal row (see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS), so the full row
+-- reads: Dropper1, Dropper2, Multiplier Pad, Pedestal1-4, Gacha Pad.
+local GACHA_PAD_LABEL = "Gacha Pull"
+local GACHA_PAD_DEBOUNCE_SECONDS = 1
+local GACHA_PAD_ACCENT_COLOR = Color3.fromRGB(255, 215, 60)
+-- rbxasset://sounds/bell.wav fails to load in this project ("Temp read
+-- failed") - reusing DROPPER_POP_SOUND_ID's electronicpingshort.wav instead,
+-- since that one's already confirmed working (it plays on every dropper pop).
+local GACHA_PULL_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+-- Matches PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE / FusionMachineService's own
+-- PROMPT_MAX_ACTIVATION_DISTANCE - every ProximityPrompt in the game uses the
+-- same reach so none of them feel inconsistent stood next to another.
+local GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE = 10
 local DROPPER_IDLE_LIGHT_BRIGHTNESS = 2
 local DROPPER_IDLE_LIGHT_RANGE = 10
 local DROPPER_POP_PARTICLE_BASE_COUNT = 8
@@ -143,18 +163,27 @@ local function syncTycoon(player: Player)
 end
 
 local function calculateTotalCashPerSecond(player: Player): number
-	local generatorLevels = PlayerDataService.GetGenerators(player)
-	if not generatorLevels then
-		return 0
-	end
-
 	local total = 0
-	for _, generator in TycoonConfig.Generators do
-		local level = generatorLevels[generator.Id] or 0
-		if level > 0 then
-			total += TycoonConfig.GetGeneratorCashPerSecond(generator, level)
+
+	local generatorLevels = PlayerDataService.GetGenerators(player)
+	if generatorLevels then
+		for _, generator in TycoonConfig.Generators do
+			local level = generatorLevels[generator.Id] or 0
+			if level > 0 then
+				total += TycoonConfig.GetGeneratorCashPerSecond(generator, level)
+			end
 		end
 	end
+
+	-- Pedestal Showcase: each occupied pedestal contributes cash/sec scaled
+	-- by its displayed item's tier, same tick as Generators above.
+	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
+		local item = PlayerDataService.GetItemByUid(player, uid)
+		if item then
+			total += TycoonConfig.GetPedestalCashPerSecond(item.Tier)
+		end
+	end
+
 	return total
 end
 
@@ -537,6 +566,23 @@ local function spawnCashPart(plot: Model, dropper: BasePart, player: Player)
 	cashPart:SetAttribute("CashValue", TycoonConfig.DropperCashValue * multiplier)
 	cashPart.Parent = plot
 
+	-- Diagnostic: this is the only thing that repeatedly spawns near a
+	-- dropper and could visually "pile up" - confirms whether what's
+	-- actually being created here matches this code (Ball/Neon/green) or
+	-- whether something else is going on (e.g. a sync gap, or these aren't
+	-- being collected and are piling up as a heap of - still round, still
+	-- green - balls that just misread as something else from a distance).
+	print((
+		"TycoonService: %s's CashDrop spawned - Shape=%s Material=%s Color=(%d,%d,%d)"
+	):format(
+		player.Name,
+		tostring(cashPart.Shape),
+		tostring(cashPart.Material),
+		math.floor(cashPart.Color.R * 255),
+		math.floor(cashPart.Color.G * 255),
+		math.floor(cashPart.Color.B * 255)
+	))
+
 	-- Nudge it toward the Collector so it rolls across the floor as it falls,
 	-- instead of dropping straight down and landing wherever it spawned.
 	cashPart.AssemblyLinearVelocity = dropper.CFrame.LookVector * CASH_DROP_FORWARD_SPEED_STUDS_PER_SECOND
@@ -583,6 +629,12 @@ local function createCollector(plot: Model, dropper: BasePart, player: Player): 
 		hit:SetAttribute("Collected", true)
 		hit:Destroy()
 		awardCash(player, value)
+
+		-- Diagnostic, paired with the CashDrop spawn print: if spawns
+		-- vastly outnumber collections in the log, drops are piling up
+		-- uncollected (a Collector/physics problem) rather than a styling
+		-- one - the balls would still be green and round, just heaped up.
+		print(("TycoonService: %s's Collector caught a CashDrop worth $%d"):format(player.Name, value))
 	end)
 
 	return collector
@@ -621,14 +673,25 @@ local function spawnDropper2(plot: Model, player: Player, referenceDropper: Base
 	-- forward offset behave identically), just relocated via PlotOrigin.
 	dropper2.CFrame = CFrame.new(worldPosition) * referenceDropper.CFrame.Rotation
 	-- Explicit styling rather than whatever Dropper2 would otherwise inherit
-	-- from cloning Dropper1 - Dropper1's own template appearance is left
-	-- untouched (see the comment on connectClaimButton), but Dropper2 is a
-	-- part this service spawns outright, so it gets deliberate Material/Color
-	-- like every other spawned part.
-	dropper2.Material = Enum.Material.Metal
+	-- from cloning Dropper1. Neon (not Metal - see the comment on
+	-- connectClaimButton for why Metal reads dark regardless of Color3)
+	-- guarantees the accent color actually shows up under this game's lighting.
+	dropper2.Material = Enum.Material.Neon
 	dropper2.Color = DROPPER_ACCENT_COLOR
 	dropper2.Parent = plot
 	snapToFloorY(dropper2, originY)
+
+	-- Diagnostic: see the comment on Dropper1's equivalent print in
+	-- connectClaimButton for why this exists.
+	print((
+		"TycoonService: %s's Dropper2 styled - Material=%s Color=(%d,%d,%d)"
+	):format(
+		player.Name,
+		tostring(dropper2.Material),
+		math.floor(dropper2.Color.R * 255),
+		math.floor(dropper2.Color.G * 255),
+		math.floor(dropper2.Color.B * 255)
+	))
 
 	startDropperLoop(plot, player, dropper2, "Dropper2")
 end
@@ -691,11 +754,127 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 	end)
 end
 
--- Spawns the repeatable "Buy Multiplier Pad" upgrade: each purchase doubles
--- the plot owner's cash-per-item multiplier (see TycoonConfig.CashMultiplier)
--- and raises the cost for the next level, until MaxLevel is reached. Unlike
--- the one-shot Dropper2 button, this pad is never destroyed - its billboard
--- just updates to show the next tier and price.
+-- Spawns the repeatable "Buy Multiplier Pad" upgrade: each purchase raises
+-- the plot owner's cash-per-item multiplier to the next of exactly 10 fixed
+-- levels (see TycoonConfig.CashMultiplierLevels), until the hard cap at
+-- level 10 is reached - there's no purchase beyond it. Unlike the one-shot
+-- Dropper2 button, this pad is never destroyed - its billboard just updates
+-- to show the current level/multiplier and the next level's cost.
+-- Mirrors FusionService's own pickRewardItem: picks a random ItemConfig entry
+-- from the rolled tier. Duplicated rather than shared since it's a 5-line
+-- local function and the two services otherwise have no reason to depend on
+-- each other.
+local function pickGachaItem(tier: string)
+	local itemsOfTier = ItemConfig.GetItemsByTier(tier)
+	if #itemsOfTier == 0 then
+		return nil
+	end
+	return itemsOfTier[math.random(1, #itemsOfTier)]
+end
+
+local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
+	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
+	local rowOffset = PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS
+	local padWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(rowOffset, 0, 0))
+
+	local pad = Instance.new("Part")
+	pad.Name = "GachaPad"
+	pad.Size = Vector3.new(PlotLayout.GACHA_PAD_SIZE_X_STUDS, 1, PlotLayout.GACHA_PAD_SIZE_X_STUDS)
+	pad.Anchored = true
+	pad.CanCollide = true
+	pad.Position = Vector3.new(padWorldPosition.X, originY + pad.Size.Y / 2, padWorldPosition.Z)
+	pad.Parent = plot
+	PadStyler.Apply(pad, { AccentColor = GACHA_PAD_ACCENT_COLOR })
+
+	local billboard = Instance.new("BillboardGui")
+	billboard.Size = UDim2.fromOffset(160, 50)
+	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.AlwaysOnTop = true
+	billboard.Parent = pad
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.TextScaled = true
+	label.Font = Enum.Font.GothamBold
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Parent = billboard
+
+	setPurchaseLabelText(label, GACHA_PAD_LABEL, ("$%d per pull"):format(TycoonConfig.GachaPullCost))
+
+	-- Prompt-gated rather than Touched-triggered: walking onto the pad no
+	-- longer spends cash on its own, only an explicit key press does - the
+	-- same "E to ..." pattern already used by pedestals and the Fusion
+	-- Machine, and it stops a player from being charged repeatedly just for
+	-- standing on or walking through the pad.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "PullPrompt"
+	prompt.ActionText = ("Pull ($%d)"):format(TycoonConfig.GachaPullCost)
+	prompt.ObjectText = "Gacha Pad"
+	prompt.MaxActivationDistance = GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = pad
+
+	local debounce = false
+	prompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if debounce then
+			return
+		end
+		if triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+
+		if not PlayerDataService.SpendCash(player, TycoonConfig.GachaPullCost) then
+			return
+		end
+
+		debounce = true
+		syncTycoon(player)
+
+		local resultTier = FusionConfig.RollResultTier()
+		local rewardItem = pickGachaItem(resultTier)
+		if not rewardItem then
+			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
+			-- Refund: the pull was charged but couldn't produce an item.
+			PlayerDataService.AddCash(player, TycoonConfig.GachaPullCost)
+			syncTycoon(player)
+			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
+			debounce = false
+			return
+		end
+
+		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+
+		-- World-visible VFX/sound at the pad, tinted to the rolled tier's own
+		-- accent color so a Mythic pull visibly reads as rarer than a Common one.
+		local tierColor = FusionConfig.TierAccentColors[resultTier] or GACHA_PAD_ACCENT_COLOR
+		local burst = SparkleEmitter.Create({ Color = tierColor })
+		burst.Enabled = false
+		burst.Parent = pad
+		burst:Emit(30)
+		Debris:AddItem(burst, 3)
+
+		local sound = Instance.new("Sound")
+		sound.SoundId = GACHA_PULL_SOUND_ID
+		sound.Volume = 0.8
+		sound.Parent = pad
+		sound:Play()
+		Debris:AddItem(sound, 3)
+
+		RemoteEvents.GachaPullResult:FireClient(player, {
+			Success = true,
+			NewItem = newEntry,
+		})
+
+		print(("TycoonService: %s pulled a %s %s from the Gacha Pad"):format(player.Name, resultTier, rewardItem.Name))
+
+		task.wait(GACHA_PAD_DEBOUNCE_SECONDS)
+		debounce = false
+	end)
+end
+
 local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePart)
 	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
 	local rowOffset = MULTIPLIER_PAD_ROW_OFFSET_STUDS
@@ -750,15 +929,24 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 
 	local function refreshLabel()
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
+		local maxLevel = TycoonConfig.GetCashMultiplierMaxLevel()
 		local currentMultiplier = TycoonConfig.GetCashMultiplierValue(level)
-		if level >= TycoonConfig.CashMultiplier.MaxLevel then
-			setPurchaseLabelText(label, MULTIPLIER_PAD_LABEL, ("MAXED (x%d)"):format(currentMultiplier))
+
+		if level >= maxLevel then
+			setPurchaseLabelText(
+				label,
+				MULTIPLIER_PAD_LABEL,
+				("Level %d/%d (x%d) - MAX LEVEL"):format(level, maxLevel, currentMultiplier)
+			)
 			return
 		end
 
-		local nextMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
-		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level)
-		setPurchaseLabelText(label, MULTIPLIER_PAD_LABEL, ("x%d -> x%d ($%d)"):format(currentMultiplier, nextMultiplier, cost))
+		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
+		setPurchaseLabelText(
+			label,
+			MULTIPLIER_PAD_LABEL,
+			("Level %d/%d (x%d) - Next: $%d"):format(level, maxLevel, currentMultiplier, cost)
+		)
 	end
 
 	refreshLabel()
@@ -774,11 +962,11 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 		end
 
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
-		if level >= TycoonConfig.CashMultiplier.MaxLevel then
+		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
 			return
 		end
 
-		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level)
+		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		if not PlayerDataService.SpendCash(player, cost) then
 			return
 		end
@@ -868,7 +1056,12 @@ end
 -- decorative - positioned from ClaimButton's own live Position/Size, but
 -- never modifies ClaimButton itself, so its Touched-based claim trigger is
 -- completely unaffected.
-local function createClaimPodRiser(plot: Model, claimButton: BasePart)
+-- Returns the floating accent orb PadStyler.Apply creates, so the caller can
+-- remove just that piece once the plot is claimed - the orb's floating/
+-- bobbing/pulsing/sparkle treatment reads as "still active, come look,"
+-- which should stop once claiming is done, even though the riser's dark
+-- base and steady glow are meant to stay as permanent plot furniture.
+local function createClaimPodRiser(plot: Model, claimButton: BasePart): BasePart?
 	local riser = Instance.new("Part")
 	riser.Name = "ClaimPodRiser"
 	riser.Size = Vector3.new(
@@ -886,7 +1079,10 @@ local function createClaimPodRiser(plot: Model, claimButton: BasePart)
 		claimButton.Position.Z
 	)
 	riser.Parent = plot
-	PadStyler.Apply(riser, { AccentColor = CLAIM_BUTTON_COLOR })
+
+	local styleElements = PadStyler.Apply(riser, { AccentColor = CLAIM_BUTTON_COLOR })
+	local orb = styleElements.Orb
+	return if orb and orb:IsA("BasePart") then orb :: BasePart else nil
 end
 
 -- Returns `player`'s plot Model, or nil if they don't have one (not yet
@@ -911,7 +1107,7 @@ local function connectClaimButton(plot: Model, player: Player)
 
 	buttonPart.Material = Enum.Material.Neon
 	buttonPart.Color = CLAIM_BUTTON_COLOR
-	createClaimPodRiser(plot, buttonPart)
+	local claimPodOrb = createClaimPodRiser(plot, buttonPart)
 
 	print(("TycoonService: ClaimButton connected for %s"):format(player.Name))
 
@@ -937,6 +1133,14 @@ local function connectClaimButton(plot: Model, player: Player)
 		buttonPart.CanCollide = false
 		buttonPart.CanTouch = false
 
+		-- The claim pod's riser (dark base + steady glow) stays as permanent
+		-- plot furniture, but its floating/bobbing/pulsing accent orb reads
+		-- as "still active, come look" - that part should stop once the
+		-- plot is actually claimed.
+		if claimPodOrb then
+			claimPodOrb:Destroy()
+		end
+
 		print(("TycoonService: %s claimed their plot"):format(player.Name))
 
 		-- Recursive lookup: Dropper1 may be nested under an organizational group/folder.
@@ -948,6 +1152,33 @@ local function connectClaimButton(plot: Model, player: Player)
 
 		local dropper1Part = dropper1 :: BasePart
 		dropper1Part.Anchored = true
+		-- The template's own Dropper1 comes in as a default Part (Plastic,
+		-- default gray) - confirmed directly from TycoonTemplate.rbxm's
+		-- Material/Color3uint8 values, not a guess. Under this game's darker
+		-- lighting that reads as an unstyled black cube. Neon (not Metal,
+		-- which renders based on specular reflection off the environment and
+		-- can look dark/muted under diffuse lighting regardless of its
+		-- Color3 - confirmed as the actual cause after testing, same class
+		-- of issue as the original ClaimButton visibility fix) guarantees
+		-- the accent color always reads at full brightness. Styled to match
+		-- Dropper2 (which already gets this explicitly since it's a part
+		-- this service spawns outright) so both droppers read as the same
+		-- machine rather than one styled and one default-gray.
+		dropper1Part.Material = Enum.Material.Neon
+		dropper1Part.Color = DROPPER_ACCENT_COLOR
+		-- Diagnostic: prints the actual applied values immediately after
+		-- setting them, so a test run shows real data instead of trusting
+		-- that this code path ran at all (e.g. a stale Rojo sync would mean
+		-- Studio isn't actually executing this file's current content).
+		print((
+			"TycoonService: %s's Dropper1 styled - Material=%s Color=(%d,%d,%d)"
+		):format(
+			player.Name,
+			tostring(dropper1Part.Material),
+			math.floor(dropper1Part.Color.R * 255),
+			math.floor(dropper1Part.Color.G * 255),
+			math.floor(dropper1Part.Color.B * 255)
+		))
 
 		-- Dropper1's rotation (and everything about how it produces cash) is
 		-- untouched template/gameplay logic, but its X/Z/height are now placed
@@ -971,6 +1202,7 @@ local function connectClaimButton(plot: Model, player: Player)
 		createPurchaseButton(plot, player, dropper1Part)
 		createMultiplierPad(plot, player, dropper1Part)
 		createPedestals(plot, player, dropper1Part)
+		createGachaPad(plot, player, dropper1Part)
 	end)
 end
 

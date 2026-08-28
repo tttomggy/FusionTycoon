@@ -46,8 +46,9 @@ local MACHINE_POSITION = Vector3.new(
 )
 
 -- Bridges the open gap between Floor's row-covering edge (PlotLayout.
--- GetFloorRowEndLocalX(), local X = 72) and the machine's own Base
--- (near edge at MACHINE_ROW_OFFSET_STUDS - half-width = 83) - both ends
+-- GetFloorRowEndLocalX(), local X = 78 now that the Gacha Pad extends the
+-- row past Pedestal 4) and the machine's own Base (near edge at
+-- MACHINE_ROW_OFFSET_STUDS - half-width = 83) - both ends
 -- read from the same shared source as TycoonService's own Floor sizing, so
 -- this can't silently drift out of alignment with wherever Floor's edge
 -- actually ends up. Overlaps a couple studs into both Floor and the Base so
@@ -96,6 +97,11 @@ local function buildConnectorWalkway(): BasePart?
 	connector.Size = Vector3.new(sizeX, CONNECTOR_THICKNESS_STUDS, CONNECTOR_WIDTH_STUDS)
 	connector.Anchored = true
 	connector.CanCollide = true
+	-- Dark Basalt base matches the machine's own Base/plinth (a deliberate
+	-- "dark base + neon accent" language), but this only ever got the dark
+	-- half - built purely to fix players falling into the Floor-to-machine
+	-- gap, nobody circled back to give it the neon accent glow every other
+	-- element in the game has. Highlight + PointLight below add that.
 	connector.Material = Enum.Material.Basalt
 	connector.Color = Color3.fromRGB(22, 22, 27)
 	connector.Position = Vector3.new(
@@ -103,6 +109,44 @@ local function buildConnectorWalkway(): BasePart?
 		SLOT_1_PLOT_ORIGIN_WORLD_POSITION.Y + CONNECTOR_THICKNESS_STUDS / 2,
 		SLOT_1_PLOT_ORIGIN_WORLD_POSITION.Z
 	)
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "ConnectorHighlight"
+	highlight.FillTransparency = 1
+	highlight.OutlineColor = ACCENT_COLOR
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = connector
+
+	local light = Instance.new("PointLight")
+	light.Name = "ConnectorLight"
+	light.Color = ACCENT_COLOR
+	light.Range = math.max(sizeX, CONNECTOR_WIDTH_STUDS)
+	light.Brightness = 4
+	light.Parent = connector
+
+	-- Diagnostic: confirms the actual applied values with real output, the
+	-- same way we verified Dropper1 and CashDrop earlier tonight. Prints the
+	-- accent glow (Highlight/Light), not just the base Material/Color -
+	-- the base was already dark Basalt by design and isn't what changed;
+	-- the Highlight/Light accent is the actual fix being verified here.
+	print((
+		"FusionMachineService: ConnectorWalkway styled - BaseMaterial=%s BaseColor=(%d,%d,%d) "
+			.. "HighlightOutlineColor=(%d,%d,%d) LightColor=(%d,%d,%d) LightBrightness=%d"
+	):format(
+		tostring(connector.Material),
+		math.floor(connector.Color.R * 255),
+		math.floor(connector.Color.G * 255),
+		math.floor(connector.Color.B * 255),
+		math.floor(highlight.OutlineColor.R * 255),
+		math.floor(highlight.OutlineColor.G * 255),
+		math.floor(highlight.OutlineColor.B * 255),
+		math.floor(light.Color.R * 255),
+		math.floor(light.Color.G * 255),
+		math.floor(light.Color.B * 255),
+		light.Brightness
+	))
+
 	return connector
 end
 

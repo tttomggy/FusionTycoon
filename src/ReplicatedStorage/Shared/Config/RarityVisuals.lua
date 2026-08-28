@@ -82,8 +82,12 @@ RarityVisuals.Tiers = {
 		RotatingRing = true,
 		Pulse = true,
 		Beam = true,
-		-- Placeholder built-in engine sound; swap for an uploaded asset id
-		-- when one's available.
+		-- TODO(asset gap, not a code bug): rbxasset://sounds/bell.wav fails to
+		-- load in this project ("Temp read failed"), so the Mythic pedestal's
+		-- ambient hum is currently silent. Left as-is deliberately until a
+		-- real ambient asset is sourced/uploaded - don't swap this for
+		-- electronicpingshort.wav like the one-shot dings elsewhere, since
+		-- looping a short ping would be worse than staying silent.
 		AmbientSoundId = "rbxasset://sounds/bell.wav",
 		ProximityBurst = true,
 		AnnounceServerWide = true,

@@ -15,12 +15,17 @@ PlotLayout.PEDESTAL_SPACING_STUDS = 8
 PlotLayout.PEDESTAL_SIZE_X_STUDS = 4
 PlotLayout.FLOOR_ROW_MARGIN_STUDS = 10
 
+-- Gacha Pad sits one more row-slot past the last Pedestal - it's now the
+-- true end of the row, not Pedestal 4.
+PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS = PlotLayout.PEDESTAL_ROW_START_OFFSET_STUDS
+	+ (PlotLayout.PEDESTAL_COUNT - 1) * PlotLayout.PEDESTAL_SPACING_STUDS
+	+ 6
+PlotLayout.GACHA_PAD_SIZE_X_STUDS = 4
+
 -- The local-X offset (from PlotOrigin) where Floor's row-covering edge ends:
--- Pedestal 4's own edge, plus margin.
+-- the Gacha Pad's own edge (the last row element), plus margin.
 function PlotLayout.GetFloorRowEndLocalX(): number
-	local lastPedestalOffset = PlotLayout.PEDESTAL_ROW_START_OFFSET_STUDS
-		+ (PlotLayout.PEDESTAL_COUNT - 1) * PlotLayout.PEDESTAL_SPACING_STUDS
-	return lastPedestalOffset + PlotLayout.PEDESTAL_SIZE_X_STUDS / 2 + PlotLayout.FLOOR_ROW_MARGIN_STUDS
+	return PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS + PlotLayout.GACHA_PAD_SIZE_X_STUDS / 2 + PlotLayout.FLOOR_ROW_MARGIN_STUDS
 end
 
 return PlotLayout

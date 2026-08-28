@@ -27,6 +27,10 @@ print("Loading ItemService...")
 local ItemService = require(Services.ItemService)
 print("ItemService Loaded!")
 
+print("Loading DebugService...")
+local DebugService = require(Services.DebugService)
+print("DebugService Loaded!")
+
 print("Initializing Services...")
 LightingService.Init()
 FusionMachineService.Init()
@@ -34,5 +38,6 @@ PlayerDataService.Init()
 FusionService.Init()
 TycoonService.Init()
 ItemService.Init()
+DebugService.Init()
 
 print("=== ALL SERVICES INITIALIZED SUCCESSFULLY ===")

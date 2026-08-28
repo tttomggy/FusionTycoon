@@ -5,11 +5,13 @@ local FusionController = require(Controllers.FusionController)
 local TycoonController = require(Controllers.TycoonController)
 local ItemController = require(Controllers.ItemController)
 local AnnouncementController = require(Controllers.AnnouncementController)
+local InventoryButtonController = require(Controllers.InventoryButtonController)
 
 InventoryController.Init()
 FusionController.Init()
 TycoonController.Init()
 AnnouncementController.Init()
+InventoryButtonController.Init()
 
 -- ItemController waits on the local player's own Pedestals folder, which
 -- only exists after they claim their plot - possibly much later than

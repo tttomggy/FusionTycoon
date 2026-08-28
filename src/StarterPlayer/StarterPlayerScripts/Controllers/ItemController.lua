@@ -3,10 +3,11 @@ local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
+local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local ItemController = {}
 
@@ -37,26 +38,13 @@ local placementResolved = Instance.new("BindableEvent")
 -- Fires once the server has validated a place-item attempt.
 ItemController.PlacementResolved = placementResolved.Event
 
--- Picks the highest-tier item the player owns that isn't already displayed
--- (or otherwise in use) elsewhere, so there's no separate item-picker UI to
--- build: pressing Display on a pedestal always offers your best available
--- piece.
-local function getBestDisplayableItem(): any
-	local inventory = InventoryController.GetInventory()
-	local best = nil
-	local bestTierIndex = 0
-	for _, item in inventory do
-		if not item.InUse then
-			local tierIndex = table.find(FusionConfig.TierOrder, item.Tier) or 0
-			if tierIndex > bestTierIndex then
-				bestTierIndex = tierIndex
-				best = item
-			end
-		end
-	end
-	return best
+local function hasDisplayableItem(): boolean
+	return #InventoryController.GetDisplayableItems() > 0
 end
 
+-- An occupied pedestal always belongs to the local player (pedestals are
+-- per-plot/per-owner), so the same prompt just switches to a pickup action
+-- instead of being disabled once something's displayed.
 local function updatePromptState(pedestal: BasePart, pedestalIndex: number)
 	local prompt = pedestal:FindFirstChild("DisplayPrompt") :: ProximityPrompt?
 	if not prompt then
@@ -64,17 +52,18 @@ local function updatePromptState(pedestal: BasePart, pedestalIndex: number)
 	end
 
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
-		prompt.Enabled = false
-		prompt.ObjectText = "Occupied"
+		prompt.Enabled = true
+		prompt.ActionText = "Remove"
+		prompt.ObjectText = ("Pedestal %d"):format(pedestalIndex)
 		return
 	end
 
-	local item = getBestDisplayableItem()
-	prompt.Enabled = item ~= nil
+	prompt.Enabled = hasDisplayableItem()
+	prompt.ActionText = "Display"
 	prompt.ObjectText = ("Pedestal %d"):format(pedestalIndex)
 end
 
-local function requestPlaceItem(pedestalIndex: number)
+local function requestPlaceItem(pedestalIndex: number, uid: string)
 	if pendingPedestals[pedestalIndex] then
 		return
 	end
@@ -82,13 +71,60 @@ local function requestPlaceItem(pedestalIndex: number)
 		return
 	end
 
-	local item = getBestDisplayableItem()
-	if not item then
+	pendingPedestals[pedestalIndex] = true
+	RemoteEvents.RequestPlaceItem:FireServer(uid, pedestalIndex)
+end
+
+-- Opens the shared ItemPickerUI over the player's current undisplayed items,
+-- so they choose which one lands on this specific pedestal instead of the
+-- game auto-selecting for them. Server-side validation in ItemService is
+-- unchanged - it already checks ownership/InUse/pedestal-empty for whichever
+-- Uid the client sends, so this only changes which Uid gets picked, not the
+-- trust boundary.
+local function openItemPicker(pedestalIndex: number)
+	if pendingPedestals[pedestalIndex] then
+		return
+	end
+	if TycoonController.GetPedestalDisplay(pedestalIndex) then
+		return
+	end
+
+	local entries = {}
+	for _, item in InventoryController.GetDisplayableItems() do
+		local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
+		table.insert(entries, {
+			Uid = item.Uid,
+			Name = itemConfigEntry and itemConfigEntry.Name or item.ItemId,
+			Tier = item.Tier,
+		})
+	end
+
+	ItemPickerUI.Open(entries, function(entry)
+		requestPlaceItem(pedestalIndex, entry.Uid)
+	end)
+end
+
+local function requestRemoveItem(pedestalIndex: number)
+	if pendingPedestals[pedestalIndex] then
+		return
+	end
+	if not TycoonController.GetPedestalDisplay(pedestalIndex) then
 		return
 	end
 
 	pendingPedestals[pedestalIndex] = true
-	RemoteEvents.RequestPlaceItem:FireServer(item.Uid, pedestalIndex)
+	RemoteEvents.RequestRemoveItem:FireServer(pedestalIndex)
+end
+
+-- Routes to whichever action the pedestal's current state calls for, so
+-- pressing the same prompt either opens the item picker or picks up
+-- whatever's already there.
+local function onPedestalTriggered(pedestalIndex: number)
+	if TycoonController.GetPedestalDisplay(pedestalIndex) then
+		requestRemoveItem(pedestalIndex)
+	else
+		openItemPicker(pedestalIndex)
+	end
 end
 
 local function onPlaceItemResult(result: any)
@@ -113,7 +149,7 @@ function ItemController.Init()
 				local prompt = pedestal:WaitForChild("DisplayPrompt") :: ProximityPrompt
 				prompt.Triggered:Connect(function(triggeringPlayer: Player)
 					if triggeringPlayer == localPlayer then
-						requestPlaceItem(pedestalIndex)
+						onPedestalTriggered(pedestalIndex)
 					end
 				end)
 				updatePromptState(pedestal, pedestalIndex)
