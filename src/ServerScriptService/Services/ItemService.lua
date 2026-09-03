@@ -1,3 +1,21 @@
+--!nonstrict
+--[[
+	ItemService
+	-----------
+	Server-authoritative pedestal placement/removal: validates that the
+	requesting player owns the item and owns the pedestal, then mutates
+	PedestalDisplays and applies the tier visuals.
+
+	Follows the ServiceTemplate contract:
+	  :Init()   connects its own remote handlers and nothing else.
+	  :Start()  resolves PlayerDataService and TycoonService.
+
+	The TycoonService reference in particular is why this pattern exists: it
+	used to be a module-scope require, which runs at load time. TycoonService
+	does not currently require ItemService back, but nothing structurally
+	prevented it, and the day someone added that line the two would have
+	deadlocked on require. Resolving in :Start() makes that impossible.
+]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = ReplicatedStorage.Shared.Config
@@ -6,10 +24,29 @@ local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 
-local PlayerDataService = require(script.Parent.PlayerDataService)
-local TycoonService = require(script.Parent.TycoonService)
+--[[ Types ---------------------------------------------------------------- ]]
+
+type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
+
+type State = {
+	connections: { RBXScriptConnection },
+}
+
+--[[ Private state -------------------------------------------------------- ]]
+
+local state: State = {
+	connections = {},
+}
+
+-- Resolved in :Start(), not at module scope. Identifier names unchanged, so
+-- every call site below reads exactly as before.
+local PlayerDataService: PlayerDataServiceModule
+local TycoonService: TycoonServiceModule
 
 local ItemService = {}
+
+ItemService.Name = "ItemService"
 
 local function reject(player: Player, reason: string, isSuspicious: boolean?)
 	if isSuspicious then
@@ -162,9 +199,14 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	})
 end
 
-function ItemService.Init()
-	RemoteEvents.RequestPlaceItem.OnServerEvent:Connect(onRequestPlaceItem)
-	RemoteEvents.RequestRemoveItem.OnServerEvent:Connect(onRequestRemoveItem)
+function ItemService:Init()
+	table.insert(state.connections, RemoteEvents.RequestPlaceItem.OnServerEvent:Connect(onRequestPlaceItem))
+	table.insert(state.connections, RemoteEvents.RequestRemoveItem.OnServerEvent:Connect(onRequestRemoveItem))
+end
+
+function ItemService:Start()
+	PlayerDataService = require(script.Parent.PlayerDataService)
+	TycoonService = require(script.Parent.TycoonService)
 end
 
 return ItemService

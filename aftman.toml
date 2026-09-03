@@ -5,3 +5,21 @@
 [tools]
 rojo = "rojo-rbx/rojo@7.7.0"
 # rojo = "rojo-rbx/rojo@6.2.0"
+
+# Luau type checker. Required for --!strict to mean anything: `rojo build`
+# performs NO Luau validation whatsoever - it exits 0 on outright broken
+# syntax and embeds it verbatim - so without this, strict-mode annotations are
+# decorative and nothing enforces them.
+#
+# First-time setup (aftman needs an interactive trust prompt for a new tool):
+#     aftman install
+#
+# Then, to actually type-check the project:
+#     rojo sourcemap default.project.json -o sourcemap.json
+#     curl -sL https://raw.githubusercontent.com/JohnnyMorganz/luau-lsp/main/scripts/globalTypes.d.luau -o globalTypes.d.luau
+#     luau-lsp analyze --sourcemap=sourcemap.json --defs=globalTypes.d.luau src/
+#
+# The sourcemap is what lets the checker resolve `require(script.Parent.X)`
+# across the Rojo tree; without it every cross-module require types as `any`
+# and strict mode catches almost nothing.
+luau-lsp = "JohnnyMorganz/luau-lsp@1.69.0"

@@ -1,3 +1,19 @@
+--!strict
+--[[
+	FusionService
+	-------------
+	Server-authoritative fusion: validates a two-item fusion request against
+	the player's real inventory, consumes the inputs, rolls a result tier, and
+	grants the reward.
+
+	Follows the ServiceTemplate contract:
+	  :Init()   connects its own remote handler and nothing else.
+	  :Start()  resolves PlayerDataService. That reference used to be a
+	            module-scope `require`, which runs at load time and is the
+	            thing that deadlocks if two services ever require each other.
+]]
+
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Config = ReplicatedStorage.Shared.Config
@@ -5,26 +21,60 @@ local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
-local PlayerDataService = require(script.Parent.PlayerDataService)
+--[[ Types ---------------------------------------------------------------- ]]
 
-local FusionService = {}
+type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+
+type RewardItem = {
+	Id: string,
+	Name: string,
+	Tier: string,
+}
+
+type State = {
+	-- Ephemeral, session-only cooldown tracking; not persisted with player data.
+	lastFusionAt: { [number]: number },
+	connections: { RBXScriptConnection },
+}
+
+--[[ Constants ------------------------------------------------------------ ]]
 
 local FUSION_COOLDOWN_SECONDS = 1.5
 
--- Ephemeral, session-only cooldown tracking; not persisted with player data.
-local lastFusionAt: { [number]: number } = {}
+--[[ Private state -------------------------------------------------------- ]]
+
+local state: State = {
+	lastFusionAt = {},
+	connections = {},
+}
+
+-- Resolved in :Start(), never at module scope - see the header. Declared with
+-- a type annotation but no value: the identifier keeps its original name, so
+-- every call site below reads exactly as it did when this was a module-scope
+-- require, while the actual resolution has moved into the Start phase.
+--
+-- ServiceManager runs Init across all services and then Start across all
+-- services with no yield in between, so this is assigned before any remote
+-- handler connected in Init can actually be resumed.
+local PlayerDataService: PlayerDataServiceModule
+
+local FusionService = {}
+
+FusionService.Name = "FusionService"
+
+--[[ Private helpers ------------------------------------------------------ ]]
 
 local function isOnCooldown(userId: number): boolean
-	local lastTime = lastFusionAt[userId]
+	local lastTime = state.lastFusionAt[userId]
 	return lastTime ~= nil and (os.clock() - lastTime) < FUSION_COOLDOWN_SECONDS
 end
 
-local function pickRewardItem(tier: string)
+local function pickRewardItem(tier: string): RewardItem?
 	local itemsOfTier = ItemConfig.GetItemsByTier(tier)
 	if #itemsOfTier == 0 then
 		return nil
 	end
-	return itemsOfTier[math.random(1, #itemsOfTier)]
+	return itemsOfTier[math.random(1, #itemsOfTier)] :: RewardItem
 end
 
 -- Every reject path fires a (Success = false) FusionResult so the client's
@@ -86,8 +136,8 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		return
 	end
 
-	lastFusionAt[player.UserId] = os.clock()
-	local consumedTier = itemA.Tier :: string
+	state.lastFusionAt[player.UserId] = os.clock()
+	local consumedTier = itemA.Tier
 
 	-- Inputs are consumed before the roll: fusion is a gamble, and a failed
 	-- roll still costs the two items.
@@ -119,8 +169,19 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 	})
 end
 
-function FusionService.Init()
-	RemoteEvents.RequestFusion.OnServerEvent:Connect(onFusionRequest)
+local function onPlayerRemoving(player: Player)
+	state.lastFusionAt[player.UserId] = nil
+end
+
+--[[ Lifecycle ------------------------------------------------------------ ]]
+
+function FusionService:Init()
+	table.insert(state.connections, RemoteEvents.RequestFusion.OnServerEvent:Connect(onFusionRequest))
+	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
+end
+
+function FusionService:Start()
+	PlayerDataService = require(script.Parent.PlayerDataService)
 end
 
 return FusionService

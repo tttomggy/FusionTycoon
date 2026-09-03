@@ -14,16 +14,48 @@ local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PadStyler = require(ReplicatedStorage.Shared.Modules.PadStyler)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
+local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
+-- Load-time guard: this module-scope require must resolve to a real table.
+-- Added after a refactor briefly moved this into :Start(), where a missed
+-- assignment would have left it nil and failed later, deep inside a handler,
+-- as an opaque "attempt to index nil". Fail loudly at load instead.
+assert(
+	type(PlayerDataService) == "table",
+	"TycoonService: PlayerDataService failed to resolve at load time"
+)
+print("TycoonService: PlayerDataService resolved at load (non-nil)")
+
 local TycoonService = {}
+
+-- From user-supplied Toolbox VFX packs (Workspace), extracted to
+-- ReplicatedStorage.Shared.VFX.*.rbxm. Optional by design (FindFirstChild,
+-- not WaitForChild) so a session running before that extraction step happens
+-- degrades to whatever VFX already existed at each site instead of erroring.
+local VFXFolder = ReplicatedStorage.Shared.VFX
+local levelingUpEffectTemplate = VFXFolder:FindFirstChild("LevelingUpEffect") :: BasePart?
+local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: BasePart?
+
+-- Every pad billboard in the plot (Buy Dropper 2, Gacha Pull, Multiplier Pad)
+-- shares this MaxDistance. Unset, a BillboardGui renders at any distance -
+-- confirmed via testing to be why Fusion Odds and Gacha Pull were visible
+-- and overlapping from clear across the map. 20 sits outside every
+-- ProximityPrompt's own 10-stud MaxActivationDistance (see
+-- GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE/PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE
+-- below, and FusionMachineService's own PROMPT_MAX_ACTIVATION_DISTANCE), so a
+-- label becomes readable before its pad's interaction range kicks in rather
+-- than appearing at the same moment. FusionMachineService.lua's own Fusion
+-- Odds billboard uses the same value independently, for the same reason.
+local BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS = 20
 
 local MAX_PLOT_SLOTS = 50
 -- Must comfortably exceed the plot row's own total footprint (Dropper1 ->
--- Dropper2 slot -> Multiplier Pad -> Pedestal row), or adjacent plots'
--- pedestals/pads overlap regardless of how wide the Floor itself is. See the
--- PEDESTAL_* constants below for the current row's total span.
+-- Dropper2 slot -> Multiplier Pad -> Gacha Pad), or adjacent plots' pads
+-- overlap regardless of how wide the Floor itself is. The Pedestal Showcase
+-- doesn't factor in here - it reaches into -Z, not along this X row, so it
+-- has no plot-to-plot spacing constraint (see PEDESTAL_SHOWCASE_* below).
 local PLOT_SLOT_SPACING_STUDS = 140
 -- Explicit gap above PlotOrigin's surface height for SpawnLocation, so a
 -- spawning character never clips into the floor even if PlotOrigin's Y
@@ -67,9 +99,11 @@ local MULTIPLIER_PAD_ROW_OFFSET_STUDS = DROPPER2_SIDE_OFFSET_STUDS * 2
 -- is why they never collide with each other) a fixed offset for the pad
 -- can't guarantee it clears ClaimButton wherever the author put it. Checked
 -- against ClaimButton's actual position at build time instead: see the
--- clearance check in createMultiplierPad. Capped short of the Pedestal row
--- (starts at +36) so pushing the pad clear of ClaimButton can't create a new
--- collision with Pedestal 1.
+-- clearance check in createMultiplierPad. Capped at 32, comfortably short of
+-- the Gacha Pad (starts at +52, see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS -
+-- that value's own comment spells out exactly why it needs to stay this far
+-- out) so pushing the pad clear of ClaimButton can't create a new collision,
+-- or activation-range overlap, further up the row.
 local MULTIPLIER_PAD_MIN_CLAIM_BUTTON_CLEARANCE_STUDS = 12
 local MULTIPLIER_PAD_MAX_ROW_OFFSET_STUDS = 32
 -- Touched fires continuously while a character stands on the pad; this
@@ -90,8 +124,10 @@ local DROPPER_ACCENT_COLOR = Color3.fromRGB(85, 255, 127)
 local DROPPER_IDLE_PULSE_SECONDS = 2.2
 
 -- Gacha Pad: the only source of fusable items. Sits one row-slot past the
--- Pedestal row (see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS), so the full row
--- reads: Dropper1, Dropper2, Multiplier Pad, Pedestal1-4, Gacha Pad.
+-- Multiplier Pad (see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS), so the main row
+-- reads: Dropper1, Dropper2, Multiplier Pad, Gacha Pad. The Pedestal Showcase
+-- isn't part of this row at all anymore - it's a separate alcove off to the
+-- side (see PEDESTAL_SHOWCASE_* above and createPedestals below).
 local GACHA_PAD_LABEL = "Gacha Pull"
 local GACHA_PAD_DEBOUNCE_SECONDS = 1
 local GACHA_PAD_ACCENT_COLOR = Color3.fromRGB(255, 215, 60)
@@ -103,6 +139,11 @@ local GACHA_PULL_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- PROMPT_MAX_ACTIVATION_DISTANCE - every ProximityPrompt in the game uses the
 -- same reach so none of them feel inconsistent stood next to another.
 local GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE = 10
+-- Matches RevealEffects.lua's MAJOR_EXPLOSION_SCALE/BURST_SECONDS exactly -
+-- same source pack, same "toned down to match the reveal's existing weight,
+-- not overpowering it" reasoning, same MajorRevealTiers flag.
+local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
+local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 local DROPPER_IDLE_LIGHT_BRIGHTNESS = 2
 local DROPPER_IDLE_LIGHT_RANGE = 10
 local DROPPER_POP_PARTICLE_BASE_COUNT = 8
@@ -117,15 +158,20 @@ local DROPPER_POP_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- along than the Multiplier Pad, so the full row reads: Dropper1, Dropper2,
 -- Multiplier Pad, Pedestal 1..N. Their own tier-specific styling is applied
 -- later by PedestalVisuals (via ItemService), not here - these start bare.
--- Count/spacing/row-start come from PlotLayout (shared with
--- FusionMachineService's connector walkway - see that file) rather than
--- being redefined here, so the two can never silently drift apart again.
--- The row's total span (last pedestal's offset + half its width) must stay
--- under PLOT_SLOT_SPACING_STUDS, or it walks into the neighboring plot: with
--- 4 pedestals that's 36 + (4-1)*8 + 2 = 62 studs, comfortably inside 140.
+-- Pedestal Showcase: a dedicated alcove off the main row (see PlotLayout.lua)
+-- instead of inline with Dropper1/Dropper2/Multiplier Pad/Gacha Pad - a
+-- straight line stepping into -Z at a fixed local X, so it reads as a
+-- display case players walk up to on purpose. Count/spacing/position come
+-- from PlotLayout (shared with FusionMachineService's connector walkway and
+-- Floor's own Z sizing) rather than being redefined here, so none of them can
+-- silently drift apart again. The showcase's own reach into -Z has no
+-- PLOT_SLOT_SPACING_STUDS-style constraint the way the main row's X extent
+-- does - plots are only ever laid out side-by-side along X (see
+-- createPlotForPlayer's PivotTo), so -Z is open regardless of neighbors.
 local PEDESTAL_COUNT = PlotLayout.PEDESTAL_COUNT
-local PEDESTAL_SIZE = Vector3.new(PlotLayout.PEDESTAL_SIZE_X_STUDS, 3, 4)
-local PEDESTAL_ROW_START_OFFSET_STUDS = PlotLayout.PEDESTAL_ROW_START_OFFSET_STUDS
+local PEDESTAL_SIZE = Vector3.new(PlotLayout.PEDESTAL_SIZE_X_STUDS, 3, PlotLayout.PEDESTAL_SIZE_Z_STUDS)
+local PEDESTAL_SHOWCASE_X_OFFSET_STUDS = PlotLayout.PEDESTAL_SHOWCASE_X_OFFSET_STUDS
+local PEDESTAL_SHOWCASE_Z_OFFSET_STUDS = PlotLayout.PEDESTAL_SHOWCASE_Z_OFFSET_STUDS
 local PEDESTAL_SPACING_STUDS = PlotLayout.PEDESTAL_SPACING_STUDS
 local PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE = 10
 
@@ -133,8 +179,9 @@ local PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE = 10
 -- row's current length: every row element is independently anchored to
 -- PlotOrigin (nothing was ever actually falling), but most of the row sat
 -- visually past Floor's own edge. Resized/recentered at plot-creation time
--- (see resizeFloorToFitRow) to actually cover Dropper1 through Pedestal 4 -
--- the plot's own row - with margin on both ends.
+-- (see resizeFloorToFitRow) to actually cover Dropper1 through the Gacha Pad
+-- on the X axis, and the Pedestal Showcase on the Z axis, with margin on
+-- every edge.
 --
 -- Deliberately NOT extended out to the Fusion Machine too: covering it would
 -- need Floor's edge to reach past local X = 107 (the machine's Base sits at
@@ -145,7 +192,6 @@ local PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE = 10
 -- depend on this plot's Floor the way the row does. A connector walkway
 -- (see FusionMachineService.lua) bridges the remaining gap instead.
 local FLOOR_ROW_MARGIN_STUDS = PlotLayout.FLOOR_ROW_MARGIN_STUDS
-local FLOOR_SIZE_Z_STUDS = 50 -- unchanged; every row element sits at local Z = 0
 
 -- Slot bookkeeping: a fixed row of slots is reused as players join/leave
 -- rather than growing forever.
@@ -391,11 +437,12 @@ local function validatePlotClone(plot: Model, player: Player)
 	end
 end
 
--- Resizes/recenters Floor so it actually covers Dropper1 through Pedestal 4
--- (the plot's own row) with margin, rather than the row extending visually
--- past Floor's original template edge. Runs at plot-creation time so Floor
--- looks right even before the plot is claimed. See the FLOOR_* constants
--- above for why this deliberately stops short of the Fusion Machine.
+-- Resizes/recenters Floor so it actually covers Dropper1 through the Gacha
+-- Pad on the X axis and the Pedestal Showcase on the Z axis, with margin,
+-- rather than either extending visually past Floor's original template edge.
+-- Runs at plot-creation time so Floor looks right even before the plot is
+-- claimed. See the FLOOR_* constants above for why this deliberately stops
+-- short of the Fusion Machine.
 local function resizeFloorToFitRow(plot: Model, player: Player)
 	local floor = getFloorPart(plot)
 	local plotOrigin = getPlotOrigin(plot)
@@ -425,12 +472,21 @@ local function resizeFloorToFitRow(plot: Model, player: Player)
 	local sizeX = rowEndLocalX - rowStartLocalX
 	local centerLocalX = (rowStartLocalX + rowEndLocalX) / 2
 
-	floor.Size = Vector3.new(sizeX, floor.Size.Y, FLOOR_SIZE_Z_STUDS)
+	-- Z axis mirrors the X axis logic above: a negative-side reach covering
+	-- the Pedestal Showcase's last pedestal, and a positive-side margin for
+	-- the main row/walkway's own width - both from PlotLayout, same reasoning
+	-- as GetFloorRowEndLocalX (single source of truth, no second hardcoded copy).
+	local rowStartLocalZ = PlotLayout.GetFloorRowStartLocalZ()
+	local rowEndLocalZ = PlotLayout.GetFloorRowEndLocalZ()
+	local sizeZ = rowEndLocalZ - rowStartLocalZ
+	local centerLocalZ = (rowStartLocalZ + rowEndLocalZ) / 2
+
+	floor.Size = Vector3.new(sizeX, floor.Size.Y, sizeZ)
 
 	-- Only X/Z move (recentering to cover the row); Y is left exactly as
 	-- authored, since Floor's top surface already matches PlotOrigin's own Y
 	-- and Size.Y (thickness) isn't changing.
-	local centerWorldPosition = plotOrigin.CFrame:PointToWorldSpace(Vector3.new(centerLocalX, 0, 0))
+	local centerWorldPosition = plotOrigin.CFrame:PointToWorldSpace(Vector3.new(centerLocalX, 0, centerLocalZ))
 	floor.Position = Vector3.new(centerWorldPosition.X, floor.Position.Y, centerWorldPosition.Z)
 end
 
@@ -717,6 +773,7 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromOffset(160, 50)
 	billboard.StudsOffset = Vector3.new(0, 2, 0)
+	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
 	billboard.Parent = button
 
@@ -789,6 +846,7 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Size = UDim2.fromOffset(160, 50)
 	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
 	billboard.Parent = pad
 
@@ -856,6 +914,17 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 		burst:Emit(30)
 		Debris:AddItem(burst, 3)
 
+		-- Same MajorRevealTiers flag that drives the Fusion Machine's own
+		-- major reveal (see RevealEffects.lua) - a Legendary/Mythic pull gets
+		-- the same Explosion piece, scaled/timed the same way, so both major
+		-- reveal moments in the game carry equivalent weight.
+		if explosionEffectTemplate and FusionConfig.MajorRevealTiers[resultTier] then
+			ImportedEffects.Play(explosionEffectTemplate, pad.CFrame, plot, {
+				Scale = GACHA_MAJOR_EXPLOSION_SCALE,
+				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
+			})
+		end
+
 		local sound = Instance.new("Sound")
 		sound.SoundId = GACHA_PULL_SOUND_ID
 		sound.Volume = 0.8
@@ -916,6 +985,7 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 	-- it means two labels never land at the exact same relative height even
 	-- if something ever pulls the parts close together again.
 	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
+	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
 	billboard.Parent = pad
 
@@ -987,6 +1057,17 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 		burst:Emit(MULTIPLIER_UPGRADE_BURST_COUNT)
 		Debris:AddItem(burst, 3)
 
+		-- The dedicated "LevelingUp" piece extracted from the user-supplied
+		-- VFX pack - this moment previously had nothing beyond the sparkle
+		-- burst above and the personal popup.
+		if levelingUpEffectTemplate then
+			ImportedEffects.Play(
+				levelingUpEffectTemplate,
+				CFrame.new(pad.Position + Vector3.new(0, pad.Size.Y / 2, 0)),
+				plot
+			)
+		end
+
 		local sound = Instance.new("Sound")
 		sound.SoundId = MULTIPLIER_UPGRADE_SOUND_ID
 		sound.Volume = 0.8
@@ -1019,8 +1100,11 @@ local function createPedestals(plot: Model, player: Player, dropper1: BasePart)
 	pedestalsFolder.Parent = plot
 
 	for index = 1, PEDESTAL_COUNT do
-		local offset = PEDESTAL_ROW_START_OFFSET_STUDS + (index - 1) * PEDESTAL_SPACING_STUDS
-		local targetWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(offset, 0, 0))
+		-- Fixed local X, stepping further into -Z per pedestal - a line
+		-- receding away from the main row's own Z = 0 walkway instead of
+		-- sitting inline with it.
+		local localZ = PEDESTAL_SHOWCASE_Z_OFFSET_STUDS - (index - 1) * PEDESTAL_SPACING_STUDS
+		local targetWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(PEDESTAL_SHOWCASE_X_OFFSET_STUDS, 0, localZ))
 
 		local pedestal = Instance.new("Part")
 		pedestal.Name = "Pedestal" .. index
@@ -1183,8 +1267,9 @@ local function connectClaimButton(plot: Model, player: Player)
 		-- Dropper1's rotation (and everything about how it produces cash) is
 		-- untouched template/gameplay logic, but its X/Z/height are now placed
 		-- directly at PlotOrigin (offset zero) - the same reference point the
-		-- buy button (+12), Multiplier Pad (+24), and Pedestals (+36..+60)
-		-- already measure their own offsets from. Dropper1 was the one part
+		-- buy button (+12), Multiplier Pad (+24), Gacha Pad (+52), and the
+		-- Pedestal Showcase already measure their own offsets from. Dropper1
+		-- was the one part
 		-- still left on its old template position while everything else
 		-- switched to PlotOrigin-relative offsets, which is exactly what let
 		-- it visibly drift out of line with the rest of the row.

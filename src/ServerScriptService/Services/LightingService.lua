@@ -1,3 +1,4 @@
+--!nonstrict
 -- Sets the plot's lighting mood once at server startup: bright, clearly-lit
 -- daytime with a cool blue-tinted ColorShift for a "sci-fi facility" feel,
 -- rather than leaning on darkness/haze for atmosphere the way the previous
@@ -5,6 +6,8 @@
 local Lighting = game:GetService("Lighting")
 
 local LightingService = {}
+
+LightingService.Name = "LightingService"
 
 -- ClockTime 19 ("dusk") still put the sun below Roblox's day/night threshold,
 -- so the default sky rendered a visible moon/night look regardless of the
@@ -25,7 +28,7 @@ local COLOR_SHIFT_BOTTOM = Color3.fromRGB(40, 30, 60)
 local AMBIENT = Color3.fromRGB(90, 100, 120)
 local OUTDOOR_AMBIENT = Color3.fromRGB(85, 95, 115)
 
-function LightingService.Init()
+function LightingService:Init()
 	Lighting.ClockTime = CLOCK_TIME
 	Lighting.Brightness = BRIGHTNESS
 	Lighting.ColorShift_Top = COLOR_SHIFT_TOP
@@ -45,7 +48,7 @@ function LightingService.Init()
 	-- Kept explicit even though ClockTime = 14 already guarantees no
 	-- moon/stars render: guards against a future ClockTime change silently
 	-- reintroducing them.
-	local sky = Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")
+	local sky = (Lighting:FindFirstChildOfClass("Sky") or Instance.new("Sky")) :: Sky
 	sky.StarCount = 0
 	sky.Parent = Lighting
 

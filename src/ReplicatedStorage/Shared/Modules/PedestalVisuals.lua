@@ -28,6 +28,12 @@ local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
 
 local BEAM_HEIGHT_STUDS = 300
+-- From the user-supplied "Beam Texture Pack" (Workspace, ~80 near-identical
+-- energy-beam textures with no descriptive names/metadata to pick from) -
+-- an arbitrary but reasonable pick, not a verified "best" one: no tool here
+-- can render/preview a texture to judge it. Swap this single ID if it
+-- doesn't read well in testing; nothing else about the beam depends on it.
+local BEAM_TEXTURE_ID = "rbxassetid://5697446711"
 
 local PROXIMITY_RADIUS_STUDS = 14
 local PROXIMITY_COOLDOWN_SECONDS = 6
@@ -217,6 +223,14 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 			NumberSequenceKeypoint.new(1, 1),
 		})
 		beam.LightEmission = 1
+		-- Previously untextured (a flat gradient with no pattern) - this was
+		-- the actual gap RarityVisuals.Tiers.Mythic's Beam = true never
+		-- filled. A slow upward scroll reads as an ambient, always-alive
+		-- effect rather than a static column.
+		beam.Texture = BEAM_TEXTURE_ID
+		beam.TextureMode = Enum.TextureMode.Wrap
+		beam.TextureLength = 4
+		beam.TextureSpeed = 0.5
 		beam.Parent = elements
 	end
 

@@ -1,3 +1,4 @@
+--!nonstrict
 -- STUDIO-ONLY debug commands for testing balance changes that a saved
 -- player profile would otherwise hide (e.g. a carried-over Multiplier Pad
 -- level blocking you from ever seeing Level 1's real cost again). Gated by
@@ -9,9 +10,28 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local PlayerDataService = require(script.Parent.PlayerDataService)
+
+--[[ Types ---------------------------------------------------------------- ]]
+
+type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+
+type State = {
+	connections: { RBXScriptConnection },
+}
+
+--[[ Private state -------------------------------------------------------- ]]
+
+local state: State = {
+	connections = {},
+}
+
+-- Resolved in :Start(), not at module scope. Identifier name unchanged, so
+-- call sites below read exactly as before.
+local PlayerDataService: PlayerDataServiceModule
 
 local DebugService = {}
+
+DebugService.Name = "DebugService"
 
 local RESET_MULTIPLIER_COMMAND = "/resetmultiplier"
 
@@ -46,12 +66,15 @@ local function onPlayerChatted(player: Player, message: string)
 end
 
 local function connectPlayer(player: Player)
-	player.Chatted:Connect(function(message: string)
-		onPlayerChatted(player, message)
-	end)
+	table.insert(
+		state.connections,
+		player.Chatted:Connect(function(message: string)
+			onPlayerChatted(player, message)
+		end)
+	)
 end
 
-function DebugService.Init()
+function DebugService:Init()
 	if not RunService:IsStudio() then
 		return
 	end
@@ -59,9 +82,13 @@ function DebugService.Init()
 	for _, player in Players:GetPlayers() do
 		connectPlayer(player)
 	end
-	Players.PlayerAdded:Connect(connectPlayer)
+	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
 	print(("DebugService: Studio debug commands active (%s)"):format(RESET_MULTIPLIER_COMMAND))
+end
+
+function DebugService:Start()
+	PlayerDataService = require(script.Parent.PlayerDataService)
 end
 
 return DebugService

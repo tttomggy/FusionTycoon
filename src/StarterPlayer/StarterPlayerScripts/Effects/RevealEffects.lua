@@ -11,8 +11,16 @@ local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
+local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local RevealEffects = {}
+
+-- From the user-supplied "Free VFX Pack #1 By DogmathPan" (Workspace),
+-- extracted to ReplicatedStorage.Shared.VFX.ExplosionEffect.rbxm. Optional by
+-- design (FindFirstChild, not WaitForChild) so a session running before that
+-- extraction step happens degrades to the pre-existing flash/burst/shake
+-- combo instead of erroring.
+local explosionEffectTemplate = ReplicatedStorage.Shared.VFX:FindFirstChild("ExplosionEffect") :: BasePart?
 
 export type EffectHandles = {
 	Core: BasePart,
@@ -36,6 +44,13 @@ local MAJOR_BURST_COUNT = 80
 
 local MAJOR_SHAKE_MAGNITUDE_STUDS = 0.35
 local MAJOR_SHAKE_DURATION_SECONDS = 0.5
+
+-- The source pack's Explosion is authored for a full combat hit - scaled
+-- down and timed to blend with this reveal's existing weight (the flash's
+-- own FLASH_DURATION_SECONDS and the MAJOR_PAUSE_SECONDS hold below) rather
+-- than overpowering it.
+local MAJOR_EXPLOSION_SCALE = 0.5
+local MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
 local MINOR_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- TODO(asset gap, not a code bug): rbxasset://sounds/bell.wav fails to load
@@ -147,6 +162,12 @@ function RevealEffects.PlayReveal(handles: EffectHandles, options: RevealOptions
 
 	if isMajor then
 		RevealEffects.ShakeCamera(MAJOR_SHAKE_MAGNITUDE_STUDS, MAJOR_SHAKE_DURATION_SECONDS)
+		if explosionEffectTemplate then
+			ImportedEffects.Play(explosionEffectTemplate, core.CFrame, Workspace, {
+				Scale = MAJOR_EXPLOSION_SCALE,
+				BurstSeconds = MAJOR_EXPLOSION_BURST_SECONDS,
+			})
+		end
 	end
 
 	TweenService:Create(flash, TweenInfo.new(FLASH_DURATION_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {

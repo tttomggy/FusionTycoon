@@ -1,3 +1,16 @@
+--!nonstrict
+--[[
+	NOTE ON --!nonstrict: staged deliberately, same reasoning as
+	TycoonService. This file is dense Instance construction (Parts, Beams,
+	Attachments, ParticleEmitters, BillboardGui) and there is still no Luau
+	type-checker installed, so flipping it to strict would ship an unknown
+	number of type errors nobody can see locally. Install the checker (see
+	aftman.toml) and convert this file as its own reviewable pass.
+
+	Lifecycle: :Init() only. This service has no cross-service references and
+	no connections/loops - it builds the machine once and is done - so it
+	needs no :Start() and no connection tracking.
+]]
 -- Builds the single, server-authoritative "Fusion Machine" every player
 -- shares: a glowing core on a dark plinth, a spinning accent ring, a
 -- ProximityPrompt players use to trigger a fusion, and a BillboardGui
@@ -13,6 +26,8 @@ local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 
 local FusionMachineService = {}
 
+FusionMachineService.Name = "FusionMachineService"
+
 local MACHINE_NAME = "FusionMachine"
 
 -- The machine is one object shared by every player, so unlike a per-plot
@@ -22,12 +37,14 @@ local MACHINE_NAME = "FusionMachine"
 -- ((slotIndex - 1) * PLOT_SLOT_SPACING_STUDS, 0, 0) - so slot 1's PlotOrigin
 -- always lands at EXACTLY world (0, 0, 0), by construction. Using that as the
 -- reference point continues slot 1's own Dropper1/pad row (Dropper1 at +0,
--- Pedestal 4 at +60, edge at +62) along the same local +X axis and Z = 0.
+-- Gacha Pad at +52, edge at +54) along the same local +X axis and Z = 0. The
+-- Pedestal Showcase isn't part of this row - it reaches into -Z instead - so
+-- it doesn't factor into this offset.
 --
--- 95 puts the machine's near edge (95 - 12 half-width = 83) about 21 studs
--- past Pedestal 4's edge - close enough to read as part of the same plot
--- instead of a separate area, comfortably inside Plot 2's row starting at
--- X = 140 (previously 100, which felt like a disconnected walk/bridge away).
+-- 95 puts the machine's near edge (95 - 12 half-width = 83) well past the
+-- Gacha Pad's edge - close enough to read as part of the same plot instead of
+-- a separate area, comfortably inside Plot 2's row starting at X = 140
+-- (previously 100, which felt like a disconnected walk/bridge away).
 --
 -- Trade-off worth knowing: this means the shared machine sits authored right
 -- next to ONE specific plot (whoever ends up in slot 1) rather than being
@@ -46,13 +63,16 @@ local MACHINE_POSITION = Vector3.new(
 )
 
 -- Bridges the open gap between Floor's row-covering edge (PlotLayout.
--- GetFloorRowEndLocalX(), local X = 78 now that the Gacha Pad extends the
--- row past Pedestal 4) and the machine's own Base (near edge at
--- MACHINE_ROW_OFFSET_STUDS - half-width = 83) - both ends
--- read from the same shared source as TycoonService's own Floor sizing, so
--- this can't silently drift out of alignment with wherever Floor's edge
--- actually ends up. Overlaps a couple studs into both Floor and the Base so
--- there's no visible seam at either end.
+-- GetFloorRowEndLocalX(), local X = 64 now that Floor's X extent tracks the
+-- Gacha Pad directly instead of the old inline Pedestal row) and the
+-- machine's own Base (near edge at MACHINE_ROW_OFFSET_STUDS - half-width =
+-- 83) - both ends read from the same shared source as TycoonService's own
+-- Floor sizing, so this can't silently drift out of alignment with wherever
+-- Floor's edge actually ends up. Overlaps a couple studs into both Floor and
+-- the Base so there's no visible seam at either end. The gap is bigger than
+-- it used to be (Floor's edge moved much closer to Dropper1 once the
+-- Pedestal Showcase stopped extending it), so this walkway is correspondingly
+-- longer now - still just a single flat part bridging two edges either way.
 local CONNECTOR_WIDTH_STUDS = 16
 local CONNECTOR_THICKNESS_STUDS = 1
 local CONNECTOR_OVERLAP_STUDS = 2
@@ -63,6 +83,15 @@ local ORBIT_ATTACHMENT_COUNT = 4
 local ACCENT_COLOR = Color3.fromRGB(140, 70, 255)
 
 local PROMPT_MAX_ACTIVATION_DISTANCE = 10
+-- Matches BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS in TycoonService.lua (same
+-- value, chosen there for the same reason - kept independently here since
+-- there's no shared constant module for pure UI-readability numbers like this
+-- one). Unset, a BillboardGui renders at any distance - confirmed via testing
+-- to be why this panel was visible and overlapping with plot pad billboards
+-- from clear across the map. 20 sits outside PROMPT_MAX_ACTIVATION_DISTANCE
+-- (10) so the panel becomes readable before the machine's own fusion prompt
+-- is even in range.
+local ODDS_BILLBOARD_MAX_DISTANCE_STUDS = 20
 
 local function buildBase(): BasePart
 	local base = Instance.new("Part")
@@ -223,7 +252,7 @@ end
 -- from, since the machine sits at +MACHINE_ROW_OFFSET_STUDS along the plot
 -- row). Previously pulled 10 studs toward the row at a low, human-scale
 -- height (5) - reasonable back when the machine was 100 studs out, but once
--- it moved to +95 (~21 studs past Pedestal 4) that put the panel low enough
+-- it moved to +95 (well past the Gacha Pad) that put the panel low enough
 -- and far enough toward the row to visually overlap the Multiplier Pad's
 -- billboard from typical viewing angles. Pulled back to a smaller X offset
 -- and raised well above the Core's own top (which sits 5 studs above Base
@@ -236,6 +265,7 @@ local function buildOddsBillboard(anchor: BasePart)
 	billboard.Name = "FusionOddsBillboard"
 	billboard.Size = UDim2.fromOffset(200, 170)
 	billboard.StudsOffset = ODDS_BILLBOARD_OFFSET
+	billboard.MaxDistance = ODDS_BILLBOARD_MAX_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
 	billboard.Parent = anchor
 
@@ -299,7 +329,7 @@ local function buildPrompt(core: BasePart): ProximityPrompt
 	return prompt
 end
 
-function FusionMachineService.Init()
+function FusionMachineService:Init()
 	-- Rebuilt fresh on every server start rather than left alone if one
 	-- already exists: skipping-when-present meant a machine built by an
 	-- older version of this file (different position/size) would silently

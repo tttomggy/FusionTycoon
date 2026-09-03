@@ -9,6 +9,12 @@
 # would leave the plot-cloning system unreproducible on a fresh clone.
 !TycoonTemplate.rbxm
 
+# Same reasoning for the imported VFX pieces extracted from user-supplied
+# Toolbox packs: real source content (Rojo auto-syncs any .rbxm found inside
+# this already-$path'd folder, no separate project.json entry needed), not
+# build output.
+!src/ReplicatedStorage/Shared/VFX/*.rbxm
+
 # Rojo sourcemap
 sourcemap.json
 
@@ -32,3 +38,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Luau type-checker artifacts (regenerate via the commands in aftman.toml)
+globalTypes.d.luau
