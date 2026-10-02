@@ -45,6 +45,7 @@ PlotLayout.GATE_RAMP_LENGTH = 3 -- z +32..+35, outside the gap
 
 PlotLayout.SPAWN_POSITION = v3(0, 0, 40) -- on the street in front of the gate
 PlotLayout.SPAWN_SIZE = v3(6, 1, 6)
+PlotLayout.SPAWN_CHARACTER_CLEARANCE = 3 -- above the spawn top when moving a character there
 
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
@@ -132,6 +133,7 @@ PlotLayout.Dropper = {
 
 PlotLayout.COLLECTOR_SIZE = v3(6, 0.4, 18)
 PlotLayout.COLLECTOR_TOP_Y = 0.2
+PlotLayout.CASH_POP_HEIGHT = 1 -- "+$X" pop, above the collector's top
 
 --[[ Pedestals ------------------------------------------------------------------- ]]
 
@@ -180,6 +182,7 @@ PlotLayout.Machine = {
 	FloorGlowTransparency = 0.6,
 	PromptAnchorY = 3,
 	PromptDistance = 10,
+	FuseAllPromptOffsetPx = 72, -- screen offset stacking FuseAllPrompt under FusePrompt
 
 	OddsPostSize = v3(0.6, 6, 0.6),
 	OddsBoardSize = v3(7, 5, 0.4),

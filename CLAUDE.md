@@ -51,21 +51,28 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 src/ReplicatedStorage/Shared/
     Config/      shared config tables (PlotLayout, TycoonConfig, FusionConfig,
                  GoalConfig — the ordered onboarding goals, …)
-    Modules/     shared runtime modules (PartKit, StationKit, PedestalVisuals,
-                 NumberFormat, UITheme — every UI colour/font token,
-                 BillboardKit — server-built world labels)
+    Modules/     shared runtime modules: UITheme (every UI colour/font token
+                 and the World part colours), BillboardKit (world labels and
+                 SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
+                 tagging), PlotKit (plot shell + sign gate), StationKit
+                 (station pads + holograms), DropperKit (dropper model),
+                 PedestalVisuals, NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
 src/ServerScriptService/
     Bootstrap.server.lua   entry point; hands Services/ to ServiceManager
     ServiceManager.lua     loading + Init/Start lifecycle
     Services/              one ModuleScript per service (GoalService pays
-                           and advances goals from PlayerDataService.OnSync)
+                           and advances goals from PlayerDataService.OnSync;
+                           WorldService builds ground, street and FREE LAB
+                           placeholders)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
                   (fusion/gacha result cards), AnnouncementController
-                  (banners), WorldLabelController (hides owner-only labels)…
+                  (banners), WorldLabelController (hides owner-only labels),
+                  WorldAnimationController (FT_Hover spin/bob, client-only),
+                  GoalMarkerController (points at the current goal)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
@@ -129,7 +136,7 @@ Supporting detail:
   from the pre-refactor Bootstrap. It is load-bearing only until every service
   honours the Init/Start contract; do not add ordering dependencies to it.
 
-**Migration status — lifecycle migration is complete.** All seven services use
+**Migration status — lifecycle migration is complete.** Every service uses
 colon lifecycle methods, private state tables, and resolve every cross-service
 reference inside `:Start()`. There are zero top-level `require(script.Parent.*)`
 calls left in `Services/`.
@@ -142,8 +149,9 @@ calls left in `Services/`.
 | `LightingService` | `:Init()` | — | `--!strict` |
 | `DebugService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
-| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService` (Start) | `--!nonstrict` ⚠ |
+| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
+| `WorldService` | `:Init()` | — | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -199,19 +207,39 @@ Services never trust client-supplied ownership, tiers, or instance references.
 Resolve everything server-side from the requesting `Player` and validate before
 mutating (see `ItemService.onRequestPlaceItem`, `FusionService.onFusionRequest`).
 
-### Shared layout math
+### World layout (plot-local space and the slot grid)
 
-`Shared/Config/PlotLayout.lua` is the single source of truth for plot geometry
-(row offsets, pedestal showcase position, Floor extents). `TycoonService` and
-`FusionMachineService` both read from it. Never hardcode a second copy of a
-position in a service — that class of duplicated assumption caused most of this
-project's layout bugs.
+`Shared/Config/PlotLayout.lua` is the single source of truth for ALL world
+geometry: every position, offset and size on a plot, the station / dropper /
+pedestal / machine / gate dimensions, the slot grid and the street. No service
+may hard-code a second copy — that class of duplicated assumption caused most
+of this project's layout bugs. A require-time assertion block in PlotLayout
+checks that no footprints overlap and everything sits inside the walls.
+
+- **Plot-local space:** origin = `PlotOrigin`, at the centre of the plot at
+  floor-top height (y = 0). +X is the plot's right, +Z its front (the gate,
+  facing the street). World position = `origin:PointToWorldSpace(localPos)`
+  (`PartKit.At(origin, localPos, y)`); facings are relative to the origin.
+- **Slot grid:** 12 slots (`MAX_PLOT_SLOTS`; set the place's Max Players to
+  12). Slot i: column `(i - 1) // 2`, row `(i - 1) % 2`; x = `(column - 2.5) *
+  80`; row 0 at z = −50 facing +Z, row 1 at z = +50 turned 180°, so both rows'
+  gates face the street at z = 0. `PlotLayout.GetSlotCFrame(i)`.
+- **Materials:** every solid part is SmoothPlastic, accents Neon (colours
+  from `UITheme.World`); the ground's Grass is the one exception. No Basalt,
+  Slate, Metal or Plastic.
+- **Prompts:** stations 7, pedestals 6, machine 10; all
+  `RequiresLineOfSight = false`, `Exclusivity = OnePerButton`.
+- **Hover animation:** tag a Part or Model `FT_Hover`
+  (`PartKit.SetHover`); clients animate it. The server never tweens these.
 
 ## Gotchas
 
-- **Plots are cloned once per player per server session.** Layout/pad changes
-  do not appear in an already-running session — stop and restart Play. Same for
-  the Fusion Machine, which is built once at server startup.
+- **Plots are built once per player per server session** (on join), each
+  with its own Fusion Machine. Layout/pad changes do not appear in an
+  already-running session — stop and restart Play.
+- **Studio setup the scripts can't do:** set `Lighting.Technology` to Future,
+  delete `Workspace.Baseplate` (WorldService also removes it at runtime), and
+  set Max Players to 12 in Game Settings.
 - **Binary assets are `.rbxm` under a blanket `.gitignore` exclusion** with
   explicit carve-outs (`!TycoonTemplate.rbxm`,
   `!src/ReplicatedStorage/Shared/VFX/*.rbxm`). A new `.rbxm` added elsewhere
@@ -220,8 +248,6 @@ project's layout bugs.
   after the filename (descendants keep their authored names). Only assets
   outside such a folder — e.g. root-level `TycoonTemplate.rbxm` — need their own
   `default.project.json` entry.
-- `Enum.Material.Metal` renders dark regardless of `Color3` under this game's
-  lighting. Use `Enum.Material.Neon` for accent colors that must read as bright.
 - A line starting with `(` directly after a statement ending in an expression is
   parsed as a call spanning both lines. Route casts through a local
   (`local x = y :: T`) instead of inline `(y :: T).Field = …`.

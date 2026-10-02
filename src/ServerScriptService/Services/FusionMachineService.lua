@@ -194,7 +194,7 @@ local function buildPromptAnchor(machine: Model, base: CFrame)
 	fuseAll.MaxActivationDistance = M.PromptDistance
 	fuseAll.RequiresLineOfSight = false
 	fuseAll.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-	fuseAll.UIOffset = Vector2.new(0, 72) -- stacked under FusePrompt
+	fuseAll.UIOffset = Vector2.new(0, M.FuseAllPromptOffsetPx) -- stacked under FusePrompt
 	fuseAll.Enabled = false
 	fuseAll.Parent = anchor
 end

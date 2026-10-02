@@ -130,3 +130,64 @@ As Player 2, look at Player 1's plot:
   not a banner.
 - [ ] A Legendary or Mythic display or fusion by anyone shows the server
   banner. Mythic uses the taller red **SERVER · MYTHIC** variant.
+
+## 8. World (world redesign)
+
+Studio setup first (scripts can't do these):
+
+- [ ] Set **Lighting → Technology** to **Future**.
+- [ ] Delete **Workspace → Baseplate**. WorldService also removes it at
+  runtime, but it shouldn't be saved in the place.
+- [ ] Set **Game Settings → Max Players** to **12** (one per plot slot).
+
+Then press Play:
+
+- [ ] **Spawn** lands on the street in front of your own gate (the purple
+  sign reads FREE LAB, then your name once claimed). Respawning (reset)
+  puts you back there.
+- [ ] **Layout.** Everything in the plan is within a short walk of the gate:
+  the claim pad straight ahead, Dropper 1 and the Dropper 2 slot on the
+  left with the gold collector strip, the gacha and multiplier stations on
+  the right, four pedestals across the middle, and the Fusion Machine at
+  the back. Nothing overlaps, and nothing clips through the walls.
+- [ ] **Gate ramp.** Walking from the street onto the floor goes up the
+  ramp. If it's backwards (a step instead of a slope), flip the 180° in
+  `PlotKit.BuildGateRamp`.
+- [ ] **Stations.** Each pad glows in its colour with a floating hologram:
+  the gacha capsule spins and bobs, the multiplier chevrons rise and snap
+  back, the claim arrow bobs and disappears after claiming, and Dropper 2
+  shows a translucent ghost until bought. The E prompt appears at about 7
+  studs, and only the nearest prompt shows.
+- [ ] **Droppers.** Green balls leave the spout on Dropper 1 (and Dropper 2
+  once bought) and roll onto the gold strip. A "+$X" pops over the strip.
+- [ ] **Pedestal orbs.** Display an item: the cap lights up in the tier
+  colour and a glass orb (bigger for higher tiers) floats above it,
+  spinning and bobbing. The label sits above the orb. Removing the item
+  clears it.
+- [ ] **Labels shrink with distance.** Walk away from a pad or pedestal
+  label: it gets smaller like a real sign and never fills the screen up
+  close. Pad labels vanish past about 90 studs, filled pedestal labels past
+  70, and EMPTY labels past 25.
+- [ ] **Fusion Machine.** A round platform with a violet rim, four leaning
+  pylons and a floating core. The camera doesn't end up inside it. Fusing
+  still plays the charge-up and reveal on the core. The odds board beside
+  it is a real board facing the gate, angled toward the walkway.
+- [ ] **Fuse All with 40 Commons.** `/cash 50000000`, pull until you have
+  about 40 Commons, then stand at the machine:
+  - [ ] **Hold F · Fuse All (N)** shows N = 20.
+  - [ ] Holding it plays a 3 s charge-up, then **one** summary card (N
+    fusions, upgraded/failed, tier chips with "−40 COMMON", BEST row).
+  - [ ] DISPLAY BEST puts the best item on a pedestal.
+  - [ ] With fewer than 2 pairs, the F prompt is hidden.
+  - [ ] Legendaries are never consumed.
+- [ ] **Goal marker on a fresh save.** `/wipe` → Play → claim. A gold
+  marker labelled **BUY DROPPER 2** floats over the Dropper 2 slot (visible
+  through walls), with a live "N studs" line and a pulsing gold ring on the
+  floor. It hides within 8 studs. At the "Buy a Basic Generator" goal, the
+  UPGRADES button gets a pulsing gold outline instead.
+- [ ] **Two players** (Test → Clients and Servers → 2 players): the two labs
+  face each other across the street, with gates on the street. Empty slots
+  show FREE LAB foundations, and a slot's foundation disappears when a
+  player's lab is built there and returns when they leave.
+- [ ] **Lighting.** Late-afternoon warm light with a soft violet haze. Only
+  Neon parts bloom, and nothing looks washed out.

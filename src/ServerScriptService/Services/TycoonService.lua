@@ -274,7 +274,7 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 		player.RespawnLocation = spawn
 		local character = player.Character
 		if character then
-			character:PivotTo(spawn.CFrame + Vector3.new(0, spawn.Size.Y / 2 + 3, 0))
+			character:PivotTo(spawn.CFrame + Vector3.new(0, spawn.Size.Y / 2 + PlotLayout.SPAWN_CHARACTER_CLEARANCE, 0))
 		end
 	else
 		warn(("TycoonService: no SpawnLocation in %s's plot"):format(player.Name))
@@ -368,7 +368,7 @@ local function createCollector(plot: Model, origin: CFrame, player: Player)
 			return
 		end
 		hit:SetAttribute("Collected", true)
-		local popPosition = Vector3.new(hit.Position.X, collector.Position.Y + size.Y / 2 + 1, hit.Position.Z)
+		local popPosition = Vector3.new(hit.Position.X, collector.Position.Y + size.Y / 2 + PlotLayout.CASH_POP_HEIGHT, hit.Position.Z)
 		hit:Destroy()
 		awardCash(player, value)
 		RemoteEvents.CashCollected:FireClient(player, { Amount = value, Position = popPosition })
