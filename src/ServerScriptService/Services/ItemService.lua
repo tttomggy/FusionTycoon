@@ -136,6 +136,10 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s just displayed a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 			Tier = item.Tier,
+			-- Parts, so the client can colour the tier word.
+			PlayerName = player.DisplayName,
+			Verb = "displayed",
+			ItemName = itemName,
 		})
 	end
 end

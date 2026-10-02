@@ -179,6 +179,10 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s fused a %s %s!"):format(player.DisplayName, resultTier:upper(), rewardItem.Name),
 			Tier = resultTier,
+			-- Parts, so the client can colour the tier word.
+			PlayerName = player.DisplayName,
+			Verb = "fused",
+			ItemName = rewardItem.Name,
 		})
 	end
 end
