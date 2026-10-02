@@ -5,7 +5,6 @@ local FusionController = require(Controllers.FusionController)
 local TycoonController = require(Controllers.TycoonController)
 local ItemController = require(Controllers.ItemController)
 local AnnouncementController = require(Controllers.AnnouncementController)
-local InventoryButtonController = require(Controllers.InventoryButtonController)
 local HudController = require(Controllers.HudController)
 
 -- Data controllers first so their remote listeners are connected before
@@ -13,7 +12,6 @@ local HudController = require(Controllers.HudController)
 InventoryController.Init()
 TycoonController.Init()
 AnnouncementController.Init()
-InventoryButtonController.Init()
 HudController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion

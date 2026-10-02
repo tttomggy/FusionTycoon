@@ -1,13 +1,14 @@
 --[[
 	HudController
 	-------------
-	The always-on HUD:
-	  * Cash readout (bottom-left) that counts up smoothly, with income/sec
-	    under it. Before this the only place to see your cash was the
-	    leaderboard, and there was no way to see your income at all.
-	  * An UPGRADES button next to the Inventory button that opens the
-	    Generators panel. The five generators existed on the server the whole
-	    time, but nothing in the game let a player buy them.
+	The always-on HUD (one ScreenGui, "Hud"):
+	  * Goal tracker (top-left, under the Roblox top bar)
+	  * Cash card: coin + counting-up cash, income/s and the multiplier pill
+	  * Bottom buttons: UPGRADES (with an affordable-count badge) and ITEMS
+	  * Cash pops: "+$24" floating up from the Collector on every pickup
+
+	Nothing is placed in the top-left 170x60 px, which belongs to the Roblox
+	top bar.
 ]]
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -16,62 +17,69 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
-local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
+local UIKit = require(script.Parent.Parent.UI.UIKit)
+local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
+local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
 
-local COLORS = {
-	Panel = Color3.fromRGB(18, 18, 26),
-	PanelLight = Color3.fromRGB(30, 30, 42),
-	Stroke = Color3.fromRGB(70, 70, 95),
-	Text = Color3.fromRGB(245, 245, 250),
-	Muted = Color3.fromRGB(150, 150, 170),
-	Cash = Color3.fromRGB(85, 255, 127),
-	Buy = Color3.fromRGB(46, 204, 113),
-	BuyDisabled = Color3.fromRGB(60, 60, 72),
-}
+local Colors = UITheme.Colors
+local Fonts = UITheme.Fonts
 
 local localPlayer = Players.LocalPlayer
 
-local screenGui: ScreenGui
-local cashLabel: TextLabel
-local incomeLabel: TextLabel
-local upgradesPanel: Frame
-local generatorRows: { [string]: { [string]: any } } = {}
-local multiplierLabel: TextLabel
+-- Layout (design px, before the phone UIScale). Phone values keep the cash
+-- card's top edge clear of the top bar AFTER the 0.8 scale (76 * 0.8 > 60).
+local LAYOUT = {
+	Desktop = {
+		GoalPosition = UDim2.fromOffset(12, 74),
+		GoalWidth = 260,
+		GoalBarHeight = 14,
+		CashPosition = UDim2.fromOffset(12, 274),
+		ButtonSize = Vector2.new(176, 64),
+		ButtonTextSize = 22,
+	},
+	Phone = {
+		GoalPosition = UDim2.fromOffset(10, 154),
+		GoalWidth = 168,
+		GoalBarHeight = 10,
+		CashPosition = UDim2.fromOffset(10, 76),
+		ButtonSize = Vector2.new(84, 60),
+		ButtonTextSize = 13,
+	},
+}
+local CASH_CARD_SIZE = Vector2.new(236, 96)
+local BOTTOM_MARGIN = 22
+local BUTTON_GAP = 14
 
+local CASH_POP_LIFETIME = 0.8
+local CASH_POP_RISE_STUDS = 4
+local CASH_POP_MAX_ALIVE = 6
+
+local screenGui: ScreenGui
 local displayedCash = 0
 
-local function corner(parent: Instance, radius: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
-end
+local cashLabel: TextLabel
+local incomeLabel: TextLabel
+local multiplierPill: TextLabel
 
-local function stroke(parent: Instance, color: Color3, thickness: number)
-	local s = Instance.new("UIStroke")
-	s.Color = color
-	s.Thickness = thickness
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
-	return s
-end
+local goalHolder: Frame
+local goalBody: Frame
+local goalRewardLabel: TextLabel
+local goalTextLabel: TextLabel
+local goalBar: Frame
+local goalCountLabel: TextLabel
 
-local function textLabel(props: { [string]: any }): TextLabel
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = COLORS.Text
-	label.TextScaled = true
-	for key, value in props do
-		(label :: any)[key] = value
-	end
-	return label
-end
+local buttonRow: Frame
+local upgradesButton: TextButton? = nil
+local upgradesHolder: Frame? = nil
 
 --[[ Income ---------------------------------------------------------------- ]]
 
@@ -110,49 +118,224 @@ local function getIncomePerSecond(): number
 	return passive
 end
 
+-- Generators that are unlocked, not maxed, and affordable right now.
+local function countAffordableUpgrades(): number
+	local count = 0
+	local cash = TycoonController.GetCash()
+	local levels = TycoonController.GetGeneratorLevels()
+	for _, generator in TycoonConfig.Generators do
+		local level = levels[generator.Id] or 0
+		if level < generator.MaxLevel
+			and TycoonConfig.IsUnlocked(generator, levels)
+			and cash >= TycoonConfig.GetUpgradeCost(generator, level)
+		then
+			count += 1
+		end
+	end
+	return count
+end
+
+--[[ Goal tracker ---------------------------------------------------------- ]]
+
+local function buildGoalTracker()
+	local body, holder = UIKit.Panel({
+		Name = "GoalTracker",
+		Parent = screenGui,
+		Size = UDim2.fromOffset(LAYOUT.Desktop.GoalWidth, 0),
+		Position = LAYOUT.Desktop.GoalPosition,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Color = Colors.Panel,
+	})
+	goalHolder = holder
+	goalBody = body
+	-- Hidden until the server sends a goal (and after the last one).
+	holder.Visible = false
+
+	UIKit.Padding(body, 12, 14, 12, 14)
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = body
+
+	local headerRow = Instance.new("Frame")
+	headerRow.Name = "Header"
+	headerRow.BackgroundTransparency = 1
+	headerRow.Size = UDim2.new(1, 0, 0, 16)
+	headerRow.LayoutOrder = 1
+	headerRow.ZIndex = body.ZIndex + 1
+	headerRow.Parent = body
+
+	UIKit.Label({
+		Name = "Caption",
+		Text = "NEXT GOAL",
+		Font = Fonts.BodyHeavy,
+		TextSize = 12,
+		TextColor3 = Colors.Goal,
+		Size = UDim2.fromScale(0.6, 1),
+		ZIndex = headerRow.ZIndex,
+		Parent = headerRow,
+	})
+	goalRewardLabel = UIKit.Label({
+		Name = "Reward",
+		Font = Fonts.Body,
+		TextSize = 12,
+		TextColor3 = Colors.Muted,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.fromScale(0.4, 1),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = headerRow.ZIndex,
+		Parent = headerRow,
+	})
+
+	goalTextLabel = UIKit.Label({
+		Name = "GoalText",
+		Font = Fonts.Body,
+		TextSize = 16,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.fromScale(1, 0),
+		LayoutOrder = 2,
+		ZIndex = body.ZIndex + 1,
+		Parent = body,
+	})
+
+	goalBar = UIKit.ProgressBar({
+		Name = "Progress",
+		Parent = body,
+		Size = UDim2.new(1, 0, 0, LAYOUT.Desktop.GoalBarHeight),
+		Fill = UITheme.Gradients.Gold,
+		LayoutOrder = 3,
+		ZIndex = body.ZIndex + 1,
+	})
+
+	goalCountLabel = UIKit.Label({
+		Name = "Count",
+		Font = Fonts.Body,
+		TextSize = 12,
+		TextColor3 = Colors.Muted,
+		Size = UDim2.new(1, 0, 0, 14),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		LayoutOrder = 4,
+		ZIndex = body.ZIndex + 1,
+		Parent = body,
+	})
+end
+
+export type GoalView = {
+	Text: string,
+	Reward: number,
+	Current: number,
+	Target: number,
+	Unit: string?, -- e.g. "Rare"; nil hides the count line
+}
+
+-- Shows a goal on the tracker, or hides the tracker when `goal` is nil.
+function HudController.SetGoal(goal: GoalView?)
+	if not goal then
+		goalHolder.Visible = false
+		return
+	end
+	goalHolder.Visible = true
+	goalRewardLabel.Text = "+" .. NumberFormat.Money(goal.Reward)
+	goalTextLabel.Text = goal.Text
+	UIKit.SetProgress(goalBar, if goal.Target > 0 then goal.Current / goal.Target else 0, true)
+	if goal.Unit then
+		goalCountLabel.Visible = true
+		goalCountLabel.Text = ("%s / %s %s"):format(
+			NumberFormat.Short(math.min(goal.Current, goal.Target)),
+			NumberFormat.Short(goal.Target),
+			goal.Unit
+		)
+	else
+		goalCountLabel.Visible = false
+	end
+end
+
+-- Completion flourish: flash the border Goal-coloured and pop the panel.
+function HudController.FlashGoal()
+	local stroke = goalBody:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		stroke.Color = Colors.Goal
+		TweenService:Create(stroke, TweenInfo.new(0.6, Enum.EasingStyle.Quad), { Color = Colors.Ink }):Play()
+	end
+	UIKit.PopIn(goalHolder)
+end
+
 --[[ Cash card ------------------------------------------------------------- ]]
 
-local function buildCashCard()
-	local card = Instance.new("Frame")
-	card.Name = "CashCard"
-	-- Left edge, a bit above centre: clear of the Roblox top bar, the mobile
-	-- thumbstick (bottom-left) and the bottom-centre buttons.
-	card.AnchorPoint = Vector2.new(0, 0.5)
-	card.Position = UDim2.new(0, 12, 0.42, 0)
-	card.Size = UDim2.fromOffset(200, 70)
-	card.BackgroundColor3 = COLORS.Panel
-	card.BackgroundTransparency = 0.1
-	card.Parent = screenGui
-	corner(card, 14)
-	stroke(card, COLORS.Stroke, 1.5)
+local function buildCashCard(): Frame
+	local body, holder = UIKit.Panel({
+		Name = "CashCard",
+		Parent = screenGui,
+		Size = UDim2.fromOffset(CASH_CARD_SIZE.X, CASH_CARD_SIZE.Y),
+		Position = LAYOUT.Desktop.CashPosition,
+		Color = Colors.Panel,
+	})
+	UIKit.Padding(body, 12, 14, 12, 14)
+	local z = body.ZIndex + 1
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
-	padding.PaddingTop = UDim.new(0, 8)
-	padding.PaddingBottom = UDim.new(0, 8)
-	padding.Parent = card
+	-- Row 1: coin + amount.
+	local coin = Instance.new("Frame")
+	coin.Name = "Coin"
+	coin.Size = UDim2.fromOffset(34, 34)
+	coin.Position = UDim2.fromOffset(0, 3)
+	coin.BackgroundColor3 = Colors.White
+	coin.ZIndex = z
+	coin.Parent = body
+	UIKit.Corner(coin, 999)
+	UIKit.PairGradient(coin, UITheme.Gradients.Green)
+	UIKit.Stroke(coin, 3)
+	UIKit.Label({
+		Text = "$",
+		Font = Fonts.Display,
+		TextSize = 18,
+		TextColor3 = Colors.CoinText,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z + 1,
+		Parent = coin,
+	})
 
-	cashLabel = textLabel({
+	cashLabel = UIKit.Label({
 		Name = "Cash",
-		Size = UDim2.new(1, 0, 0.62, 0),
-		Font = Enum.Font.GothamBlack,
-		TextColor3 = COLORS.Cash,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "$0",
-		Parent = card,
+		Text = "0",
+		Font = Fonts.Display,
+		TextSize = 34,
+		TextColor3 = Colors.Cash,
+		Position = UDim2.fromOffset(44, 0),
+		Size = UDim2.new(1, -44, 0, 40),
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
 	})
 
-	incomeLabel = textLabel({
+	-- Row 2: income + multiplier pill.
+	incomeLabel = UIKit.Label({
 		Name = "Income",
-		Position = UDim2.fromScale(0, 0.64),
-		Size = UDim2.new(1, 0, 0.36, 0),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = COLORS.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "+$0/s",
-		Parent = card,
+		Font = Fonts.Body,
+		TextSize = 16,
+		RichText = true,
+		Position = UDim2.fromOffset(0, 46),
+		Size = UDim2.new(1, -60, 0, 24),
+		ZIndex = z,
+		Parent = body,
 	})
+
+	multiplierPill = UIKit.Pill({
+		Name = "Multiplier",
+		Parent = body,
+		Text = "x1",
+		Color = Colors.VioletPill,
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		Height = 24,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 0, 46),
+		ZIndex = z,
+	})
+
+	return holder
 end
 
 local function onRenderStep(dt: number)
@@ -167,311 +350,236 @@ local function onRenderStep(dt: number)
 			displayedCash = target
 		end
 	end
-	cashLabel.Text = NumberFormat.Money(math.floor(displayedCash))
+	-- The coin stands for "$": the number only.
+	cashLabel.Text = NumberFormat.Short(math.floor(displayedCash))
 end
 
---[[ Upgrades panel -------------------------------------------------------- ]]
+--[[ Bottom buttons -------------------------------------------------------- ]]
 
-local function refreshUpgrades()
-	if not upgradesPanel then
-		return
+local function buildBrowseEntries(): { any }
+	local entries = {}
+	for _, item in InventoryController.GetInventory() do
+		local def = ItemConfig.GetItemById(item.ItemId)
+		table.insert(entries, {
+			Uid = item.Uid,
+			ItemId = item.ItemId,
+			Name = def and def.Name or item.ItemId,
+			Tier = item.Tier,
+			InUse = item.InUse == true,
+		})
 	end
-	local cash = TycoonController.GetCash()
-	local levels = TycoonController.GetGeneratorLevels()
-	local multiplierLevel = TycoonController.GetCashMultiplierLevel()
-	local multiplier = TycoonConfig.GetCashMultiplierValue(multiplierLevel)
+	return entries
+end
 
-	multiplierLabel.Text = ("All income %s  ·  upgrade at the purple pad"):format(NumberFormat.Multiplier(multiplier))
+function HudController.OpenInventory()
+	-- Browse mode: no onSelect, cards only show info.
+	ItemPickerUI.Open(buildBrowseEntries(), nil, "YOUR ITEMS")
+end
 
-	for _, generator in TycoonConfig.Generators do
-		local row = generatorRows[generator.Id]
-		if row then
-			local level = levels[generator.Id] or 0
-			local unlocked = TycoonConfig.IsUnlocked(generator, levels)
-			local maxed = level >= generator.MaxLevel
-			local perLevel = TycoonConfig.GetGeneratorCashPerSecond(generator, 1) * multiplier
-
-			row.Level.Text = ("Lv %d/%d"):format(level, generator.MaxLevel)
-			row.Detail.Text = if level > 0
-				then ("%s/s now  ·  +%s/s per level"):format(
-					NumberFormat.Money(TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier),
-					NumberFormat.Money(perLevel)
-				)
-				else ("+%s/s per level"):format(NumberFormat.Money(perLevel))
-
-			local button: TextButton = row.Button
-			if maxed then
-				button.Text = "MAX"
-				button.BackgroundColor3 = COLORS.BuyDisabled
-				button.AutoButtonColor = false
-			elseif not unlocked then
-				local requirement = generator.UnlockRequirement :: { GeneratorId: string, Level: number }
-				local required = TycoonConfig.GetGeneratorById(requirement.GeneratorId)
-				button.Text = ("🔒 %s Lv %d"):format(required and required.Name or "?", requirement.Level)
-				button.BackgroundColor3 = COLORS.BuyDisabled
-				button.AutoButtonColor = false
-			else
-				local cost = TycoonConfig.GetUpgradeCost(generator, level)
-				local affordable = cash >= cost
-				button.Text = (if level == 0 then "Buy " else "Upgrade ") .. NumberFormat.Money(cost)
-				button.BackgroundColor3 = if affordable then COLORS.Buy else COLORS.BuyDisabled
-				button.AutoButtonColor = affordable
-			end
-		end
+local function refreshBadge()
+	if upgradesButton then
+		UIKit.Badge(upgradesButton, countAffordableUpgrades())
 	end
 end
 
-local function buildGeneratorRow(parent: Instance, generator: TycoonConfig.GeneratorDef, order: number)
-	local row = Instance.new("Frame")
-	row.Name = generator.Id
-	row.LayoutOrder = order
-	row.Size = UDim2.new(1, 0, 0, 64)
-	row.BackgroundColor3 = COLORS.PanelLight
-	row.Parent = parent
-	corner(row, 10)
+local function buildButtons(isPhone: boolean)
+	for _, child in buttonRow:GetChildren() do
+		if not child:IsA("UIListLayout") then
+			child:Destroy()
+		end
+	end
 
-	local tierColor = FusionConfig.TierAccentColors[generator.Tier] or COLORS.Text
-	local stripe = Instance.new("Frame")
-	stripe.Size = UDim2.new(0, 5, 1, -16)
-	stripe.Position = UDim2.fromOffset(8, 8)
-	stripe.BackgroundColor3 = tierColor
-	stripe.BorderSizePixel = 0
-	stripe.Parent = row
-	corner(stripe, 3)
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	local size = UDim2.fromOffset(layout.ButtonSize.X, layout.ButtonSize.Y)
 
-	textLabel({
-		Name = "Name",
-		Position = UDim2.fromOffset(22, 8),
-		Size = UDim2.new(0.58, -22, 0, 22),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = generator.Name,
-		Parent = row,
+	local upgrades, holder = UIKit.Button({
+		Name = "UpgradesButton",
+		Parent = buttonRow,
+		Style = "Green",
+		Text = "UPGRADES",
+		Icon = UITheme.Icons.Upgrades,
+		IconStacked = isPhone,
+		Size = size,
+		TextSize = layout.ButtonTextSize,
+		LayoutOrder = 1,
+		OnClick = function()
+			UpgradesPanel.Toggle()
+		end,
+	})
+	upgradesButton = upgrades
+	upgradesHolder = holder
+	local pulseScale = Instance.new("UIScale")
+	pulseScale.Name = "PulseScale"
+	pulseScale.Parent = holder
+
+	UIKit.Button({
+		Name = "ItemsButton",
+		Parent = buttonRow,
+		Style = "Blue",
+		Text = "ITEMS",
+		Icon = UITheme.Icons.Items,
+		IconStacked = isPhone,
+		Size = size,
+		TextSize = layout.ButtonTextSize,
+		LayoutOrder = 2,
+		OnClick = HudController.OpenInventory,
 	})
 
-	local level = textLabel({
-		Name = "Level",
-		Position = UDim2.new(0.58, -70, 0, 10),
-		Size = UDim2.fromOffset(64, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = tierColor,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Parent = row,
-	})
-
-	local detail = textLabel({
-		Name = "Detail",
-		Position = UDim2.fromOffset(22, 34),
-		Size = UDim2.new(0.58, -22, 0, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = COLORS.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = row,
-	})
-
-	local button = Instance.new("TextButton")
-	button.Name = "Buy"
-	button.AnchorPoint = Vector2.new(1, 0.5)
-	button.Position = UDim2.new(1, -10, 0.5, 0)
-	button.Size = UDim2.new(0.4, -10, 0, 40)
-	button.Font = Enum.Font.GothamBold
-	button.TextScaled = true
-	button.TextColor3 = COLORS.Text
-	button.BackgroundColor3 = COLORS.BuyDisabled
-	button.Parent = row
-	corner(button, 8)
-	local buttonPadding = Instance.new("UIPadding")
-	buttonPadding.PaddingLeft = UDim.new(0, 8)
-	buttonPadding.PaddingRight = UDim.new(0, 8)
-	buttonPadding.PaddingTop = UDim.new(0, 8)
-	buttonPadding.PaddingBottom = UDim.new(0, 8)
-	buttonPadding.Parent = button
-
-	button.MouseButton1Click:Connect(function()
-		local levels = TycoonController.GetGeneratorLevels()
-		local current = levels[generator.Id] or 0
-		if current >= generator.MaxLevel or not TycoonConfig.IsUnlocked(generator, levels) then
-			return
-		end
-		if TycoonController.GetCash() < TycoonConfig.GetUpgradeCost(generator, current) then
-			return
-		end
-		if TycoonController.RequestUpgrade(generator.Id) then
-			-- Tiny press bounce so the click feels like it registered.
-			local scale = button:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
-			scale.Parent = button
-			scale.Scale = 0.92
-			TweenService:Create(scale, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
-		end
-	end)
-
-	generatorRows[generator.Id] = { Level = level, Detail = detail, Button = button }
+	refreshBadge()
 end
 
-local function buildUpgradesPanel()
-	upgradesPanel = Instance.new("Frame")
-	upgradesPanel.Name = "UpgradesPanel"
-	upgradesPanel.AnchorPoint = Vector2.new(0.5, 0.5)
-	upgradesPanel.Position = UDim2.fromScale(0.5, 0.5)
-	upgradesPanel.Size = UDim2.new(0.92, 0, 0, 470)
-	upgradesPanel.BackgroundColor3 = COLORS.Panel
-	upgradesPanel.Visible = false
-	upgradesPanel.Parent = screenGui
-	corner(upgradesPanel, 16)
-	stroke(upgradesPanel, COLORS.Stroke, 2)
-
-	local sizeConstraint = Instance.new("UISizeConstraint")
-	sizeConstraint.MaxSize = Vector2.new(480, 470)
-	sizeConstraint.Parent = upgradesPanel
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
-	padding.PaddingTop = UDim.new(0, 12)
-	padding.PaddingBottom = UDim.new(0, 14)
-	padding.Parent = upgradesPanel
-
-	textLabel({
-		Name = "Title",
-		Size = UDim2.new(1, -44, 0, 30),
-		Font = Enum.Font.GothamBlack,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "GENERATORS",
-		Parent = upgradesPanel,
-	})
-
-	local close = Instance.new("TextButton")
-	close.Name = "Close"
-	close.AnchorPoint = Vector2.new(1, 0)
-	close.Position = UDim2.new(1, 0, 0, 0)
-	close.Size = UDim2.fromOffset(32, 32)
-	close.Text = "✕"
-	close.Font = Enum.Font.GothamBold
-	close.TextScaled = true
-	close.TextColor3 = COLORS.Text
-	close.BackgroundColor3 = COLORS.PanelLight
-	close.Parent = upgradesPanel
-	corner(close, 8)
-	close.MouseButton1Click:Connect(function()
-		upgradesPanel.Visible = false
-	end)
-
-	multiplierLabel = textLabel({
-		Name = "Multiplier",
-		Position = UDim2.fromOffset(0, 34),
-		Size = UDim2.new(1, 0, 0, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = Color3.fromRGB(200, 60, 255),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = upgradesPanel,
-	})
-
-	local list = Instance.new("ScrollingFrame")
-	list.Name = "List"
-	list.Position = UDim2.fromOffset(0, 62)
-	list.Size = UDim2.new(1, 0, 1, -62)
-	list.BackgroundTransparency = 1
-	list.BorderSizePixel = 0
-	list.ScrollBarThickness = 4
-	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-	list.CanvasSize = UDim2.new()
-	list.Parent = upgradesPanel
+local function buildButtonRow()
+	buttonRow = Instance.new("Frame")
+	buttonRow.Name = "Buttons"
+	buttonRow.BackgroundTransparency = 1
+	buttonRow.AnchorPoint = Vector2.new(0.5, 1)
+	-- Shadow hangs 5 px below the buttons; keep the margin to the shadow.
+	buttonRow.Position = UDim2.new(0.5, 0, 1, -(BOTTOM_MARGIN + UITheme.ShadowOffset))
+	buttonRow.AutomaticSize = Enum.AutomaticSize.XY
+	buttonRow.Size = UDim2.new()
+	buttonRow.Parent = screenGui
 
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 8)
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Parent = list
+	layout.Padding = UDim.new(0, BUTTON_GAP)
+	layout.Parent = buttonRow
+end
 
-	for index, generator in TycoonConfig.Generators do
-		buildGeneratorRow(list, generator, index)
+-- Gentle pulse on UPGRADES while something is affordable, so new players notice it.
+local function runUpgradesPulse()
+	while screenGui.Parent do
+		local holder = upgradesHolder
+		local scale = holder and holder:FindFirstChild("PulseScale") :: UIScale?
+		if scale and countAffordableUpgrades() > 0 and not UpgradesPanel.IsOpen() then
+			TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Sine), { Scale = 1.08 }):Play()
+			task.wait(0.35)
+			TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Sine), { Scale = 1 }):Play()
+			task.wait(0.6)
+		else
+			if scale then
+				scale.Scale = 1
+			end
+			task.wait(0.5)
+		end
 	end
 end
 
-local function buildUpgradesButton()
-	-- Sits just left of the bottom-centre Inventory button (56px wide).
-	local button = Instance.new("TextButton")
-	button.Name = "UpgradesButton"
-	button.AnchorPoint = Vector2.new(1, 1)
-	button.Position = UDim2.new(0.5, -36, 1, -24)
-	button.Size = UDim2.fromOffset(132, 56)
-	button.BackgroundColor3 = COLORS.Buy
-	button.Font = Enum.Font.GothamBlack
-	button.TextScaled = true
-	button.TextColor3 = COLORS.Text
-	button.Text = "UPGRADES"
-	button.Parent = screenGui
-	corner(button, 16)
-	stroke(button, Color3.fromRGB(20, 120, 60), 2)
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 12)
-	padding.PaddingRight = UDim.new(0, 12)
-	padding.PaddingTop = UDim.new(0, 14)
-	padding.PaddingBottom = UDim.new(0, 14)
-	padding.Parent = button
+--[[ Cash pops ------------------------------------------------------------- ]]
 
-	-- Gentle pulse while something is affordable, so new players notice it.
-	local scale = Instance.new("UIScale")
-	scale.Parent = button
-	task.spawn(function()
-		while button.Parent do
-			local affordable = false
-			local levels = TycoonController.GetGeneratorLevels()
-			for _, generator in TycoonConfig.Generators do
-				local level = levels[generator.Id] or 0
-				if level < generator.MaxLevel
-					and TycoonConfig.IsUnlocked(generator, levels)
-					and TycoonController.GetCash() >= TycoonConfig.GetUpgradeCost(generator, level)
-				then
-					affordable = true
-					break
-				end
-			end
-			if affordable and not upgradesPanel.Visible then
-				TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Sine), { Scale = 1.08 }):Play()
-				task.wait(0.35)
-				TweenService:Create(scale, TweenInfo.new(0.35, Enum.EasingStyle.Sine), { Scale = 1 }):Play()
-				task.wait(0.6)
-			else
-				scale.Scale = 1
-				task.wait(0.5)
-			end
-		end
-	end)
+type CashPop = { Amount: number, Label: TextLabel, Gui: BillboardGui }
+local alivePops: { CashPop } = {}
 
-	button.MouseButton1Click:Connect(function()
-		upgradesPanel.Visible = not upgradesPanel.Visible
-		if upgradesPanel.Visible then
-			refreshUpgrades()
-		end
+local function removePop(pop: CashPop)
+	local index = table.find(alivePops, pop)
+	if index then
+		table.remove(alivePops, index)
+	end
+end
+
+local function onCashCollected(payload: any)
+	if typeof(payload) ~= "table" or typeof(payload.Amount) ~= "number" or typeof(payload.Position) ~= "Vector3" then
+		return
+	end
+
+	-- Throttle: past the cap, fold the amount into the newest pop instead.
+	if #alivePops >= CASH_POP_MAX_ALIVE then
+		local newest = alivePops[#alivePops]
+		newest.Amount += payload.Amount
+		newest.Label.Text = "+" .. NumberFormat.Money(newest.Amount)
+		return
+	end
+
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "CashPopAnchor"
+	anchor.WorldPosition = payload.Position
+	anchor.Parent = Workspace.Terrain
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "CashPop"
+	gui.Adornee = anchor
+	gui.Size = UDim2.fromOffset(160, 40)
+	gui.LightInfluence = 0
+	gui.AlwaysOnTop = true
+	gui.ResetOnSpawn = false
+	gui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+	local label = UIKit.Label({
+		Text = "+" .. NumberFormat.Money(payload.Amount),
+		Font = Fonts.Display,
+		TextSize = 26,
+		TextColor3 = Colors.Cash,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		Parent = gui,
+	})
+
+	local pop: CashPop = { Amount = payload.Amount, Label = label, Gui = gui }
+	table.insert(alivePops, pop)
+
+	local info = TweenInfo.new(CASH_POP_LIFETIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, CASH_POP_RISE_STUDS, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+	end
+
+	task.delay(CASH_POP_LIFETIME, function()
+		removePop(pop)
+		gui:Destroy()
+		anchor:Destroy()
 	end)
+end
+
+--[[ Layout ---------------------------------------------------------------- ]]
+
+local cashHolder: Frame
+
+local function applyLayout(isPhone: boolean)
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	cashHolder.Position = layout.CashPosition
+	goalHolder.Position = layout.GoalPosition
+	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
+	goalRewardLabel.Visible = not isPhone
+	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
+	buildButtons(isPhone)
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
 
+local function refreshAll()
+	incomeLabel.Text = ("+%s%s"):format(
+		NumberFormat.Money(getIncomePerSecond()),
+		UIKit.Colored("/s", Colors.Muted)
+	)
+	multiplierPill.Text = NumberFormat.Multiplier(
+		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	)
+	refreshBadge()
+	UpgradesPanel.Refresh()
+end
+
 function HudController.Init()
-	local playerGui = localPlayer:WaitForChild("PlayerGui")
+	screenGui = UIKit.Screen("Hud", 40)
 
-	screenGui = Instance.new("ScreenGui")
-	screenGui.Name = "Hud"
-	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
-	screenGui.DisplayOrder = 40
-	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-	screenGui.Parent = playerGui
+	buildGoalTracker()
+	cashHolder = buildCashCard()
+	buildButtonRow()
+	UpgradesPanel.Init(screenGui)
 
-	buildCashCard()
-	buildUpgradesPanel()
-	buildUpgradesButton()
+	applyLayout(UIKit.IsPhone())
+	UIKit.LayoutChanged:Connect(applyLayout)
 
 	RunService.RenderStepped:Connect(onRenderStep)
+	task.spawn(runUpgradesPulse)
 
-	local function refreshAll()
-		incomeLabel.Text = ("+%s/s"):format(NumberFormat.Money(getIncomePerSecond()))
-		if upgradesPanel.Visible then
-			refreshUpgrades()
-		end
-	end
 	TycoonController.TycoonChanged:Connect(refreshAll)
 	InventoryController.InventoryChanged:Connect(refreshAll)
+	RemoteEvents.CashCollected.OnClientEvent:Connect(onCashCollected)
 	refreshAll()
 end
 

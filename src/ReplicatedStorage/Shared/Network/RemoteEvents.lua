@@ -16,6 +16,7 @@ local REMOTE_EVENT_NAMES = {
 	"RareFusionAnnouncement", -- server -> all clients: a Legendary/Mythic item was just displayed
 	"MultiplierUpgraded", -- server -> client: the local player's cash multiplier purchase succeeded
 	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)
+	"CashCollected", -- server -> client (owner only): a cash drop hit the Collector; {Amount, Position} for the floating "+$X" pop
 }
 
 local function getOrCreateFolder(): Folder

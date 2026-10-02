@@ -639,6 +639,10 @@ local function createCollector(plot: Model, dropper: BasePart, player: Player): 
 		hit:SetAttribute("Collected", true)
 		hit:Destroy()
 		awardCash(player, value)
+		RemoteEvents.CashCollected:FireClient(player, {
+			Amount = value,
+			Position = collector.Position + Vector3.new(0, collector.Size.Y / 2 + 1, 0),
+		})
 	end)
 
 	return collector
