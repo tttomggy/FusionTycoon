@@ -34,6 +34,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
+local DropperKit = require(ReplicatedStorage.Shared.Modules.DropperKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -392,26 +393,19 @@ local function awardCash(player: Player, amount: number)
 	syncTycoon(player)
 end
 
--- Phase 1 placeholder body: the dropper's 4x6x4 column at its plan spot.
-local function placeDropperBody(body: BasePart, origin: CFrame, localPos: Vector3)
-	local size = PlotLayout.Dropper.BodySize
-	body.Size = size
-	body.CFrame = PartKit.At(origin, localPos, size.Y / 2)
-	body.Material = Enum.Material.SmoothPlastic
-	body.Color = World.Structure
-	body.Anchored = true
-end
-
-local function spawnCashPart(plot: Model, origin: CFrame, body: BasePart, player: Player)
+local function spawnCashPart(plot: Model, origin: CFrame, dropper: Model, player: Player)
+	local spawnAt = DropperKit.GetBallSpawn(dropper)
+	if not spawnAt then
+		return
+	end
 	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
-	playSound(body, DROPPER_POP_SOUND_ID, 0.35)
+	playSound(dropper.PrimaryPart or plot, DROPPER_POP_SOUND_ID, 0.35)
 
-	local d = PlotLayout.Dropper
 	local cashPart = PartKit.Part({
 		Name = "CashDrop",
 		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * d.BallDiameter,
-		CFrame = body.CFrame * CFrame.new(d.BodySize.X / 2 + d.BallDiameter / 2, d.SpoutY - d.BodySize.Y / 2, 0),
+		Size = Vector3.one * PlotLayout.Dropper.BallDiameter,
+		CFrame = spawnAt,
 		Color = World.AccentGreen,
 		Material = Enum.Material.Neon,
 		Parent = plot,
@@ -424,14 +418,14 @@ local function spawnCashPart(plot: Model, origin: CFrame, body: BasePart, player
 	Debris:AddItem(cashPart, CASH_DROP_DEBRIS_LIFETIME_SECONDS)
 end
 
-local function startDropperLoop(plot: Model, origin: CFrame, player: Player, body: BasePart)
+local function startDropperLoop(plot: Model, origin: CFrame, player: Player, dropper: Model)
 	task.spawn(function()
-		while plot.Parent and body.Parent do
+		while plot.Parent and dropper.Parent do
 			task.wait(TycoonConfig.DropperIntervalSeconds)
-			if not plot.Parent or not body.Parent then
+			if not plot.Parent or not dropper.Parent then
 				break
 			end
-			spawnCashPart(plot, origin, body, player)
+			spawnCashPart(plot, origin, dropper, player)
 		end
 	end)
 end
@@ -465,27 +459,14 @@ local function createCollector(plot: Model, origin: CFrame, player: Player)
 	end)
 end
 
-local function spawnDropper2(plot: Model, origin: CFrame, player: Player, template: BasePart)
-	local body = template:Clone()
-	body.Name = "Dropper2"
-	for _, child in body:GetChildren() do
-		child:Destroy()
-	end
-	placeDropperBody(body, origin, PlotLayout.DROPPER2)
-	body.Parent = plot
-	startDropperLoop(plot, origin, player, body)
+local function spawnDropper2(plot: Model, origin: CFrame, player: Player)
+	local dropper = DropperKit.Build(origin, PlotLayout.DROPPER2, "Dropper2", plot)
+	startDropperLoop(plot, origin, player, dropper)
 end
 
-local function createDropper2Station(plot: Model, origin: CFrame, player: Player, dropper1: BasePart)
+local function createDropper2Station(plot: Model, origin: CFrame, player: Player)
 	-- The slot shows a translucent ghost of the dropper until it's bought.
-	local ghost = Instance.new("Model")
-	local ghostBody = dropper1:Clone()
-	for _, child in ghostBody:GetChildren() do
-		child:Destroy()
-	end
-	ghostBody.Parent = ghost
-	ghost.PrimaryPart = ghostBody
-	ghost.WorldPivot = ghostBody.CFrame * CFrame.new(0, -ghostBody.Size.Y / 2, 0)
+	local ghost = DropperKit.Build(origin, PlotLayout.DROPPER2, "Ghost")
 	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen, "Ghost", { Ghost = ghost })
 	local cost = TycoonConfig.Dropper2Cost
 	BillboardKit.Pad(pad, {
@@ -514,7 +495,7 @@ local function createDropper2Station(plot: Model, origin: CFrame, player: Player
 		if station then
 			station:Destroy()
 		end
-		spawnDropper2(plot, origin, player, dropper1)
+		spawnDropper2(plot, origin, player)
 	end)
 end
 
@@ -814,8 +795,8 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 			return
 		end
 
-		local dropper1 = findPart(plot, "Dropper1")
-		if not dropper1 then
+		local dropper1 = plot:FindFirstChild("Dropper1")
+		if not dropper1 or not dropper1:IsA("Model") then
 			warn(("TycoonService: Dropper1 missing in %s's plot"):format(player.Name))
 			return
 		end
@@ -823,9 +804,9 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		createCollector(plot, origin, player)
 		startDropperLoop(plot, origin, player, dropper1)
 		if PlayerDataService.HasDropper2(player) then
-			spawnDropper2(plot, origin, player, dropper1)
+			spawnDropper2(plot, origin, player)
 		else
-			createDropper2Station(plot, origin, player, dropper1)
+			createDropper2Station(plot, origin, player)
 		end
 		createMultiplierStation(plot, origin, player)
 		createGachaStation(plot, origin, player)
@@ -867,10 +848,11 @@ local function createPlotForPlayer(player: Player)
 
 	buildShell(plot, origin, player)
 
-	-- Dropper 1 stands at its spot from the start; it produces once claimed.
-	local dropper1 = findPart(plot, "Dropper1")
-	if dropper1 then
-		placeDropperBody(dropper1, origin, PlotLayout.DROPPER1)
+	-- Dropper 1 stands at its spot from the start (the template part becomes
+	-- its Body); it produces once claimed.
+	local dropper1Body = findPart(plot, "Dropper1")
+	if dropper1Body then
+		DropperKit.Build(origin, PlotLayout.DROPPER1, "Dropper1", plot, dropper1Body)
 	end
 
 	plot.Parent = getPlotsFolder()
