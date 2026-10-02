@@ -89,19 +89,23 @@ local function openItemPicker(pedestalIndex: number)
 		return
 	end
 
+	-- Every owned item, including ones already on pedestals: the grid groups
+	-- copies, tags displayed ones, and DISPLAY only ever sends a free copy.
 	local entries = {}
-	for _, item in InventoryController.GetDisplayableItems() do
+	for _, item in InventoryController.GetInventory() do
 		local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
 		table.insert(entries, {
 			Uid = item.Uid,
+			ItemId = item.ItemId,
 			Name = itemConfigEntry and itemConfigEntry.Name or item.ItemId,
 			Tier = item.Tier,
+			InUse = item.InUse == true,
 		})
 	end
 
 	ItemPickerUI.Open(entries, function(entry)
 		requestPlaceItem(pedestalIndex, entry.Uid)
-	end)
+	end, nil, { Subtitle = ("For Pedestal %d · best items first"):format(pedestalIndex) })
 end
 
 local function requestRemoveItem(pedestalIndex: number)
