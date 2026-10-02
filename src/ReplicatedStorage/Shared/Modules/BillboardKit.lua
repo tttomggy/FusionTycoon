@@ -16,6 +16,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 
 local BillboardKit = {}
@@ -24,7 +25,7 @@ local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
 BillboardKit.PAD_MAX_DISTANCE = 26
-BillboardKit.PEDESTAL_MAX_DISTANCE = 40
+BillboardKit.PEDESTAL_MAX_DISTANCE = 70
 BillboardKit.PLOT_SIGN_MAX_DISTANCE = 120
 BillboardKit.OWNER_ONLY_ATTRIBUTE = "OwnerOnly"
 
@@ -195,10 +196,15 @@ export type PedestalInfo = {
 	Rate: number, -- per second, owner's multiplier included
 }
 
-local PEDESTAL_LABEL_OFFSET = Vector3.new(0, 4.5, 0)
+-- PlotLayout.Pedestal.LabelOffsetY is measured from the pedestal's bottom;
+-- StudsOffset is from its centre.
+local function pedestalLabelOffset(pedestal: BasePart): Vector3
+	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+	return Vector3.new(0, PlotLayout.Pedestal.LabelOffsetY - baseSize.Y / 2, 0)
+end
 
 local function buildFilledLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "FilledLabel", Vector2.new(210, 86), PEDESTAL_LABEL_OFFSET, BillboardKit.PEDESTAL_MAX_DISTANCE)
+	local gui = newBillboard(pedestal, "FilledLabel", Vector2.new(210, 86), pedestalLabelOffset(pedestal), BillboardKit.PEDESTAL_MAX_DISTANCE)
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
 	panel.BackgroundColor3 = Colors.Panel
@@ -218,7 +224,7 @@ local function buildFilledLabel(pedestal: BasePart): BillboardGui
 end
 
 local function buildEmptyLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "EmptyLabel", Vector2.new(190, 64), PEDESTAL_LABEL_OFFSET, BillboardKit.PAD_MAX_DISTANCE)
+	local gui = newBillboard(pedestal, "EmptyLabel", Vector2.new(190, 64), pedestalLabelOffset(pedestal), BillboardKit.PAD_MAX_DISTANCE)
 	gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"

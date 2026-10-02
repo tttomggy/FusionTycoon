@@ -680,6 +680,16 @@ local function createPedestals(plot: Model, origin: CFrame)
 		pedestal:SetAttribute("BaseSize", pedestal.Size)
 		pedestal:SetAttribute("PedestalIndex", index)
 
+		-- Plate on top: StructureLight while empty, tier Neon when filled
+		-- (PedestalVisuals).
+		PartKit.Part({
+			Name = "Cap",
+			Size = p.CapSize,
+			CFrame = pedestal.CFrame * CFrame.new(0, p.ColumnSize.Y / 2 + p.CapSize.Y / 2, 0),
+			Color = World.StructureLight,
+			Parent = pedestal,
+		})
+
 		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
 		-- Enabled by the owner's client once they have something to display.
 		prompt.Enabled = false

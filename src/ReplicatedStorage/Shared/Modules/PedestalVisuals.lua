@@ -14,6 +14,11 @@ local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 
 local PedestalVisuals = {}
@@ -99,11 +104,65 @@ local function startPulse(pedestal: BasePart)
 	end)
 end
 
+-- The floating item orb: a glass ball in the tier colour (bigger for
+-- higher tiers) around a Neon core, with a light. Its centre sits
+-- PlotLayout.Pedestal.OrbCenterY above the pedestal's bottom. The group is
+-- tagged FT_Hover, so clients spin and bob it. Returns the glass Orb part.
+local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance): BasePart
+	local p = PlotLayout.Pedestal
+	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
+	local center = bottom * CFrame.new(0, p.OrbCenterY, 0)
+	local diameter = p.OrbDiameter[tier] or p.OrbDiameter.Common
+
+	local group = Instance.new("Model")
+	group.Name = "OrbGroup"
+
+	local orb = PartKit.Part({
+		Name = "Orb",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter,
+		CFrame = center,
+		Color = tierColor,
+		Material = Enum.Material.Glass,
+		Transparency = p.OrbTransparency,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(orb)
+	local core = PartKit.Part({
+		Name = "OrbCore",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter * p.InnerOrbScale,
+		CFrame = center,
+		Color = tierColor,
+		Material = Enum.Material.Neon,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(core)
+
+	local light = Instance.new("PointLight")
+	light.Color = tierColor
+	light.Range = p.OrbLightRangeBase + p.OrbLightRangePerRank * (ItemConfig.Tiers[tier] or 1)
+	light.Brightness = p.OrbLightBrightness
+	light.Parent = orb
+
+	group.PrimaryPart = orb
+	PartKit.SetHover(group, p.OrbSpinDegPerSec, p.OrbBob, p.OrbBobPeriod, "Bob")
+	group.Parent = parent
+	return orb
+end
+
 -- Removes every effect PedestalVisuals.Apply may have added, restoring the
 -- pedestal to its bare, unoccupied appearance. Safe to call on a pedestal
 -- that was never styled.
 function PedestalVisuals.Clear(pedestal: BasePart)
 	stopPulse(pedestal)
+
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		cap.Material = Enum.Material.SmoothPlastic
+		cap.Color = UITheme.World.StructureLight
+	end
 
 	local elements = pedestal:FindFirstChild(ELEMENTS_FOLDER_NAME)
 	if elements then
@@ -150,6 +209,14 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 	elements.Name = ELEMENTS_FOLDER_NAME
 	elements.Parent = pedestal
 
+	local tierColor = FusionConfig.TierAccentColors[tier] or config.GlowColor
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		cap.Material = Enum.Material.Neon
+		cap.Color = tierColor
+	end
+	local orb = buildOrb(pedestal, tier, tierColor, elements)
+
 	local highlight = Instance.new("Highlight")
 	highlight.Name = "PedestalHighlight"
 	highlight.FillTransparency = 1
@@ -174,7 +241,7 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 		if particles.SpreadAngle then
 			sparkle.SpreadAngle = particles.SpreadAngle
 		end
-		sparkle.Parent = elements
+		sparkle.Parent = orb
 	end
 
 	if config.RotatingRing then
@@ -189,27 +256,29 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 		ring.Transparency = 0.4
 		-- The cylinder's axis runs along local X; rotating 90 degrees around
 		-- Z lays it flat, like a ring around the pedestal's base.
-		ring.CFrame = CFrame.new(pedestal.Position - Vector3.new(0, pedestal.Size.Y / 2 - RING_HEIGHT_OFFSET_STUDS, 0))
+		-- At the cap, around the top of the column.
+		ring.CFrame = CFrame.new(pedestal.Position + Vector3.new(0, pedestal.Size.Y / 2 + RING_HEIGHT_OFFSET_STUDS, 0))
 			* CFrame.Angles(0, 0, math.rad(90))
 		ring.Parent = elements
 
 		startSpin(ring)
 	end
 
+	-- The pulse breathes the orb (pulsing the column would push its cap
+	-- and bottom out of place).
 	if config.Pulse then
-		startPulse(pedestal)
+		startPulse(orb)
 	end
 
 	if config.Beam then
 		local bottomAttachment = Instance.new("Attachment")
 		bottomAttachment.Name = "BeamBottom"
-		bottomAttachment.Position = Vector3.new(0, pedestal.Size.Y / 2, 0)
-		bottomAttachment.Parent = pedestal
+		bottomAttachment.Parent = orb
 
 		local topAttachment = Instance.new("Attachment")
 		topAttachment.Name = "BeamTop"
 		topAttachment.Position = Vector3.new(0, BEAM_HEIGHT_STUDS, 0)
-		topAttachment.Parent = pedestal
+		topAttachment.Parent = orb
 
 		local beam = Instance.new("Beam")
 		beam.Name = "SkyBeam"

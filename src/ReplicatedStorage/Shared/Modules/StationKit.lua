@@ -29,16 +29,7 @@ export type Hologram = "Capsule" | "Chevrons" | "Arrow" | "Ghost"
 local S = PlotLayout.Station
 local World = UITheme.World
 
-StationKit.HOVER_TAG = "FT_Hover"
-
--- Hover animation parameters, read by WorldAnimationController.
-local function setHover(target: Instance, spin: number, bob: number, period: number, mode: string)
-	target:SetAttribute("SpinDegPerSec", spin)
-	target:SetAttribute("BobStuds", bob)
-	target:SetAttribute("BobPeriod", period)
-	target:SetAttribute("Mode", mode)
-	target:AddTag(StationKit.HOVER_TAG)
-end
+local setHover = PartKit.SetHover
 
 local function decorative(part: BasePart): BasePart
 	PartKit.MakeDecorative(part)
