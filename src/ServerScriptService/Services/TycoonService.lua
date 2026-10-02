@@ -12,7 +12,7 @@
 	file must not hard-code geometry.
 
 	Lifecycle: :Init() connects its own remotes/players and starts its loops.
-	:Start() resolves FusionMachineService. PlayerDataService is a leaf
+	:Start() resolves FusionMachineService and WorldService. PlayerDataService is a leaf
 	(requires no services), so its module-scope require can't form a cycle.
 ]]
 local Debris = game:GetService("Debris")
@@ -42,8 +42,10 @@ local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
+type WorldServiceModule = typeof(require(script.Parent.WorldService))
 -- Resolved in :Start().
 local FusionMachineService: FusionMachineServiceModule
+local WorldService: WorldServiceModule
 
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
@@ -800,6 +802,8 @@ local function createPlotForPlayer(player: Player)
 		return
 	end
 	slotByUserId[player.UserId] = slotIndex
+	-- The FREE LAB placeholder makes way for this player's plot.
+	WorldService.SetSlotOccupied(slotIndex, true)
 	local origin = PlotLayout.GetSlotCFrame(slotIndex)
 	originByUserId[player.UserId] = origin
 
@@ -840,6 +844,7 @@ local function removePlotForPlayer(player: Player)
 	if slotIndex then
 		occupiedSlots[slotIndex] = nil
 		slotByUserId[player.UserId] = nil
+		WorldService.SetSlotOccupied(slotIndex, false)
 	end
 end
 
@@ -873,6 +878,7 @@ end
 
 function TycoonService:Start()
 	FusionMachineService = require(script.Parent.FusionMachineService)
+	WorldService = require(script.Parent.WorldService)
 end
 
 return TycoonService
