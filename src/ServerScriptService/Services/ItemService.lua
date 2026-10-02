@@ -121,6 +121,7 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	syncTycoon(player)
 
 	PedestalVisuals.Apply(pedestal, item.Tier)
+	TycoonService.RefreshPedestalLabels(player)
 
 	local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
 	local itemName = itemConfigEntry and itemConfigEntry.Name or item.ItemId
@@ -182,6 +183,7 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	syncTycoon(player)
 
 	PedestalVisuals.Clear(pedestal)
+	TycoonService.RefreshPedestalLabels(player)
 
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,

@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local FusionMachineService = {}
 
@@ -45,8 +46,7 @@ local ACCENT_COLOR = Color3.fromRGB(140, 70, 255)
 local DARK_COLOR = Color3.fromRGB(22, 22, 27)
 
 local PROMPT_MAX_ACTIVATION_DISTANCE = 10
--- Readable a little before the prompt is in range; hidden from across the map.
-local ODDS_BILLBOARD_MAX_DISTANCE_STUDS = 24
+-- MaxDistance comes from BillboardKit (26, like every pad label).
 local ODDS_BILLBOARD_OFFSET = Vector3.new(0, 9, 0)
 
 local function buildBase(position: Vector3): BasePart
@@ -155,71 +155,18 @@ local function buildRing(core: BasePart): BasePart
 	return ring
 end
 
--- "Fusion Odds": what 2x of each tier turns into, and how likely.
+-- "Fusion Odds": what 2 of each tier turn into, and how likely. Built by
+-- BillboardKit so it matches every other world label.
 local function buildOddsBillboard(anchor: BasePart)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "FusionOddsBillboard"
-	billboard.Size = UDim2.fromOffset(230, 160)
-	billboard.StudsOffset = ODDS_BILLBOARD_OFFSET
-	billboard.MaxDistance = ODDS_BILLBOARD_MAX_DISTANCE_STUDS
-	billboard.LightInfluence = 0
-	billboard.Parent = anchor
-
-	local frame = Instance.new("Frame")
-	frame.Size = UDim2.fromScale(1, 1)
-	frame.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-	frame.BackgroundTransparency = 0.15
-	frame.BorderSizePixel = 0
-	frame.Parent = billboard
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 10)
-	corner.Parent = frame
-
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = ACCENT_COLOR
-	stroke.Thickness = 2
-	stroke.Transparency = 0.3
-	stroke.Parent = frame
-
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 6)
-	padding.PaddingBottom = UDim.new(0, 6)
-	padding.PaddingLeft = UDim.new(0, 10)
-	padding.PaddingRight = UDim.new(0, 10)
-	padding.Parent = frame
-
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.Padding = UDim.new(0, 2)
-	layout.Parent = frame
-
-	local title = Instance.new("TextLabel")
-	title.Size = UDim2.new(1, 0, 0, 26)
-	title.BackgroundTransparency = 1
-	title.Font = Enum.Font.GothamBlack
-	title.TextColor3 = Color3.new(1, 1, 1)
-	title.TextScaled = true
-	title.Text = "FUSE 2 → 1 TIER UP"
-	title.LayoutOrder = 0
-	title.Parent = frame
-
-	for index, tier in FusionConfig.TierOrder do
+	local rows = {}
+	for _, tier in FusionConfig.TierOrder do
 		local nextTier = FusionConfig.GetNextTier(tier)
 		local chance = FusionConfig.SuccessChance[tier]
 		if nextTier and chance then
-			local row = Instance.new("TextLabel")
-			row.Size = UDim2.new(1, 0, 0, 24)
-			row.BackgroundTransparency = 1
-			row.Font = Enum.Font.GothamBold
-			row.TextColor3 = FusionConfig.TierAccentColors[nextTier] or Color3.new(1, 1, 1)
-			row.TextScaled = true
-			row.TextXAlignment = Enum.TextXAlignment.Left
-			row.LayoutOrder = index
-			row.Text = ("2x %s → %s   %d%%"):format(tier, nextTier, math.floor(chance * 100 + 0.5))
-			row.Parent = frame
+			table.insert(rows, { FromTier = tier, ToTier = nextTier, Chance = chance })
 		end
 	end
+	BillboardKit.OddsBoard(anchor, rows, ODDS_BILLBOARD_OFFSET)
 end
 
 -- Left disabled until the client confirms the owner has a fusable pair.
