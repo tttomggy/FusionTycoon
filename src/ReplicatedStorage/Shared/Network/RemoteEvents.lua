@@ -17,6 +17,7 @@ local REMOTE_EVENT_NAMES = {
 	"MultiplierUpgraded", -- server -> client: the local player's cash multiplier purchase succeeded
 	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)
 	"CashCollected", -- server -> client (owner only): a cash drop hit the Collector; {Amount, Position} for the floating "+$X" pop
+	"GoalCompleted", -- server -> client: the player's current goal was met and paid; {Index, Reward}
 }
 
 local function getOrCreateFolder(): Folder

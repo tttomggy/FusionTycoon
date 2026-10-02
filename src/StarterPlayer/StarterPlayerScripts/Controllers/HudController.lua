@@ -18,6 +18,7 @@ local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -551,6 +552,24 @@ end
 
 --[[ Init ------------------------------------------------------------------ ]]
 
+local function refreshGoal()
+	local index = TycoonController.GetGoalIndex()
+	local goal = index and GoalConfig.GetGoal(index)
+	local progress = TycoonController.GetGoalProgress()
+	if not goal or not progress then
+		-- Before the first snapshot, and for good after the last goal.
+		HudController.SetGoal(nil)
+		return
+	end
+	HudController.SetGoal({
+		Text = goal.Text,
+		Reward = goal.Reward,
+		Current = progress.Current,
+		Target = progress.Target,
+		Unit = goal.Unit,
+	})
+end
+
 local function refreshAll()
 	incomeLabel.Text = ("+%s%s"):format(
 		NumberFormat.Money(getIncomePerSecond()),
@@ -560,6 +579,7 @@ local function refreshAll()
 		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 	)
 	refreshBadge()
+	refreshGoal()
 	UpgradesPanel.Refresh()
 end
 
@@ -580,6 +600,13 @@ function HudController.Init()
 	TycoonController.TycoonChanged:Connect(refreshAll)
 	InventoryController.InventoryChanged:Connect(refreshAll)
 	RemoteEvents.CashCollected.OnClientEvent:Connect(onCashCollected)
+	-- Arrives just before the snapshot that carries the next goal, so the
+	-- flash plays on the finished goal and the swap follows.
+	RemoteEvents.GoalCompleted.OnClientEvent:Connect(function()
+		if goalHolder.Visible then
+			HudController.FlashGoal()
+		end
+	end)
 	refreshAll()
 end
 

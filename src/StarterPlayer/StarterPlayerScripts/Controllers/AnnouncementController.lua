@@ -14,6 +14,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
 local ResultController = require(script.Parent.ResultController)
@@ -261,12 +262,23 @@ local function onFusionResolved(result: any)
 	end
 end
 
+local function onGoalCompleted(payload: any)
+	if typeof(payload) ~= "table" or typeof(payload.Reward) ~= "number" then
+		return
+	end
+	enqueue({
+		Message = ("Goal complete! +%s"):format(NumberFormat.Money(payload.Reward)),
+		AccentColor = UITheme.Colors.Goal,
+	})
+end
+
 function AnnouncementController.Init()
 	buildUI()
 	FusionController.FusionResolved:Connect(onFusionResolved)
 	RemoteEvents.RareFusionAnnouncement.OnClientEvent:Connect(onRareFusionAnnouncement)
 	RemoteEvents.MultiplierUpgraded.OnClientEvent:Connect(onMultiplierUpgraded)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
+	RemoteEvents.GoalCompleted.OnClientEvent:Connect(onGoalCompleted)
 end
 
 return AnnouncementController
