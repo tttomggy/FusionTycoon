@@ -6,11 +6,13 @@ local TycoonController = require(Controllers.TycoonController)
 local ItemController = require(Controllers.ItemController)
 local AnnouncementController = require(Controllers.AnnouncementController)
 local HudController = require(Controllers.HudController)
+local ToastController = require(Controllers.ToastController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
 InventoryController.Init()
 TycoonController.Init()
+ToastController.Init()
 AnnouncementController.Init()
 HudController.Init()
 

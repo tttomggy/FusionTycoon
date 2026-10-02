@@ -1,8 +1,12 @@
 --[[
 	UpgradesPanel
 	-------------
-	The Generators modal opened from the HUD's UPGRADES button. Moved out of
-	HudController unchanged; restyled in the next pass.
+	The UPGRADES modal: one row per generator with its rate, level, and a buy
+	button that reflects whether you can afford it, have maxed it, or haven't
+	unlocked it yet. All numbers shown are post-multiplier.
+
+	Purchasing is unchanged: TycoonController.RequestUpgrade, server-validated
+	by TycoonService. The client-side checks here only decide what to show.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -10,289 +14,516 @@ local TweenService = game:GetService("TweenService")
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
-local TycoonController = require(script.Parent.Parent.Controllers.TycoonController)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local Controllers = script.Parent.Parent.Controllers
+local TycoonController = require(Controllers.TycoonController)
+local ToastController = require(Controllers.ToastController)
+local UIKit = require(script.Parent.UIKit)
 
 local UpgradesPanel = {}
 
-local COLORS = {
-	Panel = Color3.fromRGB(18, 18, 26),
-	PanelLight = Color3.fromRGB(30, 30, 42),
-	Stroke = Color3.fromRGB(70, 70, 95),
-	Text = Color3.fromRGB(245, 245, 250),
-	Muted = Color3.fromRGB(150, 150, 170),
-	Cash = Color3.fromRGB(85, 255, 127),
-	Buy = Color3.fromRGB(46, 204, 113),
-	BuyDisabled = Color3.fromRGB(60, 60, 72),
+local Colors = UITheme.Colors
+local Fonts = UITheme.Fonts
+
+local MAX_SIZE = Vector2.new(520, 620)
+local ROW_HEIGHT = 84
+local ROW_GAP = 10
+local FOOTER_HEIGHT = 56
+local BUTTON_SIZE = Vector2.new(132, 52)
+local LOCKED_OPACITY = 0.92
+local FAR_LOCKED_OPACITY = 0.7
+
+type Row = {
+	Holder: Frame,
+	Body: Frame,
+	Bar: Frame,
+	Icon: Frame,
+	LockWell: Frame,
+	Name: TextLabel,
+	LevelPill: TextLabel,
+	Detail: TextLabel,
+	Progress: Frame,
+	Button: TextButton,
+	Opacity: number?,
 }
 
-local screenGui: ScreenGui
-local upgradesPanel: Frame
-local generatorRows: { [string]: { [string]: any } } = {}
-local multiplierLabel: TextLabel
+local modal: UIKit.Modal
+local cashLabel: TextLabel
+local footerPill: TextLabel
+local rows: { [string]: Row } = {}
 
-local function corner(parent: Instance, radius: number)
-	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
-	c.Parent = parent
+local function tierColor(tier: string): Color3
+	return FusionConfig.TierAccentColors[tier] or Colors.Text
 end
 
-local function stroke(parent: Instance, color: Color3, thickness: number)
-	local s = Instance.new("UIStroke")
-	s.Color = color
-	s.Thickness = thickness
-	s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
-	s.Parent = parent
-	return s
+local function getMultiplier(): number
+	return TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 end
 
-local function textLabel(props: { [string]: any }): TextLabel
-	local label = Instance.new("TextLabel")
-	label.BackgroundTransparency = 1
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = COLORS.Text
-	label.TextScaled = true
-	for key, value in props do
-		(label :: any)[key] = value
+-- "unlocked" | "locked" (next in the chain) | "far" (two or more steps away)
+local function getLockState(generator: TycoonConfig.GeneratorDef, levels: { [string]: number }): string
+	if TycoonConfig.IsUnlocked(generator, levels) then
+		return "unlocked"
 	end
-	return label
+	local requirement = generator.UnlockRequirement :: { GeneratorId: string, Level: number }
+	local required = TycoonConfig.GetGeneratorById(requirement.GeneratorId)
+	if required and not TycoonConfig.IsUnlocked(required, levels) then
+		return "far"
+	end
+	return "locked"
 end
 
---[[ Upgrades panel -------------------------------------------------------- ]]
+--[[ Refresh ------------------------------------------------------------------ ]]
 
-local function refreshUpgrades()
-	if not upgradesPanel then
+local function setRowOpacity(row: Row, opacity: number)
+	if row.Opacity ~= opacity then
+		row.Opacity = opacity
+		UIKit.SetOpacity(row.Holder, opacity)
+	end
+end
+
+local function refreshRow(generator: TycoonConfig.GeneratorDef, cash: number, levels: { [string]: number }, multiplier: number)
+	local row = rows[generator.Id]
+	if not row then
+		return
+	end
+	local level = levels[generator.Id] or 0
+	local lockState = getLockState(generator, levels)
+	local maxed = level >= generator.MaxLevel
+
+	row.Progress.Visible = lockState == "locked"
+	row.Icon.Visible = lockState == "unlocked"
+	row.LockWell.Visible = lockState ~= "unlocked"
+	row.LevelPill.Visible = lockState == "unlocked"
+
+	if lockState == "unlocked" then
+		row.Name.Text = generator.Name
+		row.LevelPill.Text = if maxed then "MAX" else ("LV %d"):format(level)
+		local current = TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier
+		local perLevel = TycoonConfig.GetGeneratorCashPerSecond(generator, 1) * multiplier
+		row.Detail.Text = if maxed
+			then ("%s/s"):format(NumberFormat.Money(current))
+			else ("%s/s · %s next"):format(
+				NumberFormat.Money(current),
+				UIKit.Colored("+" .. NumberFormat.Money(perLevel) .. "/s", Colors.Cash)
+			)
+
+		if maxed then
+			UIKit.SetButton(row.Button, { Style = "Disabled", Text = "MAXED", SubText = "", TextColor3 = Colors.Muted })
+		else
+			local cost = TycoonConfig.GetUpgradeCost(generator, level)
+			local affordable = cash >= cost
+			UIKit.SetButton(row.Button, {
+				Style = if affordable then "Green" else "Disabled",
+				Text = NumberFormat.Money(cost),
+				SubText = if level == 0 then "BUY" else "UPGRADE",
+				TextColor3 = if affordable then Colors.Text else Colors.Muted,
+			})
+		end
+		setRowOpacity(row, 1)
+		return
+	end
+
+	local requirement = generator.UnlockRequirement :: { GeneratorId: string, Level: number }
+	local required = TycoonConfig.GetGeneratorById(requirement.GeneratorId)
+	local requiredName = if required then required.Name else "?"
+	UIKit.SetButton(row.Button, { Style = "Disabled", Text = "LOCKED", SubText = "", TextColor3 = Colors.Muted })
+
+	if lockState == "locked" then
+		row.Name.Text = generator.Name
+		row.Detail.Text = ("Unlocks at %s"):format(
+			UIKit.Colored(("%s LV %d"):format(UIKit.EscapeRichText(requiredName), requirement.Level), Colors.Text)
+		)
+		local requiredLevel = levels[requirement.GeneratorId] or 0
+		UIKit.SetProgress(row.Progress, requiredLevel / requirement.Level)
+		local fill = row.Progress:FindFirstChild("Fill") :: Frame?
+		if fill and required then
+			fill.BackgroundColor3 = tierColor(required.Tier)
+		end
+		setRowOpacity(row, LOCKED_OPACITY)
+	else
+		row.Name.Text = "???"
+		row.Detail.Text = ("Unlock %s first"):format(UIKit.EscapeRichText(requiredName))
+		setRowOpacity(row, FAR_LOCKED_OPACITY)
+	end
+end
+
+local function refresh()
+	if not modal then
 		return
 	end
 	local cash = TycoonController.GetCash()
 	local levels = TycoonController.GetGeneratorLevels()
-	local multiplierLevel = TycoonController.GetCashMultiplierLevel()
-	local multiplier = TycoonConfig.GetCashMultiplierValue(multiplierLevel)
+	local multiplier = getMultiplier()
 
-	multiplierLabel.Text = ("All income %s  ·  upgrade at the purple pad"):format(NumberFormat.Multiplier(multiplier))
-
+	cashLabel.Text = NumberFormat.Money(cash)
+	footerPill.Text = NumberFormat.Multiplier(multiplier)
 	for _, generator in TycoonConfig.Generators do
-		local row = generatorRows[generator.Id]
-		if row then
-			local level = levels[generator.Id] or 0
-			local unlocked = TycoonConfig.IsUnlocked(generator, levels)
-			local maxed = level >= generator.MaxLevel
-			local perLevel = TycoonConfig.GetGeneratorCashPerSecond(generator, 1) * multiplier
-
-			row.Level.Text = ("Lv %d/%d"):format(level, generator.MaxLevel)
-			row.Detail.Text = if level > 0
-				then ("%s/s now  ·  +%s/s per level"):format(
-					NumberFormat.Money(TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier),
-					NumberFormat.Money(perLevel)
-				)
-				else ("+%s/s per level"):format(NumberFormat.Money(perLevel))
-
-			local button: TextButton = row.Button
-			if maxed then
-				button.Text = "MAX"
-				button.BackgroundColor3 = COLORS.BuyDisabled
-				button.AutoButtonColor = false
-			elseif not unlocked then
-				local requirement = generator.UnlockRequirement :: { GeneratorId: string, Level: number }
-				local required = TycoonConfig.GetGeneratorById(requirement.GeneratorId)
-				button.Text = ("🔒 %s Lv %d"):format(required and required.Name or "?", requirement.Level)
-				button.BackgroundColor3 = COLORS.BuyDisabled
-				button.AutoButtonColor = false
-			else
-				local cost = TycoonConfig.GetUpgradeCost(generator, level)
-				local affordable = cash >= cost
-				button.Text = (if level == 0 then "Buy " else "Upgrade ") .. NumberFormat.Money(cost)
-				button.BackgroundColor3 = if affordable then COLORS.Buy else COLORS.BuyDisabled
-				button.AutoButtonColor = affordable
-			end
-		end
+		refreshRow(generator, cash, levels, multiplier)
 	end
 end
 
-local function buildGeneratorRow(parent: Instance, generator: TycoonConfig.GeneratorDef, order: number)
-	local row = Instance.new("Frame")
-	row.Name = generator.Id
-	row.LayoutOrder = order
-	row.Size = UDim2.new(1, 0, 0, 64)
-	row.BackgroundColor3 = COLORS.PanelLight
-	row.Parent = parent
-	corner(row, 10)
+--[[ Build -------------------------------------------------------------------- ]]
 
-	local tierColor = FusionConfig.TierAccentColors[generator.Tier] or COLORS.Text
-	local stripe = Instance.new("Frame")
-	stripe.Size = UDim2.new(0, 5, 1, -16)
-	stripe.Position = UDim2.fromOffset(8, 8)
-	stripe.BackgroundColor3 = tierColor
-	stripe.BorderSizePixel = 0
-	stripe.Parent = row
-	corner(stripe, 3)
-
-	textLabel({
-		Name = "Name",
-		Position = UDim2.fromOffset(22, 8),
-		Size = UDim2.new(0.58, -22, 0, 22),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = generator.Name,
-		Parent = row,
-	})
-
-	local level = textLabel({
-		Name = "Level",
-		Position = UDim2.new(0.58, -70, 0, 10),
-		Size = UDim2.fromOffset(64, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = tierColor,
-		TextXAlignment = Enum.TextXAlignment.Right,
-		Parent = row,
-	})
-
-	local detail = textLabel({
-		Name = "Detail",
-		Position = UDim2.fromOffset(22, 34),
-		Size = UDim2.new(0.58, -22, 0, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = COLORS.Muted,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = row,
-	})
-
-	local button = Instance.new("TextButton")
-	button.Name = "Buy"
-	button.AnchorPoint = Vector2.new(1, 0.5)
-	button.Position = UDim2.new(1, -10, 0.5, 0)
-	button.Size = UDim2.new(0.4, -10, 0, 40)
-	button.Font = Enum.Font.GothamBold
-	button.TextScaled = true
-	button.TextColor3 = COLORS.Text
-	button.BackgroundColor3 = COLORS.BuyDisabled
-	button.Parent = row
-	corner(button, 8)
-	local buttonPadding = Instance.new("UIPadding")
-	buttonPadding.PaddingLeft = UDim.new(0, 8)
-	buttonPadding.PaddingRight = UDim.new(0, 8)
-	buttonPadding.PaddingTop = UDim.new(0, 8)
-	buttonPadding.PaddingBottom = UDim.new(0, 8)
-	buttonPadding.Parent = button
-
-	button.MouseButton1Click:Connect(function()
-		local levels = TycoonController.GetGeneratorLevels()
-		local current = levels[generator.Id] or 0
-		if current >= generator.MaxLevel or not TycoonConfig.IsUnlocked(generator, levels) then
-			return
+local function onBuyClicked(generator: TycoonConfig.GeneratorDef, row: Row)
+	local levels = TycoonController.GetGeneratorLevels()
+	local current = levels[generator.Id] or 0
+	if current >= generator.MaxLevel or not TycoonConfig.IsUnlocked(generator, levels) then
+		return
+	end
+	local cost = TycoonConfig.GetUpgradeCost(generator, current)
+	if TycoonController.GetCash() < cost then
+		ToastController.Show(("Need %s"):format(NumberFormat.Money(cost)), "Error")
+		return
+	end
+	if TycoonController.RequestUpgrade(generator.Id) then
+		-- Tiny bounce so the purchase feels like it registered.
+		local holder = row.Button.Parent :: Frame
+		local scale = holder:FindFirstChild("BuyBounce") :: UIScale?
+		if not scale then
+			local newScale = Instance.new("UIScale")
+			newScale.Name = "BuyBounce"
+			newScale.Parent = holder
+			scale = newScale
 		end
-		if TycoonController.GetCash() < TycoonConfig.GetUpgradeCost(generator, current) then
-			return
-		end
-		if TycoonController.RequestUpgrade(generator.Id) then
-			-- Tiny press bounce so the click feels like it registered.
-			local scale = button:FindFirstChildOfClass("UIScale") or Instance.new("UIScale")
-			scale.Parent = button
-			scale.Scale = 0.92
-			TweenService:Create(scale, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
-		end
-	end)
-
-	generatorRows[generator.Id] = { Level = level, Detail = detail, Button = button }
+		local bounce = scale :: UIScale
+		bounce.Scale = 0.92
+		TweenService:Create(bounce, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+	end
 end
 
-local function buildUpgradesPanel()
-	upgradesPanel = Instance.new("Frame")
-	upgradesPanel.Name = "UpgradesPanel"
-	upgradesPanel.AnchorPoint = Vector2.new(0.5, 0.5)
-	upgradesPanel.Position = UDim2.fromScale(0.5, 0.5)
-	upgradesPanel.Size = UDim2.new(0.92, 0, 0, 470)
-	upgradesPanel.BackgroundColor3 = COLORS.Panel
-	upgradesPanel.Visible = false
-	upgradesPanel.Parent = screenGui
-	corner(upgradesPanel, 16)
-	stroke(upgradesPanel, COLORS.Stroke, 2)
+local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, order: number)
+	local body, holder = UIKit.Panel({
+		Name = generator.Id,
+		Parent = parent,
+		Size = UDim2.new(1, -8, 0, ROW_HEIGHT),
+		Color = Colors.Panel2,
+		Radius = UITheme.Radius.Row,
+		LayoutOrder = order,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = 3,
+	})
+	local z = body.ZIndex + 1
 
-	local sizeConstraint = Instance.new("UISizeConstraint")
-	sizeConstraint.MaxSize = Vector2.new(480, 470)
-	sizeConstraint.Parent = upgradesPanel
+	local bar = Instance.new("Frame")
+	bar.Name = "TierBar"
+	bar.BackgroundColor3 = tierColor(generator.Tier)
+	bar.BorderSizePixel = 0
+	bar.Position = UDim2.fromOffset(10, 12)
+	bar.Size = UDim2.new(0, 10, 1, -24)
+	bar.ZIndex = z
+	bar.Parent = body
+	UIKit.Corner(bar, 5)
 
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
-	padding.PaddingTop = UDim.new(0, 12)
-	padding.PaddingBottom = UDim.new(0, 14)
-	padding.Parent = upgradesPanel
+	local icon = UIKit.TierSquare(generator.Tier, 52)
+	icon.AnchorPoint = Vector2.new(0, 0.5)
+	icon.Position = UDim2.new(0, 30, 0.5, 0)
+	icon.ZIndex = z
+	icon.Parent = body
 
-	textLabel({
-		Name = "Title",
-		Size = UDim2.new(1, -44, 0, 30),
-		Font = Enum.Font.GothamBlack,
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Text = "GENERATORS",
-		Parent = upgradesPanel,
+	local lockWell = Instance.new("Frame")
+	lockWell.Name = "LockWell"
+	lockWell.AnchorPoint = Vector2.new(0, 0.5)
+	lockWell.Position = UDim2.new(0, 30, 0.5, 0)
+	lockWell.Size = UDim2.fromOffset(52, 52)
+	lockWell.BackgroundColor3 = Colors.Panel3
+	lockWell.ZIndex = z
+	lockWell.Visible = false
+	lockWell.Parent = body
+	UIKit.Corner(lockWell, 14)
+	UIKit.Stroke(lockWell, 3)
+	if UITheme.Icons.Lock ~= "" then
+		local lockImage = Instance.new("ImageLabel")
+		lockImage.BackgroundTransparency = 1
+		lockImage.AnchorPoint = Vector2.new(0.5, 0.5)
+		lockImage.Position = UDim2.fromScale(0.5, 0.5)
+		lockImage.Size = UDim2.fromOffset(28, 28)
+		lockImage.Image = UITheme.Icons.Lock
+		lockImage.ZIndex = z + 1
+		lockImage.Parent = lockWell
+	else
+		UIKit.Label({
+			Text = "🔒",
+			TextSize = 24,
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z + 1,
+			Parent = lockWell,
+		})
+	end
+
+	-- Name + level pill on one line.
+	local titleRow = Instance.new("Frame")
+	titleRow.Name = "TitleRow"
+	titleRow.BackgroundTransparency = 1
+	titleRow.Position = UDim2.fromOffset(94, 12)
+	titleRow.Size = UDim2.new(1, -(94 + BUTTON_SIZE.X + 20), 0, 26)
+	titleRow.ZIndex = z
+	titleRow.Parent = body
+	local titleLayout = Instance.new("UIListLayout")
+	titleLayout.FillDirection = Enum.FillDirection.Horizontal
+	titleLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	titleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	titleLayout.Padding = UDim.new(0, 8)
+	titleLayout.Parent = titleRow
+
+	local nameLabel = UIKit.Label({
+		Name = "GeneratorName",
+		Text = generator.Name,
+		Font = Fonts.Display,
+		TextSize = 20,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 26),
+		LayoutOrder = 1,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = titleRow,
+	})
+	local levelPill = UIKit.Pill({
+		Name = "Level",
+		Parent = titleRow,
+		Text = "LV 0",
+		Color = tierColor(generator.Tier),
+		TextColor3 = Colors.Ink,
+		Font = Fonts.BodyHeavy,
+		TextSize = 12,
+		Height = 20,
+		LayoutOrder = 2,
+		ZIndex = z,
 	})
 
-	local close = Instance.new("TextButton")
-	close.Name = "Close"
-	close.AnchorPoint = Vector2.new(1, 0)
-	close.Position = UDim2.new(1, 0, 0, 0)
-	close.Size = UDim2.fromOffset(32, 32)
-	close.Text = "✕"
-	close.Font = Enum.Font.GothamBold
-	close.TextScaled = true
-	close.TextColor3 = COLORS.Text
-	close.BackgroundColor3 = COLORS.PanelLight
-	close.Parent = upgradesPanel
-	corner(close, 8)
-	close.MouseButton1Click:Connect(function()
-		upgradesPanel.Visible = false
-	end)
+	local detail = UIKit.Label({
+		Name = "Detail",
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextColor3 = Colors.Muted,
+		RichText = true,
+		Position = UDim2.fromOffset(94, 40),
+		Size = UDim2.new(1, -(94 + BUTTON_SIZE.X + 20), 0, 18),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = z,
+		Parent = body,
+	})
 
-	multiplierLabel = textLabel({
+	local progress = UIKit.ProgressBar({
+		Name = "UnlockProgress",
+		Parent = body,
+		Position = UDim2.fromOffset(94, 62),
+		Size = UDim2.fromOffset(180, 10),
+		ZIndex = z,
+	})
+	progress.Visible = false
+
+	local button: TextButton
+	local row: Row
+	button = UIKit.Button({
+		Name = "Buy",
+		Parent = body,
+		Style = "Green",
+		Text = "",
+		SubText = "UPGRADE",
+		TextSize = 17,
+		Size = UDim2.fromOffset(BUTTON_SIZE.X, BUTTON_SIZE.Y),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, -2),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = z,
+		OnClick = function()
+			onBuyClicked(generator, row)
+		end,
+	})
+
+	row = {
+		Holder = holder,
+		Body = body,
+		Bar = bar,
+		Icon = icon,
+		LockWell = lockWell,
+		Name = nameLabel,
+		LevelPill = levelPill,
+		Detail = detail,
+		Progress = progress,
+		Button = button,
+	}
+	rows[generator.Id] = row
+end
+
+local function buildTabs(parent: Instance)
+	local tabs = Instance.new("Frame")
+	tabs.Name = "Tabs"
+	tabs.BackgroundTransparency = 1
+	tabs.Size = UDim2.new(1, 0, 0, 34)
+	tabs.ZIndex = 5
+	tabs.Parent = parent
+
+	local pills = Instance.new("Frame")
+	pills.BackgroundTransparency = 1
+	pills.Size = UDim2.new(1, -150, 1, 0)
+	pills.ZIndex = 5
+	pills.Parent = tabs
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = pills
+
+	UIKit.Pill({
+		Name = "Generators",
+		Parent = pills,
+		Text = "Generators",
+		Color = Colors.White,
+		TextColor3 = Colors.Ink,
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		Height = 30,
+		StrokeThickness = 3,
+		LayoutOrder = 1,
+		ZIndex = 5,
+	})
+	-- Not clickable: a plain label, no button.
+	UIKit.Pill({
+		Name = "Boosts",
+		Parent = pills,
+		Text = "Boosts · soon",
+		Color = Colors.Panel2,
+		TextColor3 = Colors.Muted,
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		Height = 30,
+		StrokeThickness = 3,
+		LayoutOrder = 2,
+		ZIndex = 5,
+	})
+
+	cashLabel = UIKit.Label({
+		Name = "Cash",
+		Font = Fonts.Display,
+		TextSize = 22,
+		TextColor3 = Colors.Cash,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, 150, 1, 0),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = 5,
+		Stroke = UITheme.Stroke.Text,
+		Parent = tabs,
+	})
+end
+
+local function buildFooter(parent: Instance)
+	local body = UIKit.Panel({
+		Name = "Footer",
+		Parent = parent,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 0, 1, -UITheme.SmallShadowOffset),
+		Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT),
+		Color = Colors.Panel2,
+		Radius = UITheme.Radius.Row,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = 5,
+	})
+	UIKit.Padding(body, 0, 14, 0, 14)
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 10)
+	layout.Parent = body
+
+	footerPill = UIKit.Pill({
 		Name = "Multiplier",
-		Position = UDim2.fromOffset(0, 34),
-		Size = UDim2.new(1, 0, 0, 18),
-		Font = Enum.Font.GothamMedium,
-		TextColor3 = Color3.fromRGB(200, 60, 255),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = upgradesPanel,
+		Parent = body,
+		Text = "x1",
+		Color = Colors.VioletPill,
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		Height = 24,
+		LayoutOrder = 1,
+		ZIndex = body.ZIndex + 1,
 	})
+	UIKit.Label({
+		Name = "Hint",
+		Text = ("All income multiplier · raise it at the %s in your base"):format(
+			UIKit.Colored("purple pad", Colors.VioletLight)
+		),
+		RichText = true,
+		Font = Fonts.Body,
+		TextSize = 13,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		Size = UDim2.new(1, -70, 1, 0),
+		LayoutOrder = 2,
+		ZIndex = body.ZIndex + 1,
+		Parent = body,
+	})
+end
+
+local function build()
+	modal = UIKit.Modal({
+		Name = "UpgradesPanel",
+		Title = "UPGRADES",
+		DisplayOrder = 140,
+		MaxSize = MAX_SIZE,
+		HeaderTop = Colors.PanelTop,
+	})
+	local content = modal.Content
+
+	buildTabs(content)
 
 	local list = Instance.new("ScrollingFrame")
 	list.Name = "List"
-	list.Position = UDim2.fromOffset(0, 62)
-	list.Size = UDim2.new(1, 0, 1, -62)
+	list.Position = UDim2.fromOffset(0, 46)
+	list.Size = UDim2.new(1, 0, 1, -(46 + FOOTER_HEIGHT + UITheme.SmallShadowOffset + 12))
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
-	list.ScrollBarThickness = 4
+	list.ScrollBarThickness = 6
+	list.ScrollBarImageColor3 = Colors.Faint
 	list.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	list.CanvasSize = UDim2.new()
-	list.Parent = upgradesPanel
+	list.ZIndex = 3
+	list.Parent = content
+	-- Room for the outer strokes/shadows so the list doesn't clip them.
+	UIKit.Padding(list, 3, 4, 8, 3)
 
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 8)
+	layout.Padding = UDim.new(0, ROW_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = list
 
 	for index, generator in TycoonConfig.Generators do
-		buildGeneratorRow(list, generator, index)
+		buildRow(list, generator, index)
 	end
+
+	buildFooter(content)
 end
 
+--[[ Public -------------------------------------------------------------------- ]]
+
 function UpgradesPanel.IsOpen(): boolean
-	return upgradesPanel ~= nil and upgradesPanel.Visible
+	return modal ~= nil and modal.IsOpen()
 end
 
 function UpgradesPanel.Toggle()
-	upgradesPanel.Visible = not upgradesPanel.Visible
-	if upgradesPanel.Visible then
-		refreshUpgrades()
+	if modal.IsOpen() then
+		modal.Close()
+	else
+		refresh()
+		modal.Open()
 	end
 end
 
 function UpgradesPanel.Refresh()
-	if upgradesPanel.Visible then
-		refreshUpgrades()
+	if modal and modal.IsOpen() then
+		refresh()
 	end
 end
 
-function UpgradesPanel.Init(parentGui: ScreenGui)
-	screenGui = parentGui
-	buildUpgradesPanel()
+-- `_hud` is accepted for compatibility with the HUD's call; the panel has
+-- its own ScreenGui now.
+function UpgradesPanel.Init(_hud: ScreenGui?)
+	build()
+	refresh()
 end
 
 return UpgradesPanel

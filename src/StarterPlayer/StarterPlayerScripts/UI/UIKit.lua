@@ -791,6 +791,197 @@ function UIKit.CloseButton(props: { Parent: Instance?, Position: UDim2?, AnchorP
 	})
 end
 
+--[[ Opacity --------------------------------------------------------------------
+	Fades a whole subtree (row opacity 0.92 / 0.7) without a CanvasGroup, which
+	would nest inside the modal's own CanvasGroup. The authored transparency of
+	each element is remembered on first use so the call is repeatable.
+]]
+local OPACITY_PROPS = {
+	{ Class = "GuiObject", Prop = "BackgroundTransparency" },
+	{ Class = "TextLabel", Prop = "TextTransparency" },
+	{ Class = "TextButton", Prop = "TextTransparency" },
+	{ Class = "ImageLabel", Prop = "ImageTransparency" },
+	{ Class = "ImageButton", Prop = "ImageTransparency" },
+	{ Class = "UIStroke", Prop = "Transparency" },
+}
+
+function UIKit.SetOpacity(root: Instance, opacity: number)
+	local function apply(instance: Instance)
+		for _, entry in OPACITY_PROPS do
+			if instance:IsA(entry.Class) then
+				local key = "Base" .. entry.Prop
+				local base = instance:GetAttribute(key)
+				if base == nil then
+					base = (instance :: any)[entry.Prop]
+					instance:SetAttribute(key, base)
+				end
+				(instance :: any)[entry.Prop] = 1 - (1 - base) * opacity
+			end
+		end
+	end
+	apply(root)
+	for _, descendant in root:GetDescendants() do
+		apply(descendant)
+	end
+end
+
+--[[ Modal ----------------------------------------------------------------------- ]]
+
+export type ModalProps = {
+	Name: string,
+	Title: string,
+	DisplayOrder: number,
+	MaxSize: Vector2,
+	HeaderTop: Color3, -- gradient top colour (fades to Panel at 22%)
+	OnClose: (() -> ())?,
+}
+
+export type Modal = {
+	Gui: ScreenGui,
+	Root: CanvasGroup,
+	Body: Frame,
+	Content: Frame, -- everything below the header row
+	Header: Frame,
+	Title: TextLabel,
+	Subtitle: TextLabel,
+	Open: () -> (),
+	Close: () -> (),
+	IsOpen: () -> boolean,
+}
+
+-- Centered modal: dim backdrop, 92% wide on phone, capped at MaxSize by a
+-- UISizeConstraint, header gradient, title and red close button. The panel
+-- sits inside a CanvasGroup so PopOut can fade it; the group is a few px
+-- larger than the panel so the 4 px stroke and the shadow aren't clipped.
+local MODAL_MARGIN = 4
+
+function UIKit.Modal(props: ModalProps): Modal
+	local gui = UIKit.Screen(props.Name, props.DisplayOrder)
+	gui.Enabled = false
+
+	local backdrop = Instance.new("TextButton")
+	backdrop.Name = "Backdrop"
+	backdrop.Size = UDim2.fromScale(1, 1)
+	backdrop.BackgroundColor3 = Colors.Black
+	backdrop.BackgroundTransparency = 0.45
+	backdrop.AutoButtonColor = false
+	backdrop.Text = ""
+	backdrop.Parent = gui
+
+	local root = Instance.new("CanvasGroup")
+	root.Name = "Root"
+	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.Position = UDim2.fromScale(0.5, 0.5)
+	root.Size = UDim2.fromScale(0.92, 0.9)
+	root.BackgroundTransparency = 1
+	root.ZIndex = 2
+	root.Parent = gui
+	local constraint = Instance.new("UISizeConstraint")
+	constraint.MaxSize = props.MaxSize + Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
+	constraint.Parent = root
+
+	local body = UIKit.Panel({
+		Name = "Panel",
+		Parent = root,
+		Position = UDim2.fromOffset(MODAL_MARGIN, MODAL_MARGIN),
+		Size = UDim2.new(1, -MODAL_MARGIN * 2, 1, -(MODAL_MARGIN * 2 + UITheme.ShadowOffset)),
+		Gradient = { { 0, props.HeaderTop }, { 0.22, Colors.Panel }, { 1, Colors.Panel } },
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	UIKit.Padding(body, 16)
+
+	local header = Instance.new("Frame")
+	header.Name = "Header"
+	header.BackgroundTransparency = 1
+	header.Size = UDim2.new(1, 0, 0, 48)
+	header.ZIndex = body.ZIndex + 1
+	header.Parent = body
+
+	local title = UIKit.Label({
+		Name = "Title",
+		Text = props.Title,
+		Font = Fonts.Display,
+		TextSize = 32,
+		Size = UDim2.new(1, -60, 0, 34),
+		ZIndex = header.ZIndex,
+		Stroke = UITheme.Stroke.Text,
+		Parent = header,
+	})
+	local subtitle = UIKit.Label({
+		Name = "Subtitle",
+		Font = Fonts.Body,
+		TextSize = 13,
+		TextColor3 = Colors.Muted,
+		Position = UDim2.fromOffset(0, 34),
+		Size = UDim2.new(1, -60, 0, 16),
+		ZIndex = header.ZIndex,
+		Visible = false,
+		Parent = header,
+	})
+
+	local content = Instance.new("Frame")
+	content.Name = "Content"
+	content.BackgroundTransparency = 1
+	content.Position = UDim2.fromOffset(0, 58)
+	content.Size = UDim2.new(1, 0, 1, -58)
+	content.ZIndex = body.ZIndex + 1
+	content.Parent = body
+
+	local isOpen = false
+	local modal: Modal
+
+	local function close()
+		if not isOpen then
+			return
+		end
+		isOpen = false
+		local tween = UIKit.PopOut(root)
+		TweenService:Create(backdrop, POP_OUT_INFO, { BackgroundTransparency = 1 }):Play()
+		tween.Completed:Once(function()
+			if not isOpen then
+				gui.Enabled = false
+			end
+		end)
+		if props.OnClose then
+			props.OnClose()
+		end
+	end
+
+	local function open()
+		isOpen = true
+		gui.Enabled = true
+		backdrop.BackgroundTransparency = 1
+		TweenService:Create(backdrop, POP_IN_INFO, { BackgroundTransparency = 0.45 }):Play()
+		UIKit.PopIn(root)
+	end
+
+	UIKit.CloseButton({
+		Parent = header,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		OnClick = close,
+		ZIndex = header.ZIndex,
+	})
+	backdrop.Activated:Connect(close)
+
+	modal = {
+		Gui = gui,
+		Root = root,
+		Body = body,
+		Content = content,
+		Header = header,
+		Title = title,
+		Subtitle = subtitle,
+		Open = open,
+		Close = close,
+		IsOpen = function()
+			return isOpen
+		end,
+	}
+	return modal
+end
+
 -- Escapes text for safe use inside a RichText label.
 function UIKit.EscapeRichText(text: string): string
 	return (text:gsub("&", "&amp;"):gsub("<", "&lt;"):gsub(">", "&gt;"):gsub('"', "&quot;"))
