@@ -4,7 +4,7 @@
 	------------
 	The "Fusion Lab" look for world labels (BillboardGuis), built by the
 	server: pad labels (title + gradient price pill + detail line), pedestal
-	labels, the Fusion odds board and the plot sign. Colours and fonts come
+	labels, the Fusion odds board (a SurfaceGui) and the plot sign. Colours and fonts come
 	from UITheme, like the HUD's.
 
 	Every label: LightInfluence 0, AlwaysOnTop false (true drew them through
@@ -281,26 +281,34 @@ export type OddsRow = {
 	Chance: number, -- 0..1
 }
 
-function BillboardKit.OddsBoard(anchor: Instance, rows: { OddsRow }, offset: Vector3): BillboardGui
-	local gui = newBillboard(anchor, "FusionOddsBillboard", Vector2.new(250, 60 + 26 * #rows), offset, BillboardKit.PAD_MAX_DISTANCE)
+-- The odds board's content on a SurfaceGui on the Front face of `board`
+-- (a real board part in the world, not a billboard): title, one row per
+-- recipe coloured by the tier it fuses into, and the fail rule.
+function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerStud: number): SurfaceGui
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = "OddsSurface"
+	gui.Face = Enum.NormalId.Front
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = pixelsPerStud
+	gui.LightInfluence = 0
+	gui.ResetOnSpawn = false
+	gui.Parent = board
 
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
 	panel.BackgroundColor3 = Colors.Panel
-	panel.Size = UDim2.new(1, -8, 1, -8)
-	panel.Position = UDim2.fromOffset(4, 4)
+	panel.Size = UDim2.fromScale(1, 1)
 	panel.Parent = gui
-	corner(panel, 18)
-	borderStroke(panel, 3)
+	borderStroke(panel, 6)
 	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 6)
-	padding.PaddingBottom = UDim.new(0, 6)
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
+	padding.PaddingTop = UDim.new(0, 10)
+	padding.PaddingBottom = UDim.new(0, 10)
+	padding.PaddingLeft = UDim.new(0, 18)
+	padding.PaddingRight = UDim.new(0, 18)
 	padding.Parent = panel
-	listLayout(panel, 0)
+	listLayout(panel, 2)
 
-	local title = label(panel, "Title", Fonts.Display, 20, Colors.VioletLight, 26, 0)
+	local title = label(panel, "Title", Fonts.Display, 30, Colors.VioletLight, 34, 0)
 	title.Text = "FUSE 2 → TIER UP"
 	textStroke(title, 2)
 
@@ -308,22 +316,22 @@ function BillboardKit.OddsBoard(anchor: Instance, rows: { OddsRow }, offset: Vec
 		local line = Instance.new("Frame")
 		line.Name = "Row" .. index
 		line.BackgroundTransparency = 1
-		line.Size = UDim2.new(1, 0, 0, 24)
+		line.Size = UDim2.new(1, 0, 0, 28)
 		line.LayoutOrder = index
 		line.Parent = panel
 
-		local left = label(line, "Recipe", Fonts.Body, 15, UITheme.GetTierLight(row.ToTier), 24, 0)
+		local left = label(line, "Recipe", Fonts.Body, 22, UITheme.GetTierLight(row.ToTier), 28, 0)
 		left.Text = ("2 %s → %s"):format(row.FromTier, row.ToTier)
 		left.TextXAlignment = Enum.TextXAlignment.Left
 		textStroke(left, 1.5)
 
-		local right = label(line, "Chance", Fonts.Display, 16, Colors.Text, 24, 0)
+		local right = label(line, "Chance", Fonts.Display, 24, Colors.Text, 28, 0)
 		right.Text = ("%d%%"):format(math.floor(row.Chance * 100 + 0.5))
 		right.TextXAlignment = Enum.TextXAlignment.Right
 		textStroke(right, 1.5)
 	end
 
-	local footer = label(panel, "Footer", Fonts.Body, 11, Colors.Muted, 16, #rows + 1)
+	local footer = label(panel, "Footer", Fonts.Body, 16, Colors.Muted, 20, #rows + 1)
 	footer.Text = "Fail = keep 1 of the 2"
 	return gui
 end

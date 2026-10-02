@@ -2,94 +2,146 @@
 --[[
 	FusionMachineService
 	--------------------
-	Builds a Fusion Machine: a glowing core on a dark plinth, a spinning accent
-	ring, a ProximityPrompt to fuse, and a board showing the live success odds
-	from FusionConfig. All code-built so it stays Rojo-friendly.
+	Builds a plot's Fusion Machine: a round Structure platform with a violet
+	Neon rim, four leaning pylons, a floating Neon Core with its spinning
+	Ring, a floor glow, and an invisible PromptAnchor holding the fuse
+	prompts. Beside it stands the odds board: a post and a real board with
+	the odds on a SurfaceGui.
 
-	One machine PER PLOT now. It used to be a single shared machine parked next
-	to whoever got plot slot 1, so the player in slot 5 had a ~560-stud walk to
-	fuse anything. TycoonService calls FusionMachineService.Build for each plot,
-	at the same plot-relative spot slot 1's machine always used (local +95 X),
-	which already fits between plots (spacing 140).
+	TycoonService calls Build once per plot. Every position and size comes
+	from PlotLayout (Machine, FUSION_MACHINE, ODDS_BOARD).
 
-	Lifecycle: :Init() only removes any leftover shared machine from an older
+	RevealEffects animates `Core` (Size) and `Ring` (CFrame) by name, and
+	FusionController finds the prompts on `PromptAnchor`.
+
+	Lifecycle: :Init() only removes a leftover shared machine from an older
 	build. No cross-service references.
 ]]
 local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
-local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 
 local FusionMachineService = {}
 
 FusionMachineService.Name = "FusionMachineService"
-
 FusionMachineService.MACHINE_NAME = "FusionMachine"
 
-local BASE_SIZE = Vector3.new(24, 2, 24)
+local M = PlotLayout.Machine
+local World = UITheme.World
+local ACCENT = World.AccentViolet
 
-local CORE_SIZE = Vector3.new(4, 4, 4)
-local RING_SIZE = Vector3.new(0.6, 9, 9) -- Cylinder shape: X = thickness, Y/Z = diameter
+-- Lighting/particle tuning (not geometry).
+local CORE_LIGHT_RANGE = 28
+local CORE_LIGHT_BRIGHTNESS = 6
+local CORE_SPARKLE_RATE = 4
+local RING_TRANSPARENCY = 0.35
 local ORBIT_ATTACHMENT_COUNT = 4
-local ACCENT_COLOR = Color3.fromRGB(140, 70, 255)
-local DARK_COLOR = Color3.fromRGB(22, 22, 27)
+local ORBIT_SPARKLE_RATE = 6
 
-local PROMPT_MAX_ACTIVATION_DISTANCE = 10
--- MaxDistance comes from BillboardKit (26, like every pad label).
-local ODDS_BILLBOARD_OFFSET = Vector3.new(0, 9, 0)
-
-local function buildBase(position: Vector3): BasePart
-	local base = Instance.new("Part")
-	base.Name = "Base"
-	base.Size = BASE_SIZE
-	base.Anchored = true
-	base.CanCollide = true
-	base.Material = Enum.Material.SmoothPlastic
-	base.Color = DARK_COLOR
-	base.Position = position
-	return base
+local function buildPlatform(machine: Model, base: CFrame)
+	PartKit.Cylinder({
+		Name = "Base",
+		Center = base * CFrame.new(0, M.BaseHeight / 2, 0),
+		Height = M.BaseHeight,
+		Diameter = M.BaseDiameter,
+		Color = World.Structure,
+		Parent = machine,
+	})
+	PartKit.Cylinder({
+		Name = "Rim",
+		Center = base * CFrame.new(0, M.BaseHeight - M.RimCenterBelowTop, 0),
+		Height = M.RimHeight,
+		Diameter = M.RimDiameter,
+		Color = ACCENT,
+		Material = Enum.Material.Neon,
+		CanQuery = false,
+		Parent = machine,
+	})
+	local glow = PartKit.Cylinder({
+		Name = "FloorGlow",
+		Center = base * CFrame.new(0, M.BaseHeight + M.FloorGlowHeight / 2, 0),
+		Height = M.FloorGlowHeight,
+		Diameter = M.FloorGlowDiameter,
+		Color = ACCENT,
+		Material = Enum.Material.Neon,
+		Transparency = M.FloorGlowTransparency,
+		Parent = machine,
+	})
+	PartKit.MakeDecorative(glow)
 end
 
-local function buildCore(base: BasePart): BasePart
-	local core = Instance.new("Part")
-	core.Name = "Core"
-	core.Shape = Enum.PartType.Ball
-	core.Size = CORE_SIZE
-	core.Anchored = true
-	core.CanCollide = false
-	core.Material = Enum.Material.Neon
-	core.Color = ACCENT_COLOR
-	core.Position = base.Position + Vector3.new(0, base.Size.Y / 2 + CORE_SIZE.Y / 2 + 1, 0)
+-- Four pylons at 45/135/225/315 degrees, each leaning toward the centre,
+-- with a Neon strip on its inward face.
+local function buildPylons(machine: Model, base: CFrame)
+	local top = base * CFrame.new(0, M.BaseHeight, 0)
+	for _, degrees in M.PylonAnglesDegrees do
+		local angle = math.rad(degrees)
+		local foot = top * CFrame.new(math.cos(angle) * M.PylonRadius, 0, math.sin(angle) * M.PylonRadius)
+		-- Face the centre (LookVector = -Z), then tip the top forward toward it.
+		local facing = CFrame.lookAt(foot.Position, top.Position) * CFrame.Angles(-math.rad(M.PylonLeanDegrees), 0, 0)
+		local pylon = PartKit.Part({
+			Name = "Pylon",
+			Size = M.PylonSize,
+			CFrame = facing * CFrame.new(0, M.PylonSize.Y / 2, 0),
+			Color = World.StructureLight,
+			Parent = machine,
+		})
+		local strip = PartKit.Part({
+			Name = "PylonStrip",
+			Size = Vector3.new(M.PylonStripWidth, M.PylonSize.Y, M.PylonStripDepth),
+			CFrame = pylon.CFrame * CFrame.new(0, 0, -(M.PylonSize.Z / 2 + M.PylonStripDepth / 2)),
+			Color = ACCENT,
+			Material = Enum.Material.Neon,
+			Parent = machine,
+		})
+		PartKit.MakeDecorative(strip)
+	end
+end
 
+local function buildCore(machine: Model, base: CFrame): BasePart
+	local core = PartKit.Part({
+		Name = "Core",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * M.CoreDiameter,
+		CFrame = base * CFrame.new(0, M.CoreY, 0),
+		Color = ACCENT,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+		Parent = machine,
+	})
 	local light = Instance.new("PointLight")
-	light.Color = ACCENT_COLOR
-	light.Range = 28
-	light.Brightness = 6
+	light.Color = ACCENT
+	light.Range = CORE_LIGHT_RANGE
+	light.Brightness = CORE_LIGHT_BRIGHTNESS
 	light.Parent = core
 
-	local sparkle = SparkleEmitter.Create({ Color = ACCENT_COLOR, Rate = 4 })
+	local sparkle = SparkleEmitter.Create({ Color = ACCENT, Rate = CORE_SPARKLE_RATE })
 	sparkle.Parent = core
-
 	return core
 end
 
--- A flat neon disc with sparkle trails on its rim; RevealEffects spins it
--- during a fusion so the trails visibly orbit the core.
-local function buildRing(core: BasePart): BasePart
-	local ring = Instance.new("Part")
-	ring.Name = "Ring"
-	ring.Shape = Enum.PartType.Cylinder
-	ring.Size = RING_SIZE
-	ring.Anchored = true
-	ring.CanCollide = false
-	ring.Material = Enum.Material.Neon
-	ring.Color = ACCENT_COLOR
-	ring.Transparency = 0.35
-	ring.CFrame = CFrame.new(core.Position) * CFrame.Angles(0, 0, math.rad(90))
-
-	local radius = RING_SIZE.Y / 2
+-- A flat Neon disc with sparkle trails on its rim, centred on the Core;
+-- RevealEffects spins it during a fusion so the trails orbit the core.
+local function buildRing(machine: Model, core: BasePart)
+	local ring = PartKit.Part({
+		Name = "Ring",
+		Shape = Enum.PartType.Cylinder,
+		Size = M.RingSize,
+		CFrame = CFrame.new(core.Position) * CFrame.Angles(0, 0, math.rad(90)),
+		Color = ACCENT,
+		Material = Enum.Material.Neon,
+		Transparency = RING_TRANSPARENCY,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = machine,
+	})
+	local radius = M.RingSize.Y / 2
 	for index = 1, ORBIT_ATTACHMENT_COUNT do
 		local angle = (index / ORBIT_ATTACHMENT_COUNT) * math.pi * 2
 		local attachment = Instance.new("Attachment")
@@ -97,16 +149,68 @@ local function buildRing(core: BasePart): BasePart
 		attachment.Position = Vector3.new(0, math.cos(angle) * radius, math.sin(angle) * radius)
 		attachment.Parent = ring
 
-		local sparkle = SparkleEmitter.Create({ Color = ACCENT_COLOR, Rate = 6 })
+		local sparkle = SparkleEmitter.Create({ Color = ACCENT, Rate = ORBIT_SPARKLE_RATE })
 		sparkle.Parent = attachment
 	end
-
-	return ring
 end
 
--- "Fusion Odds": what 2 of each tier turn into, and how likely. Built by
--- BillboardKit so it matches every other world label.
-local function buildOddsBillboard(anchor: BasePart)
+-- Invisible anchor at the platform centre for the prompts, so they show
+-- where you stand rather than up at the core.
+local function buildPromptAnchor(machine: Model, base: CFrame)
+	local anchor = PartKit.Part({
+		Name = "PromptAnchor",
+		Size = Vector3.one,
+		CFrame = base * CFrame.new(0, M.PromptAnchorY, 0),
+		Color = ACCENT,
+		Transparency = 1,
+		CanCollide = false,
+		CanTouch = false,
+		Parent = machine,
+	})
+
+	-- Left disabled until the owner's client confirms a fusable pair.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "FusePrompt"
+	prompt.ActionText = "Fuse"
+	prompt.ObjectText = "Fusion Machine"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.MaxActivationDistance = M.PromptDistance
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	prompt.Enabled = false
+	prompt.Parent = anchor
+end
+
+-- Post + board facing the gate, yawed toward the walkway, with the odds on
+-- a SurfaceGui. Not part of the machine Model (it stands beside it).
+local function buildOddsBoard(originCFrame: CFrame, parent: Instance)
+	local board = Instance.new("Model")
+	board.Name = "OddsBoard"
+
+	local foot = PartKit.At(originCFrame, PlotLayout.ODDS_BOARD, 0)
+	-- Face +Z (the gate), turned toward the walkway. A part's Front face
+	-- looks along its -Z, hence the half turn.
+	local towardWalkway = if PlotLayout.ODDS_BOARD.X > PlotLayout.WALKWAY_X then -1 else 1
+	local yaw = math.rad(PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES) * towardWalkway
+	local facing = foot * CFrame.Angles(0, math.pi + yaw, 0)
+
+	local post = M.OddsPostSize
+	PartKit.Part({
+		Name = "Post",
+		Size = post,
+		CFrame = facing * CFrame.new(0, post.Y / 2, 0),
+		Color = World.StructureLight,
+		Parent = board,
+	})
+	local boardPart = PartKit.Part({
+		Name = "Board",
+		Size = M.OddsBoardSize,
+		CFrame = facing * CFrame.new(0, post.Y + M.OddsBoardSize.Y / 2, 0),
+		Color = World.Structure,
+		Parent = board,
+	})
+
 	local rows = {}
 	for _, tier in FusionConfig.TierOrder do
 		local nextTier = FusionConfig.GetNextTier(tier)
@@ -115,50 +219,32 @@ local function buildOddsBillboard(anchor: BasePart)
 			table.insert(rows, { FromTier = tier, ToTier = nextTier, Chance = chance })
 		end
 	end
-	BillboardKit.OddsBoard(anchor, rows, ODDS_BILLBOARD_OFFSET)
-end
+	BillboardKit.OddsSurface(boardPart, rows, M.SurfacePixelsPerStud)
 
--- Left disabled until the client confirms the owner has a fusable pair.
-local function buildPrompt(core: BasePart): ProximityPrompt
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "FusePrompt"
-	prompt.ActionText = "Fuse"
-	prompt.ObjectText = "Fusion Machine"
-	prompt.MaxActivationDistance = PROMPT_MAX_ACTIVATION_DISTANCE
-	prompt.HoldDuration = 0
-	prompt.RequiresLineOfSight = false
-	prompt.Enabled = false
-	prompt.Parent = core
-	return prompt
+	board.Parent = parent
 end
 
 -- Builds one machine for a plot at plot-local `localPos` (floor top y = 0).
--- Returns the Model (already parented to `parent`).
+-- Returns the machine Model (already parented to `parent`).
 function FusionMachineService.Build(originCFrame: CFrame, localPos: Vector3, parent: Instance): Model
 	local machine = Instance.new("Model")
 	machine.Name = FusionMachineService.MACHINE_NAME
+	local base = PartKit.At(originCFrame, localPos, 0)
 
-	local basePosition = originCFrame:PointToWorldSpace(Vector3.new(localPos.X, BASE_SIZE.Y / 2, localPos.Z))
-	local base = buildBase(basePosition)
-	base.Parent = machine
-
-	local core = buildCore(base)
-	core.Parent = machine
-
-	local ring = buildRing(core)
-	ring.Parent = machine
-
-	buildOddsBillboard(base)
-	buildPrompt(core)
+	buildPlatform(machine, base)
+	buildPylons(machine, base)
+	local core = buildCore(machine, base)
+	buildRing(machine, core)
+	buildPromptAnchor(machine, base)
 
 	machine.PrimaryPart = core
 	machine.Parent = parent
+	buildOddsBoard(originCFrame, parent)
 	return machine
 end
 
 function FusionMachineService:Init()
-	-- Older builds put one shared machine directly in Workspace; if a place
-	-- file still has it saved, remove it so it doesn't sit there unused.
+	-- Older builds put one shared machine directly in Workspace; remove it.
 	local legacy = Workspace:FindFirstChild(FusionMachineService.MACHINE_NAME)
 	if legacy then
 		legacy:Destroy()

@@ -31,6 +31,8 @@ FusionController.FusionResolved = fusionResolved.Event
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil
+-- The prompts live here (platform centre), not on the Core up in the air.
+local promptAnchor: BasePart? = nil
 
 -- Offers the LOWEST tier you have a spare pair of (not counting items on
 -- pedestals). Fusing is a climb now (2x Common -> Rare, ...), so working up
@@ -77,7 +79,8 @@ function FusionController.CanRequestFusion(): boolean
 		return false
 	end
 	local reach = (prompt :: ProximityPrompt).MaxActivationDistance
-	return (root.Position - (core :: BasePart).Position).Magnitude <= reach
+	local anchor = promptAnchor or core :: BasePart
+	return (root.Position - anchor.Position).Magnitude <= reach
 end
 
 -- Fire-and-forget: does not return until the full request/animation cycle
@@ -157,7 +160,9 @@ function FusionController.Init()
 	local machine = plot:WaitForChild(MACHINE_NAME) :: Model
 	core = machine:WaitForChild("Core") :: BasePart
 	ring = machine:FindFirstChild("Ring") :: BasePart?
-	prompt = (core :: BasePart):WaitForChild("FusePrompt") :: ProximityPrompt
+	local anchor = machine:WaitForChild("PromptAnchor") :: BasePart
+	promptAnchor = anchor
+	prompt = anchor:WaitForChild("FusePrompt") :: ProximityPrompt
 
 	-- Same fix as AnnouncementController: a line starting with "(" right
 	-- after a statement is ambiguous in Lua (could read as continuing the

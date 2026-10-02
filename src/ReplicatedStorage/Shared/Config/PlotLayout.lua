@@ -171,6 +171,7 @@ PlotLayout.Machine = {
 	PylonAnglesDegrees = { 45, 135, 225, 315 },
 	PylonLeanDegrees = 8,
 	PylonStripWidth = 0.25,
+	PylonStripDepth = 0.1,
 	CoreDiameter = 4,
 	CoreY = 9.5,
 	RingSize = v3(0.6, 9, 9), -- Cylinder: X = thickness, Y/Z = diameter
