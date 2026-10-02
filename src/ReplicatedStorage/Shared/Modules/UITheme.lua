@@ -46,6 +46,22 @@ UITheme.Colors = {
 	Black = hex("#000000"),
 }
 
+-- 3D world colours (parts, not GUIs). Every solid part is SmoothPlastic and
+-- every accent Neon; the ground's Grass material is the one exception.
+UITheme.World = {
+	Grass = hex("#4E7F5E"), -- ground
+	Street = hex("#34305E"), -- street
+	Floor = hex("#2B2752"), -- plot floor
+	Walkway = hex("#3A3566"), -- walkway inlay
+	Structure = hex("#221E42"), -- walls, pads, pedestal columns, dropper bodies, machine platform
+	StructureLight = hex("#2D2856"), -- pylons, posts, locked/unclaimed trim
+	AccentViolet = hex("#8B5CFF"), -- wall strips, machine rim, multiplier
+	AccentGreen = hex("#3BEB7E"), -- claim, droppers, Dropper 2
+	AccentGold = hex("#FFBE28"), -- gacha, collector
+	Unclaimed = hex("#3A3560"), -- wall strip before claiming
+	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
+}
+
 export type GradientPair = { Top: Color3, Bottom: Color3 }
 
 -- Button gradients: UIGradient, Rotation 90, Top -> Bottom.

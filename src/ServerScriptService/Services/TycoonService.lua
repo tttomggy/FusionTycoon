@@ -1,8 +1,24 @@
+--!nonstrict
+--[[
+	TycoonService
+	-------------
+	Owns every player's plot: builds it from TycoonTemplate at their slot,
+	runs the droppers, collector, stations (claim, Dropper 2, gacha,
+	multiplier) and pedestals, pays passive income and handles generator
+	upgrades.
+
+	Every position, offset and size comes from PlotLayout (plot-local space:
+	origin at the plot's centre, floor top y = 0, +Z toward the gate). This
+	file must not hard-code geometry.
+
+	Lifecycle: :Init() connects its own remotes/players and starts its loops.
+	:Start() resolves FusionMachineService. PlayerDataService is a leaf
+	(requires no services), so its module-scope require can't form a cycle.
+]]
 local Debris = game:GetService("Debris")
 local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Config = ReplicatedStorage.Shared.Config
@@ -12,16 +28,14 @@ local PlotLayout = require(Config.PlotLayout)
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local PadStyler = require(ReplicatedStorage.Shared.Modules.PadStyler)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
--- PlayerDataService is a leaf (requires no services), so this module-scope
--- require can't form a cycle.
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
@@ -31,179 +45,53 @@ local FusionMachineService: FusionMachineServiceModule
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
 
--- From user-supplied Toolbox VFX packs (Workspace), extracted to
--- ReplicatedStorage.Shared.VFX.*.rbxm. Optional by design (FindFirstChild,
--- not WaitForChild) so a session running before that extraction step happens
--- degrades to whatever VFX already existed at each site instead of erroring.
+local World = UITheme.World
+
+-- Optional VFX extracted from the user's Toolbox packs (FindFirstChild so a
+-- session without them degrades to the sparkle/sound feedback only).
 local VFXFolder = ReplicatedStorage.Shared.VFX
 local levelingUpEffectTemplate = VFXFolder:FindFirstChild("LevelingUpEffect") :: BasePart?
 local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: BasePart?
 
--- Pad labels are BillboardKit.Pad (Shared/Modules/BillboardKit.lua): one
--- look for every pad, MaxDistance 26, never drawn through walls.
+--[[ Tuning (not geometry) ---------------------------------------------------- ]]
+
 local GACHA_RATE_TIERS_SHOWN = 3
--- Plot signs refresh on this interval (income and best tier change slowly).
-local PLOT_SIGN_REFRESH_SECONDS = 5
-
-local MAX_PLOT_SLOTS = 50
--- Must comfortably exceed the plot row's own total footprint (Dropper1 ->
--- Dropper2 slot -> Multiplier Pad -> Gacha Pad), or adjacent plots' pads
--- overlap regardless of how wide the Floor itself is. The Pedestal Showcase
--- doesn't factor in here - it reaches into -Z, not along this X row, so it
--- has no plot-to-plot spacing constraint (see PEDESTAL_SHOWCASE_* below).
-local PLOT_SLOT_SPACING_STUDS = 140
--- Explicit gap above PlotOrigin's surface height for SpawnLocation, so a
--- spawning character never clips into the floor even if PlotOrigin's Y
--- reading is off by a hair.
-local SPAWN_LOCATION_CLEARANCE_STUDS = 0.5
 local CASH_DROP_DEBRIS_LIFETIME_SECONDS = 30
--- How far in front of Dropper1 (along its facing direction) the Collector sits,
--- so cash lands on the open floor first instead of spawning right on top of it.
-local COLLECTOR_FORWARD_OFFSET_STUDS = 12
-local CASH_DROP_FORWARD_SPEED_STUDS_PER_SECOND = 6
+local CASH_DROP_SPEED_STUDS_PER_SECOND = 6
+local STATION_DEBOUNCE_SECONDS = 1
+local BURST_COUNT = 30
+local DROPPER_POP_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+local STATION_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
+local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
--- ClaimButton comes from the template with whatever Material/Color it was
--- authored with (easy to miss entirely); styled bright green here so it
--- reads as an interactive "claim" action at a glance.
-local CLAIM_BUTTON_COLOR = Color3.fromRGB(20, 255, 80)
--- Claim pod: a short PadStyler-accented riser built beneath ClaimButton so it
--- reads as a small kiosk/pod instead of a flat button sitting on the ground.
--- Purely a decorative part parented alongside ClaimButton - it never touches
--- ClaimButton's own Position/Size/Touched wiring, so the claim trigger itself
--- is unaffected.
-local CLAIM_POD_RISER_HEIGHT_STUDS = 3
-local CLAIM_POD_RISER_MARGIN_STUDS = 1
-
--- Cash parts belong to their own collision group so they pass through player
--- characters (left in "Default") without being bumped. Floor/Collector are
--- moved into a second group so they keep colliding with cash even though
--- "Default" no longer does.
+-- Cash balls pass through characters ("Default") but still hit the plot
+-- floor/collector (PlotEnvironment).
 local CASH_COLLISION_GROUP = "CashParts"
 local PLOT_ENVIRONMENT_COLLISION_GROUP = "PlotEnvironment"
 
-local DROPPER2_COST = TycoonConfig.Dropper2Cost
-local DROPPER2_SIDE_OFFSET_STUDS = 12
+local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "Dropper1", "ClaimButton", "PlotOrigin", "SpawnLocation" }
 
--- Multiplier Pad sits one row-slot further along the same edge as the
--- Dropper2 button/spawn spot, so the row reads: Dropper1, Dropper2, Pad.
-local MULTIPLIER_PAD_ROW_OFFSET_STUDS = DROPPER2_SIDE_OFFSET_STUDS * 2
--- ClaimButton's placement comes from the template, not this service, so
--- unlike every other row element (all placed relative to PlotOrigin, which
--- is why they never collide with each other) a fixed offset for the pad
--- can't guarantee it clears ClaimButton wherever the author put it. Checked
--- against ClaimButton's actual position at build time instead: see the
--- clearance check in createMultiplierPad. Capped at 32, comfortably short of
--- the Gacha Pad (starts at +52, see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS -
--- that value's own comment spells out exactly why it needs to stay this far
--- out) so pushing the pad clear of ClaimButton can't create a new collision,
--- or activation-range overlap, further up the row.
-local MULTIPLIER_PAD_MIN_CLAIM_BUTTON_CLEARANCE_STUDS = 12
-local MULTIPLIER_PAD_MAX_ROW_OFFSET_STUDS = 32
--- Touched fires continuously while a character stands on the pad; this
--- debounce turns that into one purchase per touch instead of many per frame.
-local MULTIPLIER_PAD_DEBOUNCE_SECONDS = 1
--- One-shot feedback (VFX/sound/screen popup) when a multiplier purchase
--- succeeds - purely presentational, doesn't touch SpendCash/SetCashMultiplierLevel.
-local MULTIPLIER_UPGRADE_ACCENT_COLOR = Color3.fromRGB(200, 60, 255)
-local MULTIPLIER_UPGRADE_BURST_COUNT = 30
--- rbxasset://sounds/bell.wav fails to load in this project ("Temp read
--- failed") - reusing DROPPER_POP_SOUND_ID's electronicpingshort.wav instead,
--- since that one's already confirmed working (it plays on every dropper pop).
-local MULTIPLIER_UPGRADE_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+--[[ State --------------------------------------------------------------------- ]]
 
--- Dropper idle glow + per-drop "pop" feedback. Matches the falling cash
--- part's own color so the dropper visually reads as the source of that cash.
-local DROPPER_ACCENT_COLOR = Color3.fromRGB(85, 255, 127)
-local DROPPER_IDLE_PULSE_SECONDS = 2.2
-
--- Gacha Pad: the only source of fusable items. Sits one row-slot past the
--- Multiplier Pad (see PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS), so the main row
--- reads: Dropper1, Dropper2, Multiplier Pad, Gacha Pad. The Pedestal Showcase
--- isn't part of this row at all anymore - it's a separate alcove off to the
--- side (see PEDESTAL_SHOWCASE_* above and createPedestals below).
-local GACHA_PAD_DEBOUNCE_SECONDS = 1
-local GACHA_PAD_ACCENT_COLOR = Color3.fromRGB(255, 215, 60)
--- rbxasset://sounds/bell.wav fails to load in this project ("Temp read
--- failed") - reusing DROPPER_POP_SOUND_ID's electronicpingshort.wav instead,
--- since that one's already confirmed working (it plays on every dropper pop).
-local GACHA_PULL_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
--- Matches PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE / FusionMachineService's own
--- PROMPT_MAX_ACTIVATION_DISTANCE - every ProximityPrompt in the game uses the
--- same reach so none of them feel inconsistent stood next to another.
-local GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE = 10
--- Matches RevealEffects.lua's MAJOR_EXPLOSION_SCALE/BURST_SECONDS exactly -
--- same source pack, same "toned down to match the reveal's existing weight,
--- not overpowering it" reasoning, same MajorRevealTiers flag.
-local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
-local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
-local DROPPER_IDLE_LIGHT_BRIGHTNESS = 2
-local DROPPER_IDLE_LIGHT_RANGE = 10
-local DROPPER_POP_PARTICLE_BASE_COUNT = 8
--- Dropper1/Dropper2 don't produce distinct item tiers (just multiplier-scaled
--- cash), so the pop's intensity scales off the current cash multiplier
--- instead - the closest thing this system has to a "rarity" signal. Capped
--- so the effect stays "slightly bigger," not absurd, at very high multipliers.
-local DROPPER_POP_SCALE_CAP = 8
-local DROPPER_POP_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
-
--- Pedestal Showcase: a row of empty display pedestals, one row-slot further
--- along than the Multiplier Pad, so the full row reads: Dropper1, Dropper2,
--- Multiplier Pad, Pedestal 1..N. Their own tier-specific styling is applied
--- later by PedestalVisuals (via ItemService), not here - these start bare.
--- Pedestal Showcase: a dedicated alcove off the main row (see PlotLayout.lua)
--- instead of inline with Dropper1/Dropper2/Multiplier Pad/Gacha Pad - a
--- straight line stepping into -Z at a fixed local X, so it reads as a
--- display case players walk up to on purpose. Count/spacing/position come
--- from PlotLayout (shared with FusionMachineService's connector walkway and
--- Floor's own Z sizing) rather than being redefined here, so none of them can
--- silently drift apart again. The showcase's own reach into -Z has no
--- PLOT_SLOT_SPACING_STUDS-style constraint the way the main row's X extent
--- does - plots are only ever laid out side-by-side along X (see
--- createPlotForPlayer's PivotTo), so -Z is open regardless of neighbors.
-local PEDESTAL_COUNT = PlotLayout.PEDESTAL_COUNT
-local PEDESTAL_SIZE = Vector3.new(PlotLayout.PEDESTAL_SIZE_X_STUDS, 3, PlotLayout.PEDESTAL_SIZE_Z_STUDS)
-local PEDESTAL_SHOWCASE_X_OFFSET_STUDS = PlotLayout.PEDESTAL_SHOWCASE_X_OFFSET_STUDS
-local PEDESTAL_SHOWCASE_Z_OFFSET_STUDS = PlotLayout.PEDESTAL_SHOWCASE_Z_OFFSET_STUDS
-local PEDESTAL_SPACING_STUDS = PlotLayout.PEDESTAL_SPACING_STUDS
-local PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE = 10
-
--- Floor's original template Size (50x1x50, ~25-stud radius) predates the pad
--- row's current length: every row element is independently anchored to
--- PlotOrigin (nothing was ever actually falling), but most of the row sat
--- visually past Floor's own edge. Resized/recentered at plot-creation time
--- (see resizeFloorToFitRow) to actually cover Dropper1 through the Gacha Pad
--- on the X axis, and the Pedestal Showcase on the Z axis, with margin on
--- every edge.
---
--- Deliberately NOT extended out to the Fusion Machine too: covering it would
--- need Floor's edge to reach past local X = 107 (the machine's Base sits at
--- +95 with a 12-stud half-width), leaving under 15 studs of clearance before
--- the next plot's own Floor at PLOT_SLOT_SPACING_STUDS = 140 - recreating
--- the exact cross-plot overlap risk fixed a few turns ago. The machine
--- already has its own dedicated 24x24 Base for solid ground; it doesn't
--- depend on this plot's Floor the way the row does. A connector walkway
--- (see FusionMachineService.lua) bridges the remaining gap instead.
-local FLOOR_ROW_MARGIN_STUDS = PlotLayout.FLOOR_ROW_MARGIN_STUDS
-
--- Slot bookkeeping: a fixed row of slots is reused as players join/leave
--- rather than growing forever.
 local occupiedSlots: { [number]: boolean } = {}
 local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
+local originByUserId: { [number]: CFrame } = {}
 
 local function syncTycoon(player: Player)
 	PlayerDataService.SyncTycoon(player)
 end
 
+--[[ Income + upgrades ----------------------------------------------------------- ]]
+
 local function onPassiveIncomeTick()
 	for _, player in Players:GetPlayers() do
 		if PlayerDataService.IsDataLoaded(player) then
-			-- Generators + pedestals, with the cash multiplier applied. Same
-			-- function the client HUD uses for its "+$X/s" readout.
+			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
-				local income = cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds
-				PlayerDataService.AddCash(player, income)
+				PlayerDataService.AddCash(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
 				syncTycoon(player)
 			end
 		end
@@ -248,34 +136,20 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 
 	local newLevel = currentLevel + 1
 	PlayerDataService.SetGeneratorLevel(player, generatorId, newLevel)
-
-	RemoteEvents.UpgradeResult:FireClient(player, {
-		Success = true,
-		GeneratorId = generatorId,
-		NewLevel = newLevel,
-	})
+	RemoteEvents.UpgradeResult:FireClient(player, { Success = true, GeneratorId = generatorId, NewLevel = newLevel })
 	syncTycoon(player)
 end
 
---[[ Plot lifecycle: TycoonTemplate is cloned into Workspace for every player
-	on join and reserved for them (OwnerUserId attribute), but stays inactive
-	until that player touches their plot's ClaimButton, which starts Dropper1
-	producing cash items. ]]
+--[[ Helpers ------------------------------------------------------------------- ]]
 
--- Registers the collision groups used by dropped cash and disables collision
--- between cash and "Default" (players, and any plot geometry left unassigned).
--- Floor/Collector are explicitly moved into PlotEnvironment in createCollector
--- so they keep colliding with cash despite that.
 local function setupCollisionGroups()
-	-- pcall guards against "already exists" errors if this ever re-runs
-	-- (e.g. Studio script hot-reload) without a full server restart.
+	-- pcall: "already exists" if this ever re-runs without a server restart.
 	pcall(function()
 		PhysicsService:RegisterCollisionGroup(CASH_COLLISION_GROUP)
 	end)
 	pcall(function()
 		PhysicsService:RegisterCollisionGroup(PLOT_ENVIRONMENT_COLLISION_GROUP)
 	end)
-
 	PhysicsService:CollisionGroupSetCollidable(CASH_COLLISION_GROUP, "Default", false)
 end
 
@@ -289,22 +163,17 @@ local function getPlotsFolder(): Folder
 	return folder :: Folder
 end
 
-local function claimSlotIndex(): number
-	for index = 1, MAX_PLOT_SLOTS do
+local function claimSlotIndex(): number?
+	for index = 1, PlotLayout.MAX_PLOT_SLOTS do
 		if not occupiedSlots[index] then
 			occupiedSlots[index] = true
 			return index
 		end
 	end
-	error("TycoonService: no free plot slots available (raise MAX_PLOT_SLOTS)")
+	return nil
 end
 
-local function releaseSlotIndex(index: number)
-	occupiedSlots[index] = nil
-end
-
--- Resolves the touching Player only for an actual character limb, so tools,
--- accessories, or other props touching a button/pickup are ignored.
+-- Resolves the touching Player only for an actual character limb.
 local function getTouchingPlayer(hit: BasePart): Player?
 	local character = hit.Parent
 	if not character or not character:FindFirstChildOfClass("Humanoid") then
@@ -313,76 +182,11 @@ local function getTouchingPlayer(hit: BasePart): Player?
 	return Players:GetPlayerFromCharacter(character)
 end
 
--- The Collector alone stays anchored to the Floor's own CFrame (not
--- PlotOrigin): it has to track wherever Dropper1's cash actually falls,
--- which depends on Dropper1's own live position/rotation, not a fixed
--- reference point. This is existing, working dropper logic and is
--- intentionally left as-is - see createCollector.
-local function getFloorPart(plot: Model): BasePart?
-	local floor = plot:FindFirstChild("Floor", true)
-	if floor and floor:IsA("BasePart") then
-		return floor :: BasePart
-	end
-	return nil
+local function findPart(plot: Model, name: string): BasePart?
+	local part = plot:FindFirstChild(name, true)
+	return if part and part:IsA("BasePart") then part else nil
 end
 
-local function getFloorTopY(floor: BasePart?): number
-	if not floor then
-		return 0
-	end
-	return floor.Position.Y + floor.Size.Y / 2
-end
-
--- Everything else spawned for a plot (purchase buttons, Multiplier Pad,
--- Dropper2, Pedestals) is positioned as an offset from PlotOrigin - a fixed,
--- author-placed reference part in TycoonTemplate - rather than from Floor or
--- from wherever Dropper1's template position happens to be. This removes any
--- dependency on Floor's size/rotation or Dropper1's exact placement, which is
--- what let those offsets silently drift out of alignment before.
-local function getPlotOrigin(plot: Model): BasePart?
-	local origin = plot:FindFirstChild("PlotOrigin", true)
-	if origin and origin:IsA("BasePart") then
-		return origin :: BasePart
-	end
-	return nil
-end
-
--- Resolves the (CFrame, surfaceY) every non-dropper plot layout function
--- offsets from. Falls back to Dropper1's own CFrame/Y with a warning if a
--- template is missing a PlotOrigin part, so layout degrades gracefully
--- instead of erroring outright.
-local function resolvePlotOrigin(plot: Model, dropper1: BasePart, player: Player): (CFrame, number)
-	local origin = getPlotOrigin(plot)
-	if origin then
-		return origin.CFrame, origin.Position.Y
-	end
-	warn(("TycoonService: PlotOrigin not found in %s's plot; add one to TycoonTemplate. Falling back to Dropper1 for layout."):format(player.Name))
-	return dropper1.CFrame, dropper1.Position.Y
-end
-
--- Snaps `part` flush onto a surface at world-Y `surfaceY` (typically
--- PlotOrigin's own Y, which the plot's author places at floor-top height)
--- without disturbing its horizontal placement or rotation, so dropped-in
--- template parts (Dropper1) and cloned ones (Dropper2) never float above or
--- clip into the floor.
-local function snapToFloorY(part: BasePart, surfaceY: number)
-	local position = part.Position
-	part.Position = Vector3.new(position.X, surfaceY + part.Size.Y / 2, position.Z)
-end
-
--- Repositions every SpawnLocation found anywhere in the plot (matched by
--- class, not name, so any extra/duplicate spawn point is caught too) to sit
--- just above PlotOrigin's own X/Z/surface-height, the same reference point
--- everything else in the plot uses - so it can't quietly drift out of sync
--- with the floor again the way the template's authored SpawnLocation did.
--- A plot is only ever cloned once per player per server session (see the
--- early-return in createPlotForPlayer) - if ReplicatedStorage.TycoonTemplate
--- was mid-edit or mid-Rojo-sync at that exact moment, the resulting clone can
--- be silently incomplete and will just sit that way for the rest of the
--- session, since nothing else re-clones it. This turns that into one
--- unambiguous log line at creation time instead of a much later, harder-to-
--- trace symptom (players falling through the floor, missing pads, etc).
-local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "Dropper1", "ClaimButton", "PlotOrigin", "SpawnLocation" }
 local function validatePlotClone(plot: Model, player: Player)
 	local missing = {}
 	for _, name in EXPECTED_TEMPLATE_PART_NAMES do
@@ -392,99 +196,196 @@ local function validatePlotClone(plot: Model, player: Player)
 	end
 	if #missing > 0 then
 		warn((
-			"TycoonService: %s's cloned plot is missing %s. TycoonTemplate in ReplicatedStorage was "
-				.. "likely incomplete or out of sync at the exact moment this plot was cloned. A plot is "
-				.. "only ever cloned once per player per server session, so fixing the template now won't "
-				.. "repair this one - restart the server (or have %s leave and rejoin) after confirming the "
-				.. "template is correct."
-		):format(player.Name, table.concat(missing, ", "), player.Name))
+			"TycoonService: %s's cloned plot is missing %s. TycoonTemplate was likely incomplete or mid-sync "
+				.. "when it was cloned; plots are cloned once per session, so restart Play after fixing it."
+		):format(player.Name, table.concat(missing, ", ")))
 	end
 end
 
--- Resizes/recenters Floor so it actually covers Dropper1 through the Gacha
--- Pad on the X axis and the Pedestal Showcase on the Z axis, with margin,
--- rather than either extending visually past Floor's original template edge.
--- Runs at plot-creation time so Floor looks right even before the plot is
--- claimed. See the FLOOR_* constants above for why this deliberately stops
--- short of the Fusion Machine.
-local function resizeFloorToFitRow(plot: Model, player: Player)
-	local floor = getFloorPart(plot)
-	local plotOrigin = getPlotOrigin(plot)
-	if not floor or not plotOrigin then
-		warn(("TycoonService: couldn't resize Floor for %s's plot - Floor or PlotOrigin missing"):format(player.Name))
-		return
-	end
-
-	local rowStartLocalX = -FLOOR_ROW_MARGIN_STUDS
-	-- Shared with FusionMachineService (see PlotLayout.lua) so Floor's actual
-	-- right edge and the connector walkway's starting point can never drift
-	-- apart the way two independently-hardcoded copies of this number could.
-	local rowEndLocalX = PlotLayout.GetFloorRowEndLocalX()
-
-	-- ClaimButton's position comes from the template (not computed by this
-	-- service the way everything else in the row is), so its actual
-	-- footprint is checked here rather than assumed to fit inside the
-	-- default margin - it doesn't: it sits at local X = -10, and with its
-	-- own half-width its edge reaches -12, past the row's usual -10 start.
-	local claimButton = plot:FindFirstChild("ClaimButton", true)
-	if claimButton and claimButton:IsA("BasePart") then
-		local claimButtonLocal = plotOrigin.CFrame:PointToObjectSpace(claimButton.Position)
-		local claimButtonLeftEdge = claimButtonLocal.X - claimButton.Size.X / 2 - FLOOR_ROW_MARGIN_STUDS
-		rowStartLocalX = math.min(rowStartLocalX, claimButtonLeftEdge)
-	end
-
-	local sizeX = rowEndLocalX - rowStartLocalX
-	local centerLocalX = (rowStartLocalX + rowEndLocalX) / 2
-
-	-- Z axis mirrors the X axis logic above: a negative-side reach covering
-	-- the Pedestal Showcase's last pedestal, and a positive-side margin for
-	-- the main row/walkway's own width - both from PlotLayout, same reasoning
-	-- as GetFloorRowEndLocalX (single source of truth, no second hardcoded copy).
-	local rowStartLocalZ = PlotLayout.GetFloorRowStartLocalZ()
-	local rowEndLocalZ = PlotLayout.GetFloorRowEndLocalZ()
-	local sizeZ = rowEndLocalZ - rowStartLocalZ
-	local centerLocalZ = (rowStartLocalZ + rowEndLocalZ) / 2
-
-	floor.Size = Vector3.new(sizeX, floor.Size.Y, sizeZ)
-
-	-- Only X/Z move (recentering to cover the row); Y is left exactly as
-	-- authored, since Floor's top surface already matches PlotOrigin's own Y
-	-- and Size.Y (thickness) isn't changing.
-	local centerWorldPosition = plotOrigin.CFrame:PointToWorldSpace(Vector3.new(centerLocalX, 0, centerLocalZ))
-	floor.Position = Vector3.new(centerWorldPosition.X, floor.Position.Y, centerWorldPosition.Z)
+local function playSound(parent: Instance, soundId: string, volume: number)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = volume
+	sound.Parent = parent
+	sound:Play()
+	Debris:AddItem(sound, 3)
 end
 
--- Runs at plot-creation time (before the plot is even claimed), since a
--- player's very first spawn can happen before they've touched ClaimButton -
--- fixing this only on claim would be too late for that first spawn.
-local function fixSpawnLocations(plot: Model, player: Player)
-	local plotOrigin = getPlotOrigin(plot)
-	if not plotOrigin then
-		warn(("TycoonService: PlotOrigin not found in %s's plot; can't reposition SpawnLocation(s)"):format(player.Name))
-		return
+local function burst(parent: Instance, color: Color3, count: number)
+	local emitter = SparkleEmitter.Create({ Color = color })
+	emitter.Enabled = false
+	emitter.Parent = parent
+	emitter:Emit(count)
+	Debris:AddItem(emitter, 3)
+end
+
+local function newPrompt(parent: Instance, name: string, actionText: string, objectText: string, distance: number): ProximityPrompt
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = name
+	prompt.ActionText = actionText
+	prompt.ObjectText = objectText
+	prompt.MaxActivationDistance = distance
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	-- Where ranges overlap, only the nearest E prompt shows.
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	prompt.Parent = parent
+	return prompt
+end
+
+--[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
+
+local function buildShell(plot: Model, origin: CFrame, player: Player)
+	local floorSize = PlotLayout.FLOOR_SIZE
+	local half = PlotLayout.PLOT_HALF
+
+	local plotOrigin = findPart(plot, "PlotOrigin")
+	if plotOrigin then
+		plotOrigin.CFrame = origin
+		plotOrigin.Transparency = 1
+		plotOrigin.CanCollide = false
+		plotOrigin.CanQuery = false
+		plotOrigin.CanTouch = false
+		plotOrigin.Anchored = true
+		plot.PrimaryPart = plotOrigin
 	end
 
-	local fixedCount = 0
-	for _, descendant in plot:GetDescendants() do
-		if descendant:IsA("SpawnLocation") then
-			local spawn = descendant :: SpawnLocation
-			spawn.Position = Vector3.new(
-				plotOrigin.Position.X,
-				plotOrigin.Position.Y + SPAWN_LOCATION_CLEARANCE_STUDS + spawn.Size.Y / 2,
-				plotOrigin.Position.Z
-			)
-			fixedCount += 1
+	local floor = findPart(plot, "Floor")
+	if floor then
+		floor.Size = floorSize
+		floor.CFrame = PartKit.At(origin, Vector3.zero, -floorSize.Y / 2)
+		floor.Material = Enum.Material.SmoothPlastic
+		floor.Color = World.Floor
+		floor.Anchored = true
+		floor.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
+	end
+
+	local walkwayLength = PlotLayout.WALKWAY_Z_MAX - PlotLayout.WALKWAY_Z_MIN
+	PartKit.Part({
+		Name = "Walkway",
+		Size = Vector3.new(PlotLayout.WALKWAY_WIDTH, PlotLayout.WALKWAY_THICKNESS, walkwayLength),
+		CFrame = PartKit.At(
+			origin,
+			Vector3.new(PlotLayout.WALKWAY_X, 0, (PlotLayout.WALKWAY_Z_MIN + PlotLayout.WALKWAY_Z_MAX) / 2),
+			PlotLayout.WALKWAY_TOP_Y - PlotLayout.WALKWAY_THICKNESS / 2
+		),
+		Color = World.Walkway,
+		CanCollide = false,
+		CanQuery = false,
+		Parent = plot,
+	})
+
+	-- Rim walls just inside the floor edge, with a strip on top that turns
+	-- violet once the plot is claimed. The front wall has the gate gap.
+	local walls = Instance.new("Folder")
+	walls.Name = "Walls"
+	walls.Parent = plot
+	local thickness = PlotLayout.WALL_THICKNESS
+	local inset = half - thickness / 2
+	local inner = half - thickness
+	local gate = PlotLayout.GATE_HALF_WIDTH
+	local frontSegment = half - gate
+	local segments = {
+		{ Name = "BackWall", Center = Vector3.new(0, 0, -inset), Size = Vector3.new(floorSize.X, 0, thickness) },
+		{ Name = "LeftWall", Center = Vector3.new(-inset, 0, 0), Size = Vector3.new(thickness, 0, inner * 2) },
+		{ Name = "RightWall", Center = Vector3.new(inset, 0, 0), Size = Vector3.new(thickness, 0, inner * 2) },
+		{ Name = "FrontWallLeft", Center = Vector3.new(-(gate + frontSegment / 2), 0, inset), Size = Vector3.new(frontSegment, 0, thickness) },
+		{ Name = "FrontWallRight", Center = Vector3.new(gate + frontSegment / 2, 0, inset), Size = Vector3.new(frontSegment, 0, thickness) },
+	}
+	for _, segment in segments do
+		PartKit.Part({
+			Name = segment.Name,
+			Size = Vector3.new(segment.Size.X, PlotLayout.WALL_HEIGHT, segment.Size.Z),
+			CFrame = PartKit.At(origin, segment.Center, PlotLayout.WALL_HEIGHT / 2),
+			Color = World.Structure,
+			Parent = walls,
+		})
+		local strip = PartKit.Part({
+			Name = "WallStrip",
+			Size = Vector3.new(
+				math.max(segment.Size.X, PlotLayout.WALL_STRIP_WIDTH),
+				PlotLayout.WALL_STRIP_HEIGHT,
+				math.max(segment.Size.Z, PlotLayout.WALL_STRIP_WIDTH)
+			),
+			CFrame = PartKit.At(origin, segment.Center, PlotLayout.WALL_HEIGHT + PlotLayout.WALL_STRIP_HEIGHT / 2),
+			Color = World.Unclaimed,
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			Parent = walls,
+		})
+		strip:AddTag("FT_WallStrip")
+	end
+
+	-- Gate ramp: a wedge from street level up to the floor, outside the gap.
+	-- A WedgePart is tallest at its local +Z face, so it's turned to put that
+	-- face against the floor edge.
+	PartKit.Part({
+		Name = "GateRamp",
+		ClassName = "WedgePart",
+		Size = Vector3.new(PlotLayout.GATE_RAMP_WIDTH, PlotLayout.GATE_RAMP_HEIGHT, PlotLayout.GATE_RAMP_LENGTH),
+		CFrame = PartKit.At(origin, Vector3.new(0, 0, half + PlotLayout.GATE_RAMP_LENGTH / 2), -PlotLayout.GATE_RAMP_HEIGHT / 2)
+			* CFrame.Angles(0, math.pi, 0),
+		Color = World.Structure,
+		Parent = plot,
+	})
+
+	-- Spawn on the street in front of the gate; RespawnLocation picks it.
+	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)
+	if spawn then
+		spawn.Size = PlotLayout.SPAWN_SIZE
+		spawn.CFrame = PartKit.At(origin, PlotLayout.SPAWN_POSITION, PlotLayout.STREET_TOP_Y + PlotLayout.SPAWN_SIZE.Y / 2)
+		spawn.Transparency = 1
+		spawn.Anchored = true
+		for _, child in spawn:GetChildren() do
+			if child:IsA("Decal") then
+				child:Destroy()
+			end
+		end
+		player.RespawnLocation = spawn
+		local character = player.Character
+		if character then
+			character:PivotTo(spawn.CFrame + Vector3.new(0, spawn.Size.Y / 2 + 3, 0))
+		end
+	else
+		warn(("TycoonService: no SpawnLocation in %s's plot"):format(player.Name))
+	end
+end
+
+local function setWallStripsClaimed(plot: Model, claimed: boolean)
+	local walls = plot:FindFirstChild("Walls")
+	if not walls then
+		return
+	end
+	for _, strip in walls:GetChildren() do
+		if strip:IsA("BasePart") and strip:HasTag("FT_WallStrip") then
+			strip.Color = if claimed then World.AccentViolet else World.Unclaimed
 		end
 	end
-
-	if fixedCount == 0 then
-		warn(("TycoonService: no SpawnLocation found in %s's plot"):format(player.Name))
-	elseif fixedCount > 1 then
-		warn(("TycoonService: %d SpawnLocations found in %s's plot (expected 1) - all repositioned relative to PlotOrigin"):format(fixedCount, player.Name))
-	end
 end
 
--- Awards a Collector pickup's worth of cash and pushes an immediate balance sync.
+--[[ Stations ---------------------------------------------------------------------- ]]
+
+-- Phase 1 placeholder: a plain pad at the station spot (StationKit replaces it).
+local function buildStation(plot: Model, origin: CFrame, name: string, localPos: Vector3, accent: Color3, pad: BasePart?): BasePart
+	local s = PlotLayout.Station
+	local model = Instance.new("Model")
+	model.Name = name
+	local padPart = pad or Instance.new("Part")
+	padPart.Name = "Pad"
+	padPart.Shape = Enum.PartType.Cylinder
+	padPart.Size = Vector3.new(s.PadHeight, s.PadDiameter, s.PadDiameter)
+	padPart.CFrame = PartKit.At(origin, localPos, s.PadTopY - s.PadHeight / 2) * CFrame.Angles(0, 0, math.rad(90))
+	padPart.Material = Enum.Material.Neon
+	padPart.Color = accent
+	padPart.Anchored = true
+	padPart.Parent = model
+	model.PrimaryPart = padPart
+	model.Parent = plot
+	return padPart
+end
+
+--[[ Droppers + collector ------------------------------------------------------------- ]]
+
 local function awardCash(player: Player, amount: number)
 	if not PlayerDataService.IsDataLoaded(player) then
 		return
@@ -493,126 +394,62 @@ local function awardCash(player: Player, amount: number)
 	syncTycoon(player)
 end
 
--- Subtle always-on "idle" feedback for a producing dropper: a soft glow that
--- gently pulses. Deliberately doesn't bob the dropper's own Position/CFrame
--- (unlike PadStyler's floating accent orb) since spawnCashPart and the
--- Collector's forward-offset both read dropper.Position/CFrame live on every
--- drop - a decorative element gets the motion instead of the dropper itself.
--- Safe to call more than once (e.g. Dropper2 inherits Dropper1's elements via
--- Clone()): clears anything from a previous call first.
-local function applyDropperIdleVisuals(dropper: BasePart)
-	local existingElements = dropper:FindFirstChild("DropperIdleElements")
-	if existingElements then
-		existingElements:Destroy()
-	end
-	local existingLight = dropper:FindFirstChild("DropperIdleLight")
-	if existingLight then
-		existingLight:Destroy()
-	end
-
-	local elements = Instance.new("Folder")
-	elements.Name = "DropperIdleElements"
-	elements.Parent = dropper
-
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "DropperIdleHighlight"
-	highlight.FillTransparency = 1
-	highlight.OutlineColor = DROPPER_ACCENT_COLOR
-	highlight.OutlineTransparency = 0.3
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = elements
-
-	local light = Instance.new("PointLight")
-	light.Name = "DropperIdleLight"
-	light.Color = DROPPER_ACCENT_COLOR
-	light.Brightness = DROPPER_IDLE_LIGHT_BRIGHTNESS
-	light.Range = DROPPER_IDLE_LIGHT_RANGE
-	light.Parent = dropper
-
-	TweenService:Create(
-		highlight,
-		TweenInfo.new(DROPPER_IDLE_PULSE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ OutlineTransparency = 0.85 }
-	):Play()
+-- Phase 1 placeholder body: the dropper's 4x6x4 column at its plan spot.
+local function placeDropperBody(body: BasePart, origin: CFrame, localPos: Vector3)
+	local size = PlotLayout.Dropper.BodySize
+	body.Size = size
+	body.CFrame = PartKit.At(origin, localPos, size.Y / 2)
+	body.Material = Enum.Material.SmoothPlastic
+	body.Color = World.Structure
+	body.Anchored = true
 end
 
--- Brief "pop" the moment a dropper ejects a cash item: a small particle
--- burst plus a one-shot sound, scaled mildly by the current cash multiplier
--- (see DROPPER_POP_SCALE_CAP) so bigger payouts feel a little bigger too -
--- purely cosmetic, doesn't touch the cash value itself.
-local function playDropperPopEffect(dropper: BasePart, multiplier: number)
-	local scale = math.min(multiplier, DROPPER_POP_SCALE_CAP)
-
-	local burst = SparkleEmitter.Create({ Color = DROPPER_ACCENT_COLOR })
-	burst.Enabled = false
-	burst.Parent = dropper
-	burst:Emit(math.floor(DROPPER_POP_PARTICLE_BASE_COUNT * scale))
-	Debris:AddItem(burst, 2)
-
-	local sound = Instance.new("Sound")
-	sound.SoundId = DROPPER_POP_SOUND_ID
-	sound.Volume = 0.35
-	sound.PlaybackSpeed = 1 + math.min((scale - 1) * 0.05, 0.3)
-	sound.Parent = dropper
-	sound:Play()
-	Debris:AddItem(sound, 2)
-end
-
--- Spawns an unanchored, collidable cash part above Dropper1 so it physically
--- falls; collection happens on contact with the plot's Collector pad, not by
--- the player touching the falling part directly. Its value is scaled by the
--- player's current Multiplier Pad level at spawn time, so items already in
--- flight aren't retroactively changed by a purchase made after they dropped.
-local function spawnCashPart(plot: Model, dropper: BasePart, player: Player)
+local function spawnCashPart(plot: Model, origin: CFrame, body: BasePart, player: Player)
 	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
-	playDropperPopEffect(dropper, multiplier)
+	playSound(body, DROPPER_POP_SOUND_ID, 0.35)
 
-	local cashPart = Instance.new("Part")
-	cashPart.Name = "CashDrop"
-	cashPart.Shape = Enum.PartType.Ball
-	cashPart.Size = Vector3.new(1.5, 1.5, 1.5)
-	cashPart.Color = Color3.fromRGB(85, 255, 127)
-	cashPart.Material = Enum.Material.Neon
+	local d = PlotLayout.Dropper
+	local cashPart = PartKit.Part({
+		Name = "CashDrop",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * d.BallDiameter,
+		CFrame = body.CFrame * CFrame.new(d.BodySize.X / 2 + d.BallDiameter / 2, d.SpoutY - d.BodySize.Y / 2, 0),
+		Color = World.AccentGreen,
+		Material = Enum.Material.Neon,
+		Parent = plot,
+	})
 	cashPart.Anchored = false
-	cashPart.CanCollide = true
 	cashPart.CollisionGroup = CASH_COLLISION_GROUP
-	cashPart.Position = dropper.Position + Vector3.new(0, dropper.Size.Y / 2 + 1, 0)
 	cashPart:SetAttribute("CashValue", TycoonConfig.DropperCashValue * multiplier)
-	cashPart.Parent = plot
-
-	-- Nudge it toward the Collector so it rolls across the floor as it falls,
-	-- instead of dropping straight down and landing wherever it spawned.
-	cashPart.AssemblyLinearVelocity = dropper.CFrame.LookVector * CASH_DROP_FORWARD_SPEED_STUDS_PER_SECOND
-
-	-- Safety net in case a part rolls astray and never reaches the Collector.
+	-- Out of the spout toward the collector (plot +X).
+	cashPart.AssemblyLinearVelocity = origin.RightVector * CASH_DROP_SPEED_STUDS_PER_SECOND
 	Debris:AddItem(cashPart, CASH_DROP_DEBRIS_LIFETIME_SECONDS)
 end
 
--- Creates the Collector pad on the plot's Floor, offset in front of Dropper1,
--- and wires it to credit the plot owner whenever a cash part lands on it.
-local function createCollector(plot: Model, dropper: BasePart, player: Player): BasePart
-	local floor = getFloorPart(plot)
-	local floorTopY = getFloorTopY(floor)
-	if floor then
-		floor.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
-	end
+local function startDropperLoop(plot: Model, origin: CFrame, player: Player, body: BasePart)
+	task.spawn(function()
+		while plot.Parent and body.Parent do
+			task.wait(TycoonConfig.DropperIntervalSeconds)
+			if not plot.Parent or not body.Parent then
+				break
+			end
+			spawnCashPart(plot, origin, body, player)
+		end
+	end)
+end
 
-	-- Offset along the Floor's facing direction (not the dropper's own
-	-- rotation): cash spawns above the dropper and lands on open floor first,
-	-- then travels to the Collector rather than dropping straight onto it.
-	local forward = if floor then floor.CFrame.LookVector else dropper.CFrame.LookVector
-	local collectorTarget = dropper.Position + forward * COLLECTOR_FORWARD_OFFSET_STUDS
-
-	local collector = Instance.new("Part")
-	collector.Name = "Collector"
-	collector.Size = Vector3.new(6, 1, 6)
-	collector.Anchored = true
-	collector.CanCollide = true
+-- One gold strip both droppers' balls roll onto.
+local function createCollector(plot: Model, origin: CFrame, player: Player)
+	local size = PlotLayout.COLLECTOR_SIZE
+	local collector = PartKit.Part({
+		Name = "Collector",
+		Size = size,
+		CFrame = PartKit.At(origin, PlotLayout.COLLECTOR, PlotLayout.COLLECTOR_TOP_Y - size.Y / 2),
+		Color = World.AccentGold,
+		Material = Enum.Material.Neon,
+		Parent = plot,
+	})
 	collector.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
-	collector.Material = Enum.Material.Neon
-	collector.Color = Color3.fromRGB(255, 215, 0)
-	collector.Position = Vector3.new(collectorTarget.X, floorTopY + collector.Size.Y / 2, collectorTarget.Z)
-	collector.Parent = plot
 
 	collector.Touched:Connect(function(hit: BasePart)
 		if hit.Parent == nil or hit:GetAttribute("Collected") then
@@ -622,121 +459,63 @@ local function createCollector(plot: Model, dropper: BasePart, player: Player): 
 		if not value then
 			return
 		end
-
 		hit:SetAttribute("Collected", true)
+		local popPosition = Vector3.new(hit.Position.X, collector.Position.Y + size.Y / 2 + 1, hit.Position.Z)
 		hit:Destroy()
 		awardCash(player, value)
-		RemoteEvents.CashCollected:FireClient(player, {
-			Amount = value,
-			Position = collector.Position + Vector3.new(0, collector.Size.Y / 2 + 1, 0),
-		})
-	end)
-
-	return collector
-end
-
--- Self-terminating: the loop exits once the plot is destroyed (Parent becomes nil).
--- `dropper` must already be resolved by the caller, since this is shared by
--- both Dropper1 (found in the template) and Dropper2 (spawned on purchase).
-local function startDropperLoop(plot: Model, player: Player, dropper: BasePart, _dropperLabel: string)
-	applyDropperIdleVisuals(dropper)
-	createCollector(plot, dropper, player)
-
-	task.spawn(function()
-		while plot.Parent do
-			task.wait(TycoonConfig.DropperIntervalSeconds)
-			if not plot.Parent then
-				break
-			end
-			spawnCashPart(plot, dropper, player)
-		end
+		RemoteEvents.CashCollected:FireClient(player, { Amount = value, Position = popPosition })
 	end)
 end
 
--- Clones Dropper1's appearance to build Dropper2, positioned as an offset
--- from PlotOrigin (see resolvePlotOrigin) rather than relative to Dropper1's
--- own CFrame, then starts it producing cash the same way.
-local function spawnDropper2(plot: Model, player: Player, referenceDropper: BasePart)
-	local originCFrame, originY = resolvePlotOrigin(plot, referenceDropper, player)
-	local worldPosition = originCFrame:PointToWorldSpace(Vector3.new(DROPPER2_SIDE_OFFSET_STUDS, 0, 0))
-
-	local dropper2 = referenceDropper:Clone()
-	dropper2.Name = "Dropper2"
-	dropper2.Anchored = true
-	-- Keep Dropper1's own facing (so cash-fling direction and the Collector's
-	-- forward offset behave identically), just relocated via PlotOrigin.
-	dropper2.CFrame = CFrame.new(worldPosition) * referenceDropper.CFrame.Rotation
-	-- Explicit styling rather than whatever Dropper2 would otherwise inherit
-	-- from cloning Dropper1. Neon (not Metal - see the comment on
-	-- connectClaimButton for why Metal reads dark regardless of Color3)
-	-- guarantees the accent color actually shows up under this game's lighting.
-	dropper2.Material = Enum.Material.Neon
-	dropper2.Color = DROPPER_ACCENT_COLOR
-	dropper2.Parent = plot
-	snapToFloorY(dropper2, originY)
-
-	startDropperLoop(plot, player, dropper2, "Dropper2")
+local function spawnDropper2(plot: Model, origin: CFrame, player: Player, template: BasePart)
+	local body = template:Clone()
+	body.Name = "Dropper2"
+	for _, child in body:GetChildren() do
+		child:Destroy()
+	end
+	placeDropperBody(body, origin, PlotLayout.DROPPER2)
+	body.Parent = plot
+	startDropperLoop(plot, origin, player, body)
 end
 
--- Spawns a purchase button (at the spot Dropper2 will occupy) that, once
--- bought by the plot owner, deducts DROPPER2_COST and spawns Dropper2.
--- Positioned as an offset from PlotOrigin (see resolvePlotOrigin) so buttons
--- line up neatly in a row regardless of Floor's own size/rotation, even as
--- more are added in the future.
-local function createPurchaseButton(plot: Model, player: Player, dropper1: BasePart)
-	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
-	local buttonWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(DROPPER2_SIDE_OFFSET_STUDS, 0, 0))
-
-	local button = Instance.new("Part")
-	button.Name = "BuyDropper2Button"
-	button.Size = Vector3.new(4, 1, 4)
-	button.Anchored = true
-	button.CanCollide = true
-	button.Position = Vector3.new(buttonWorldPosition.X, originY + button.Size.Y / 2, buttonWorldPosition.Z)
-	button.Parent = plot
-	PadStyler.Apply(button, { AccentColor = Color3.fromRGB(60, 160, 255) })
-
-	BillboardKit.Pad(button, {
+local function createDropper2Station(plot: Model, origin: CFrame, player: Player, dropper1: BasePart)
+	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen)
+	local cost = TycoonConfig.Dropper2Cost
+	BillboardKit.Pad(pad, {
 		Name = "Dropper2Label",
 		Title = "DROPPER 2",
 		TitleColor = UITheme.Colors.DropperTitle,
-		Pill = NumberFormat.Money(DROPPER2_COST),
+		Pill = NumberFormat.Money(cost),
 		PillGradient = UITheme.Gradients.Green,
 		Detail = "Doubles your drops",
-		StudsOffset = Vector3.new(0, 3, 0),
+		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
+	local prompt = newPrompt(pad, "BuyPrompt", ("Buy (%s)"):format(NumberFormat.Money(cost)), "Dropper 2", PlotLayout.Station.PromptDistance)
 
 	local purchased = false
-	local connection: RBXScriptConnection
-	connection = button.Touched:Connect(function(hit: BasePart)
-		if purchased then
+	prompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if purchased or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
-		local toucher = getTouchingPlayer(hit)
-		if not toucher or toucher.UserId ~= player.UserId then
+		if not PlayerDataService.SpendCash(player, cost) then
 			return
 		end
-
-		if not PlayerDataService.SpendCash(player, DROPPER2_COST) then
-			return
-		end
-
 		purchased = true
-		connection:Disconnect()
 		PlayerDataService.SetHasDropper2(player, true)
 		syncTycoon(player)
-		button:Destroy()
-
-		spawnDropper2(plot, player, dropper1)
+		local station = pad.Parent
+		if station then
+			station:Destroy()
+		end
+		spawnDropper2(plot, origin, player, dropper1)
 	end)
 end
 
--- Gacha Pad: rolls a tier from FusionConfig.GachaRates, then a random item
--- of that tier. The pull price rises with every pull.
+--[[ Gacha station ------------------------------------------------------------------ ]]
+
 local gachaRng = Random.new()
 
--- "Common 78% · Rare 18% · Epic 3.5%": the most likely tiers, straight from
--- FusionConfig.GachaRates so the label can never disagree with the roll.
+-- "Common 78% · Rare 18% · Epic 3.5%", straight from FusionConfig.GachaRates.
 local function formatPercent(rate: number): string
 	local percent = rate * 100
 	if math.abs(percent - math.floor(percent + 0.5)) < 1e-6 then
@@ -758,20 +537,8 @@ local function getGachaRatesText(): string
 	return table.concat(parts, " · ")
 end
 
-local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
-	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
-	local rowOffset = PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS
-	local padWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(rowOffset, 0, 0))
-
-	local pad = Instance.new("Part")
-	pad.Name = "GachaPad"
-	pad.Size = Vector3.new(PlotLayout.GACHA_PAD_SIZE_X_STUDS, 1, PlotLayout.GACHA_PAD_SIZE_X_STUDS)
-	pad.Anchored = true
-	pad.CanCollide = true
-	pad.Position = Vector3.new(padWorldPosition.X, originY + pad.Size.Y / 2, padWorldPosition.Z)
-	pad.Parent = plot
-	PadStyler.Apply(pad, { AccentColor = GACHA_PAD_ACCENT_COLOR })
-
+local function createGachaStation(plot: Model, origin: CFrame, player: Player)
+	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold)
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "GachaLabel",
 		Title = "GACHA",
@@ -781,38 +548,21 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 		PillTextColor = UITheme.Colors.GoldText,
 		PillTextStroke = false,
 		Detail = getGachaRatesText(),
-		StudsOffset = Vector3.new(0, 3.5, 0),
+		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
+	-- E-to-pull, never Touched: walking across the pad must not spend cash.
+	local prompt = newPrompt(pad, "PullPrompt", "Pull", "Gacha Pad", PlotLayout.Station.PromptDistance)
 
-
-	-- Prompt-gated rather than Touched-triggered: walking onto the pad no
-	-- longer spends cash on its own, only an explicit key press does - the
-	-- same "E to ..." pattern already used by pedestals and the Fusion
-	-- Machine, and it stops a player from being charged repeatedly just for
-	-- standing on or walking through the pad.
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "PullPrompt"
-	prompt.ObjectText = "Gacha Pad"
-	prompt.MaxActivationDistance = GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE
-	prompt.HoldDuration = 0
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = pad
-
-	-- The price rises with every pull (TycoonConfig.GetGachaPullCost), so the
-	-- label and prompt are refreshed after each one.
-	local function refreshGachaLabel()
+	local function refreshLabel()
 		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
 		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
 		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
 	end
-	refreshGachaLabel()
+	refreshLabel()
 
 	local debounce = false
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if debounce then
-			return
-		end
-		if triggeringPlayer.UserId ~= player.UserId then
+		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
 
@@ -834,141 +584,66 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 		debounce = true
 		PlayerDataService.IncrementGachaPulls(player)
 		syncTycoon(player)
-		refreshGachaLabel()
+		refreshLabel()
 
 		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
-		-- World-visible VFX/sound at the pad, tinted to the rolled tier's own
-		-- accent color so a Mythic pull visibly reads as rarer than a Common one.
-		local tierColor = FusionConfig.TierAccentColors[resultTier] or GACHA_PAD_ACCENT_COLOR
-		local burst = SparkleEmitter.Create({ Color = tierColor })
-		burst.Enabled = false
-		burst.Parent = pad
-		burst:Emit(30)
-		Debris:AddItem(burst, 3)
-
-		-- Same MajorRevealTiers flag that drives the Fusion Machine's own
-		-- major reveal (see RevealEffects.lua) - a Legendary/Mythic pull gets
-		-- the same Explosion piece, scaled/timed the same way, so both major
-		-- reveal moments in the game carry equivalent weight.
+		burst(pad, FusionConfig.TierAccentColors[resultTier] or World.AccentGold, BURST_COUNT)
 		if explosionEffectTemplate and FusionConfig.MajorRevealTiers[resultTier] then
 			ImportedEffects.Play(explosionEffectTemplate, pad.CFrame, plot, {
 				Scale = GACHA_MAJOR_EXPLOSION_SCALE,
 				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
 			})
 		end
+		playSound(pad, STATION_SOUND_ID, 0.8)
 
-		local sound = Instance.new("Sound")
-		sound.SoundId = GACHA_PULL_SOUND_ID
-		sound.Volume = 0.8
-		sound.Parent = pad
-		sound:Play()
-		Debris:AddItem(sound, 3)
+		RemoteEvents.GachaPullResult:FireClient(player, { Success = true, NewItem = newEntry })
 
-		RemoteEvents.GachaPullResult:FireClient(player, {
-			Success = true,
-			NewItem = newEntry,
-		})
-
-		task.wait(GACHA_PAD_DEBOUNCE_SECONDS)
+		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
 	end)
 end
 
--- Multiplier Pad: each purchase moves the owner to the next of 10 fixed
--- levels (TycoonConfig.CashMultiplierLevels). The multiplier applies to all
--- income. The pad stays after buying; its label shows current -> next.
-local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePart)
-	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
-	local rowOffset = MULTIPLIER_PAD_ROW_OFFSET_STUDS
+--[[ Multiplier station --------------------------------------------------------------- ]]
 
-	-- ClaimButton's actual position isn't known until the plot is live (it
-	-- comes from the template), so its clearance is checked here rather than
-	-- assumed: if the pad's usual spot would land on top of it, push the pad
-	-- further along the row instead.
-	local claimButton = plot:FindFirstChild("ClaimButton", true)
-	if claimButton and claimButton:IsA("BasePart") then
-		local candidatePosition = originCFrame:PointToWorldSpace(Vector3.new(rowOffset, 0, 0))
-		local horizontalClearance =
-			Vector2.new(candidatePosition.X - claimButton.Position.X, candidatePosition.Z - claimButton.Position.Z).Magnitude
-		if horizontalClearance < MULTIPLIER_PAD_MIN_CLAIM_BUTTON_CLEARANCE_STUDS then
-			local needed = rowOffset + (MULTIPLIER_PAD_MIN_CLAIM_BUTTON_CLEARANCE_STUDS - horizontalClearance) + 4
-			rowOffset = math.min(needed, MULTIPLIER_PAD_MAX_ROW_OFFSET_STUDS)
-			warn((
-				"TycoonService: Multiplier Pad's usual spot was too close to ClaimButton in %s's plot "
-					.. "(%.1f studs, wanted >= %d) - shifted to +%d along the row instead."
-			):format(player.Name, horizontalClearance, MULTIPLIER_PAD_MIN_CLAIM_BUTTON_CLEARANCE_STUDS, rowOffset))
-		end
-	end
-
-	local padWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(rowOffset, 0, 0))
-
-	local pad = Instance.new("Part")
-	pad.Name = "MultiplierPad"
-	pad.Size = Vector3.new(4, 1, 4)
-	pad.Anchored = true
-	pad.CanCollide = true
-	pad.Position = Vector3.new(padWorldPosition.X, originY + pad.Size.Y / 2, padWorldPosition.Z)
-	pad.Parent = plot
-	PadStyler.Apply(pad, { AccentColor = Color3.fromRGB(200, 60, 255) })
-
+local function createMultiplierStation(plot: Model, origin: CFrame, player: Player)
+	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet)
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "MultiplierLabel",
 		Title = "MULTIPLIER",
 		TitleColor = UITheme.Colors.VioletLight,
 		Pill = "",
 		PillGradient = UITheme.Gradients.Violet,
-		StudsOffset = Vector3.new(0, 3.5, 0),
+		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
+	local prompt = newPrompt(pad, "UpgradePrompt", "Upgrade", "Cash Multiplier", PlotLayout.Station.PromptDistance)
 
 	local function refreshLabel()
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
-		local currentMultiplier = TycoonConfig.GetCashMultiplierValue(level)
-
+		local current = TycoonConfig.GetCashMultiplierValue(level)
 		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
-			padLabel.SetPill(("%s MAX"):format(NumberFormat.Multiplier(currentMultiplier)))
+			padLabel.SetPill(("%s MAX"):format(NumberFormat.Multiplier(current)))
 			padLabel.SetDetail(nil)
-			return
-		end
-
-		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
-		local nextMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
-		padLabel.SetPill(("%s → %s"):format(
-			NumberFormat.Multiplier(currentMultiplier),
-			NumberFormat.Multiplier(nextMultiplier)
-		))
-		padLabel.SetDetail(("%s · press E"):format(NumberFormat.Money(cost)))
-	end
-
-	refreshLabel()
-
-	-- E-to-buy, same as the Gacha Pad. It used to buy on Touched, so just
-	-- standing on the pad (or walking across it) spent cash every second.
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = "UpgradePrompt"
-	prompt.ActionText = "Upgrade"
-	prompt.ObjectText = "Cash Multiplier"
-	prompt.MaxActivationDistance = GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE
-	prompt.HoldDuration = 0
-	prompt.RequiresLineOfSight = false
-	prompt.Parent = pad
-
-	local debounce = false
-	prompt.Triggered:Connect(function(toucher: Player)
-		if debounce then
-			return
-		end
-		if toucher.UserId ~= player.UserId then
-			return
-		end
-
-		local level = PlayerDataService.GetCashMultiplierLevel(player)
-		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
 			prompt.Enabled = false
 			return
 		end
+		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
+		local nextValue = TycoonConfig.GetCashMultiplierValue(level + 1)
+		padLabel.SetPill(("%s → %s"):format(NumberFormat.Multiplier(current), NumberFormat.Multiplier(nextValue)))
+		padLabel.SetDetail(("%s · press E"):format(NumberFormat.Money(cost)))
+	end
+	refreshLabel()
 
+	local debounce = false
+	prompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if debounce or triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+		local level = PlayerDataService.GetCashMultiplierLevel(player)
+		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
+			return
+		end
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		if not PlayerDataService.SpendCash(player, cost) then
 			return
@@ -977,109 +652,62 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 		debounce = true
 		local oldMultiplier = TycoonConfig.GetCashMultiplierValue(level)
 		local newMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
-
 		PlayerDataService.SetCashMultiplierLevel(player, level + 1)
 		syncTycoon(player)
 		refreshLabel()
 		-- Pedestal labels show income with the multiplier applied.
 		TycoonService.RefreshPedestalLabels(player)
 
-		-- World-visible VFX/sound at the pad, plus a personal screen popup for
-		-- the buyer - pure feedback, no effect on the multiplier/cash logic above.
-		local burst = SparkleEmitter.Create({ Color = MULTIPLIER_UPGRADE_ACCENT_COLOR })
-		burst.Enabled = false
-		burst.Parent = pad
-		burst:Emit(MULTIPLIER_UPGRADE_BURST_COUNT)
-		Debris:AddItem(burst, 3)
-
-		-- The dedicated "LevelingUp" piece extracted from the user-supplied
-		-- VFX pack - this moment previously had nothing beyond the sparkle
-		-- burst above and the personal popup.
+		burst(pad, World.AccentViolet, BURST_COUNT)
 		if levelingUpEffectTemplate then
-			ImportedEffects.Play(
-				levelingUpEffectTemplate,
-				CFrame.new(pad.Position + Vector3.new(0, pad.Size.Y / 2, 0)),
-				plot
-			)
+			ImportedEffects.Play(levelingUpEffectTemplate, pad.CFrame, plot)
 		end
+		playSound(pad, STATION_SOUND_ID, 0.8)
 
-		local sound = Instance.new("Sound")
-		sound.SoundId = MULTIPLIER_UPGRADE_SOUND_ID
-		sound.Volume = 0.8
-		sound.Parent = pad
-		sound:Play()
-		Debris:AddItem(sound, 3)
+		RemoteEvents.MultiplierUpgraded:FireClient(player, { OldMultiplier = oldMultiplier, NewMultiplier = newMultiplier })
 
-		RemoteEvents.MultiplierUpgraded:FireClient(player, {
-			OldMultiplier = oldMultiplier,
-			NewMultiplier = newMultiplier,
-		})
-
-		task.wait(MULTIPLIER_PAD_DEBOUNCE_SECONDS)
+		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
 	end)
 end
 
--- Builds the plot's row of empty Pedestal Showcase slots (named "Pedestal1"
--- through "PedestalN" inside a "Pedestals" folder, so ItemService can look
--- one up by index without needing to know anything about plot layout).
--- Pedestals start bare; PedestalVisuals.Apply gives them tier-specific
--- styling once ItemService places an item on one.
-local function createPedestals(plot: Model, player: Player, dropper1: BasePart)
-	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
+--[[ Pedestals ------------------------------------------------------------------------ ]]
 
-	local pedestalsFolder = Instance.new("Folder")
-	pedestalsFolder.Name = "Pedestals"
-	pedestalsFolder.Parent = plot
+-- "Pedestal1".."PedestalN" inside a "Pedestals" folder, so ItemService can
+-- look one up by index. PedestalVisuals styles them once an item is placed.
+local function createPedestals(plot: Model, origin: CFrame)
+	local folder = Instance.new("Folder")
+	folder.Name = "Pedestals"
+	folder.Parent = plot
 
-	for index = 1, PEDESTAL_COUNT do
-		-- Fixed local X, stepping further into -Z per pedestal - a line
-		-- receding away from the main row's own Z = 0 walkway instead of
-		-- sitting inline with it.
-		local localZ = PEDESTAL_SHOWCASE_Z_OFFSET_STUDS - (index - 1) * PEDESTAL_SPACING_STUDS
-		local targetWorldPosition = originCFrame:PointToWorldSpace(Vector3.new(PEDESTAL_SHOWCASE_X_OFFSET_STUDS, 0, localZ))
-
-		local pedestal = Instance.new("Part")
-		pedestal.Name = "Pedestal" .. index
-		pedestal.Size = PEDESTAL_SIZE
-		pedestal.Anchored = true
-		pedestal.CanCollide = true
-		pedestal.Material = Enum.Material.Slate
-		pedestal.Color = Color3.fromRGB(40, 40, 46)
-		pedestal.Position = Vector3.new(targetWorldPosition.X, originY + PEDESTAL_SIZE.Y / 2, targetWorldPosition.Z)
+	local p = PlotLayout.Pedestal
+	for index = 1, PlotLayout.PEDESTAL_COUNT do
+		local pedestal = PartKit.Part({
+			Name = "Pedestal" .. index,
+			Size = p.ColumnSize,
+			CFrame = PartKit.At(origin, PlotLayout.GetPedestalPosition(index), p.ColumnSize.Y / 2),
+			Color = World.Structure,
+			Parent = folder,
+		})
 		pedestal:SetAttribute("BaseSize", pedestal.Size)
 		pedestal:SetAttribute("PedestalIndex", index)
-		pedestal.Parent = pedestalsFolder
 
-		local prompt = Instance.new("ProximityPrompt")
-		prompt.Name = "DisplayPrompt"
-		prompt.ActionText = "Display"
-		prompt.ObjectText = ("Pedestal %d"):format(index)
-		prompt.MaxActivationDistance = PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE
-		prompt.HoldDuration = 0
-		prompt.RequiresLineOfSight = false
-		-- Left disabled until the client confirms the local player has a
-		-- displayable item and this specific pedestal is still empty.
+		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
+		-- Enabled by the owner's client once they have something to display.
 		prompt.Enabled = false
-		prompt.Parent = pedestal
 
-		-- Starts as the owner-only "EMPTY" label; ItemService swaps in the
-		-- filled label on place/restore.
 		BillboardKit.SetPedestalLabel(pedestal, nil)
 	end
-
 end
 
--- Re-applies saved pedestal displays when a returning player claims their
--- plot. Before this, displayed items kept earning after a rejoin but the
--- pedestals looked empty, so players thought their Mythic was gone.
+-- Re-applies saved displays when a returning player claims their plot.
 local function restoreSavedPedestals(plot: Model, player: Player)
-	local pedestalsFolder = plot:FindFirstChild("Pedestals")
-	if not pedestalsFolder then
+	local folder = plot:FindFirstChild("Pedestals")
+	if not folder then
 		return
 	end
 	for pedestalIndex, uid in PlayerDataService.GetPedestalDisplays(player) do
-		local pedestal = pedestalsFolder:FindFirstChild("Pedestal" .. pedestalIndex)
+		local pedestal = folder:FindFirstChild("Pedestal" .. pedestalIndex)
 		local item = uid and PlayerDataService.GetItemByUid(player, uid)
 		if pedestal and pedestal:IsA("BasePart") and item then
 			PedestalVisuals.Apply(pedestal, item.Tier)
@@ -1090,64 +718,29 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 	end
 end
 
--- Builds the "claim pod" riser beneath ClaimButton: a short, slightly wider
--- PadStyler-accented base so the whole thing reads as a small kiosk/pod
--- rather than a flat button sitting directly on the ground. Purely
--- decorative - positioned from ClaimButton's own live Position/Size, but
--- never modifies ClaimButton itself, so its Touched-based claim trigger is
--- completely unaffected.
--- Returns the floating accent orb PadStyler.Apply creates, so the caller can
--- remove just that piece once the plot is claimed - the orb's floating/
--- bobbing/pulsing/sparkle treatment reads as "still active, come look,"
--- which should stop once claiming is done, even though the riser's dark
--- base and steady glow are meant to stay as permanent plot furniture.
-local function createClaimPodRiser(plot: Model, claimButton: BasePart): BasePart?
-	local riser = Instance.new("Part")
-	riser.Name = "ClaimPodRiser"
-	riser.Size = Vector3.new(
-		claimButton.Size.X + CLAIM_POD_RISER_MARGIN_STUDS * 2,
-		CLAIM_POD_RISER_HEIGHT_STUDS,
-		claimButton.Size.Z + CLAIM_POD_RISER_MARGIN_STUDS * 2
-	)
-	riser.Anchored = true
-	riser.CanCollide = true
-	-- Its top sits right at ClaimButton's own bottom (so the button reads as
-	-- the surface on top of the riser), extending straight down from there.
-	riser.Position = Vector3.new(
-		claimButton.Position.X,
-		claimButton.Position.Y - claimButton.Size.Y / 2 - CLAIM_POD_RISER_HEIGHT_STUDS / 2,
-		claimButton.Position.Z
-	)
-	riser.Parent = plot
+--[[ Public ---------------------------------------------------------------------------- ]]
 
-	local styleElements = PadStyler.Apply(riser, { AccentColor = CLAIM_BUTTON_COLOR })
-	local orb = styleElements.Orb
-	return if orb and orb:IsA("BasePart") then orb :: BasePart else nil
-end
-
--- Returns `player`'s plot Model, or nil if they don't have one (not yet
--- joined this session, or already left). Used by ItemService to resolve a
--- pedestal request without ever trusting a client-supplied plot reference.
+-- `player`'s plot Model, or nil. Lets ItemService resolve pedestals without
+-- trusting a client-supplied plot.
 function TycoonService.GetPlotForPlayer(player: Player): Model?
 	return plotByUserId[player.UserId]
 end
 
--- Re-labels every pedestal on `player`'s plot: the filled label (item, tier,
--- income with the owner's multiplier) where something is displayed, the
--- owner-only EMPTY label elsewhere. ItemService calls this on place/remove;
--- this service calls it after restoring saved displays on claim and after a
--- multiplier purchase. Lives here (not ItemService) so the two services
--- don't reference each other.
+-- Re-labels every pedestal on `player`'s plot: the filled label where
+-- something is displayed, the owner-only EMPTY label elsewhere. ItemService
+-- calls this on place/remove; this service after restoring on claim and after
+-- a multiplier purchase. Lives here so the two services don't reference each
+-- other.
 function TycoonService.RefreshPedestalLabels(player: Player)
 	local plot = plotByUserId[player.UserId]
-	local pedestalsFolder = plot and plot:FindFirstChild("Pedestals")
-	if not pedestalsFolder then
+	local folder = plot and plot:FindFirstChild("Pedestals")
+	if not folder then
 		return
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
 	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
-	for index = 1, PEDESTAL_COUNT do
-		local pedestal = pedestalsFolder:FindFirstChild("Pedestal" .. index)
+	for index = 1, PlotLayout.PEDESTAL_COUNT do
+		local pedestal = folder:FindFirstChild("Pedestal" .. index)
 		if pedestal and pedestal:IsA("BasePart") then
 			local uid = displays[index]
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
@@ -1165,67 +758,42 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 	end
 end
 
-local function connectClaimButton(plot: Model, player: Player)
-	-- Recursive lookup: ClaimButton may be nested under an organizational group/folder.
-	local claimButton = plot:FindFirstChild("ClaimButton", true)
-	if not claimButton or not claimButton:IsA("BasePart") then
-		warn(("TycoonService: ClaimButton missing or not a BasePart in %s's plot"):format(player.Name))
+--[[ Claim ------------------------------------------------------------------------------ ]]
+
+local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
+	local claimButton = findPart(plot, "ClaimButton")
+	if not claimButton then
+		warn(("TycoonService: ClaimButton missing in %s's plot"):format(player.Name))
 		return
 	end
-
-	local buttonPart = claimButton :: BasePart
-
-	-- Touched only fires while CanTouch is true; force it in case the template disabled it.
-	buttonPart.CanTouch = true
-
-	buttonPart.Material = Enum.Material.Neon
-	buttonPart.Color = CLAIM_BUTTON_COLOR
-	local claimPodOrb = createClaimPodRiser(plot, buttonPart)
+	-- ClaimButton becomes the claim station's Pad.
+	local pad = buildStation(plot, origin, "ClaimStation", PlotLayout.CLAIM_STATION, World.AccentGreen, claimButton)
+	pad.CanTouch = true
 
 	-- Owner-only: other players' clients disable it (WorldLabelController).
-	local claimLabel = BillboardKit.Pad(buttonPart, {
+	local claimLabel = BillboardKit.Pad(pad, {
 		Name = "ClaimLabel",
 		Title = "CLAIM",
 		TitleColor = UITheme.Colors.Text,
 		Pill = "STEP HERE",
 		PillGradient = UITheme.Gradients.Green,
 		Detail = ("This base is yours, %s"):format(player.DisplayName),
-		StudsOffset = Vector3.new(0, 3.5, 0),
+		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 		OwnerOnly = true,
 	})
 
 	local connection: RBXScriptConnection
-	connection = buttonPart.Touched:Connect(function(hit: BasePart)
+	connection = pad.Touched:Connect(function(hit: BasePart)
 		local toucher = getTouchingPlayer(hit)
-		if not toucher then
+		if not toucher or toucher.UserId ~= player.UserId or plot:GetAttribute("Claimed") then
 			return
 		end
-		if toucher.UserId ~= player.UserId then
-			return
-		end
-		if plot:GetAttribute("Claimed") then
-			return
-		end
-
 		plot:SetAttribute("Claimed", true)
 		connection:Disconnect()
-
-		-- Retire the button visually/physically now that it's served its purpose.
 		claimLabel.Gui:Destroy()
-		buttonPart.Transparency = 1
-		buttonPart.CanCollide = false
-		buttonPart.CanTouch = false
+		setWallStripsClaimed(plot, true)
 
-		-- The claim pod's riser (dark base + steady glow) stays as permanent
-		-- plot furniture, but its floating/bobbing/pulsing accent orb reads
-		-- as "still active, come look" - that part should stop once the
-		-- plot is actually claimed.
-		if claimPodOrb then
-			claimPodOrb:Destroy()
-		end
-
-		-- Saved state (Dropper2, pedestals) is restored below, so wait for
-		-- the profile if the DataStore is being slow.
+		-- Saved state (Dropper 2, pedestals) is restored below.
 		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
 			task.wait(0.25)
 		end
@@ -1233,128 +801,29 @@ local function connectClaimButton(plot: Model, player: Player)
 			return
 		end
 
-		-- Recursive lookup: Dropper1 may be nested under an organizational group/folder.
-		local dropper1 = plot:FindFirstChild("Dropper1", true)
-		if not dropper1 or not dropper1:IsA("BasePart") then
-			warn(("TycoonService: Dropper1 missing or not a BasePart in %s's plot"):format(player.Name))
+		local dropper1 = findPart(plot, "Dropper1")
+		if not dropper1 then
+			warn(("TycoonService: Dropper1 missing in %s's plot"):format(player.Name))
 			return
 		end
 
-		local dropper1Part = dropper1 :: BasePart
-		dropper1Part.Anchored = true
-		-- The template's own Dropper1 comes in as a default Part (Plastic,
-		-- default gray) - confirmed directly from TycoonTemplate.rbxm's
-		-- Material/Color3uint8 values, not a guess. Under this game's darker
-		-- lighting that reads as an unstyled black cube. Neon (not Metal,
-		-- which renders based on specular reflection off the environment and
-		-- can look dark/muted under diffuse lighting regardless of its
-		-- Color3 - confirmed as the actual cause after testing, same class
-		-- of issue as the original ClaimButton visibility fix) guarantees
-		-- the accent color always reads at full brightness. Styled to match
-		-- Dropper2 (which already gets this explicitly since it's a part
-		-- this service spawns outright) so both droppers read as the same
-		-- machine rather than one styled and one default-gray.
-		dropper1Part.Material = Enum.Material.Neon
-		dropper1Part.Color = DROPPER_ACCENT_COLOR
-		-- Dropper1's rotation (and everything about how it produces cash) is
-		-- untouched template/gameplay logic, but its X/Z/height are now placed
-		-- directly at PlotOrigin (offset zero) - the same reference point the
-		-- buy button (+12), Multiplier Pad (+24), Gacha Pad (+52), and the
-		-- Pedestal Showcase already measure their own offsets from. Dropper1
-		-- was the one part
-		-- still left on its old template position while everything else
-		-- switched to PlotOrigin-relative offsets, which is exactly what let
-		-- it visibly drift out of line with the rest of the row.
-		local plotOrigin = getPlotOrigin(plot)
-		if plotOrigin then
-			dropper1Part.CFrame = CFrame.new(plotOrigin.Position.X, dropper1Part.Position.Y, plotOrigin.Position.Z)
-				* dropper1Part.CFrame.Rotation
-			snapToFloorY(dropper1Part, plotOrigin.Position.Y)
-		else
-			warn(("TycoonService: PlotOrigin not found in %s's plot; add one to TycoonTemplate. Falling back to Floor for Dropper1's height."):format(player.Name))
-			snapToFloorY(dropper1Part, getFloorTopY(getFloorPart(plot)))
-		end
-
-		startDropperLoop(plot, player, dropper1Part, "Dropper1")
+		createCollector(plot, origin, player)
+		startDropperLoop(plot, origin, player, dropper1)
 		if PlayerDataService.HasDropper2(player) then
-			spawnDropper2(plot, player, dropper1Part)
+			spawnDropper2(plot, origin, player, dropper1)
 		else
-			createPurchaseButton(plot, player, dropper1Part)
+			createDropper2Station(plot, origin, player, dropper1)
 		end
-		createMultiplierPad(plot, player, dropper1Part)
-		createPedestals(plot, player, dropper1Part)
+		createMultiplierStation(plot, origin, player)
+		createGachaStation(plot, origin, player)
+		createPedestals(plot, origin)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
-		createGachaPad(plot, player, dropper1Part)
 		syncTycoon(player)
 	end)
 end
 
---[[ Plot sign: "<NAME>'S LAB" on a post at the Floor's front-left corner. ]]
-
-local plotSignByUserId: { [number]: BillboardKit.PlotSign } = {}
-
-local function createPlotSign(plot: Model, player: Player)
-	local plotOrigin = getPlotOrigin(plot)
-	if not plotOrigin then
-		return
-	end
-	local localPosition = PlotLayout.GetPlotSignLocalPosition()
-	local height = PlotLayout.PLOT_SIGN_HEIGHT_STUDS
-	local worldPosition = plotOrigin.CFrame:PointToWorldSpace(localPosition)
-
-	local post = Instance.new("Part")
-	post.Name = "PlotSignPost"
-	post.Size = Vector3.new(PlotLayout.PLOT_SIGN_POST_THICKNESS_STUDS, height, PlotLayout.PLOT_SIGN_POST_THICKNESS_STUDS)
-	post.Anchored = true
-	post.CanCollide = false
-	post.Material = Enum.Material.SmoothPlastic
-	post.Color = UITheme.Colors.Panel3
-	post.Position = Vector3.new(worldPosition.X, plotOrigin.Position.Y + height / 2, worldPosition.Z)
-	post.Parent = plot
-
-	-- Billboard sits at the top of the post, 12 studs up.
-	plotSignByUserId[player.UserId] = BillboardKit.PlotSign(post, Vector3.new(0, height / 2 + 1.5, 0))
-end
-
-local function getBestTier(player: Player): string?
-	local best: string? = nil
-	local bestRank = 0
-	local inventory = PlayerDataService.GetInventory(player)
-	if not inventory then
-		return nil
-	end
-	for _, item in inventory do
-		local rank = ItemConfig.Tiers[item.Tier] or 0
-		if rank > bestRank then
-			bestRank = rank
-			best = item.Tier
-		end
-	end
-	return best
-end
-
-local function refreshPlotSigns()
-	for userId, sign in plotSignByUserId do
-		local player = Players:GetPlayerByUserId(userId)
-		local plot = plotByUserId[userId]
-		if player and plot then
-			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
-				sign.Set("FREE LAB", "Step on the green pad")
-			else
-				local multiplierLevel = PlayerDataService.GetCashMultiplierLevel(player)
-				local droppers = if PlayerDataService.HasDropper2(player) then 2 else 1
-				local income = PlayerDataService.GetPassiveCashPerSecond(player)
-					+ TycoonConfig.GetDropperCashPerSecond(droppers, multiplierLevel)
-				local best = getBestTier(player)
-				sign.Set(
-					("%s'S LAB"):format(player.DisplayName:upper()),
-					("%s/s · best: %s"):format(NumberFormat.Money(income), best or "none")
-				)
-			end
-		end
-	end
-end
+--[[ Plot lifecycle ----------------------------------------------------------------------- ]]
 
 local function createPlotForPlayer(player: Player)
 	if plotByUserId[player.UserId] then
@@ -1362,55 +831,40 @@ local function createPlotForPlayer(player: Player)
 	end
 
 	local template = ReplicatedStorage:FindFirstChild("TycoonTemplate")
-	if not template then
-		warn("TycoonService: ReplicatedStorage.TycoonTemplate not found; skipping plot creation for " .. player.Name)
+	if not template or not template:IsA("Model") then
+		warn("TycoonService: ReplicatedStorage.TycoonTemplate (a Model) not found; skipping plot for " .. player.Name)
 		return
 	end
 
 	local slotIndex = claimSlotIndex()
+	if not slotIndex then
+		warn(("TycoonService: no free plot slot for %s (all %d taken)"):format(player.Name, PlotLayout.MAX_PLOT_SLOTS))
+		return
+	end
 	slotByUserId[player.UserId] = slotIndex
+	local origin = PlotLayout.GetSlotCFrame(slotIndex)
+	originByUserId[player.UserId] = origin
 
 	local plot = template:Clone()
 	plot.Name = PlotNaming.GetPlotName(player.UserId)
 	plot:SetAttribute("OwnerUserId", player.UserId)
 	plot:SetAttribute("Claimed", false)
-	plot.Parent = getPlotsFolder()
+	plot:SetAttribute("SlotIndex", slotIndex)
+	validatePlotClone(plot, player)
 
-	if plot:IsA("Model") then
-		validatePlotClone(plot :: Model, player)
+	buildShell(plot, origin, player)
 
-		local plotModel = plot :: Model
-		-- Without an explicit PrimaryPart, Model:PivotTo pivots around the
-		-- model's bounding-box center - an unpredictable point that depends on
-		-- every part in the template, not on PlotOrigin. Anchoring the pivot
-		-- to PlotOrigin itself means PlotOrigin lands at EXACTLY
-		-- ((slotIndex - 1) * PLOT_SLOT_SPACING_STUDS, 0, 0) for every plot,
-		-- making the whole plot's world placement - not just this service's
-		-- own pad layout - fully deterministic relative to PlotOrigin.
-		local plotOrigin = plotModel:FindFirstChild("PlotOrigin", true)
-		if plotOrigin and plotOrigin:IsA("BasePart") then
-			plotModel.PrimaryPart = plotOrigin :: BasePart
-		else
-			warn(("TycoonService: PlotOrigin not found in %s's plot; add one to TycoonTemplate. Plot placement will pivot around the model's bounding-box center instead."):format(player.Name))
-		end
-		plotModel:PivotTo(CFrame.new((slotIndex - 1) * PLOT_SLOT_SPACING_STUDS, 0, 0))
-		resizeFloorToFitRow(plotModel, player)
-		fixSpawnLocations(plotModel, player)
-		createPlotSign(plotModel, player)
-
-		-- Every plot gets its own Fusion Machine (it used to be one shared
-		-- machine next to slot 1 only).
-		local originPart = getPlotOrigin(plotModel)
-		if originPart then
-			FusionMachineService.Build(originPart.CFrame, originPart.Position.Y, plotModel)
-		end
-	else
-		warn("TycoonService: TycoonTemplate is not a Model, so plots cannot be repositioned and will overlap")
+	-- Dropper 1 stands at its spot from the start; it produces once claimed.
+	local dropper1 = findPart(plot, "Dropper1")
+	if dropper1 then
+		placeDropperBody(dropper1, origin, PlotLayout.DROPPER1)
 	end
 
-	plotByUserId[player.UserId] = plot :: Model
-	connectClaimButton(plot :: Model, player)
-	refreshPlotSigns()
+	plot.Parent = getPlotsFolder()
+	FusionMachineService.Build(origin, PlotLayout.FUSION_MACHINE, plot)
+
+	plotByUserId[player.UserId] = plot
+	connectClaimStation(plot, origin, player)
 end
 
 local function removePlotForPlayer(player: Player)
@@ -1419,11 +873,10 @@ local function removePlotForPlayer(player: Player)
 		plot:Destroy()
 		plotByUserId[player.UserId] = nil
 	end
-	plotSignByUserId[player.UserId] = nil
-
+	originByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
-		releaseSlotIndex(slotIndex)
+		occupiedSlots[slotIndex] = nil
 		slotByUserId[player.UserId] = nil
 	end
 end
@@ -1445,13 +898,6 @@ function TycoonService:Init()
 		while true do
 			task.wait(TycoonConfig.PassiveIncomeIntervalSeconds)
 			onPassiveIncomeTick()
-		end
-	end)
-
-	task.spawn(function()
-		while true do
-			task.wait(PLOT_SIGN_REFRESH_SECONDS)
-			refreshPlotSigns()
 		end
 	end)
 end

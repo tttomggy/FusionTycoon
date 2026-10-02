@@ -51,7 +51,7 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 src/ReplicatedStorage/Shared/
     Config/      shared config tables (PlotLayout, TycoonConfig, FusionConfig,
                  GoalConfig — the ordered onboarding goals, …)
-    Modules/     shared runtime modules (PadStyler, PedestalVisuals,
+    Modules/     shared runtime modules (PartKit, StationKit, PedestalVisuals,
                  NumberFormat, UITheme — every UI colour/font token,
                  BillboardKit — server-built world labels)
     Network/     RemoteEvents.lua — single source of truth for remotes
@@ -159,30 +159,21 @@ it is retained so future additions can do the same.
 
 ### Known type-checker findings (unfixed, tracked)
 
-`luau-lsp analyze` currently reports **15 pre-existing errors in two shared
-modules**. They predate the service-lifecycle work, are unrelated to it, and
-were deliberately left alone rather than fixed opportunistically. Both files
-are unannotated (default nonstrict). Do not "clean these up" as a drive-by —
-they deserve their own reviewed change.
-
-**`Shared/Modules/PadStyler.lua` — 13 errors**
-
-- Lines 44, 61, 62, 77, 87, 88, 119: `Value of type 'PadStyle?' could be nil`.
-  The `options = options or {}` idiom does not narrow the optional parameter
-  for the checker. Fix is a narrowed local (`local style = options or {}`)
-  rather than reassigning the parameter.
-- Lines 85–89: `Expected type table, got 'PointLight | SpotLight'`. A
-  `FindFirstChildWhichIsA`-style lookup returns a union; needs a concrete
-  `:IsA()` narrow or a cast before property assignment.
-- Line 121: `Value of type 'ParticleEmitter?' could be nil`.
+`luau-lsp analyze` currently reports **2 pre-existing errors in one shared
+module**. They predate the service-lifecycle work, are unrelated to it, and
+were deliberately left alone rather than fixed opportunistically. The file is
+unannotated (default nonstrict). Do not "clean these up" as a drive-by — they
+deserve their own reviewed change. (`PadStyler.lua`, which owned 13 more, was
+deleted in the world redesign.)
 
 **`Shared/VFX/SparkleEmitter.lua` — 2 errors**
 
-- Lines 17, 35: `Value of type 'SparkleEmitterOptions?' could be nil` — same
-  optional-parameter narrowing issue as above.
+- Lines 17, 35: `Value of type 'SparkleEmitterOptions?' could be nil`. The
+  `options = options or {}` idiom does not narrow the optional parameter for
+  the checker; the fix is a narrowed local (`local style = options or {}`).
 
-Note these are reported whenever you analyze any service that transitively
-requires them (most of `Services/`), so a "clean" run means *no errors owned by
+Note these are reported whenever you analyze any module that transitively
+requires it (most of `Services/`), so a "clean" run means *no errors owned by
 the file under test* — check the path on each reported line.
 
 ### Remotes

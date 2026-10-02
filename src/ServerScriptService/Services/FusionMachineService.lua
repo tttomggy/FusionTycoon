@@ -19,7 +19,6 @@ local Workspace = game:GetService("Workspace")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
@@ -29,15 +28,7 @@ FusionMachineService.Name = "FusionMachineService"
 
 FusionMachineService.MACHINE_NAME = "FusionMachine"
 
--- Local offset from PlotOrigin along the plot row. Near edge = 95 - 12 = 83,
--- past the Gacha Pad (edge ~54) and well short of the next plot (140).
-local MACHINE_ROW_OFFSET_STUDS = 95
 local BASE_SIZE = Vector3.new(24, 2, 24)
-
--- Bridges Floor's row edge (PlotLayout.GetFloorRowEndLocalX()) to the Base.
-local CONNECTOR_WIDTH_STUDS = 16
-local CONNECTOR_THICKNESS_STUDS = 1
-local CONNECTOR_OVERLAP_STUDS = 2
 
 local CORE_SIZE = Vector3.new(4, 4, 4)
 local RING_SIZE = Vector3.new(0.6, 9, 9) -- Cylinder shape: X = thickness, Y/Z = diameter
@@ -55,52 +46,10 @@ local function buildBase(position: Vector3): BasePart
 	base.Size = BASE_SIZE
 	base.Anchored = true
 	base.CanCollide = true
-	base.Material = Enum.Material.Basalt
+	base.Material = Enum.Material.SmoothPlastic
 	base.Color = DARK_COLOR
 	base.Position = position
 	return base
-end
-
-local function buildConnectorWalkway(originCFrame: CFrame, originY: number): BasePart?
-	local floorEdgeLocalX = PlotLayout.GetFloorRowEndLocalX()
-	local baseNearEdgeLocalX = MACHINE_ROW_OFFSET_STUDS - BASE_SIZE.X / 2
-
-	local startX = floorEdgeLocalX - CONNECTOR_OVERLAP_STUDS
-	local endX = baseNearEdgeLocalX + CONNECTOR_OVERLAP_STUDS
-	if endX <= startX then
-		return nil
-	end
-
-	local sizeX = endX - startX
-	local centerLocalX = (startX + endX) / 2
-	local center = originCFrame:PointToWorldSpace(Vector3.new(centerLocalX, 0, 0))
-
-	local connector = Instance.new("Part")
-	connector.Name = "ConnectorWalkway"
-	connector.Size = Vector3.new(sizeX, CONNECTOR_THICKNESS_STUDS, CONNECTOR_WIDTH_STUDS)
-	connector.Anchored = true
-	connector.CanCollide = true
-	connector.Material = Enum.Material.Basalt
-	connector.Color = DARK_COLOR
-	connector.CFrame = CFrame.new(center.X, originY + CONNECTOR_THICKNESS_STUDS / 2, center.Z) * originCFrame.Rotation
-
-	-- Two thin neon edge strips instead of an always-on-top Highlight, which
-	-- drew the walkway's outline through walls from anywhere on the map.
-	for _, side in { -1, 1 } do
-		local strip = Instance.new("Part")
-		strip.Name = "EdgeStrip"
-		strip.Size = Vector3.new(sizeX, 0.2, 0.4)
-		strip.Anchored = true
-		strip.CanCollide = false
-		strip.CanQuery = false
-		strip.Material = Enum.Material.Neon
-		strip.Color = ACCENT_COLOR
-		strip.CFrame = connector.CFrame
-			* CFrame.new(0, CONNECTOR_THICKNESS_STUDS / 2 + 0.1, side * (CONNECTOR_WIDTH_STUDS / 2 - 0.3))
-		strip.Parent = connector
-	end
-
-	return connector
 end
 
 local function buildCore(base: BasePart): BasePart
@@ -183,14 +132,14 @@ local function buildPrompt(core: BasePart): ProximityPrompt
 	return prompt
 end
 
--- Builds one machine for a plot, positioned from its PlotOrigin. Returns the
--- Model (already parented to `parent`).
-function FusionMachineService.Build(originCFrame: CFrame, originY: number, parent: Instance): Model
+-- Builds one machine for a plot at plot-local `localPos` (floor top y = 0).
+-- Returns the Model (already parented to `parent`).
+function FusionMachineService.Build(originCFrame: CFrame, localPos: Vector3, parent: Instance): Model
 	local machine = Instance.new("Model")
 	machine.Name = FusionMachineService.MACHINE_NAME
 
-	local basePosition = originCFrame:PointToWorldSpace(Vector3.new(MACHINE_ROW_OFFSET_STUDS, 0, 0))
-	local base = buildBase(Vector3.new(basePosition.X, originY + BASE_SIZE.Y / 2, basePosition.Z))
+	local basePosition = originCFrame:PointToWorldSpace(Vector3.new(localPos.X, BASE_SIZE.Y / 2, localPos.Z))
+	local base = buildBase(basePosition)
 	base.Parent = machine
 
 	local core = buildCore(base)
@@ -201,11 +150,6 @@ function FusionMachineService.Build(originCFrame: CFrame, originY: number, paren
 
 	buildOddsBillboard(base)
 	buildPrompt(core)
-
-	local connector = buildConnectorWalkway(originCFrame, originY)
-	if connector then
-		connector.Parent = machine
-	end
 
 	machine.PrimaryPart = core
 	machine.Parent = parent
