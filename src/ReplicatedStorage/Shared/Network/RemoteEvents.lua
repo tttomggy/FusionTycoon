@@ -18,6 +18,8 @@ local REMOTE_EVENT_NAMES = {
 	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)
 	"CashCollected", -- server -> client (owner only): a cash drop hit the Collector; {Amount, Position} for the floating "+$X" pop
 	"GoalCompleted", -- server -> client: the player's current goal was met and paid; {Index, Reward}
+	"RequestFuseAll", -- client -> server: fuse every Common/Rare/Epic pair (cascading) in one go
+	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
 }
 
 local function getOrCreateFolder(): Folder

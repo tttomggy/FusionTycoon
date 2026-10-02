@@ -12,6 +12,7 @@ local FusionController = {}
 
 local MACHINE_NAME = "FusionMachine"
 local CHARGE_DURATION_SECONDS = 2.2
+local FUSE_ALL_CHARGE_SECONDS = 3
 
 -- Guards against double-firing while a request is in flight; the server is
 -- still the final authority (it has its own cooldown check independently).
@@ -22,6 +23,13 @@ local isRequestPending = false
 -- can never leave a dangling listener.
 local pendingResult: any = nil
 
+-- Set only by onFuseAllResult; RequestFuseAll waits on it the same way.
+local pendingFuseAllResult: any = nil
+
+local fuseAllResolved = Instance.new("BindableEvent")
+-- Fires (summary) once a Fuse All has resolved and its charge-up finished.
+FusionController.FuseAllResolved = fuseAllResolved.Event
+
 local fusionResolved = Instance.new("BindableEvent")
 -- Fires only once the server has validated the attempt AND the reveal effect
 -- (if any) has finished playing. UI code should hook this, never react at
@@ -31,6 +39,7 @@ FusionController.FusionResolved = fusionResolved.Event
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil
+local fuseAllPrompt: ProximityPrompt? = nil
 -- The prompts live here (platform centre), not on the Core up in the air.
 local promptAnchor: BasePart? = nil
 
@@ -48,7 +57,21 @@ local function getNextFusableTier(): string?
 	return nil
 end
 
+-- Fusions possible right now without cascading: pairs per Fuse All tier.
+local function countFuseAllPairs(): number
+	local pairCount = 0
+	for _, tier in FusionConfig.GetFuseAllTiers() do
+		pairCount += #InventoryController.GetFusableItemsByTier(tier) // FusionConfig.ItemsRequiredPerFusion
+	end
+	return pairCount
+end
+
 local function updatePromptState()
+	if fuseAllPrompt then
+		local count = if isRequestPending then 0 else countFuseAllPairs()
+		fuseAllPrompt.Enabled = count >= 2
+		fuseAllPrompt.ActionText = ("Fuse All (%d)"):format(count)
+	end
 	if not prompt then
 		return
 	end
@@ -147,12 +170,49 @@ end
 -- Yields for the whole charge/reveal cycle; call it with task.spawn.
 FusionController.RequestFusion = requestFusion
 
+-- Fuse every Common/Rare/Epic pair in one go: plays the charge-up for 3 s,
+-- then fires FuseAllResolved with the server's summary. Yields; call it
+-- with task.spawn.
+function FusionController.RequestFuseAll()
+	if isRequestPending or not core then
+		return
+	end
+	isRequestPending = true
+	pendingFuseAllResult = nil
+	updatePromptState()
+
+	local handles = { Core = core :: BasePart, Ring = ring }
+	task.spawn(function()
+		RevealEffects.PlayChargeUp(handles, FUSE_ALL_CHARGE_SECONDS)
+	end)
+
+	local startTime = os.clock()
+	RemoteEvents.RequestFuseAll:FireServer()
+	repeat
+		task.wait()
+	until pendingFuseAllResult ~= nil
+	local result = pendingFuseAllResult
+	pendingFuseAllResult = nil
+
+	local elapsed = os.clock() - startTime
+	if elapsed < FUSE_ALL_CHARGE_SECONDS then
+		task.wait(FUSE_ALL_CHARGE_SECONDS - elapsed)
+	end
+
+	isRequestPending = false
+	updatePromptState()
+	fuseAllResolved:Fire(result)
+end
+
 local function onFusionResult(payload: any)
 	pendingResult = payload
 end
 
 function FusionController.Init()
 	RemoteEvents.FusionResult.OnClientEvent:Connect(onFusionResult)
+	RemoteEvents.FuseAllResult.OnClientEvent:Connect(function(payload: any)
+		pendingFuseAllResult = if typeof(payload) == "table" then payload else { Count = 0 }
+	end)
 
 	-- Each plot has its own machine now; only ours is ever enabled for us.
 	local plotsFolder = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
@@ -163,6 +223,13 @@ function FusionController.Init()
 	local anchor = machine:WaitForChild("PromptAnchor") :: BasePart
 	promptAnchor = anchor
 	prompt = anchor:WaitForChild("FusePrompt") :: ProximityPrompt
+	fuseAllPrompt = anchor:WaitForChild("FuseAllPrompt") :: ProximityPrompt
+	local holdPrompt = fuseAllPrompt :: ProximityPrompt
+	holdPrompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if triggeringPlayer == Players.LocalPlayer then
+			task.spawn(FusionController.RequestFuseAll)
+		end
+	end)
 
 	-- Same fix as AnnouncementController: a line starting with "(" right
 	-- after a statement is ambiguous in Lua (could read as continuing the

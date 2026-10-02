@@ -43,6 +43,7 @@ local CORE_SPARKLE_RATE = 4
 local RING_TRANSPARENCY = 0.35
 local ORBIT_ATTACHMENT_COUNT = 4
 local ORBIT_SPARKLE_RATE = 6
+local FUSE_ALL_HOLD_SECONDS = 0.6
 
 local function buildPlatform(machine: Model, base: CFrame)
 	PartKit.Cylinder({
@@ -180,6 +181,22 @@ local function buildPromptAnchor(machine: Model, base: CFrame)
 	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
 	prompt.Enabled = false
 	prompt.Parent = anchor
+
+	-- Hold F: fuse every Common/Rare/Epic pair at once. The owner's client
+	-- fills in "Fuse All (N)" and enables it when N >= 2.
+	local fuseAll = Instance.new("ProximityPrompt")
+	fuseAll.Name = "FuseAllPrompt"
+	fuseAll.ActionText = "Fuse All"
+	fuseAll.ObjectText = "Hold · Common, Rare, Epic"
+	fuseAll.KeyboardKeyCode = Enum.KeyCode.F
+	fuseAll.GamepadKeyCode = Enum.KeyCode.ButtonY
+	fuseAll.HoldDuration = FUSE_ALL_HOLD_SECONDS
+	fuseAll.MaxActivationDistance = M.PromptDistance
+	fuseAll.RequiresLineOfSight = false
+	fuseAll.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	fuseAll.UIOffset = Vector2.new(0, 72) -- stacked under FusePrompt
+	fuseAll.Enabled = false
+	fuseAll.Parent = anchor
 end
 
 -- Post + board facing the gate, yawed toward the walkway, with the odds on

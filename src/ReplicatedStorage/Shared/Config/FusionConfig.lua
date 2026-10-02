@@ -23,6 +23,25 @@ FusionConfig.SuccessChance = {
 -- The Fusion Machine always consumes exactly this many same-tier items per attempt.
 FusionConfig.ItemsRequiredPerFusion = 2
 
+-- Fuse All only fuses pairs up to this tier (Common, Rare, Epic). A failed
+-- Legendary fusion costs a Legendary, so that stays a manual choice.
+FusionConfig.FuseAllMaxTier = "Epic"
+FusionConfig.FuseAllMaxFusions = 500 -- safety cap per Fuse All
+
+-- Tiers Fuse All may consume, lowest first.
+function FusionConfig.GetFuseAllTiers(): { string }
+	local tiers = {}
+	for _, tier in FusionConfig.TierOrder do
+		if FusionConfig.CanFuseTier(tier) then
+			table.insert(tiers, tier)
+		end
+		if tier == FusionConfig.FuseAllMaxTier then
+			break
+		end
+	end
+	return tiers
+end
+
 function FusionConfig.GetNextTier(tier: string): string?
 	for index, candidate in FusionConfig.TierOrder do
 		if candidate == tier then

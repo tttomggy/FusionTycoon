@@ -290,6 +290,246 @@ local function showBigCard(info: BigCardInfo)
 	end
 end
 
+--[[ Fuse All summary card ---------------------------------------------------------- ]]
+
+local FUSE_ALL_CARD_WIDTH = 400
+local LEGENDARY_RANK = ItemConfig.Tiers.Legendary
+
+local function tierRank(tier: string): number
+	return ItemConfig.Tiers[tier] or 0
+end
+
+-- Tiers in a {[tier]: n} map, highest tier first.
+local function sortedTiers(counts: { [string]: number }): { string }
+	local tiers = {}
+	for tier, n in counts do
+		if typeof(n) == "number" and n > 0 then
+			table.insert(tiers, tier)
+		end
+	end
+	table.sort(tiers, function(a, b)
+		return tierRank(a) > tierRank(b)
+	end)
+	return tiers
+end
+
+local function addChip(parent: Instance, tier: string, text: string, color: Color3, order: number, z: number)
+	local chip = Instance.new("Frame")
+	chip.Name = "Chip"
+	chip.BackgroundTransparency = 1
+	chip.LayoutOrder = order
+	chip.ZIndex = z
+	chip.Parent = parent
+	local orb = UIKit.TierOrb(tier, 26)
+	orb.AnchorPoint = Vector2.new(0, 0.5)
+	orb.Position = UDim2.new(0, 4, 0.5, 0)
+	orb.ZIndex = z
+	orb.Parent = chip
+	UIKit.Label({
+		Text = text,
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = color,
+		Position = UDim2.fromOffset(38, 0),
+		Size = UDim2.new(1, -38, 1, 0),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = z,
+		Parent = chip,
+	})
+end
+
+local function showFuseAllCard(result: any)
+	if bigHolder then
+		if sunburstConnection then
+			sunburstConnection:Disconnect()
+			sunburstConnection = nil
+		end
+		(bigHolder :: Frame):Destroy()
+		bigHolder = nil
+	end
+
+	local body, holder = UIKit.Panel({
+		Name = "FuseAllSummary",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(FUSE_ALL_CARD_WIDTH, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Gradient = { { 0, Colors.FuseAllTop }, { 0.4, Colors.Panel }, { 1, Colors.Panel } },
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	bigHolder = holder
+	local z = body.ZIndex + 1
+	UIKit.Padding(body, 18, 20, 18, 20)
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = body
+
+	local count = result.Count :: number
+	local upgraded = (result.Upgraded :: number?) or 0
+	UIKit.Label({
+		Text = "FUSE ALL",
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		TextColor3 = Colors.VioletLight,
+		Size = UDim2.new(1, 0, 0, 16),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		LayoutOrder = 1,
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Label({
+		Text = ("%d %s"):format(count, if count == 1 then "fusion" else "fusions"),
+		Font = Fonts.Display,
+		TextSize = 44,
+		Size = UDim2.new(1, 0, 0, 48),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		LayoutOrder = 2,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Label({
+		Text = ("%s · %d failed"):format(UIKit.Colored(("%d upgraded"):format(upgraded), Colors.Cash), count - upgraded),
+		RichText = true,
+		Font = Fonts.Body,
+		TextSize = 15,
+		TextColor3 = Colors.Muted,
+		Size = UDim2.new(1, 0, 0, 20),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		LayoutOrder = 3,
+		ZIndex = z,
+		Parent = body,
+	})
+
+	-- Two-column chips: gains first (highest tier first), then what was used up.
+	local grid = Instance.new("Frame")
+	grid.Name = "Chips"
+	grid.BackgroundTransparency = 1
+	grid.AutomaticSize = Enum.AutomaticSize.Y
+	grid.Size = UDim2.fromScale(1, 0)
+	grid.LayoutOrder = 4
+	grid.ZIndex = z
+	grid.Parent = body
+	local gridLayout = Instance.new("UIGridLayout")
+	gridLayout.CellSize = UDim2.new(0.5, -4, 0, 34)
+	gridLayout.CellPadding = UDim2.fromOffset(8, 4)
+	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	gridLayout.Parent = grid
+
+	local order = 0
+	local gained = if typeof(result.Gained) == "table" then result.Gained else {}
+	for _, tier in sortedTiers(gained) do
+		order += 1
+		addChip(grid, tier, ("+%d %s"):format(gained[tier], tier:upper()), UITheme.GetTierLight(tier), order, z)
+	end
+	local consumed = if typeof(result.Consumed) == "table" then result.Consumed else {}
+	for _, tier in sortedTiers(consumed) do
+		order += 1
+		addChip(grid, tier, ("−%d %s"):format(consumed[tier], tier:upper()), Colors.Muted, order, z)
+	end
+
+	local best = result.Best
+	if typeof(best) == "table" and typeof(best.Tier) == "string" then
+		local row = UIKit.Panel({
+			Name = "Best",
+			Parent = body,
+			Size = UDim2.new(1, 0, 0, 56),
+			Color = Colors.Panel2,
+			Radius = UITheme.Radius.Row,
+			ShadowOffset = UITheme.SmallShadowOffset,
+			LayoutOrder = 5,
+			ZIndex = z,
+		})
+		local orb = UIKit.TierOrb(best.Tier, 38)
+		orb.AnchorPoint = Vector2.new(0, 0.5)
+		orb.Position = UDim2.new(0, 12, 0.5, 0)
+		orb.ZIndex = row.ZIndex + 1
+		orb.Parent = row
+		UIKit.Label({
+			Text = ("BEST · %s"):format(UIKit.Colored(best.Tier:upper(), UITheme.GetTierLight(best.Tier))),
+			RichText = true,
+			Font = Fonts.BodyHeavy,
+			TextSize = 12,
+			TextColor3 = Colors.Muted,
+			Position = UDim2.fromOffset(62, 8),
+			Size = UDim2.new(1, -74, 0, 16),
+			ZIndex = row.ZIndex + 1,
+			Parent = row,
+		})
+		UIKit.Label({
+			Text = itemName(best),
+			Font = Fonts.Display,
+			TextSize = 18,
+			Position = UDim2.fromOffset(62, 26),
+			Size = UDim2.new(1, -74, 0, 22),
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			ZIndex = row.ZIndex + 1,
+			Stroke = UITheme.Stroke.Text,
+			Parent = row,
+		})
+	end
+
+	local buttons = Instance.new("Frame")
+	buttons.Name = "Buttons"
+	buttons.BackgroundTransparency = 1
+	buttons.Size = UDim2.new(1, 0, 0, 52 + UITheme.ShadowOffset)
+	buttons.LayoutOrder = 6
+	buttons.ZIndex = z
+	buttons.Parent = body
+	local buttonLayout = Instance.new("UIListLayout")
+	buttonLayout.FillDirection = Enum.FillDirection.Horizontal
+	buttonLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	buttonLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	buttonLayout.Padding = UDim.new(0, 12)
+	buttonLayout.Parent = buttons
+
+	if typeof(best) == "table" and typeof(best.Uid) == "string" then
+		local uid = best.Uid :: string
+		UIKit.Button({
+			Name = "DisplayBest",
+			Parent = buttons,
+			Style = "Green",
+			Text = "DISPLAY BEST",
+			TextSize = 18,
+			Size = UDim2.fromOffset(180, 52),
+			LayoutOrder = 1,
+			ZIndex = z,
+			OnClick = function()
+				onDisplayIt(uid)
+			end,
+		})
+	end
+	UIKit.Button({
+		Name = "Ok",
+		Parent = buttons,
+		Style = "Disabled",
+		Text = "OK",
+		TextSize = 20,
+		Size = UDim2.fromOffset(110, 52),
+		LayoutOrder = 2,
+		ZIndex = z,
+		OnClick = closeBigCard,
+	})
+
+	UIKit.PopIn(holder)
+	if typeof(best) == "table" and tierRank(best.Tier) >= LEGENDARY_RANK then
+		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
+	end
+end
+
+local function onFuseAllResolved(result: any)
+	if typeof(result) ~= "table" or typeof(result.Count) ~= "number" or result.Count <= 0 then
+		ToastController.Show("Nothing to fuse", "Neutral")
+		return
+	end
+	showFuseAllCard(result)
+end
+
 --[[ Bottom cards (fail / small pull) --------------------------------------------- ]]
 
 local bottomHolder: Frame? = nil
@@ -519,6 +759,7 @@ end
 function ResultController.Init()
 	screenGui = UIKit.Screen("Results", 130)
 	FusionController.FusionResolved:Connect(onFusionResolved)
+	FusionController.FuseAllResolved:Connect(onFuseAllResolved)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
 end
 
