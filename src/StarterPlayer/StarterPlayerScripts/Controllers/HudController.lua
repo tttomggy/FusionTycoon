@@ -81,6 +81,9 @@ local goalCountLabel: TextLabel
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
 local upgradesHolder: Frame? = nil
+local buttonsByName: { [string]: TextButton } = {}
+-- Buttons the goal marker wants highlighted; reapplied after a rebuild.
+local highlighted: { [string]: boolean? } = {}
 
 --[[ Income ---------------------------------------------------------------- ]]
 
@@ -383,6 +386,49 @@ local function refreshBadge()
 	end
 end
 
+local GOAL_HIGHLIGHT_NAME = "GoalHighlight"
+
+local function applyHighlight(name: string)
+	local button = buttonsByName[name]
+	if not button then
+		return
+	end
+	local existing = button:FindFirstChild(GOAL_HIGHLIGHT_NAME)
+	if not highlighted[name] then
+		if existing then
+			existing:Destroy()
+		end
+		return
+	end
+	if existing then
+		return
+	end
+	-- A separate overlay, because the button's own UIStroke is its ink border.
+	local overlay = Instance.new("Frame")
+	overlay.Name = GOAL_HIGHLIGHT_NAME
+	overlay.BackgroundTransparency = 1
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.ZIndex = button.ZIndex + 6
+	overlay.Parent = button
+	local corner = button:FindFirstChildOfClass("UICorner")
+	if corner then
+		UIKit.Corner(overlay, corner.CornerRadius.Offset)
+	end
+	local stroke = UIKit.Stroke(overlay, 4, UITheme.Gradients.Gold.Top)
+	TweenService:Create(
+		stroke,
+		TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.7 }
+	):Play()
+end
+
+-- Pulsing 4 px gold outline on a HUD button ("Upgrades" or "Items") while
+-- the current goal points at it.
+function HudController.SetButtonHighlight(name: string, on: boolean)
+	highlighted[name] = if on then true else nil
+	applyHighlight(name)
+end
+
 local function buildButtons(isPhone: boolean)
 	for _, child in buttonRow:GetChildren() do
 		if not child:IsA("UIListLayout") then
@@ -409,11 +455,12 @@ local function buildButtons(isPhone: boolean)
 	})
 	upgradesButton = upgrades
 	upgradesHolder = holder
+	buttonsByName.Upgrades = upgrades
 	local pulseScale = Instance.new("UIScale")
 	pulseScale.Name = "PulseScale"
 	pulseScale.Parent = holder
 
-	UIKit.Button({
+	buttonsByName.Items = UIKit.Button({
 		Name = "ItemsButton",
 		Parent = buttonRow,
 		Style = "Blue",
@@ -427,6 +474,9 @@ local function buildButtons(isPhone: boolean)
 	})
 
 	refreshBadge()
+	for name in highlighted do
+		applyHighlight(name)
+	end
 end
 
 local function buildButtonRow()

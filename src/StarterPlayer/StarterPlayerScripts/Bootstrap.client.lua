@@ -10,6 +10,7 @@ local ToastController = require(Controllers.ToastController)
 local ResultController = require(Controllers.ResultController)
 local WorldLabelController = require(Controllers.WorldLabelController)
 local WorldAnimationController = require(Controllers.WorldAnimationController)
+local GoalMarkerController = require(Controllers.GoalMarkerController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -20,6 +21,7 @@ AnnouncementController.Init()
 HudController.Init()
 ResultController.Init()
 WorldAnimationController.Init()
+GoalMarkerController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.
