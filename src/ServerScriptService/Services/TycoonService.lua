@@ -33,6 +33,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -365,23 +366,20 @@ end
 
 --[[ Stations ---------------------------------------------------------------------- ]]
 
--- Phase 1 placeholder: a plain pad at the station spot (StationKit replaces it).
-local function buildStation(plot: Model, origin: CFrame, name: string, localPos: Vector3, accent: Color3, pad: BasePart?): BasePart
-	local s = PlotLayout.Station
-	local model = Instance.new("Model")
-	model.Name = name
-	local padPart = pad or Instance.new("Part")
-	padPart.Name = "Pad"
-	padPart.Shape = Enum.PartType.Cylinder
-	padPart.Size = Vector3.new(s.PadHeight, s.PadDiameter, s.PadDiameter)
-	padPart.CFrame = PartKit.At(origin, localPos, s.PadTopY - s.PadHeight / 2) * CFrame.Angles(0, 0, math.rad(90))
-	padPart.Material = Enum.Material.Neon
-	padPart.Color = accent
-	padPart.Anchored = true
-	padPart.Parent = model
-	model.PrimaryPart = padPart
-	model.Parent = plot
-	return padPart
+-- Builds a StationKit station named `name` and returns its Pad (which
+-- holds the prompt and the label).
+local function buildStation(
+	plot: Model,
+	origin: CFrame,
+	name: string,
+	localPos: Vector3,
+	accent: Color3,
+	hologram: StationKit.Hologram,
+	options: StationKit.BuildOptions?
+): BasePart
+	local station = StationKit.Build(origin, localPos, accent, hologram, plot, options)
+	station.Name = name
+	return station:FindFirstChild("Pad") :: BasePart
 end
 
 --[[ Droppers + collector ------------------------------------------------------------- ]]
@@ -479,7 +477,16 @@ local function spawnDropper2(plot: Model, origin: CFrame, player: Player, templa
 end
 
 local function createDropper2Station(plot: Model, origin: CFrame, player: Player, dropper1: BasePart)
-	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen)
+	-- The slot shows a translucent ghost of the dropper until it's bought.
+	local ghost = Instance.new("Model")
+	local ghostBody = dropper1:Clone()
+	for _, child in ghostBody:GetChildren() do
+		child:Destroy()
+	end
+	ghostBody.Parent = ghost
+	ghost.PrimaryPart = ghostBody
+	ghost.WorldPivot = ghostBody.CFrame * CFrame.new(0, -ghostBody.Size.Y / 2, 0)
+	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen, "Ghost", { Ghost = ghost })
 	local cost = TycoonConfig.Dropper2Cost
 	BillboardKit.Pad(pad, {
 		Name = "Dropper2Label",
@@ -538,7 +545,7 @@ local function getGachaRatesText(): string
 end
 
 local function createGachaStation(plot: Model, origin: CFrame, player: Player)
-	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold)
+	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule")
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "GachaLabel",
 		Title = "GACHA",
@@ -608,7 +615,7 @@ end
 --[[ Multiplier station --------------------------------------------------------------- ]]
 
 local function createMultiplierStation(plot: Model, origin: CFrame, player: Player)
-	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet)
+	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet, "Chevrons")
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "MultiplierLabel",
 		Title = "MULTIPLIER",
@@ -767,7 +774,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		return
 	end
 	-- ClaimButton becomes the claim station's Pad.
-	local pad = buildStation(plot, origin, "ClaimStation", PlotLayout.CLAIM_STATION, World.AccentGreen, claimButton)
+	local pad = buildStation(plot, origin, "ClaimStation", PlotLayout.CLAIM_STATION, World.AccentGreen, "Arrow", { Pad = claimButton })
 	pad.CanTouch = true
 
 	-- Owner-only: other players' clients disable it (WorldLabelController).
@@ -792,6 +799,12 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		connection:Disconnect()
 		claimLabel.Gui:Destroy()
 		setWallStripsClaimed(plot, true)
+		-- The station stays as a plain green pad; only the arrow goes.
+		local station = pad.Parent
+		local arrow = station and station:FindFirstChild("Hologram")
+		if arrow then
+			arrow:Destroy()
+		end
 
 		-- Saved state (Dropper 2, pedestals) is restored below.
 		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
