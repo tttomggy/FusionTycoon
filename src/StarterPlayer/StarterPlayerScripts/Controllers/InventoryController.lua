@@ -24,6 +24,19 @@ function InventoryController.GetItemsByTier(tier: string): { any }
 	return results
 end
 
+-- Items of `tier` that can go into the Fusion Machine: anything not on a
+-- pedestal. Counting displayed items here used to make the machine offer a
+-- pair that included a displayed item, which the server then rejected.
+function InventoryController.GetFusableItemsByTier(tier: string): { any }
+	local results = {}
+	for _, item in inventory do
+		if item.Tier == tier and not item.InUse then
+			table.insert(results, item)
+		end
+	end
+	return results
+end
+
 function InventoryController.CountItemsOfTier(tier: string): number
 	local count = 0
 	for _, item in inventory do

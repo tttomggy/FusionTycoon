@@ -21,6 +21,30 @@ broken syntax and embeds it verbatim. It checks project/file structure only.
 A green `rojo build` is *not* evidence that code compiles — use `luau-lsp
 analyze` for that.
 
+## Game loop & economy (read before balancing)
+
+Claim plot → Dropper1 (+Dropper2) → buy Generators in the UPGRADES panel →
+Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
+(success = next tier, fail = 1 item of the same tier back) → display the best
+4 items on pedestals for passive income → Multiplier Pad multiplies ALL income.
+
+- All economy numbers live in `TycoonConfig.lua` (costs, pedestal income,
+  multiplier levels, gacha price curve) and `FusionConfig.lua` (fusion success
+  odds, gacha drop rates). They were tuned with a greedy-player simulation
+  of a brand-new save; the target milestones are in TycoonConfig's header.
+  Re-simulate after changing them instead of eyeballing.
+- Passive income has ONE formula: `TycoonConfig.GetPassiveCashPerSecond`,
+  used by the server payout tick and the client HUD.
+- Every service syncs the client with `PlayerDataService.SyncTycoon(player)`.
+  Do not hand-build SyncTycoon payloads.
+- Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
+  called from `TycoonService.createPlotForPlayer`).
+- Saves: a failed DataStore load kicks the player in live games (never
+  overwrites the real save); in Studio it plays on a blank profile that is
+  never saved. PedestalDisplays are stored with string keys on disk.
+- Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
+  `/wipe`.
+
 ## Layout
 
 ```
@@ -91,7 +115,7 @@ calls left in `Services/`.
 | `ItemService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LightingService` | `:Init()` | — | `--!strict` |
 | `DebugService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
-| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` | `--!nonstrict` ⚠ |
+| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged

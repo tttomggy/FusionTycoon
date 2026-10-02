@@ -7,9 +7,7 @@
 -- player-facing feature; delete this file if it's no longer needed.
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -34,35 +32,41 @@ local DebugService = {}
 DebugService.Name = "DebugService"
 
 local RESET_MULTIPLIER_COMMAND = "/resetmultiplier"
-
--- Mirrors TycoonService's own syncTycoon payload shape so the client's cash/
--- multiplier state actually reflects the reset immediately, rather than only
--- on the next unrelated sync.
-local function syncTycoon(player: Player)
-	RemoteEvents.SyncTycoon:FireClient(player, {
-		Cash = PlayerDataService.GetCash(player),
-		Generators = PlayerDataService.GetGenerators(player) or {},
-		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
-	})
-end
+-- "/cash 50000" adds $50,000. Handy for testing late-game balance without
+-- grinding. Studio only.
+local CASH_COMMAND = "/cash"
+-- "/wipe" resets your whole profile to a fresh save (Studio only).
+local WIPE_COMMAND = "/wipe"
 
 local function onPlayerChatted(player: Player, message: string)
-	if message:lower() ~= RESET_MULTIPLIER_COMMAND then
-		return
-	end
 	if not PlayerDataService.IsDataLoaded(player) then
 		return
 	end
+	local lower = message:lower()
+	local command, argument = lower:match("^(%S+)%s*(.*)$")
 
-	PlayerDataService.SetCashMultiplierLevel(player, 0)
-	syncTycoon(player)
-
-	-- The Multiplier Pad's own billboard only refreshes on the next
-	-- purchase attempt, not on an external data change like this - it'll
-	-- show stale text (e.g. "MAX LEVEL") until you touch it once, at which
-	-- point the purchase (and its price) will correctly reflect level 0.
-	print(("DebugService: reset %s's Multiplier Pad level to 0 (pad billboard updates on next touch)"):format(player.Name))
+	if command == RESET_MULTIPLIER_COMMAND then
+		PlayerDataService.SetCashMultiplierLevel(player, 0)
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: reset %s's Multiplier Pad level to 0 (pad label updates on next touch)"):format(player.Name))
+	elseif command == CASH_COMMAND then
+		local amount = tonumber(argument) or 1000000
+		PlayerDataService.AddCash(player, amount)
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: gave %s $%s"):format(player.Name, tostring(amount)))
+	elseif command == WIPE_COMMAND then
+		local data = PlayerDataService.GetData(player)
+		if data then
+			data.Cash = 0
+			data.Inventory = {}
+			data.Generators = {}
+			data.CashMultiplierLevel = 0
+			data.PedestalDisplays = {}
+			data.GachaPulls = 0
+			data.HasDropper2 = false
+		end
+		player:Kick("Profile wiped (Studio debug). Press Play again.")
+	end
 end
 
 local function connectPlayer(player: Player)
@@ -84,7 +88,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print(("DebugService: Studio debug commands active (%s)"):format(RESET_MULTIPLIER_COMMAND))
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /wipe")
 end
 
 function DebugService:Start()

@@ -16,7 +16,10 @@ local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local RunService = game:GetService("RunService")
+
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -39,12 +42,30 @@ export type PlayerData = {
 	-- pedestal slot (see SetPedestalDisplay) - Luau treats key removal as an
 	-- assignment of nil, so `{ [number]: string }` would reject it.
 	PedestalDisplays: { [number]: string? },
+	-- How many Gacha pulls this player has made; drives the pull price.
+	GachaPulls: number,
+	-- Dropper2 is a one-time purchase and now survives rejoining.
+	HasDropper2: boolean,
+}
+
+-- What SyncTycoon sends to the client. One builder (GetTycoonSnapshot) so the
+-- four services that sync no longer each hand-copy the payload shape.
+export type TycoonSnapshot = {
+	Cash: number,
+	Generators: { [string]: number },
+	CashMultiplierLevel: number,
+	PedestalDisplays: { [number]: string? },
+	GachaPulls: number,
+	HasDropper2: boolean,
 }
 
 type State = {
 	-- In-memory cache keyed by UserId; the source of truth while a player is
 	-- in-session. Private: never exposed on the service table.
 	sessionCache: { [number]: PlayerData },
+	-- UserIds whose data must NEVER be written back (load failed in Studio and
+	-- we fell back to a blank profile). See loadData.
+	noSave: { [number]: boolean },
 	connections: { RBXScriptConnection },
 }
 
@@ -52,6 +73,8 @@ type State = {
 
 local DATASTORE_NAME = "PlayerData_v1"
 local SAVE_RETRY_ATTEMPTS = 3
+local LOAD_RETRY_ATTEMPTS = 3
+local LOAD_RETRY_DELAY_SECONDS = 2
 local AUTOSAVE_INTERVAL_SECONDS = 120
 
 local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
@@ -62,12 +85,15 @@ local DEFAULT_DATA: PlayerData = {
 	Generators = {},
 	CashMultiplierLevel = 0,
 	PedestalDisplays = {},
+	GachaPulls = 0,
+	HasDropper2 = false,
 }
 
 --[[ Private state -------------------------------------------------------- ]]
 
 local state: State = {
 	sessionCache = {},
+	noSave = {},
 	connections = {},
 }
 
@@ -89,26 +115,137 @@ local function deepCopy<T>(value: T): T
 	return (copy :: any) :: T
 end
 
-local function loadData(player: Player)
-	local key = "Player_" .. player.UserId
-	local success, result = pcall(function()
-		return dataStore:GetAsync(key)
-	end)
-
-	if success and result then
-		state.sessionCache[player.UserId] = result :: PlayerData
-	else
-		if not success then
-			warn(("PlayerDataService: failed to load data for %s (%d): %s"):format(player.Name, player.UserId, tostring(result)))
+-- DataStores serialize numeric keys with gaps ({[2] = uid}) unreliably: they
+-- can come back as string keys ("2"), and the next SetPedestalDisplay(2, ...)
+-- then makes a mixed string/number table that DataStores refuse to save at
+-- all - silently losing every bit of progress after it. So pedestal slots are
+-- stored on disk with string keys and converted back to numbers on load.
+local function pedestalDisplaysToDisk(displays: { [number]: string? }): { [string]: string }
+	local out: { [string]: string } = {}
+	for index, uid in displays do
+		if uid then
+			out[tostring(index)] = uid
 		end
-		state.sessionCache[player.UserId] = deepCopy(DEFAULT_DATA)
 	end
+	return out
+end
+
+local function pedestalDisplaysFromDisk(raw: any): { [number]: string? }
+	local out: { [number]: string? } = {}
+	if typeof(raw) ~= "table" then
+		return out
+	end
+	for key, uid in raw do
+		local index = tonumber(key)
+		if index and typeof(uid) == "string" then
+			out[math.floor(index)] = uid
+		end
+	end
+	return out
+end
+
+-- Fills any field missing from an older save with its default, so new
+-- features never index nil on an old profile.
+local function reconcile(raw: any): PlayerData
+	local data = deepCopy(DEFAULT_DATA)
+	if typeof(raw) ~= "table" then
+		return data
+	end
+	if typeof(raw.Cash) == "number" then
+		data.Cash = raw.Cash
+	end
+	if typeof(raw.Inventory) == "table" then
+		data.Inventory = raw.Inventory
+	end
+	if typeof(raw.Generators) == "table" then
+		data.Generators = raw.Generators
+	end
+	if typeof(raw.CashMultiplierLevel) == "number" then
+		data.CashMultiplierLevel = raw.CashMultiplierLevel
+	end
+	data.PedestalDisplays = pedestalDisplaysFromDisk(raw.PedestalDisplays)
+	if typeof(raw.GachaPulls) == "number" then
+		data.GachaPulls = raw.GachaPulls
+	end
+	if typeof(raw.HasDropper2) == "boolean" then
+		data.HasDropper2 = raw.HasDropper2
+	end
+
+	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
+	-- happened mid-change) would be stuck forever: unfusable and undisplayable.
+	local displayed: { [string]: boolean } = {}
+	for _, uid in data.PedestalDisplays do
+		if uid then
+			displayed[uid] = true
+		end
+	end
+	for _, item in data.Inventory do
+		item.InUse = displayed[item.Uid] == true
+	end
+	return data
+end
+
+-- Returns true if the player's data is ready. On a DataStore failure this
+-- used to fall back to a BLANK profile and then autosave it over the real
+-- one - one Roblox outage and a player's whole save was wiped. Now: retry,
+-- and if it still fails, kick in a live game (nothing gets overwritten), or
+-- in Studio play on a blank profile that is never saved.
+local function loadData(player: Player): boolean
+	local key = "Player_" .. player.UserId
+	local result: any = nil
+	local success = false
+	local lastError: any = nil
+
+	for attempt = 1, LOAD_RETRY_ATTEMPTS do
+		local ok, value = pcall(function()
+			return dataStore:GetAsync(key)
+		end)
+		if ok then
+			success = true
+			result = value
+			break
+		end
+		lastError = value
+		warn(("PlayerDataService: load attempt %d/%d failed for %s (%d): %s"):format(
+			attempt,
+			LOAD_RETRY_ATTEMPTS,
+			player.Name,
+			player.UserId,
+			tostring(value)
+		))
+		if attempt < LOAD_RETRY_ATTEMPTS then
+			task.wait(LOAD_RETRY_DELAY_SECONDS)
+		end
+	end
+
+	if not player.Parent then
+		return false
+	end
+
+	if success then
+		state.sessionCache[player.UserId] = reconcile(result)
+		return true
+	end
+
+	if RunService:IsStudio() then
+		warn(("PlayerDataService: using a blank, UNSAVED profile for %s in Studio (%s). "
+			.. "Enable Studio API access in Game Settings > Security to test saving."):format(player.Name, tostring(lastError)))
+		state.sessionCache[player.UserId] = deepCopy(DEFAULT_DATA)
+		state.noSave[player.UserId] = true
+		return true
+	end
+
+	player:Kick("Couldn't load your save (Roblox data servers are having trouble). Your progress is safe - please rejoin in a minute.")
+	return false
 end
 
 local function saveData(userId: number, data: PlayerData?): boolean
-	if not data then
+	if not data or state.noSave[userId] then
 		return false
 	end
+
+	local toSave = deepCopy(data) :: any
+	toSave.PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays)
 
 	local key = "Player_" .. userId
 	local attempt = 0
@@ -117,7 +254,7 @@ local function saveData(userId: number, data: PlayerData?): boolean
 	repeat
 		attempt += 1
 		success, err = pcall(function()
-			dataStore:SetAsync(key, data)
+			dataStore:SetAsync(key, toSave)
 		end)
 		if not success then
 			warn(("PlayerDataService: save attempt %d/%d failed for %d: %s"):format(attempt, SAVE_RETRY_ATTEMPTS, userId, tostring(err)))
@@ -318,6 +455,80 @@ function PlayerDataService.SetPedestalDisplay(player: Player, pedestalIndex: num
 	data.PedestalDisplays[pedestalIndex] = uid
 end
 
+--[[ Public API: gacha / dropper2 ----------------------------------------- ]]
+
+function PlayerDataService.GetGachaPulls(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.GachaPulls else 0
+end
+
+function PlayerDataService.IncrementGachaPulls(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.GachaPulls += 1
+	end
+end
+
+function PlayerDataService.HasDropper2(player: Player): boolean
+	local data = state.sessionCache[player.UserId]
+	return if data then data.HasDropper2 else false
+end
+
+function PlayerDataService.SetHasDropper2(player: Player, owned: boolean)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.HasDropper2 = owned
+	end
+end
+
+--[[ Public API: income + sync -------------------------------------------- ]]
+
+-- Tiers of the items currently on this player's pedestals.
+function PlayerDataService.GetDisplayedTiers(player: Player): { string }
+	local tiers = {}
+	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
+		if uid then
+			local item = PlayerDataService.GetItemByUid(player, uid)
+			if item then
+				table.insert(tiers, item.Tier)
+			end
+		end
+	end
+	return tiers
+end
+
+-- Generators + pedestals, multiplier applied. Droppers are paid on collection.
+function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	return TycoonConfig.GetPassiveCashPerSecond(
+		data.Generators,
+		PlayerDataService.GetDisplayedTiers(player),
+		data.CashMultiplierLevel
+	)
+end
+
+function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
+	return {
+		Cash = PlayerDataService.GetCash(player),
+		Generators = PlayerDataService.GetGenerators(player) or {},
+		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
+		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
+		GachaPulls = PlayerDataService.GetGachaPulls(player),
+		HasDropper2 = PlayerDataService.HasDropper2(player),
+	}
+end
+
+-- The one way every service pushes cash/upgrade state to a client.
+function PlayerDataService.SyncTycoon(player: Player)
+	if not state.sessionCache[player.UserId] then
+		return
+	end
+	RemoteEvents.SyncTycoon:FireClient(player, PlayerDataService.GetTycoonSnapshot(player))
+end
+
 --[[ Player lifecycle ----------------------------------------------------- ]]
 
 local function createLeaderstats(player: Player)
@@ -332,18 +543,21 @@ local function createLeaderstats(player: Player)
 	leaderstats.Parent = player
 end
 
+local dataLoaded = Instance.new("BindableEvent")
+-- Fires (player) once a player's data is in the session cache. TycoonService
+-- waits on this before restoring saved pedestals/Dropper2 on claim.
+PlayerDataService.DataLoaded = dataLoaded.Event
+
 local function onPlayerAdded(player: Player)
-	loadData(player)
+	if not loadData(player) then
+		return
+	end
 	createLeaderstats(player)
 	updateLeaderstatsCash(player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
-	RemoteEvents.SyncTycoon:FireClient(player, {
-		Cash = PlayerDataService.GetCash(player),
-		Generators = PlayerDataService.GetGenerators(player) or {},
-		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
-	})
+	PlayerDataService.SyncTycoon(player)
+	dataLoaded:Fire(player)
 end
 
 local function onPlayerRemoving(player: Player)
@@ -353,6 +567,7 @@ local function onPlayerRemoving(player: Player)
 	if data then
 		saveData(userId, data)
 	end
+	state.noSave[userId] = nil
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]

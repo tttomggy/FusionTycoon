@@ -3,8 +3,11 @@
 	FusionService
 	-------------
 	Server-authoritative fusion: validates a two-item fusion request against
-	the player's real inventory, consumes the inputs, rolls a result tier, and
-	grants the reward.
+	the player's real inventory, consumes the inputs, and rolls for an upgrade.
+
+	Two items of tier N -> success: one item of tier N+1
+	                    -> fail:    one item of tier N back
+	Odds per tier live in FusionConfig.SuccessChance.
 
 	Follows the ServiceTemplate contract:
 	  :Init()   connects its own remote handler and nothing else.
@@ -19,17 +22,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
+local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
-
-type RewardItem = {
-	Id: string,
-	Name: string,
-	Tier: string,
-}
 
 type State = {
 	-- Ephemeral, session-only cooldown tracking; not persisted with player data.
@@ -69,13 +67,7 @@ local function isOnCooldown(userId: number): boolean
 	return lastTime ~= nil and (os.clock() - lastTime) < FUSION_COOLDOWN_SECONDS
 end
 
-local function pickRewardItem(tier: string): RewardItem?
-	local itemsOfTier = ItemConfig.GetItemsByTier(tier)
-	if #itemsOfTier == 0 then
-		return nil
-	end
-	return itemsOfTier[math.random(1, #itemsOfTier)] :: RewardItem
-end
+local rng = Random.new()
 
 -- Every reject path fires a (Success = false) FusionResult so the client's
 -- pending-request flag always resolves. `isSuspicious` marks rejections that
@@ -136,37 +128,55 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		return
 	end
 
-	state.lastFusionAt[player.UserId] = os.clock()
 	local consumedTier = itemA.Tier
-
-	-- Inputs are consumed before the roll: fusion is a gamble, and a failed
-	-- roll still costs the two items.
-	local removed = PlayerDataService.RemoveItemsByUid(player, { uidA, uidB })
-	if not removed then
-		reject(player, "ItemNotOwned")
+	-- Mythic (top tier) has no next tier; the client never offers it, so a
+	-- request for it is a modified client.
+	local nextTier = FusionConfig.GetNextTier(consumedTier)
+	local successChance = FusionConfig.SuccessChance[consumedTier]
+	if not nextTier or not successChance then
+		reject(player, "MaxTier", true)
 		return
 	end
-	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
-	local resultTier = FusionConfig.RollResultTier()
-	local rewardItem = pickRewardItem(resultTier)
+	-- Roll and pick the result item BEFORE touching the inventory, so a
+	-- config gap can never eat the player's two items.
+	local upgraded = rng:NextNumber() < successChance
+	local resultTier = if upgraded then nextTier else consumedTier
+	local rewardItem = ItemConfig.PickRandomOfTier(resultTier, rng)
 	if not rewardItem then
 		warn(("FusionService: no ItemConfig entry found for tier %s"):format(resultTier))
 		reject(player, "MissingRewardItem")
 		return
 	end
 
+	state.lastFusionAt[player.UserId] = os.clock()
+
+	local removed = PlayerDataService.RemoveItemsByUid(player, { uidA, uidB })
+	if not removed then
+		reject(player, "ItemNotOwned")
+		return
+	end
+
 	local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
-	print(("FusionService: %s fused 2x %s into %s (%s)"):format(player.Name, consumedTier, rewardItem.Name, resultTier))
-
 	RemoteEvents.FusionResult:FireClient(player, {
 		Success = true,
+		Upgraded = upgraded,
 		ConsumedUids = { uidA, uidB },
 		ConsumedTier = consumedTier,
 		NewItem = newEntry,
 	})
+
+	-- Server-wide brag for a Legendary/Mythic fusion: the moment everyone
+	-- else in the server sees and wants for themselves.
+	local visual = RarityVisuals.Tiers[resultTier]
+	if upgraded and visual and visual.AnnounceServerWide then
+		RemoteEvents.RareFusionAnnouncement:FireAllClients({
+			Message = ("%s fused a %s %s!"):format(player.DisplayName, resultTier:upper(), rewardItem.Name),
+			Tier = resultTier,
+		})
+	end
 end
 
 local function onPlayerRemoving(player: Player)

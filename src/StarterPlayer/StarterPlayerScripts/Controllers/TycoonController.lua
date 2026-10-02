@@ -8,6 +8,10 @@ local TycoonController = {}
 local cash = 0
 local generatorLevels: { [string]: number } = {}
 local pedestalDisplays: { [number]: string } = {}
+local cashMultiplierLevel = 0
+local gachaPulls = 0
+local hasDropper2 = false
+local hasSynced = false
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -31,6 +35,31 @@ function TycoonController.IsUpgradePending(generatorId: string): boolean
 	return pendingUpgrades[generatorId] == true
 end
 
+function TycoonController.GetGeneratorLevels(): { [string]: number }
+	return generatorLevels
+end
+
+function TycoonController.GetCashMultiplierLevel(): number
+	return cashMultiplierLevel
+end
+
+function TycoonController.GetGachaPulls(): number
+	return gachaPulls
+end
+
+function TycoonController.HasDropper2(): boolean
+	return hasDropper2
+end
+
+-- False until the first snapshot arrives (so the HUD doesn't flash $0).
+function TycoonController.HasSynced(): boolean
+	return hasSynced
+end
+
+function TycoonController.GetPedestalDisplays(): { [number]: string }
+	return pedestalDisplays
+end
+
 -- Uid of the item displayed on `pedestalIndex`, or nil if it's empty.
 function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 	return pedestalDisplays[pedestalIndex]
@@ -50,8 +79,19 @@ end
 
 local function onSyncTycoon(snapshot: any)
 	cash = snapshot.Cash
-	generatorLevels = snapshot.Generators
-	pedestalDisplays = snapshot.PedestalDisplays or {}
+	generatorLevels = snapshot.Generators or {}
+	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
+	gachaPulls = snapshot.GachaPulls or 0
+	hasDropper2 = snapshot.HasDropper2 == true
+	-- Remote tables with numeric keys can arrive keyed by strings; normalise.
+	pedestalDisplays = {}
+	for key, uid in snapshot.PedestalDisplays or {} do
+		local index = tonumber(key)
+		if index then
+			pedestalDisplays[index] = uid
+		end
+	end
+	hasSynced = true
 	tycoonChanged:Fire(cash, generatorLevels)
 end
 

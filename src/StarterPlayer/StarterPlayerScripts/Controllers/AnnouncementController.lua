@@ -14,7 +14,9 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
+local FusionController = require(script.Parent.FusionController)
 
 local AnnouncementController = {}
 
@@ -214,7 +216,10 @@ end
 
 local function onMultiplierUpgraded(payload: any)
 	enqueue({
-		Message = ("Multiplier Upgraded! x%d -> x%d"):format(payload.OldMultiplier, payload.NewMultiplier),
+		Message = ("Multiplier Upgraded! %s → %s"):format(
+			NumberFormat.Multiplier(payload.OldMultiplier),
+			NumberFormat.Multiplier(payload.NewMultiplier)
+		),
 		AccentColor = MULTIPLIER_ACCENT_COLOR,
 	})
 end
@@ -232,7 +237,17 @@ local function buildGachaPullMessage(tier: string, itemName: string): string
 end
 
 local function onGachaPullResult(payload: any)
-	if not payload.Success or not payload.NewItem then
+	if not payload.Success then
+		if payload.Reason == "InsufficientCash" and payload.Cost then
+			enqueueInstant({
+				Message = ("Need %s for a pull"):format(NumberFormat.Money(payload.Cost)),
+				AccentColor = Color3.fromRGB(255, 80, 80),
+				Instant = true,
+			})
+		end
+		return
+	end
+	if not payload.NewItem then
 		return
 	end
 
@@ -250,8 +265,37 @@ local function onGachaPullResult(payload: any)
 	})
 end
 
+-- Shown after the Fusion Machine's reveal finishes, so the banner never
+-- spoils the result before the animation does.
+local function onFusionResolved(result: any)
+	if not result or not result.Success or not result.NewItem then
+		return
+	end
+	local newItem = result.NewItem
+	local tier = newItem.Tier :: string
+	local itemConfigEntry = ItemConfig.GetItemById(newItem.ItemId)
+	local itemName = itemConfigEntry and itemConfigEntry.Name or newItem.ItemId
+	local tierVisual = RarityVisuals.Tiers[tier]
+
+	if result.Upgraded then
+		enqueueInstant({
+			Message = ("FUSION SUCCESS! → %s %s"):format(tier:upper(), itemName),
+			AccentColor = (tierVisual and tierVisual.GlowColor) or Color3.new(1, 1, 1),
+			IsMajor = FusionConfig.MajorRevealTiers[tier] == true,
+			Instant = true,
+		})
+	else
+		enqueueInstant({
+			Message = ("Fusion failed - kept 1 %s"):format(tier),
+			AccentColor = Color3.fromRGB(120, 120, 135),
+			Instant = true,
+		})
+	end
+end
+
 function AnnouncementController.Init()
 	buildUI()
+	FusionController.FusionResolved:Connect(onFusionResolved)
 	RemoteEvents.RareFusionAnnouncement.OnClientEvent:Connect(onRareFusionAnnouncement)
 	RemoteEvents.MultiplierUpgraded.OnClientEvent:Connect(onMultiplierUpgraded)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)

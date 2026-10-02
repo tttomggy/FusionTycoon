@@ -1,10 +1,10 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
 
@@ -31,55 +31,15 @@ FusionController.FusionResolved = fusionResolved.Event
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil
-local oddsBillboard: BillboardGui? = nil
 
--- A BillboardGui's on-screen position depends on camera angle, not just
--- where it sits in 3D - repositioning it further (as done last turn) helps
--- for typical angles but can't guarantee it never overlaps Roblox's default
--- PlayerList (top-right corner) from every possible viewpoint. This checks
--- its actual projected screen position every frame instead, and hides it
--- outright when it would land in that corner. The zone is a conservative
--- approximation (the PlayerList's real bounds vary with player count/
--- resolution) - erring on the side of hiding a little early rather than
--- risking a real overlap.
-local RESERVED_ZONE_WIDTH_FRACTION = 0.22
-local RESERVED_ZONE_HEIGHT_FRACTION = 0.35
-
-local function updateOddsBillboardVisibility()
-	if not oddsBillboard then
-		return
-	end
-	local base = oddsBillboard.Parent
-	if not base or not base:IsA("BasePart") then
-		return
-	end
-
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-
-	local anchorPosition = (base :: BasePart).Position + oddsBillboard.StudsOffset
-	local screenPoint, isOnScreen = camera:WorldToScreenPoint(anchorPosition)
-	if not isOnScreen then
-		oddsBillboard.Enabled = true
-		return
-	end
-
-	local viewportSize = camera.ViewportSize
-	local isInReservedZone = screenPoint.X > viewportSize.X * (1 - RESERVED_ZONE_WIDTH_FRACTION)
-		and screenPoint.Y < viewportSize.Y * RESERVED_ZONE_HEIGHT_FRACTION
-
-	oddsBillboard.Enabled = not isInReservedZone
-end
-
--- Picks the highest tier the player currently has at least two of, so
--- there's no separate tier-picker UI to build: walking up and pressing Fuse
--- always offers your best available pair.
-local function getBestAvailableTier(): string?
-	for index = #FusionConfig.TierOrder, 1, -1 do
-		local tier = FusionConfig.TierOrder[index]
-		if InventoryController.CountItemsOfTier(tier) >= FusionConfig.ItemsRequiredPerFusion then
+-- Offers the LOWEST tier you have a spare pair of (not counting items on
+-- pedestals). Fusing is a climb now (2x Common -> Rare, ...), so working up
+-- from the bottom is what you want, and Mythic can't be fused at all.
+local function getNextFusableTier(): string?
+	for _, tier in FusionConfig.TierOrder do
+		if FusionConfig.CanFuseTier(tier)
+			and #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.ItemsRequiredPerFusion
+		then
 			return tier
 		end
 	end
@@ -90,10 +50,13 @@ local function updatePromptState()
 	if not prompt then
 		return
 	end
-	local tier = getBestAvailableTier()
+	local tier = if isRequestPending then nil else getNextFusableTier()
 	prompt.Enabled = tier ~= nil
 	if tier then
-		prompt.ObjectText = ("Fuse 2x %s"):format(tier)
+		local nextTier = FusionConfig.GetNextTier(tier) :: string
+		local chance = FusionConfig.SuccessChance[tier] or 0
+		prompt.ActionText = ("Fuse 2x %s"):format(tier)
+		prompt.ObjectText = ("→ %s  (%d%% chance)"):format(nextTier, math.floor(chance * 100 + 0.5))
 	end
 end
 
@@ -108,18 +71,19 @@ local function requestFusion()
 		return
 	end
 
-	local tier = getBestAvailableTier()
+	local tier = getNextFusableTier()
 	if not tier then
 		return
 	end
 
-	local items = InventoryController.GetItemsByTier(tier)
+	local items = InventoryController.GetFusableItemsByTier(tier)
 	if #items < FusionConfig.ItemsRequiredPerFusion then
 		return
 	end
 
 	isRequestPending = true
 	pendingResult = nil
+	updatePromptState()
 	local uidA, uidB = items[1].Uid, items[2].Uid
 
 	-- The client only ever plays this generic shell - it has no idea what
@@ -150,7 +114,8 @@ local function requestFusion()
 		local resultTier = result.NewItem.Tier
 		RevealEffects.PlayReveal(handles, {
 			AccentColor = FusionConfig.TierAccentColors[resultTier] or Color3.new(1, 1, 1),
-			IsMajor = FusionConfig.MajorRevealTiers[resultTier] == true,
+			-- A failed roll never gets the big treatment, even on a high tier.
+			IsMajor = result.Upgraded == true and FusionConfig.MajorRevealTiers[resultTier] == true,
 		})
 	end
 
@@ -166,14 +131,13 @@ end
 function FusionController.Init()
 	RemoteEvents.FusionResult.OnClientEvent:Connect(onFusionResult)
 
-	local machine = Workspace:WaitForChild(MACHINE_NAME) :: Model
+	-- Each plot has its own machine now; only ours is ever enabled for us.
+	local plotsFolder = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
+	local plot = plotsFolder:WaitForChild(PlotNaming.GetPlotName(Players.LocalPlayer.UserId))
+	local machine = plot:WaitForChild(MACHINE_NAME) :: Model
 	core = machine:WaitForChild("Core") :: BasePart
 	ring = machine:FindFirstChild("Ring") :: BasePart?
 	prompt = (core :: BasePart):WaitForChild("FusePrompt") :: ProximityPrompt
-
-	local base = machine:WaitForChild("Base") :: BasePart
-	oddsBillboard = base:WaitForChild("FusionOddsBillboard") :: BillboardGui
-	RunService.RenderStepped:Connect(updateOddsBillboardVisibility)
 
 	-- Same fix as AnnouncementController: a line starting with "(" right
 	-- after a statement is ambiguous in Lua (could read as continuing the

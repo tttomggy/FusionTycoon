@@ -67,17 +67,8 @@ local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
 	return nil
 end
 
--- Pushes a fresh Cash/Generators/... snapshot after a placement changes
--- PedestalDisplays. Mirrors TycoonService's own syncTycoon payload shape;
--- duplicated rather than shared since TycoonService's version is a private
--- local function, and the two rarely change independently anyway.
 local function syncTycoon(player: Player)
-	RemoteEvents.SyncTycoon:FireClient(player, {
-		Cash = PlayerDataService.GetCash(player),
-		Generators = PlayerDataService.GetGenerators(player) or {},
-		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
-	})
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIndex: unknown)
@@ -134,8 +125,6 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
 	local itemName = itemConfigEntry and itemConfigEntry.Name or item.ItemId
 
-	print(("ItemService: %s displayed a %s %s on pedestal %d"):format(player.Name, item.Tier, itemName, pedestalIndex))
-
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,
 		PedestalIndex = pedestalIndex,
@@ -145,7 +134,7 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	local visualConfig = RarityVisuals.Tiers[item.Tier]
 	if visualConfig and visualConfig.AnnounceServerWide then
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
-			Message = ("%s just displayed a %s %s!"):format(player.Name, item.Tier:upper(), itemName),
+			Message = ("%s just displayed a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 			Tier = item.Tier,
 		})
 	end
@@ -189,8 +178,6 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	syncTycoon(player)
 
 	PedestalVisuals.Clear(pedestal)
-
-	print(("ItemService: %s picked an item back up from pedestal %d"):format(player.Name, pedestalIndex))
 
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,

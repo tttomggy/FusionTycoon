@@ -13,22 +13,21 @@ local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PadStyler = require(ReplicatedStorage.Shared.Modules.PadStyler)
+local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
+-- PlayerDataService is a leaf (requires no services), so this module-scope
+-- require can't form a cycle.
 local PlayerDataService = require(script.Parent.PlayerDataService)
 
--- Load-time guard: this module-scope require must resolve to a real table.
--- Added after a refactor briefly moved this into :Start(), where a missed
--- assignment would have left it nil and failed later, deep inside a handler,
--- as an opaque "attempt to index nil". Fail loudly at load instead.
-assert(
-	type(PlayerDataService) == "table",
-	"TycoonService: PlayerDataService failed to resolve at load time"
-)
-print("TycoonService: PlayerDataService resolved at load (non-nil)")
+type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
+-- Resolved in :Start().
+local FusionMachineService: FusionMachineServiceModule
 
 local TycoonService = {}
+TycoonService.Name = "TycoonService"
 
 -- From user-supplied Toolbox VFX packs (Workspace), extracted to
 -- ReplicatedStorage.Shared.VFX.*.rbxm. Optional by design (FindFirstChild,
@@ -86,7 +85,7 @@ local CLAIM_POD_RISER_MARGIN_STUDS = 1
 local CASH_COLLISION_GROUP = "CashParts"
 local PLOT_ENVIRONMENT_COLLISION_GROUP = "PlotEnvironment"
 
-local DROPPER2_COST = 100
+local DROPPER2_COST = TycoonConfig.Dropper2Cost
 local DROPPER2_LABEL = "Buy Dropper 2"
 local DROPPER2_SIDE_OFFSET_STUDS = 12
 
@@ -200,43 +199,15 @@ local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
 
 local function syncTycoon(player: Player)
-	RemoteEvents.SyncTycoon:FireClient(player, {
-		Cash = PlayerDataService.GetCash(player),
-		Generators = PlayerDataService.GetGenerators(player) or {},
-		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
-	})
-end
-
-local function calculateTotalCashPerSecond(player: Player): number
-	local total = 0
-
-	local generatorLevels = PlayerDataService.GetGenerators(player)
-	if generatorLevels then
-		for _, generator in TycoonConfig.Generators do
-			local level = generatorLevels[generator.Id] or 0
-			if level > 0 then
-				total += TycoonConfig.GetGeneratorCashPerSecond(generator, level)
-			end
-		end
-	end
-
-	-- Pedestal Showcase: each occupied pedestal contributes cash/sec scaled
-	-- by its displayed item's tier, same tick as Generators above.
-	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
-		local item = PlayerDataService.GetItemByUid(player, uid)
-		if item then
-			total += TycoonConfig.GetPedestalCashPerSecond(item.Tier)
-		end
-	end
-
-	return total
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function onPassiveIncomeTick()
 	for _, player in Players:GetPlayers() do
 		if PlayerDataService.IsDataLoaded(player) then
-			local cashPerSecond = calculateTotalCashPerSecond(player)
+			-- Generators + pedestals, with the cash multiplier applied. Same
+			-- function the client HUD uses for its "+$X/s" readout.
+			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
 				local income = cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds
 				PlayerDataService.AddCash(player, income)
@@ -622,23 +593,6 @@ local function spawnCashPart(plot: Model, dropper: BasePart, player: Player)
 	cashPart:SetAttribute("CashValue", TycoonConfig.DropperCashValue * multiplier)
 	cashPart.Parent = plot
 
-	-- Diagnostic: this is the only thing that repeatedly spawns near a
-	-- dropper and could visually "pile up" - confirms whether what's
-	-- actually being created here matches this code (Ball/Neon/green) or
-	-- whether something else is going on (e.g. a sync gap, or these aren't
-	-- being collected and are piling up as a heap of - still round, still
-	-- green - balls that just misread as something else from a distance).
-	print((
-		"TycoonService: %s's CashDrop spawned - Shape=%s Material=%s Color=(%d,%d,%d)"
-	):format(
-		player.Name,
-		tostring(cashPart.Shape),
-		tostring(cashPart.Material),
-		math.floor(cashPart.Color.R * 255),
-		math.floor(cashPart.Color.G * 255),
-		math.floor(cashPart.Color.B * 255)
-	))
-
 	-- Nudge it toward the Collector so it rolls across the floor as it falls,
 	-- instead of dropping straight down and landing wherever it spawned.
 	cashPart.AssemblyLinearVelocity = dropper.CFrame.LookVector * CASH_DROP_FORWARD_SPEED_STUDS_PER_SECOND
@@ -685,12 +639,6 @@ local function createCollector(plot: Model, dropper: BasePart, player: Player): 
 		hit:SetAttribute("Collected", true)
 		hit:Destroy()
 		awardCash(player, value)
-
-		-- Diagnostic, paired with the CashDrop spawn print: if spawns
-		-- vastly outnumber collections in the log, drops are piling up
-		-- uncollected (a Collector/physics problem) rather than a styling
-		-- one - the balls would still be green and round, just heaped up.
-		print(("TycoonService: %s's Collector caught a CashDrop worth $%d"):format(player.Name, value))
 	end)
 
 	return collector
@@ -699,10 +647,9 @@ end
 -- Self-terminating: the loop exits once the plot is destroyed (Parent becomes nil).
 -- `dropper` must already be resolved by the caller, since this is shared by
 -- both Dropper1 (found in the template) and Dropper2 (spawned on purchase).
-local function startDropperLoop(plot: Model, player: Player, dropper: BasePart, dropperLabel: string)
+local function startDropperLoop(plot: Model, player: Player, dropper: BasePart, _dropperLabel: string)
 	applyDropperIdleVisuals(dropper)
 	createCollector(plot, dropper, player)
-	print(("TycoonService: %s's %s is now producing cash"):format(player.Name, dropperLabel))
 
 	task.spawn(function()
 		while plot.Parent do
@@ -737,18 +684,6 @@ local function spawnDropper2(plot: Model, player: Player, referenceDropper: Base
 	dropper2.Parent = plot
 	snapToFloorY(dropper2, originY)
 
-	-- Diagnostic: see the comment on Dropper1's equivalent print in
-	-- connectClaimButton for why this exists.
-	print((
-		"TycoonService: %s's Dropper2 styled - Material=%s Color=(%d,%d,%d)"
-	):format(
-		player.Name,
-		tostring(dropper2.Material),
-		math.floor(dropper2.Color.R * 255),
-		math.floor(dropper2.Color.G * 255),
-		math.floor(dropper2.Color.B * 255)
-	))
-
 	startDropperLoop(plot, player, dropper2, "Dropper2")
 end
 
@@ -771,7 +706,7 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 	PadStyler.Apply(button, { AccentColor = Color3.fromRGB(60, 160, 255) })
 
 	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(160, 50)
+	billboard.Size = UDim2.fromOffset(220, 60)
 	billboard.StudsOffset = Vector3.new(0, 2, 0)
 	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
@@ -783,7 +718,7 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 	label.TextScaled = true
 	label.Font = Enum.Font.GothamBold
 	label.TextColor3 = Color3.new(1, 1, 1)
-	setPurchaseLabelText(label, DROPPER2_LABEL, ("$%d"):format(DROPPER2_COST))
+	setPurchaseLabelText(label, DROPPER2_LABEL, NumberFormat.Money(DROPPER2_COST))
 	label.Parent = billboard
 
 	local purchased = false
@@ -803,31 +738,17 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 
 		purchased = true
 		connection:Disconnect()
+		PlayerDataService.SetHasDropper2(player, true)
 		syncTycoon(player)
 		button:Destroy()
 
-		print(("TycoonService: %s purchased Dropper2"):format(player.Name))
 		spawnDropper2(plot, player, dropper1)
 	end)
 end
 
--- Spawns the repeatable "Buy Multiplier Pad" upgrade: each purchase raises
--- the plot owner's cash-per-item multiplier to the next of exactly 10 fixed
--- levels (see TycoonConfig.CashMultiplierLevels), until the hard cap at
--- level 10 is reached - there's no purchase beyond it. Unlike the one-shot
--- Dropper2 button, this pad is never destroyed - its billboard just updates
--- to show the current level/multiplier and the next level's cost.
--- Mirrors FusionService's own pickRewardItem: picks a random ItemConfig entry
--- from the rolled tier. Duplicated rather than shared since it's a 5-line
--- local function and the two services otherwise have no reason to depend on
--- each other.
-local function pickGachaItem(tier: string)
-	local itemsOfTier = ItemConfig.GetItemsByTier(tier)
-	if #itemsOfTier == 0 then
-		return nil
-	end
-	return itemsOfTier[math.random(1, #itemsOfTier)]
-end
+-- Gacha Pad: rolls a tier from FusionConfig.GachaRates, then a random item
+-- of that tier. The pull price rises with every pull.
+local gachaRng = Random.new()
 
 local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
@@ -844,7 +765,7 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	PadStyler.Apply(pad, { AccentColor = GACHA_PAD_ACCENT_COLOR })
 
 	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(160, 50)
+	billboard.Size = UDim2.fromOffset(220, 60)
 	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
 	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
 	billboard.AlwaysOnTop = true
@@ -858,7 +779,6 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	label.TextColor3 = Color3.new(1, 1, 1)
 	label.Parent = billboard
 
-	setPurchaseLabelText(label, GACHA_PAD_LABEL, ("$%d per pull"):format(TycoonConfig.GachaPullCost))
 
 	-- Prompt-gated rather than Touched-triggered: walking onto the pad no
 	-- longer spends cash on its own, only an explicit key press does - the
@@ -867,12 +787,20 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	-- standing on or walking through the pad.
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "PullPrompt"
-	prompt.ActionText = ("Pull ($%d)"):format(TycoonConfig.GachaPullCost)
 	prompt.ObjectText = "Gacha Pad"
 	prompt.MaxActivationDistance = GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE
 	prompt.HoldDuration = 0
 	prompt.RequiresLineOfSight = false
 	prompt.Parent = pad
+
+	-- The price rises with every pull (TycoonConfig.GetGachaPullCost), so the
+	-- label and prompt are refreshed after each one.
+	local function refreshGachaLabel()
+		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		setPurchaseLabelText(label, GACHA_PAD_LABEL, ("%s per pull"):format(NumberFormat.Money(cost)))
+		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
+	end
+	refreshGachaLabel()
 
 	local debounce = false
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
@@ -883,24 +811,25 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 			return
 		end
 
-		if not PlayerDataService.SpendCash(player, TycoonConfig.GachaPullCost) then
+		-- Roll first: a config gap can then never charge for nothing.
+		local resultTier = FusionConfig.RollGachaTier(gachaRng)
+		local rewardItem = ItemConfig.PickRandomOfTier(resultTier, gachaRng)
+		if not rewardItem then
+			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
+			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
+			return
+		end
+
+		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		if not PlayerDataService.SpendCash(player, cost) then
+			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
 			return
 		end
 
 		debounce = true
+		PlayerDataService.IncrementGachaPulls(player)
 		syncTycoon(player)
-
-		local resultTier = FusionConfig.RollResultTier()
-		local rewardItem = pickGachaItem(resultTier)
-		if not rewardItem then
-			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
-			-- Refund: the pull was charged but couldn't produce an item.
-			PlayerDataService.AddCash(player, TycoonConfig.GachaPullCost)
-			syncTycoon(player)
-			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
-			debounce = false
-			return
-		end
+		refreshGachaLabel()
 
 		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
@@ -937,13 +866,14 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 			NewItem = newEntry,
 		})
 
-		print(("TycoonService: %s pulled a %s %s from the Gacha Pad"):format(player.Name, resultTier, rewardItem.Name))
-
 		task.wait(GACHA_PAD_DEBOUNCE_SECONDS)
 		debounce = false
 	end)
 end
 
+-- Multiplier Pad: each purchase moves the owner to the next of 10 fixed
+-- levels (TycoonConfig.CashMultiplierLevels). The multiplier applies to all
+-- income. The pad stays after buying; its label shows current -> next.
 local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePart)
 	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
 	local rowOffset = MULTIPLIER_PAD_ROW_OFFSET_STUDS
@@ -979,7 +909,7 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 	PadStyler.Apply(pad, { AccentColor = Color3.fromRGB(200, 60, 255) })
 
 	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(160, 50)
+	billboard.Size = UDim2.fromOffset(220, 60)
 	-- Deliberately different from the Dropper2 button's billboard offset
 	-- (0, 2, 0): with correctly-spaced parts this alone wouldn't matter, but
 	-- it means two labels never land at the exact same relative height even
@@ -1006,33 +936,49 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 			setPurchaseLabelText(
 				label,
 				MULTIPLIER_PAD_LABEL,
-				("Level %d/%d (x%d) - MAX LEVEL"):format(level, maxLevel, currentMultiplier)
+				("Level %d/%d (%s) - MAX"):format(level, maxLevel, NumberFormat.Multiplier(currentMultiplier))
 			)
 			return
 		end
 
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
+		local nextMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
 		setPurchaseLabelText(
 			label,
 			MULTIPLIER_PAD_LABEL,
-			("Level %d/%d (x%d) - Next: $%d"):format(level, maxLevel, currentMultiplier, cost)
+			("%s → %s  ·  %s"):format(
+				NumberFormat.Multiplier(currentMultiplier),
+				NumberFormat.Multiplier(nextMultiplier),
+				NumberFormat.Money(cost)
+			)
 		)
 	end
 
 	refreshLabel()
 
+	-- E-to-buy, same as the Gacha Pad. It used to buy on Touched, so just
+	-- standing on the pad (or walking across it) spent cash every second.
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "UpgradePrompt"
+	prompt.ActionText = "Upgrade"
+	prompt.ObjectText = "Cash Multiplier"
+	prompt.MaxActivationDistance = GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE
+	prompt.HoldDuration = 0
+	prompt.RequiresLineOfSight = false
+	prompt.Parent = pad
+
 	local debounce = false
-	pad.Touched:Connect(function(hit: BasePart)
+	prompt.Triggered:Connect(function(toucher: Player)
 		if debounce then
 			return
 		end
-		local toucher = getTouchingPlayer(hit)
-		if not toucher or toucher.UserId ~= player.UserId then
+		if toucher.UserId ~= player.UserId then
 			return
 		end
 
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
 		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
+			prompt.Enabled = false
 			return
 		end
 
@@ -1079,8 +1025,6 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 			OldMultiplier = oldMultiplier,
 			NewMultiplier = newMultiplier,
 		})
-
-		print(("TycoonService: %s upgraded cash multiplier to x%d"):format(player.Name, newMultiplier))
 
 		task.wait(MULTIPLIER_PAD_DEBOUNCE_SECONDS)
 		debounce = false
@@ -1131,7 +1075,26 @@ local function createPedestals(plot: Model, player: Player, dropper1: BasePart)
 		prompt.Parent = pedestal
 	end
 
-	print(("TycoonService: built %d pedestals for %s"):format(PEDESTAL_COUNT, player.Name))
+end
+
+-- Re-applies saved pedestal displays when a returning player claims their
+-- plot. Before this, displayed items kept earning after a rejoin but the
+-- pedestals looked empty, so players thought their Mythic was gone.
+local function restoreSavedPedestals(plot: Model, player: Player)
+	local pedestalsFolder = plot:FindFirstChild("Pedestals")
+	if not pedestalsFolder then
+		return
+	end
+	for pedestalIndex, uid in PlayerDataService.GetPedestalDisplays(player) do
+		local pedestal = pedestalsFolder:FindFirstChild("Pedestal" .. pedestalIndex)
+		local item = uid and PlayerDataService.GetItemByUid(player, uid)
+		if pedestal and pedestal:IsA("BasePart") and item then
+			PedestalVisuals.Apply(pedestal, item.Tier)
+		elseif uid and not item then
+			-- Points at an item that no longer exists; free the slot.
+			PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
+		end
+	end
 end
 
 -- Builds the "claim pod" riser beneath ClaimButton: a short, slightly wider
@@ -1193,8 +1156,6 @@ local function connectClaimButton(plot: Model, player: Player)
 	buttonPart.Color = CLAIM_BUTTON_COLOR
 	local claimPodOrb = createClaimPodRiser(plot, buttonPart)
 
-	print(("TycoonService: ClaimButton connected for %s"):format(player.Name))
-
 	local connection: RBXScriptConnection
 	connection = buttonPart.Touched:Connect(function(hit: BasePart)
 		local toucher = getTouchingPlayer(hit)
@@ -1202,7 +1163,6 @@ local function connectClaimButton(plot: Model, player: Player)
 			return
 		end
 		if toucher.UserId ~= player.UserId then
-			print(("TycoonService: %s touched %s's ClaimButton but doesn't own it"):format(toucher.Name, player.Name))
 			return
 		end
 		if plot:GetAttribute("Claimed") then
@@ -1225,7 +1185,14 @@ local function connectClaimButton(plot: Model, player: Player)
 			claimPodOrb:Destroy()
 		end
 
-		print(("TycoonService: %s claimed their plot"):format(player.Name))
+		-- Saved state (Dropper2, pedestals) is restored below, so wait for
+		-- the profile if the DataStore is being slow.
+		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
+			task.wait(0.25)
+		end
+		if not player.Parent or not plot.Parent then
+			return
+		end
 
 		-- Recursive lookup: Dropper1 may be nested under an organizational group/folder.
 		local dropper1 = plot:FindFirstChild("Dropper1", true)
@@ -1250,20 +1217,6 @@ local function connectClaimButton(plot: Model, player: Player)
 		-- machine rather than one styled and one default-gray.
 		dropper1Part.Material = Enum.Material.Neon
 		dropper1Part.Color = DROPPER_ACCENT_COLOR
-		-- Diagnostic: prints the actual applied values immediately after
-		-- setting them, so a test run shows real data instead of trusting
-		-- that this code path ran at all (e.g. a stale Rojo sync would mean
-		-- Studio isn't actually executing this file's current content).
-		print((
-			"TycoonService: %s's Dropper1 styled - Material=%s Color=(%d,%d,%d)"
-		):format(
-			player.Name,
-			tostring(dropper1Part.Material),
-			math.floor(dropper1Part.Color.R * 255),
-			math.floor(dropper1Part.Color.G * 255),
-			math.floor(dropper1Part.Color.B * 255)
-		))
-
 		-- Dropper1's rotation (and everything about how it produces cash) is
 		-- untouched template/gameplay logic, but its X/Z/height are now placed
 		-- directly at PlotOrigin (offset zero) - the same reference point the
@@ -1284,10 +1237,16 @@ local function connectClaimButton(plot: Model, player: Player)
 		end
 
 		startDropperLoop(plot, player, dropper1Part, "Dropper1")
-		createPurchaseButton(plot, player, dropper1Part)
+		if PlayerDataService.HasDropper2(player) then
+			spawnDropper2(plot, player, dropper1Part)
+		else
+			createPurchaseButton(plot, player, dropper1Part)
+		end
 		createMultiplierPad(plot, player, dropper1Part)
 		createPedestals(plot, player, dropper1Part)
+		restoreSavedPedestals(plot, player)
 		createGachaPad(plot, player, dropper1Part)
+		syncTycoon(player)
 	end)
 end
 
@@ -1331,11 +1290,16 @@ local function createPlotForPlayer(player: Player)
 		plotModel:PivotTo(CFrame.new((slotIndex - 1) * PLOT_SLOT_SPACING_STUDS, 0, 0))
 		resizeFloorToFitRow(plotModel, player)
 		fixSpawnLocations(plotModel, player)
+
+		-- Every plot gets its own Fusion Machine (it used to be one shared
+		-- machine next to slot 1 only).
+		local originPart = getPlotOrigin(plotModel)
+		if originPart then
+			FusionMachineService.Build(originPart.CFrame, originPart.Position.Y, plotModel)
+		end
 	else
 		warn("TycoonService: TycoonTemplate is not a Model, so plots cannot be repositioned and will overlap")
 	end
-
-	print(("TycoonService: created plot for %s in slot %d"):format(player.Name, slotIndex))
 
 	plotByUserId[player.UserId] = plot :: Model
 	connectClaimButton(plot :: Model, player)
@@ -1355,15 +1319,17 @@ local function removePlotForPlayer(player: Player)
 	end
 end
 
-function TycoonService.Init()
+function TycoonService:Init()
 	setupCollisionGroups()
 
 	RemoteEvents.RequestUpgrade.OnServerEvent:Connect(onRequestUpgrade)
 
 	Players.PlayerAdded:Connect(createPlotForPlayer)
 	Players.PlayerRemoving:Connect(removePlotForPlayer)
+	-- Deferred, not spawned: plot creation needs FusionMachineService, which
+	-- is only resolved in :Start(). Deferred threads run after Init+Start.
 	for _, player in Players:GetPlayers() do
-		task.spawn(createPlotForPlayer, player)
+		task.defer(createPlotForPlayer, player)
 	end
 
 	task.spawn(function()
@@ -1372,6 +1338,10 @@ function TycoonService.Init()
 			onPassiveIncomeTick()
 		end
 	end)
+end
+
+function TycoonService:Start()
+	FusionMachineService = require(script.Parent.FusionMachineService)
 end
 
 return TycoonService

@@ -10,6 +10,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 
 local ItemPickerUI = {}
 
@@ -181,7 +184,18 @@ function ItemPickerUI.Open(items: { PickerEntry }, onSelect: ((PickerEntry) -> (
 		empty.Visible = false
 		scroll.Visible = true
 
-		for index, entry in items do
+		-- Best items first, so the one you want on a pedestal is at the top.
+		local sorted = table.clone(items)
+		table.sort(sorted, function(a, b)
+			local rankA = ItemConfig.Tiers[a.Tier] or 0
+			local rankB = ItemConfig.Tiers[b.Tier] or 0
+			if rankA ~= rankB then
+				return rankA > rankB
+			end
+			return a.Name < b.Name
+		end)
+
+		for index, entry in sorted do
 			local tierVisual = RarityVisuals.Tiers[entry.Tier]
 			local tierColor = (tierVisual and tierVisual.GlowColor) or Color3.new(1, 1, 1)
 
@@ -231,7 +245,11 @@ function ItemPickerUI.Open(items: { PickerEntry }, onSelect: ((PickerEntry) -> (
 			tierLabel.TextColor3 = tierColor
 			tierLabel.TextScaled = true
 			tierLabel.TextXAlignment = Enum.TextXAlignment.Right
-			tierLabel.Text = entry.Tier:upper()
+			-- What it earns on a pedestal (before the multiplier).
+			tierLabel.Text = ("%s · %s/s"):format(
+				entry.Tier:upper(),
+				NumberFormat.Money(TycoonConfig.GetPedestalCashPerSecond(entry.Tier))
+			)
 			tierLabel.Parent = row
 
 			if onSelect then
