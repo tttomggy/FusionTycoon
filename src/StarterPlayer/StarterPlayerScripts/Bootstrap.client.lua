@@ -7,6 +7,7 @@ local ItemController = require(Controllers.ItemController)
 local AnnouncementController = require(Controllers.AnnouncementController)
 local HudController = require(Controllers.HudController)
 local ToastController = require(Controllers.ToastController)
+local ResultController = require(Controllers.ResultController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -15,6 +16,7 @@ TycoonController.Init()
 ToastController.Init()
 AnnouncementController.Init()
 HudController.Init()
+ResultController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

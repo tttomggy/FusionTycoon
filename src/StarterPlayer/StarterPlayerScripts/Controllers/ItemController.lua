@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
@@ -33,6 +34,8 @@ end
 
 -- Guards per-pedestal so a pending placement on one doesn't block another.
 local pendingPedestals: { [number]: boolean } = {}
+-- True once this player's Pedestals folder exists (their plot is claimed).
+local pedestalsReady = false
 
 local placementResolved = Instance.new("BindableEvent")
 -- Fires once the server has validated a place-item attempt.
@@ -108,6 +111,22 @@ local function openItemPicker(pedestalIndex: number)
 	end, nil, { Subtitle = ("For Pedestal %d · best items first"):format(pedestalIndex) })
 end
 
+-- Places `uid` on the lowest-numbered empty pedestal (the result card's
+-- DISPLAY IT). Returns false if the plot isn't claimed yet or every pedestal
+-- is full, so the caller can fall back to the inventory picker.
+function ItemController.PlaceOnFirstEmpty(uid: string): boolean
+	if not pedestalsReady then
+		return false
+	end
+	for index = 1, PlotLayout.PEDESTAL_COUNT do
+		if not TycoonController.GetPedestalDisplay(index) and not pendingPedestals[index] then
+			requestPlaceItem(index, uid)
+			return true
+		end
+	end
+	return false
+end
+
 local function requestRemoveItem(pedestalIndex: number)
 	if pendingPedestals[pedestalIndex] then
 		return
@@ -145,6 +164,7 @@ function ItemController.Init()
 	local plotsFolder = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
 	local plot = plotsFolder:WaitForChild(PlotNaming.GetPlotName(localPlayer.UserId))
 	local pedestalsFolder = waitForNamedChild(plot, "Pedestals") :: Folder
+	pedestalsReady = true
 
 	for _, pedestal in pedestalsFolder:GetChildren() do
 		if pedestal:IsA("BasePart") then

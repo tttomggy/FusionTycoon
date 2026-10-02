@@ -12,11 +12,11 @@ local Debris = game:GetService("Debris")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
-local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
+local ResultController = require(script.Parent.ResultController)
 
 local AnnouncementController = {}
 
@@ -224,18 +224,6 @@ local function onMultiplierUpgraded(payload: any)
 	})
 end
 
--- Every current ItemConfig entry already spells its own tier out in its Name
--- (e.g. "Common Spark"), so blindly prepending the tier again reads
--- redundantly ("You pulled a COMMON Common Spark!"). Only prepend it when the
--- item's own name doesn't already start with it, so a future item whose name
--- doesn't encode its tier still reads correctly either way.
-local function buildGachaPullMessage(tier: string, itemName: string): string
-	if itemName:sub(1, #tier):lower() == tier:lower() then
-		return ("You pulled a %s!"):format(itemName)
-	end
-	return ("You pulled a %s %s!"):format(tier:upper(), itemName)
-end
-
 local function onGachaPullResult(payload: any)
 	if not payload.Success then
 		if payload.Reason == "InsufficientCash" and payload.Cost then
@@ -247,22 +235,7 @@ local function onGachaPullResult(payload: any)
 		end
 		return
 	end
-	if not payload.NewItem then
-		return
-	end
-
-	local newItem = payload.NewItem
-	local tier = newItem.Tier :: string
-	local itemConfigEntry = ItemConfig.GetItemById(newItem.ItemId)
-	local itemName = itemConfigEntry and itemConfigEntry.Name or newItem.ItemId
-	local tierVisual = RarityVisuals.Tiers[tier]
-
-	enqueueInstant({
-		Message = buildGachaPullMessage(tier, itemName),
-		AccentColor = (tierVisual and tierVisual.GlowColor) or Color3.new(1, 1, 1),
-		IsMajor = FusionConfig.MajorRevealTiers[tier] == true,
-		Instant = true,
-	})
+	-- Successful pulls are shown by ResultController's pull/result cards.
 end
 
 -- Shown after the Fusion Machine's reveal finishes, so the banner never
@@ -277,17 +250,12 @@ local function onFusionResolved(result: any)
 	local itemName = itemConfigEntry and itemConfigEntry.Name or newItem.ItemId
 	local tierVisual = RarityVisuals.Tiers[tier]
 
-	if result.Upgraded then
+	-- Fails get ResultController's fail card and Epic+ successes its big
+	-- result card; only the smaller successes keep this banner.
+	if result.Upgraded and not ResultController.ShowsBigCardFor(tier) then
 		enqueueInstant({
 			Message = ("FUSION SUCCESS! → %s %s"):format(tier:upper(), itemName),
 			AccentColor = (tierVisual and tierVisual.GlowColor) or Color3.new(1, 1, 1),
-			IsMajor = FusionConfig.MajorRevealTiers[tier] == true,
-			Instant = true,
-		})
-	else
-		enqueueInstant({
-			Message = ("Fusion failed - kept 1 %s"):format(tier),
-			AccentColor = Color3.fromRGB(120, 120, 135),
 			Instant = true,
 		})
 	end
