@@ -2,13 +2,16 @@
 --[[
 	BillboardKit
 	------------
-	The "Fusion Lab" look for world labels (BillboardGuis), built by the
-	server: pad labels (title + gradient price pill + detail line), pedestal
-	labels, the Fusion odds board (a SurfaceGui) and the plot sign. Colours and fonts come
-	from UITheme, like the HUD's.
+	The "Fusion Lab" look for world labels, built by the server:
 
-	Every label: LightInfluence 0, AlwaysOnTop false (true drew them through
-	walls), and a MaxDistance so they don't litter the map.
+	  * Pad labels and pedestal labels - BillboardGuis sized IN STUDS
+	    (UDim2.fromScale), with scale-based contents and TextScaled text
+	    (capped by a UITextSizeConstraint), so they shrink with distance like
+	    real signs instead of filling the screen up close.
+	  * The Fusion odds board and the plot sign - SurfaceGuis on real parts.
+
+	Colours and fonts come from UITheme. Every BillboardGui: LightInfluence 0,
+	AlwaysOnTop false, and a MaxDistance.
 
 	Labels only the plot owner should see carry the attribute OwnerOnly =
 	true; the client's WorldLabelController disables them for everyone else.
@@ -24,16 +27,21 @@ local BillboardKit = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-BillboardKit.PAD_MAX_DISTANCE = 26
+BillboardKit.PAD_MAX_DISTANCE = 90
 BillboardKit.PEDESTAL_MAX_DISTANCE = 70
-BillboardKit.PLOT_SIGN_MAX_DISTANCE = 120
+BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE = 25
 BillboardKit.OWNER_ONLY_ATTRIBUTE = "OwnerOnly"
+
+-- Billboard sizes in studs.
+local PAD_LABEL_STUDS = Vector2.new(9, 3.4)
+local PEDESTAL_LABEL_STUDS = Vector2.new(6.5, 2.6)
+local MAX_TEXT_SIZE = 64
 
 --[[ Primitives ------------------------------------------------------------- ]]
 
-local function corner(parent: Instance, radius: number)
+local function corner(parent: Instance, radius: UDim)
 	local c = Instance.new("UICorner")
-	c.CornerRadius = UDim.new(0, radius)
+	c.CornerRadius = radius
 	c.Parent = parent
 end
 
@@ -47,57 +55,45 @@ local function borderStroke(parent: Instance, thickness: number, color: Color3?)
 	return stroke
 end
 
-local function textStroke(label: TextLabel, thickness: number)
+local function textStroke(text: TextLabel, thickness: number)
 	local stroke = Instance.new("UIStroke")
 	stroke.Color = Colors.Ink
 	stroke.Thickness = thickness
 	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
 	stroke.LineJoinMode = Enum.LineJoinMode.Round
-	stroke.Parent = label
+	stroke.Parent = text
 end
 
-local function gradient(parent: Instance, top: Color3, bottom: Color3, rotation: number?)
+local function gradient(parent: Instance, top: Color3, bottom: Color3)
 	local g = Instance.new("UIGradient")
 	g.Color = ColorSequence.new(top, bottom)
-	g.Rotation = rotation or 90
+	g.Rotation = 90
 	g.Parent = parent
 end
 
-local function listLayout(parent: Instance, padding: number)
-	local layout = Instance.new("UIListLayout")
-	layout.SortOrder = Enum.SortOrder.LayoutOrder
-	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.VerticalAlignment = Enum.VerticalAlignment.Center
-	layout.Padding = UDim.new(0, padding)
-	layout.Parent = parent
-end
-
-local function label(
-	parent: Instance,
-	name: string,
-	font: Font,
-	size: number,
-	color: Color3,
-	height: number,
-	order: number
-): TextLabel
+-- A TextScaled label occupying `height` (a fraction of its parent) at `y`,
+-- capped at MAX_TEXT_SIZE.
+local function scaledLabel(parent: Instance, name: string, font: Font, color: Color3, y: number, height: number): TextLabel
 	local text = Instance.new("TextLabel")
 	text.Name = name
 	text.BackgroundTransparency = 1
 	text.FontFace = font
-	text.TextSize = size
 	text.TextColor3 = color
-	text.Size = UDim2.new(1, 0, 0, height)
-	text.LayoutOrder = order
+	text.TextScaled = true
 	text.RichText = false
+	text.Position = UDim2.fromScale(0, y)
+	text.Size = UDim2.fromScale(1, height)
 	text.Parent = parent
+	local constraint = Instance.new("UITextSizeConstraint")
+	constraint.MaxTextSize = MAX_TEXT_SIZE
+	constraint.Parent = text
 	return text
 end
 
-local function newBillboard(parent: Instance, name: string, size: Vector2, offset: Vector3, maxDistance: number): BillboardGui
+local function newBillboard(parent: Instance, name: string, studs: Vector2, offset: Vector3, maxDistance: number): BillboardGui
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = name
-	billboard.Size = UDim2.fromOffset(size.X, size.Y)
+	billboard.Size = UDim2.fromScale(studs.X, studs.Y)
 	billboard.StudsOffset = offset
 	billboard.MaxDistance = maxDistance
 	billboard.LightInfluence = 0
@@ -129,48 +125,41 @@ export type PadLabel = {
 	SetDetail: (text: string?) -> (),
 }
 
--- Title (Display 30, coloured, 2.5 ink stroke), a gradient price pill
--- (Display 22, ink stroke 3) and an optional detail line (Body 13).
+-- Title (Display, coloured, ink stroke), a gradient price pill (Display,
+-- ink stroke) and an optional detail line (Body). 9 x 3.4 studs.
 function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 	local gui = newBillboard(
 		parent,
 		props.Name or "PadLabel",
-		Vector2.new(300, 120),
-		props.StudsOffset or Vector3.new(0, 3, 0),
+		PAD_LABEL_STUDS,
+		props.StudsOffset or Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 		props.MaxDistance or BillboardKit.PAD_MAX_DISTANCE
 	)
 	if props.OwnerOnly then
 		gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 	end
 
-	local stack = Instance.new("Frame")
-	stack.BackgroundTransparency = 1
-	stack.Size = UDim2.fromScale(1, 1)
-	stack.Parent = gui
-	listLayout(stack, 4)
-
-	local title = label(stack, "Title", Fonts.Display, 30, props.TitleColor, 34, 1)
+	local title = scaledLabel(gui, "Title", Fonts.Display, props.TitleColor, 0, 0.4)
 	title.Text = props.Title
 	textStroke(title, 2.5)
 
-	local pill = label(stack, "Pill", Fonts.Display, 22, props.PillTextColor or Colors.Text, 34, 2)
-	pill.AutomaticSize = Enum.AutomaticSize.X
-	pill.Size = UDim2.fromOffset(0, 34)
-	pill.BackgroundTransparency = 0
+	local pill = Instance.new("Frame")
+	pill.Name = "Pill"
+	pill.AnchorPoint = Vector2.new(0.5, 0)
+	pill.Position = UDim2.fromScale(0.5, 0.42)
+	pill.Size = UDim2.fromScale(0.62, 0.34)
 	pill.BackgroundColor3 = Colors.White
+	pill.Parent = gui
 	gradient(pill, props.PillGradient.Top, props.PillGradient.Bottom)
-	corner(pill, 999)
+	corner(pill, UDim.new(0.5, 0))
 	borderStroke(pill, 3)
-	local padding = Instance.new("UIPadding")
-	padding.PaddingLeft = UDim.new(0, 14)
-	padding.PaddingRight = UDim.new(0, 14)
-	padding.Parent = pill
+	local pillText = scaledLabel(pill, "Text", Fonts.Display, props.PillTextColor or Colors.Text, 0.12, 0.76)
 	if props.PillTextStroke ~= false then
-		textStroke(pill, 2)
+		textStroke(pillText, 2)
 	end
-	pill.Text = props.Pill
+	pillText.Text = props.Pill
 
-	local detail = label(stack, "Detail", Fonts.Body, 13, Colors.Text, 18, 3)
+	local detail = scaledLabel(gui, "Detail", Fonts.Body, Colors.Text, 0.8, 0.2)
 	textStroke(detail, 1.5)
 
 	local function setDetail(text: string?)
@@ -182,7 +171,7 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 	return {
 		Gui = gui,
 		SetPill = function(text: string)
-			pill.Text = text
+			pillText.Text = text
 		end,
 		SetDetail = setDetail,
 	}
@@ -203,44 +192,38 @@ local function pedestalLabelOffset(pedestal: BasePart): Vector3
 	return Vector3.new(0, PlotLayout.Pedestal.LabelOffsetY - baseSize.Y / 2, 0)
 end
 
-local function buildFilledLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "FilledLabel", Vector2.new(210, 86), pedestalLabelOffset(pedestal), BillboardKit.PEDESTAL_MAX_DISTANCE)
+local function pedestalPanel(gui: BillboardGui, transparency: number, strokeColor: Color3): Frame
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
 	panel.BackgroundColor3 = Colors.Panel
-	panel.BackgroundTransparency = 0.08
-	panel.Size = UDim2.new(1, -6, 1, -6)
-	panel.Position = UDim2.fromOffset(3, 3)
+	panel.BackgroundTransparency = transparency
+	panel.AnchorPoint = Vector2.new(0.5, 0.5)
+	panel.Position = UDim2.fromScale(0.5, 0.5)
+	panel.Size = UDim2.fromScale(0.96, 0.92)
 	panel.Parent = gui
-	corner(panel, 14)
-	borderStroke(panel, 3)
-	listLayout(panel, 0)
+	corner(panel, UDim.new(0.18, 0))
+	borderStroke(panel, 3, strokeColor)
+	return panel
+end
 
-	label(panel, "Tier", Fonts.BodyHeavy, 11, Colors.Text, 16, 1)
-	local name = label(panel, "ItemName", Fonts.Display, 22, Colors.Text, 28, 2)
+local function buildFilledLabel(pedestal: BasePart): BillboardGui
+	local gui = newBillboard(pedestal, "FilledLabel", PEDESTAL_LABEL_STUDS, pedestalLabelOffset(pedestal), BillboardKit.PEDESTAL_MAX_DISTANCE)
+	local panel = pedestalPanel(gui, 0.08, Colors.Ink)
+	scaledLabel(panel, "Tier", Fonts.BodyHeavy, Colors.Text, 0.06, 0.2)
+	local name = scaledLabel(panel, "ItemName", Fonts.Display, Colors.Text, 0.28, 0.4)
 	textStroke(name, 2)
-	label(panel, "Rate", Fonts.Body, 14, Colors.Cash, 20, 3)
+	scaledLabel(panel, "Rate", Fonts.Body, Colors.Cash, 0.7, 0.24)
 	return gui
 end
 
 local function buildEmptyLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "EmptyLabel", Vector2.new(190, 64), pedestalLabelOffset(pedestal), BillboardKit.PAD_MAX_DISTANCE)
+	local gui = newBillboard(pedestal, "EmptyLabel", PEDESTAL_LABEL_STUDS, pedestalLabelOffset(pedestal), BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE)
 	gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
-	local panel = Instance.new("Frame")
-	panel.Name = "Panel"
-	panel.BackgroundColor3 = Colors.Panel
-	panel.BackgroundTransparency = 0.3
-	panel.Size = UDim2.new(1, -6, 1, -6)
-	panel.Position = UDim2.fromOffset(3, 3)
-	panel.Parent = gui
-	corner(panel, 14)
 	-- "Dashed" look: a faint outline instead of the solid ink one.
-	borderStroke(panel, 3, Colors.Faint)
-	listLayout(panel, 0)
-
-	local empty = label(panel, "Empty", Fonts.Display, 18, Colors.Muted, 24, 1)
+	local panel = pedestalPanel(gui, 0.3, Colors.Faint)
+	local empty = scaledLabel(panel, "Empty", Fonts.Display, Colors.Muted, 0.12, 0.44)
 	empty.Text = "EMPTY"
-	local hint = label(panel, "Hint", Fonts.Body, 12, Colors.Faint, 16, 2)
+	local hint = scaledLabel(panel, "Hint", Fonts.Body, Colors.Faint, 0.6, 0.26)
 	hint.Text = "E to display an item"
 	return gui
 end
@@ -273,7 +256,19 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 	emptyGui.Enabled = info == nil
 end
 
---[[ Fusion odds board ---------------------------------------------------------- ]]
+--[[ Surfaces ------------------------------------------------------------------ ]]
+
+local function newSurface(part: BasePart, name: string, face: Enum.NormalId, pixelsPerStud: number): SurfaceGui
+	local gui = Instance.new("SurfaceGui")
+	gui.Name = name
+	gui.Face = face
+	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
+	gui.PixelsPerStud = pixelsPerStud
+	gui.LightInfluence = 0
+	gui.ResetOnSpawn = false
+	gui.Parent = part
+	return gui
+end
 
 export type OddsRow = {
 	FromTier: string,
@@ -281,18 +276,11 @@ export type OddsRow = {
 	Chance: number, -- 0..1
 }
 
--- The odds board's content on a SurfaceGui on the Front face of `board`
--- (a real board part in the world, not a billboard): title, one row per
--- recipe coloured by the tier it fuses into, and the fail rule.
+-- The odds board's content on the Front face of `board` (a real board part,
+-- not a billboard): title, one row per recipe coloured by the tier it fuses
+-- into, and the fail rule.
 function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerStud: number): SurfaceGui
-	local gui = Instance.new("SurfaceGui")
-	gui.Name = "OddsSurface"
-	gui.Face = Enum.NormalId.Front
-	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	gui.PixelsPerStud = pixelsPerStud
-	gui.LightInfluence = 0
-	gui.ResetOnSpawn = false
-	gui.Parent = board
+	local gui = newSurface(board, "OddsSurface", Enum.NormalId.Front, pixelsPerStud)
 
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
@@ -300,73 +288,68 @@ function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerS
 	panel.Size = UDim2.fromScale(1, 1)
 	panel.Parent = gui
 	borderStroke(panel, 6)
-	local padding = Instance.new("UIPadding")
-	padding.PaddingTop = UDim.new(0, 10)
-	padding.PaddingBottom = UDim.new(0, 10)
-	padding.PaddingLeft = UDim.new(0, 18)
-	padding.PaddingRight = UDim.new(0, 18)
-	padding.Parent = panel
-	listLayout(panel, 2)
 
-	local title = label(panel, "Title", Fonts.Display, 30, Colors.VioletLight, 34, 0)
+	local titleHeight, footerHeight = 0.2, 0.12
+	local rowHeight = (1 - titleHeight - footerHeight - 0.08) / math.max(#rows, 1)
+
+	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.03, titleHeight)
 	title.Text = "FUSE 2 → TIER UP"
 	textStroke(title, 2)
 
 	for index, row in rows do
-		local line = Instance.new("Frame")
-		line.Name = "Row" .. index
-		line.BackgroundTransparency = 1
-		line.Size = UDim2.new(1, 0, 0, 28)
-		line.LayoutOrder = index
-		line.Parent = panel
-
-		local left = label(line, "Recipe", Fonts.Body, 22, UITheme.GetTierLight(row.ToTier), 28, 0)
-		left.Text = ("2 %s → %s"):format(row.FromTier, row.ToTier)
+		local y = 0.04 + titleHeight + (index - 1) * rowHeight
+		local left = scaledLabel(panel, "Recipe" .. index, Fonts.Body, UITheme.GetTierLight(row.ToTier), y, rowHeight * 0.9)
+		left.Position = UDim2.fromScale(0.06, y)
+		left.Size = UDim2.fromScale(0.66, rowHeight * 0.9)
 		left.TextXAlignment = Enum.TextXAlignment.Left
+		left.Text = ("2 %s → %s"):format(row.FromTier, row.ToTier)
 		textStroke(left, 1.5)
 
-		local right = label(line, "Chance", Fonts.Display, 24, Colors.Text, 28, 0)
-		right.Text = ("%d%%"):format(math.floor(row.Chance * 100 + 0.5))
+		local right = scaledLabel(panel, "Chance" .. index, Fonts.Display, Colors.Text, y, rowHeight * 0.9)
+		right.Position = UDim2.fromScale(0.72, y)
+		right.Size = UDim2.fromScale(0.22, rowHeight * 0.9)
 		right.TextXAlignment = Enum.TextXAlignment.Right
+		right.Text = ("%d%%"):format(math.floor(row.Chance * 100 + 0.5))
 		textStroke(right, 1.5)
 	end
 
-	local footer = label(panel, "Footer", Fonts.Body, 16, Colors.Muted, 20, #rows + 1)
+	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight - 0.03, footerHeight)
 	footer.Text = "Fail = keep 1 of the 2"
 	return gui
 end
 
---[[ Plot sign ------------------------------------------------------------------- ]]
-
-export type PlotSign = {
-	Gui: BillboardGui,
+export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
 }
 
-function BillboardKit.PlotSign(anchor: Instance, offset: Vector3): PlotSign
-	local gui = newBillboard(anchor, "PlotSign", Vector2.new(320, 86), offset, BillboardKit.PLOT_SIGN_MAX_DISTANCE)
+-- The plot sign's content on BOTH the Front and Back faces of `board`: the
+-- Violet button gradient, "<NAME>'S LAB" and the income/best line.
+function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignSurface
+	local titles: { TextLabel } = {}
+	local details: { TextLabel } = {}
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local gui = newSurface(board, "Sign" .. face.Name, face, pixelsPerStud)
+		local panel = Instance.new("Frame")
+		panel.Name = "Panel"
+		panel.BackgroundColor3 = Colors.White
+		panel.Size = UDim2.fromScale(1, 1)
+		panel.Parent = gui
+		gradient(panel, UITheme.Gradients.Violet.Top, UITheme.Gradients.Violet.Bottom)
 
-	local panel = Instance.new("Frame")
-	panel.Name = "Panel"
-	panel.BackgroundColor3 = Colors.White
-	panel.Size = UDim2.new(1, -8, 1, -8)
-	panel.Position = UDim2.fromOffset(4, 4)
-	panel.Parent = gui
-	gradient(panel, UITheme.Gradients.Violet.Top, UITheme.Gradients.Violet.Bottom)
-	corner(panel, 18)
-	borderStroke(panel, 4)
-	listLayout(panel, 0)
-
-	local title = label(panel, "Title", Fonts.Display, 28, Colors.Text, 34, 1)
-	textStroke(title, 2.5)
-	local detail = label(panel, "Detail", Fonts.Body, 13, Colors.PlotSignDetail, 18, 2)
-	textStroke(detail, 1.5)
-
+		local title = scaledLabel(panel, "Title", Fonts.Display, Colors.Text, 0.08, 0.52)
+		textStroke(title, 4)
+		local detail = scaledLabel(panel, "Detail", Fonts.Body, Colors.PlotSignDetail, 0.64, 0.26)
+		table.insert(titles, title)
+		table.insert(details, detail)
+	end
 	return {
-		Gui = gui,
 		Set = function(titleText: string, detailText: string)
-			title.Text = titleText
-			detail.Text = detailText
+			for _, title in titles do
+				title.Text = titleText
+			end
+			for _, detail in details do
+				detail.Text = detailText
+			end
 		end,
 	}
 end

@@ -35,6 +35,7 @@ local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local DropperKit = require(ReplicatedStorage.Shared.Modules.DropperKit)
+local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -58,6 +59,7 @@ local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: B
 --[[ Tuning (not geometry) ---------------------------------------------------- ]]
 
 local GACHA_RATE_TIERS_SHOWN = 3
+local PLOT_SIGN_REFRESH_SECONDS = 5
 local CASH_DROP_DEBRIS_LIFETIME_SECONDS = 30
 local CASH_DROP_SPEED_STUDS_PER_SECOND = 6
 local STATION_DEBOUNCE_SECONDS = 1
@@ -70,7 +72,7 @@ local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 -- Cash balls pass through characters ("Default") but still hit the plot
 -- floor/collector (PlotEnvironment).
 local CASH_COLLISION_GROUP = "CashParts"
-local PLOT_ENVIRONMENT_COLLISION_GROUP = "PlotEnvironment"
+local PLOT_ENVIRONMENT_COLLISION_GROUP = PlotKit.FLOOR_COLLISION_GROUP
 
 local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "Dropper1", "ClaimButton", "PlotOrigin", "SpawnLocation" }
 
@@ -80,6 +82,7 @@ local occupiedSlots: { [number]: boolean } = {}
 local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
 local originByUserId: { [number]: CFrame } = {}
+local plotSignByUserId: { [number]: BillboardKit.SignSurface } = {}
 
 local function syncTycoon(player: Player)
 	PlayerDataService.SyncTycoon(player)
@@ -238,9 +241,6 @@ end
 --[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
 
 local function buildShell(plot: Model, origin: CFrame, player: Player)
-	local floorSize = PlotLayout.FLOOR_SIZE
-	local half = PlotLayout.PLOT_HALF
-
 	local plotOrigin = findPart(plot, "PlotOrigin")
 	if plotOrigin then
 		plotOrigin.CFrame = origin
@@ -252,84 +252,10 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 		plot.PrimaryPart = plotOrigin
 	end
 
-	local floor = findPart(plot, "Floor")
-	if floor then
-		floor.Size = floorSize
-		floor.CFrame = PartKit.At(origin, Vector3.zero, -floorSize.Y / 2)
-		floor.Material = Enum.Material.SmoothPlastic
-		floor.Color = World.Floor
-		floor.Anchored = true
-		floor.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
-	end
-
-	local walkwayLength = PlotLayout.WALKWAY_Z_MAX - PlotLayout.WALKWAY_Z_MIN
-	PartKit.Part({
-		Name = "Walkway",
-		Size = Vector3.new(PlotLayout.WALKWAY_WIDTH, PlotLayout.WALKWAY_THICKNESS, walkwayLength),
-		CFrame = PartKit.At(
-			origin,
-			Vector3.new(PlotLayout.WALKWAY_X, 0, (PlotLayout.WALKWAY_Z_MIN + PlotLayout.WALKWAY_Z_MAX) / 2),
-			PlotLayout.WALKWAY_TOP_Y - PlotLayout.WALKWAY_THICKNESS / 2
-		),
-		Color = World.Walkway,
-		CanCollide = false,
-		CanQuery = false,
-		Parent = plot,
-	})
-
-	-- Rim walls just inside the floor edge, with a strip on top that turns
-	-- violet once the plot is claimed. The front wall has the gate gap.
-	local walls = Instance.new("Folder")
-	walls.Name = "Walls"
-	walls.Parent = plot
-	local thickness = PlotLayout.WALL_THICKNESS
-	local inset = half - thickness / 2
-	local inner = half - thickness
-	local gate = PlotLayout.GATE_HALF_WIDTH
-	local frontSegment = half - gate
-	local segments = {
-		{ Name = "BackWall", Center = Vector3.new(0, 0, -inset), Size = Vector3.new(floorSize.X, 0, thickness) },
-		{ Name = "LeftWall", Center = Vector3.new(-inset, 0, 0), Size = Vector3.new(thickness, 0, inner * 2) },
-		{ Name = "RightWall", Center = Vector3.new(inset, 0, 0), Size = Vector3.new(thickness, 0, inner * 2) },
-		{ Name = "FrontWallLeft", Center = Vector3.new(-(gate + frontSegment / 2), 0, inset), Size = Vector3.new(frontSegment, 0, thickness) },
-		{ Name = "FrontWallRight", Center = Vector3.new(gate + frontSegment / 2, 0, inset), Size = Vector3.new(frontSegment, 0, thickness) },
-	}
-	for _, segment in segments do
-		PartKit.Part({
-			Name = segment.Name,
-			Size = Vector3.new(segment.Size.X, PlotLayout.WALL_HEIGHT, segment.Size.Z),
-			CFrame = PartKit.At(origin, segment.Center, PlotLayout.WALL_HEIGHT / 2),
-			Color = World.Structure,
-			Parent = walls,
-		})
-		local strip = PartKit.Part({
-			Name = "WallStrip",
-			Size = Vector3.new(
-				math.max(segment.Size.X, PlotLayout.WALL_STRIP_WIDTH),
-				PlotLayout.WALL_STRIP_HEIGHT,
-				math.max(segment.Size.Z, PlotLayout.WALL_STRIP_WIDTH)
-			),
-			CFrame = PartKit.At(origin, segment.Center, PlotLayout.WALL_HEIGHT + PlotLayout.WALL_STRIP_HEIGHT / 2),
-			Color = World.Unclaimed,
-			Material = Enum.Material.Neon,
-			CanCollide = false,
-			Parent = walls,
-		})
-		strip:AddTag("FT_WallStrip")
-	end
-
-	-- Gate ramp: a wedge from street level up to the floor, outside the gap.
-	-- A WedgePart is tallest at its local +Z face, so it's turned to put that
-	-- face against the floor edge.
-	PartKit.Part({
-		Name = "GateRamp",
-		ClassName = "WedgePart",
-		Size = Vector3.new(PlotLayout.GATE_RAMP_WIDTH, PlotLayout.GATE_RAMP_HEIGHT, PlotLayout.GATE_RAMP_LENGTH),
-		CFrame = PartKit.At(origin, Vector3.new(0, 0, half + PlotLayout.GATE_RAMP_LENGTH / 2), -PlotLayout.GATE_RAMP_HEIGHT / 2)
-			* CFrame.Angles(0, math.pi, 0),
-		Color = World.Structure,
-		Parent = plot,
-	})
+	PlotKit.BuildFloor(origin, plot, findPart(plot, "Floor"))
+	PlotKit.BuildWalkway(origin, plot)
+	PlotKit.BuildWalls(origin, plot, false)
+	PlotKit.BuildGateRamp(origin, plot)
 
 	-- Spawn on the street in front of the gate; RespawnLocation picks it.
 	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)
@@ -350,18 +276,6 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 		end
 	else
 		warn(("TycoonService: no SpawnLocation in %s's plot"):format(player.Name))
-	end
-end
-
-local function setWallStripsClaimed(plot: Model, claimed: boolean)
-	local walls = plot:FindFirstChild("Walls")
-	if not walls then
-		return
-	end
-	for _, strip in walls:GetChildren() do
-		if strip:IsA("BasePart") and strip:HasTag("FT_WallStrip") then
-			strip.Color = if claimed then World.AccentViolet else World.Unclaimed
-		end
 	end
 end
 
@@ -756,6 +670,45 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 	end
 end
 
+--[[ Plot sign ------------------------------------------------------------------------ ]]
+
+local function getBestTier(player: Player): string?
+	local inventory = PlayerDataService.GetInventory(player)
+	if not inventory then
+		return nil
+	end
+	local best: string? = nil
+	local bestRank = 0
+	for _, item in inventory do
+		local rank = ItemConfig.Tiers[item.Tier] or 0
+		if rank > bestRank then
+			bestRank = rank
+			best = item.Tier
+		end
+	end
+	return best
+end
+
+local function refreshPlotSigns()
+	for userId, sign in plotSignByUserId do
+		local player = Players:GetPlayerByUserId(userId)
+		local plot = plotByUserId[userId]
+		if player and plot then
+			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
+				sign.Set("FREE LAB", "Step on the green pad")
+			else
+				local droppers = if PlayerDataService.HasDropper2(player) then 2 else 1
+				local income = PlayerDataService.GetPassiveCashPerSecond(player)
+					+ TycoonConfig.GetDropperCashPerSecond(droppers, PlayerDataService.GetCashMultiplierLevel(player))
+				sign.Set(
+					("%s'S LAB"):format(player.DisplayName:upper()),
+					("%s/s · best: %s"):format(NumberFormat.Money(income), getBestTier(player) or "none")
+				)
+			end
+		end
+	end
+end
+
 --[[ Claim ------------------------------------------------------------------------------ ]]
 
 local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
@@ -789,7 +742,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		plot:SetAttribute("Claimed", true)
 		connection:Disconnect()
 		claimLabel.Gui:Destroy()
-		setWallStripsClaimed(plot, true)
+		PlotKit.SetWallStripsClaimed(plot, true)
 		-- The station stays as a plain green pad; only the arrow goes.
 		local station = pad.Parent
 		local arrow = station and station:FindFirstChild("Hologram")
@@ -824,6 +777,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
 		syncTycoon(player)
+		refreshPlotSigns()
 	end)
 end
 
@@ -857,6 +811,7 @@ local function createPlotForPlayer(player: Player)
 	validatePlotClone(plot, player)
 
 	buildShell(plot, origin, player)
+	plotSignByUserId[player.UserId] = PlotKit.BuildSignGate(origin, plot)
 
 	-- Dropper 1 stands at its spot from the start (the template part becomes
 	-- its Body); it produces once claimed.
@@ -870,6 +825,7 @@ local function createPlotForPlayer(player: Player)
 
 	plotByUserId[player.UserId] = plot
 	connectClaimStation(plot, origin, player)
+	refreshPlotSigns()
 end
 
 local function removePlotForPlayer(player: Player)
@@ -879,6 +835,7 @@ local function removePlotForPlayer(player: Player)
 		plotByUserId[player.UserId] = nil
 	end
 	originByUserId[player.UserId] = nil
+	plotSignByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
 		occupiedSlots[slotIndex] = nil
@@ -903,6 +860,13 @@ function TycoonService:Init()
 		while true do
 			task.wait(TycoonConfig.PassiveIncomeIntervalSeconds)
 			onPassiveIncomeTick()
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(PLOT_SIGN_REFRESH_SECONDS)
+			refreshPlotSigns()
 		end
 	end)
 end
