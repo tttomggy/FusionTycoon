@@ -28,7 +28,15 @@ factory line along the left wall or in the UPGRADES panel; both fire
 `RequestUpgrade`) →
 Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 (success = next tier, fail = 1 item of the same tier back) → display the best
-4 items on pedestals for passive income → Multiplier Pad multiplies ALL income.
+4 items on pedestals for passive income → Multiplier Pad multiplies ALL income
+→ Rebirth (Portal, back-right corner).
+
+Rebirth (`RebirthService`, numbers in `RebirthConfig`) needs this run's
+passive earnings (`RunEarnings`) ≥ the requirement. It resets cash,
+generators (Basic back to LV 1), the Multiplier Pad and the gacha price; it
+keeps every item, the pedestals, goals and the rebirth count, and gives
+income ×(1 + 0.5 n) and luck ×(1 + 0.05 n) (luck raises Legendary/Mythic
+gacha odds via `FusionConfig.GetGachaRates`).
 
 - All economy numbers live in `TycoonConfig.lua` (costs, pedestal income,
   multiplier levels, gacha price curve) and `FusionConfig.lua` (fusion success
@@ -39,6 +47,11 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 - Passive income has ONE formula: `TycoonConfig.GetPassiveCashPerSecond`,
   used by the server payout tick and the client HUD. It is all income: the
   factory line's cash balls are a client-side picture of it and never pay.
+  It takes one `IncomeInputs` table, built only by
+  `PlayerDataService.GetIncomeInputs` (server) and
+  `TycoonController.GetIncomeInputs` (client).
+- Every income display uses `TycoonConfig.GetIncomeMultiplier`;
+  `GetCashMultiplierValue` is the pad only.
 - Every service syncs the client with `PlayerDataService.SyncTycoon(player)`.
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
@@ -47,23 +60,28 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
 - Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
-  `/wipe`.
+  `/rebirthready` (sets this run's earnings to the requirement),
+  `/rebirths <n>`, `/wipe`.
+- Runtime `Size` animation on world parts goes through `PartKit.Pulse` /
+  `TweenSize` (a stored `BaseSize`, never the live size): reading the live
+  size compounded the generator upgrade bump until it poked through walls.
 
 ## Layout
 
 ```
 src/ReplicatedStorage/Shared/
     Config/      shared config tables (PlotLayout, StreetLayout — the street
-                 and speed belts, TycoonConfig, FusionConfig, GoalConfig — the
-                 ordered onboarding goals, …)
+                 and speed belts, TycoonConfig, FusionConfig, RebirthConfig —
+                 rebirth requirement/income/luck, GoalConfig — the ordered
+                 onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
                  tagging), PlotKit (plot shell + sign gate), StationKit
-                 (station pads + holograms), DropperKit (dropper model),
-                 GeneratorKit (the five factory-line generators + their
+                 (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
-                 ball path), PedestalVisuals, NumberFormat
+                 ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
+                 NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
 src/ServerScriptService/
@@ -87,7 +105,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   on every nearby factory line, collector pops)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
-                  Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
+                  Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI,
+                  RebirthPanel
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -164,6 +183,7 @@ calls left in `Services/`.
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 | `WorldService` | `:Init()` | — | `--!strict` |
+| `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker

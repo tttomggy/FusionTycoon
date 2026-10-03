@@ -341,3 +341,58 @@ otherwise.
     GetChildren()` is the pool size).
 - [ ] **No droppers left.** No Dropper 1, Dropper 2 slot, old gold
   collector strip or DROPPER 2 label anywhere on the plot.
+
+## 12. Rebirth + scale (Polish 4)
+
+- [ ] **No more growing generators.** `/cash 1e12`, then press E on the
+  Singularity Core's Upgrade prompt as fast as it allows, 20+ times.
+  - [ ] Its body bumps each time but always settles back to 5 × 5 × 8.
+    It never pokes through the fence, and its orb stays the same size.
+  - [ ] Repeat for the Core Engine (4 × 4 × 6).
+  - [ ] The Output window shows no "has drifted from its PlotLayout size"
+    warning (the Studio guard checks 1 s after every bump).
+  - [ ] Overlapping Fuse All charge-ups never leave the machine core
+    bigger.
+- [ ] **Multiplier Pad.** The pad label pill reads **x1 · LV 0/15**, then
+  **x1.25 · LV 1/15**, with the next value and cost on the detail line.
+  The UPGRADES footer pill matches. It climbs by +0.25 per level up to
+  **x4.5 · LV 14/15**, then reads **x5 MAX** with the prompt gone.
+- [ ] **Portal ready.** `/rebirthready`:
+  - [ ] The back-right portal's swirl turns opaque and spins.
+  - [ ] Its base ring pulses and its light brightens.
+  - [ ] Its owner-only label reads **READY · x1 → x1.5**, with a full bar
+    and **$30M / $30M this run**.
+  - [ ] Before that, the swirl is translucent and still, and the pill reads
+    **x1 → x1.5 income**.
+- [ ] **Panel and two-step confirm.** Hold E at the portal (0.5 s), or tap
+  the HUD pill once you have a rebirth.
+  - [ ] **REBIRTH n** shows the INCOME and LUCK cards, YOU KEEP / YOU
+    RESET, the bar and the caption.
+  - [ ] Not ready: the button reads **Earn $X more** and does nothing.
+  - [ ] Ready: **REBIRTH** opens **ARE YOU SURE?**. **Cancel** closes it
+    with nothing sent. **REBIRTH** there rebirths.
+  - [ ] On a phone (iPhone 14 landscape) the panel fits, scrolls if
+    needed, and every button is at least 44 px.
+- [ ] **After a rebirth.**
+  - [ ] There's an orange flash and a **REBIRTH 1!** card with **Income
+    x1.5 · Luck +5%**.
+  - [ ] Cash is $0.
+  - [ ] Basic Generator is LV 1, and the other generators are locked
+    ghosts again.
+  - [ ] The pad is x1 · LV 0/15, and the gacha is **$250 / pull**.
+  - [ ] Every item and every pedestal is intact.
+  - [ ] Pedestal labels and generator screens show the new ×1.5.
+  - [ ] The "Rebirth for the first time" goal pays $25,000 into the new run.
+- [ ] **Shows everywhere.**
+  - [ ] The HUD shows an orange **⟳ 1 · x1.5** pill beside the Multiplier
+    pill (hidden at 0).
+  - [ ] The leaderboard has **Rebirths** as its first column.
+  - [ ] Everyone gets the **SERVER · REBIRTH** banner, "<Name> reached
+    Rebirth 1!", including you.
+- [ ] **Rejoin** with saving enabled: Rebirths, the HUD pill and the portal's
+  next requirement ($96M for Rebirth 2) persist.
+- [ ] **Two players:**
+  - [ ] Player 2 sees Player 1's rebirth banner.
+  - [ ] Player 2 does **not** see Player 1's portal label or its Rebirth
+    prompt.
+  - [ ] Player 2 does see Player 1's portal itself.

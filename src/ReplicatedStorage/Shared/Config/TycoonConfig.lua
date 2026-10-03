@@ -6,13 +6,17 @@ local TycoonConfig = {}
 --[[ Economy -----------------------------------------------------------------
 	Every number in this file was tuned with the greedy-player simulation in
 	tools/econ_sim.py, run on a brand-new save (generators -> gacha -> fuse ->
-	pedestals -> multiplier; new saves start with Basic Generator at LV 1).
-	Median milestones it produces:
+	pedestals -> multiplier -> rebirth; new saves start with Basic Generator
+	at LV 1). Polish 4 medians (`python3 tools/econ_sim.py 30 12 --no-depth`):
 
-	    first Gacha pull ..... ~1:10     first Epic ............ ~3.5 min
-	    first Legendary ...... ~7 min    first Mythic .......... ~30 min
-	    Singularity Core ..... ~1h43     Multiplier maxed ...... ~3h53
-	    4 Mythics displayed .. long-tail chase
+	    first Gacha pull ..... ~1:10     first Legendary ....... ~6 min
+	    first Mythic ......... ~27 min (wide spread)
+	    Rebirth 1 ............ ~1:03     Rebirth 2 ............. ~1:50
+	    Rebirth 3 ............ ~2:48     Singularity Core ...... ~2:45
+	    Multiplier maxed ..... never in 12 h
+
+	Depth 1 (Secret tier, mutations, Index) changes these; re-run the sim
+	without --no-depth once it lands.
 
 	Income is generators + pedestals only (the factory line's cash balls are
 	a client-side picture of it). If you rebalance, change the sim's
