@@ -579,10 +579,12 @@ end
 
 -- "Pedestal1".."PedestalN" inside a "Pedestals" folder, so ItemService can
 -- look one up by index. PedestalVisuals styles them once an item is placed.
+-- The folder is built complete and parented LAST, so it replicates to the
+-- client in one piece (parenting it first let it arrive before its children,
+-- and the client wired only the pedestals it could see at that moment).
 local function createPedestals(plot: Model, origin: CFrame)
 	local folder = Instance.new("Folder")
 	folder.Name = "Pedestals"
-	folder.Parent = plot
 
 	local p = PlotLayout.Pedestal
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
@@ -596,7 +598,7 @@ local function createPedestals(plot: Model, origin: CFrame)
 		pedestal:SetAttribute("BaseSize", pedestal.Size)
 		pedestal:SetAttribute("PedestalIndex", index)
 
-		-- Plate on top: StructureLight while empty, tier Neon when filled
+		-- Plate on top: StructureLight while empty, tier colour when filled
 		-- (PedestalVisuals).
 		PartKit.Part({
 			Name = "Cap",
@@ -606,12 +608,15 @@ local function createPedestals(plot: Model, origin: CFrame)
 			Parent = pedestal,
 		})
 
+		-- Always enabled: the owner's client handles it (picker or remove) and
+		-- every other client hides it (WorldLabelController, OwnerOnly).
 		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
-		-- Enabled by the owner's client once they have something to display.
-		prompt.Enabled = false
+		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 
 		BillboardKit.SetPedestalLabel(pedestal, nil)
 	end
+
+	folder.Parent = plot
 end
 
 -- Re-applies saved displays when a returning player claims their plot.

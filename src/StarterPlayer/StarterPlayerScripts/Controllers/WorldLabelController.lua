@@ -1,9 +1,9 @@
 --[[
 	WorldLabelController
 	--------------------
-	Hides world labels that only a plot's owner should see - the CLAIM label
-	and the EMPTY pedestal labels (BillboardKit marks them OwnerOnly) - on
-	every plot that isn't the local player's.
+	Hides world labels and prompts that only a plot's owner should see - the
+	CLAIM label, the EMPTY pedestal labels and the pedestal DisplayPrompts
+	(all marked OwnerOnly) - on every plot that isn't the local player's.
 
 	The server toggles the EMPTY label's Enabled as items are placed and
 	removed, which would replicate over a one-off local change, so this keeps
@@ -19,7 +19,7 @@ local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local WorldLabelController = {}
 
 local localUserId = Players.LocalPlayer.UserId
-local watched: { [BillboardGui]: boolean } = {}
+local watched: { [Instance]: boolean } = {}
 
 local function getOwnerUserId(instance: Instance): number?
 	local current: Instance? = instance
@@ -33,8 +33,25 @@ local function getOwnerUserId(instance: Instance): number?
 	return nil
 end
 
+-- Keeps `target.Enabled` false on this client, even when the server flips
+-- it back on (the EMPTY label toggles as items come and go).
+local function keepDisabled(target: any) -- a BillboardGui or ProximityPrompt
+	watched[target] = true
+	target.Enabled = false
+	target:GetPropertyChangedSignal("Enabled"):Connect(function()
+		if target.Enabled then
+			target.Enabled = false
+		end
+	end)
+	target.Destroying:Connect(function()
+		watched[target] = nil
+	end)
+end
+
+-- Owner-only labels and prompts on someone else's plot are hidden here; the
+-- server can't hide them per player.
 local function consider(instance: Instance)
-	if not instance:IsA("BillboardGui") or watched[instance] then
+	if watched[instance] or not (instance:IsA("BillboardGui") or instance:IsA("ProximityPrompt")) then
 		return
 	end
 	if instance:GetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE) ~= true then
@@ -44,18 +61,7 @@ local function consider(instance: Instance)
 	if owner == nil or owner == localUserId then
 		return
 	end
-
-	local gui = instance :: BillboardGui
-	watched[gui] = true
-	gui.Enabled = false
-	gui:GetPropertyChangedSignal("Enabled"):Connect(function()
-		if gui.Enabled then
-			gui.Enabled = false
-		end
-	end)
-	gui.Destroying:Connect(function()
-		watched[gui] = nil
-	end)
+	keepDisabled(instance)
 end
 
 function WorldLabelController.Init()
