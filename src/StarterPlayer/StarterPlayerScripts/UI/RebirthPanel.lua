@@ -8,7 +8,7 @@
 	  * Two stat cards: INCOME x1 -> x1.5, LUCK +0% -> +5% (RebirthConfig)
 	  * An unlock row when RebirthConfig.Unlocks[next] exists
 	  * YOU KEEP / YOU RESET lines
-	  * Run progress bar and "$12.4M / $30M earned this run"
+	  * Cash progress bar and "You have $9.2M of $15M" (a rebirth costs cash)
 	  * The button: Disabled "Earn $X more", or Orange REBIRTH, which opens
 	    a second-step confirm modal. Only the confirm's REBIRTH fires
 	    RequestRebirth.
@@ -52,7 +52,7 @@ local FLASH_START_TRANSPARENCY = 0.15
 
 -- Short, never-blank toast text for every RebirthResult reason.
 local REJECTION_TOASTS: { [string]: string } = {
-	NotReady = "Not ready yet · keep earning this run",
+	NotReady = "Not enough cash for the rebirth yet",
 	TooFast = "One moment, then try again",
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
@@ -70,6 +70,7 @@ local unlockHolder: Frame
 local unlockText: TextLabel
 local progressBar: Frame
 local progressCaption: TextLabel
+local resetLabel: TextLabel
 local actionButton: TextButton
 local isReady = false
 local requestPending = false
@@ -132,7 +133,7 @@ local function statCard(parent: Instance, title: string, order: number): TextLab
 	})
 end
 
-local function infoLines(parent: Instance, name: string, order: number, heading: string, headingColor: Color3, text: string)
+local function infoLines(parent: Instance, name: string, order: number, heading: string, headingColor: Color3, text: string): TextLabel
 	local frame = section(parent, name, order, 40)
 	UIKit.Label({
 		Name = "Heading",
@@ -143,7 +144,7 @@ local function infoLines(parent: Instance, name: string, order: number, heading:
 		Size = UDim2.new(1, 0, 0, 16),
 		Parent = frame,
 	})
-	UIKit.Label({
+	return UIKit.Label({
 		Name = "Text",
 		Text = text,
 		Font = Fonts.Body,
@@ -154,6 +155,16 @@ local function infoLines(parent: Instance, name: string, order: number, heading:
 		Size = UDim2.new(1, 0, 0, 22),
 		Parent = frame,
 	})
+end
+
+-- "Cash (pays the $15M) · Generators → Basic LV 1 · ..."
+local function resetText(cost: number): string
+	return ("Cash (pays the %s) · Generators → Basic LV %d · Multiplier → %s · Gacha price → %s"):format(
+		NumberFormat.Money(cost),
+		TycoonConfig.StartingBasicGeneratorLevel,
+		NumberFormat.Multiplier(TycoonConfig.GetCashMultiplierValue(0)),
+		NumberFormat.Money(TycoonConfig.GetGachaPullCost(0))
+	)
 end
 
 --[[ Refresh ------------------------------------------------------------------ ]]
@@ -179,21 +190,23 @@ local function refresh()
 	unlockHolder.Visible = unlock ~= nil
 	unlockText.Text = if unlock then ("UNLOCKS · %s"):format(unlock) else ""
 
-	local earned = TycoonController.GetRunEarnings()
-	local requirement = math.max(TycoonController.GetRebirthRequirement(), 1)
-	UIKit.SetProgress(progressBar, earned / requirement)
-	progressCaption.Text = ("%s / %s earned this run"):format(
-		NumberFormat.Money(math.min(earned, requirement)),
-		NumberFormat.Money(requirement)
-	)
+	local cash = TycoonController.GetCash()
+	local cost = math.max(TycoonController.GetRebirthCost(), 1)
+	resetLabel.Text = resetText(cost)
+	UIKit.SetProgress(progressBar, cash / cost)
+	progressCaption.Text = ("You have %s of %s"):format(NumberFormat.Money(math.min(cash, cost)), NumberFormat.Money(cost))
 
-	isReady = earned >= requirement
+	isReady = cash >= cost
 	if isReady then
-		UIKit.SetButton(actionButton, { Style = "Orange", Text = "REBIRTH", TextColor3 = Colors.Text })
+		UIKit.SetButton(actionButton, {
+			Style = "Orange",
+			Text = ("REBIRTH · %s"):format(NumberFormat.Money(cost)),
+			TextColor3 = Colors.Text,
+		})
 	else
 		UIKit.SetButton(actionButton, {
 			Style = "Disabled",
-			Text = ("Earn %s more"):format(NumberFormat.Money(requirement - earned)),
+			Text = ("Need %s more"):format(NumberFormat.Money(cost - cash)),
 			TextColor3 = Colors.Muted,
 		})
 	end
@@ -363,19 +376,7 @@ local function build()
 	})
 
 	infoLines(list, "Keep", 3, "YOU KEEP", Colors.Cash, "Every item · your pedestals · Index · goals · rebirths")
-	infoLines(
-		list,
-		"Reset",
-		4,
-		"YOU RESET",
-		Colors.Danger,
-		("Cash → %s · Generators → Basic LV %d · Multiplier → %s · Gacha price → %s"):format(
-			NumberFormat.Money(0),
-			TycoonConfig.StartingBasicGeneratorLevel,
-			NumberFormat.Multiplier(TycoonConfig.GetCashMultiplierValue(0)),
-			NumberFormat.Money(TycoonConfig.GetGachaPullCost(0))
-		)
-	)
+	resetLabel = infoLines(list, "Reset", 4, "YOU RESET", Colors.Danger, resetText(RebirthConfig.GetCost(0)))
 
 	local progress = section(list, "Progress", 5, 40)
 	progressBar = UIKit.ProgressBar({

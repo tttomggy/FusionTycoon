@@ -43,7 +43,7 @@ local RESET_MULTIPLIER_COMMAND = "/resetmultiplier"
 local CASH_COMMAND = "/cash"
 -- "/wipe" resets your whole profile to a fresh save (Studio only).
 local WIPE_COMMAND = "/wipe"
--- "/rebirthready" sets this run's earnings to the next rebirth's requirement.
+-- "/rebirthready" sets cash to the next rebirth's price.
 local REBIRTH_READY_COMMAND = "/rebirthready"
 -- "/rebirths 3" sets the rebirth count.
 local REBIRTHS_COMMAND = "/rebirths"
@@ -68,10 +68,10 @@ local function onPlayerChatted(player: Player, message: string)
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: gave %s $%s"):format(player.Name, tostring(amount)))
 	elseif command == REBIRTH_READY_COMMAND then
-		local requirement = RebirthConfig.GetRequirement(PlayerDataService.GetRebirths(player))
-		PlayerDataService.SetRunEarnings(player, requirement)
+		local cost = RebirthConfig.GetCost(PlayerDataService.GetRebirths(player))
+		PlayerDataService.AddCash(player, cost - PlayerDataService.GetCash(player))
 		PlayerDataService.SyncTycoon(player)
-		print(("DebugService: %s's run earnings set to %s (rebirth ready)"):format(player.Name, tostring(requirement)))
+		print(("DebugService: %s's cash set to %s (rebirth ready)"):format(player.Name, tostring(cost)))
 	elseif command == REBIRTHS_COMMAND then
 		local count = tonumber(argument)
 		if count then
@@ -108,7 +108,6 @@ local function onPlayerChatted(player: Player, message: string)
 			data.GoalIndex = 1
 			data.TotalFusions = 0
 			data.Rebirths = 0
-			data.RunEarnings = 0
 			data.Index = {}
 		end
 		player:Kick("Profile wiped (Studio debug). Press Play again.")

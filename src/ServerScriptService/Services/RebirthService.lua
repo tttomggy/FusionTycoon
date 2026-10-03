@@ -2,11 +2,11 @@
 --[[
 	RebirthService
 	--------------
-	Handles RequestRebirth. Once a run's passive earnings reach
-	RebirthConfig.GetRequirement(Rebirths), the player can reset:
+	Handles RequestRebirth. A rebirth costs cash: once the player holds
+	RebirthConfig.GetCost(Rebirths), they can reset:
 
-	  * Cash -> 0, generators -> Basic at TycoonConfig's starting level,
-	    Multiplier Pad -> 0, gacha pulls (price) -> 0, run earnings -> 0
+	  * Cash -> 0 (which pays the price), generators -> Basic at TycoonConfig's starting level,
+	    Multiplier Pad -> 0, gacha pulls (price) -> 0
 	  * Rebirths += 1 (income x(1 + 0.5n), luck x(1 + 0.05n))
 	  * KEPT: inventory, pedestals, goals and everything else.
 
@@ -79,8 +79,8 @@ local function onRequestRebirth(player: Player)
 		reject(player, "NoPlot")
 		return
 	end
-	local requirement = RebirthConfig.GetRequirement(PlayerDataService.GetRebirths(player))
-	if PlayerDataService.GetRunEarnings(player) < requirement then
+	local cost = RebirthConfig.GetCost(PlayerDataService.GetRebirths(player))
+	if PlayerDataService.GetCash(player) < cost then
 		reject(player, "NotReady")
 		return
 	end

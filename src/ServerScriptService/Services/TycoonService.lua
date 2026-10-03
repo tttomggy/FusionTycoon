@@ -102,8 +102,7 @@ local function onPassiveIncomeTick()
 			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
-				-- AddPassiveIncome also counts it toward RunEarnings (rebirth).
-				PlayerDataService.AddPassiveIncome(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
+				PlayerDataService.AddCash(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
 				syncTycoon(player)
 			end
 		end
@@ -747,19 +746,17 @@ local function refreshRebirthPortal(player: Player)
 		return
 	end
 	local rebirths = PlayerDataService.GetRebirths(player)
-	local earned = PlayerDataService.GetRunEarnings(player)
-	local requirement = RebirthConfig.GetRequirement(rebirths)
-	local ready = earned >= requirement
+	local cash = PlayerDataService.GetCash(player)
+	local cost = RebirthConfig.GetCost(rebirths)
+	local ready = cash >= cost
 	local now = NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths))
 	local nextValue = NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths + 1))
 	PortalKit.SetReady(portal.Model, ready)
 	portal.Label.SetPill(
-		if ready then ("READY · %s → %s"):format(now, nextValue) else ("%s → %s income"):format(now, nextValue)
+		if ready then ("READY · %s → %s"):format(now, nextValue) else ("REBIRTH · %s"):format(NumberFormat.Money(cost))
 	)
-	portal.Label.SetProgress(earned / requirement)
-	portal.Label.SetCaption(
-		("%s / %s this run"):format(NumberFormat.Money(math.min(earned, requirement)), NumberFormat.Money(requirement))
-	)
+	portal.Label.SetProgress(cash / cost)
+	portal.Label.SetCaption(("%s / %s"):format(NumberFormat.Money(math.min(cash, cost)), NumberFormat.Money(cost)))
 end
 
 -- OnSync hook: runs before every snapshot, so the world matches what the

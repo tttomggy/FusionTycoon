@@ -2,17 +2,18 @@
 --[[
 	RebirthConfig
 	-------------
-	Rebirth: once a run has earned enough (RunEarnings, counted from the
-	passive payout only), the player can reset cash, generators, the
-	Multiplier Pad and the gacha price for a permanent income and luck boost.
-	Items, pedestals and goals are kept.
+	Rebirth costs cash: once you hold GetCost(rebirths), you can reset cash
+	(which pays the price), generators, the Multiplier Pad and the gacha
+	price for a permanent income and luck boost. Items, pedestals, the
+	Index and goals are kept. (A cash price reads for kids; the old hidden
+	"run earnings" counter didn't.)
 
 	Mirrored in tools/econ_sim.py (REBIRTH_*); change both together.
 ]]
 local RebirthConfig = {}
 
-RebirthConfig.BaseRequirement = 30_000_000 -- run earnings for the 1st rebirth
-RebirthConfig.RequirementGrowth = 3.2 -- each rebirth needs 3.2x the last
+RebirthConfig.BaseCost = 15_000_000 -- cash price of the 1st rebirth
+RebirthConfig.CostGrowth = 3.2 -- each rebirth costs 3.2x the last ($15M, $48M, $154M, $492M, ...)
 RebirthConfig.IncomePerRebirth = 0.5 -- income x(1 + 0.5 * rebirths)
 RebirthConfig.LuckPerRebirth = 0.05 -- luck x(1 + 0.05 * rebirths)
 RebirthConfig.SecretFusionRebirths = 1 -- Mythic -> Secret fusion unlocks at this many rebirths
@@ -20,9 +21,9 @@ RebirthConfig.Unlocks = { -- rebirth number -> what it unlocks (shown in the Reb
 	[1] = "Mythic fusion → Secret",
 } :: { [number]: string }
 
--- Run earnings needed for the next rebirth after `rebirths` so far.
-function RebirthConfig.GetRequirement(rebirths: number): number
-	return math.floor(RebirthConfig.BaseRequirement * RebirthConfig.RequirementGrowth ^ math.max(0, rebirths))
+-- Cash price of the next rebirth after `rebirths` so far.
+function RebirthConfig.GetCost(rebirths: number): number
+	return math.floor(RebirthConfig.BaseCost * RebirthConfig.CostGrowth ^ math.max(0, rebirths))
 end
 
 function RebirthConfig.GetIncomeMultiplier(rebirths: number): number

@@ -84,6 +84,7 @@ local goalCountLabel: TextLabel
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
 local upgradesHolder: Frame? = nil
+local rebirthReadyHolder: Frame
 local buttonsByName: { [string]: TextButton } = {}
 -- Buttons the goal marker wants highlighted; reapplied after a rebuild.
 local highlighted: { [string]: boolean? } = {}
@@ -527,6 +528,44 @@ local function buildButtonRow()
 	layout.Parent = buttonRow
 end
 
+--[[ REBIRTH! button -----------------------------------------------------------
+	Centred above the bottom button row while the player can afford the next
+	rebirth; pulses so it's hard to miss, and opens the Rebirth panel.
+]]
+local REBIRTH_READY_SIZE = { Desktop = Vector2.new(220, 56), Phone = Vector2.new(170, 48) }
+local REBIRTH_READY_GAP = 14 -- above the button row's top
+
+local function buildRebirthReadyButton()
+	local _, holder = UIKit.Button({
+		Name = "RebirthReady",
+		Parent = screenGui,
+		Style = "Orange",
+		Text = "REBIRTH!",
+		TextSize = 24,
+		AnchorPoint = Vector2.new(0.5, 1),
+		Size = UDim2.fromOffset(REBIRTH_READY_SIZE.Desktop.X, REBIRTH_READY_SIZE.Desktop.Y),
+		OnClick = RebirthPanel.Open,
+	})
+	rebirthReadyHolder = holder
+	holder.Visible = false
+	local scale = Instance.new("UIScale")
+	scale.Name = "PulseScale"
+	scale.Parent = holder
+	TweenService:Create(
+		scale,
+		TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Scale = 1.08 }
+	):Play()
+end
+
+local function layoutRebirthReady(isPhone: boolean)
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	local size = if isPhone then REBIRTH_READY_SIZE.Phone else REBIRTH_READY_SIZE.Desktop
+	local bottom = BOTTOM_MARGIN + UITheme.ShadowOffset + layout.ButtonSize.Y + REBIRTH_READY_GAP
+	rebirthReadyHolder.Size = UDim2.fromOffset(size.X, size.Y)
+	rebirthReadyHolder.Position = UDim2.new(0.5, 0, 1, -bottom)
+end
+
 -- Gentle pulse on UPGRADES while something is affordable, so new players notice it.
 local function runUpgradesPulse()
 	while screenGui.Parent do
@@ -604,6 +643,7 @@ local function applyLayout(isPhone: boolean)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
 	buildButtons(isPhone)
+	layoutRebirthReady(isPhone)
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
@@ -635,6 +675,7 @@ local function refreshAll()
 	multiplierPill.Text = NumberFormat.Multiplier(
 		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 	)
+	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
 	local rebirths = TycoonController.GetRebirths()
 	local rebirthFill = rebirthPill.Parent :: Frame
 	rebirthFill.Visible = rebirths > 0
@@ -650,6 +691,7 @@ function HudController.Init()
 	buildGoalTracker()
 	cashHolder = buildCashCard()
 	buildButtonRow()
+	buildRebirthReadyButton()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()

@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -17,8 +18,6 @@ local goalIndex: number? = nil
 local goalProgress: { Current: number, Target: number }? = nil
 local hasSynced = false
 local rebirths = 0
-local runEarnings = 0
-local rebirthRequirement = 0
 local indexFound: { [string]: boolean } = {}
 local indexMultiplier = 1
 
@@ -70,13 +69,14 @@ function TycoonController.GetRebirths(): number
 	return rebirths
 end
 
--- Passive earnings since the last rebirth, and what the next one needs.
-function TycoonController.GetRunEarnings(): number
-	return runEarnings
+-- Cash price of the next rebirth.
+function TycoonController.GetRebirthCost(): number
+	return RebirthConfig.GetCost(rebirths)
 end
 
-function TycoonController.GetRebirthRequirement(): number
-	return rebirthRequirement
+-- True while the player can afford the next rebirth.
+function TycoonController.IsRebirthReady(): boolean
+	return hasSynced and cash >= TycoonController.GetRebirthCost()
 end
 
 -- Found Index entries ("<itemId>|<Mutation or Normal>" -> true).
@@ -149,8 +149,6 @@ local function onSyncTycoon(snapshot: any)
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
 	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0
-	runEarnings = if typeof(snapshot.RunEarnings) == "number" then snapshot.RunEarnings else 0
-	rebirthRequirement = if typeof(snapshot.RebirthRequirement) == "number" then snapshot.RebirthRequirement else 0
 	indexFound = {}
 	if typeof(snapshot.IndexKeys) == "table" then
 		for _, key in snapshot.IndexKeys do
