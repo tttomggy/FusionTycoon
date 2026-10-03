@@ -30,12 +30,13 @@ local Fonts = UITheme.Fonts
 
 BillboardKit.PAD_MAX_DISTANCE = 90
 BillboardKit.PEDESTAL_MAX_DISTANCE = 70
-BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE = 25
+BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE = 20
 BillboardKit.OWNER_ONLY_ATTRIBUTE = "OwnerOnly"
 
 -- Billboard sizes in studs.
 local PAD_LABEL_STUDS = Vector2.new(9, 3.4)
 local PEDESTAL_LABEL_STUDS = Vector2.new(6.5, 2.6)
+local EMPTY_PILL_STUDS = Vector2.new(3.6, 1.1)
 local MAX_TEXT_SIZE = 64
 
 --[[ Primitives ------------------------------------------------------------- ]]
@@ -186,11 +187,11 @@ export type PedestalInfo = {
 	Rate: number, -- per second, owner's multiplier included
 }
 
--- PlotLayout.Pedestal.LabelOffsetY is measured from the pedestal's bottom;
+-- PlotLayout's label heights are measured from the pedestal's bottom;
 -- StudsOffset is from its centre.
-local function pedestalLabelOffset(pedestal: BasePart): Vector3
+local function pedestalLabelOffset(pedestal: BasePart, heightAboveBottom: number): Vector3
 	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
-	return Vector3.new(0, PlotLayout.Pedestal.LabelOffsetY - baseSize.Y / 2, 0)
+	return Vector3.new(0, heightAboveBottom - baseSize.Y / 2, 0)
 end
 
 local function pedestalPanel(gui: BillboardGui, transparency: number, strokeColor: Color3): Frame
@@ -208,7 +209,13 @@ local function pedestalPanel(gui: BillboardGui, transparency: number, strokeColo
 end
 
 local function buildFilledLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "FilledLabel", PEDESTAL_LABEL_STUDS, pedestalLabelOffset(pedestal), BillboardKit.PEDESTAL_MAX_DISTANCE)
+	local gui = newBillboard(
+		pedestal,
+		"FilledLabel",
+		PEDESTAL_LABEL_STUDS,
+		pedestalLabelOffset(pedestal, PlotLayout.Pedestal.LabelOffsetY),
+		BillboardKit.PEDESTAL_MAX_DISTANCE
+	)
 	local panel = pedestalPanel(gui, 0.08, Colors.Ink)
 	scaledLabel(panel, "Tier", Fonts.BodyHeavy, Colors.Text, 0.06, 0.2)
 	local name = scaledLabel(panel, "ItemName", Fonts.Display, Colors.Text, 0.28, 0.4)
@@ -217,15 +224,48 @@ local function buildFilledLabel(pedestal: BasePart): BillboardGui
 	return gui
 end
 
+-- A small, low pill: circled "+" then EMPTY. Owner-only.
 local function buildEmptyLabel(pedestal: BasePart): BillboardGui
-	local gui = newBillboard(pedestal, "EmptyLabel", PEDESTAL_LABEL_STUDS, pedestalLabelOffset(pedestal), BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE)
+	local gui = newBillboard(
+		pedestal,
+		"EmptyLabel",
+		EMPTY_PILL_STUDS,
+		pedestalLabelOffset(pedestal, PlotLayout.Pedestal.EmptyLabelOffsetY),
+		BillboardKit.EMPTY_PEDESTAL_MAX_DISTANCE
+	)
 	gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
-	-- "Dashed" look: a faint outline instead of the solid ink one.
-	local panel = pedestalPanel(gui, 0.3, Colors.Faint)
-	local empty = scaledLabel(panel, "Empty", Fonts.Display, Colors.Muted, 0.12, 0.44)
-	empty.Text = "EMPTY"
-	local hint = scaledLabel(panel, "Hint", Fonts.Body, Colors.Faint, 0.6, 0.26)
-	hint.Text = "E to display an item"
+
+	local pill = Instance.new("Frame")
+	pill.Name = "Panel"
+	pill.BackgroundColor3 = Colors.Panel
+	pill.BackgroundTransparency = 0.15
+	pill.AnchorPoint = Vector2.new(0.5, 0.5)
+	pill.Position = UDim2.fromScale(0.5, 0.5)
+	pill.Size = UDim2.fromScale(0.96, 0.9)
+	pill.Parent = gui
+	corner(pill, UDim.new(0.5, 0))
+	borderStroke(pill, 3, Colors.Faint)
+
+	-- Circled "+": a ring with the glyph inside, sized to the pill height.
+	local badge = Instance.new("Frame")
+	badge.Name = "Plus"
+	badge.BackgroundTransparency = 1
+	badge.AnchorPoint = Vector2.new(0, 0.5)
+	badge.Position = UDim2.fromScale(0.08, 0.5)
+	badge.Size = UDim2.fromScale(0.62, 0.62)
+	badge.SizeConstraint = Enum.SizeConstraint.RelativeYY
+	badge.Parent = pill
+	corner(badge, UDim.new(0.5, 0))
+	borderStroke(badge, 2, Colors.Muted)
+	local plus = scaledLabel(badge, "Glyph", Fonts.Display, Colors.Muted, 0.05, 0.9)
+	plus.Text = "+"
+	textStroke(plus, 2)
+
+	local word = scaledLabel(pill, "Empty", Fonts.Display, Colors.Muted, 0.18, 0.64)
+	word.Position = UDim2.fromScale(0.34, 0.18)
+	word.Size = UDim2.fromScale(0.58, 0.64)
+	word.TextXAlignment = Enum.TextXAlignment.Left
+	word.Text = "EMPTY"
 	return gui
 end
 

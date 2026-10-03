@@ -177,7 +177,8 @@ PlotLayout.Pedestal = {
 	OrbSpinDegPerSec = 45,
 	OrbBob = 0.25,
 	OrbBobPeriod = 2.4,
-	LabelOffsetY = 9, -- above the pedestal's bottom
+	LabelOffsetY = 8.5, -- filled label, above the pedestal's bottom
+	EmptyLabelOffsetY = 5, -- the small EMPTY pill, above the pedestal's bottom
 	PromptDistance = 6,
 }
 
