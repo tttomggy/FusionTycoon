@@ -3,9 +3,9 @@
 	TycoonService
 	-------------
 	Owns every player's plot: builds it from TycoonTemplate at their slot,
-	runs the droppers, collector, stations (claim, Dropper 2, gacha,
-	multiplier) and pedestals, pays passive income and handles generator
-	upgrades.
+	runs the stations (claim, gacha, multiplier), pedestals and the factory
+	line (generators, belt, collector), pays passive income and handles
+	generator upgrades.
 
 	Every position, offset and size comes from PlotLayout (plot-local space:
 	origin at the plot's centre, floor top y = 0, +Z toward the gate). This
@@ -17,7 +17,6 @@
 	(requires no services), so its module-scope require can't form a cycle.
 ]]
 local Debris = game:GetService("Debris")
-local PhysicsService = game:GetService("PhysicsService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -36,7 +35,6 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
-local DropperKit = require(ReplicatedStorage.Shared.Modules.DropperKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
@@ -71,12 +69,10 @@ local STATION_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
 local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
--- Cash balls pass through characters ("Default") but still hit the plot
--- floor/collector (PlotEnvironment).
-local CASH_COLLISION_GROUP = PlotKit.CASH_COLLISION_GROUP
-local PLOT_ENVIRONMENT_COLLISION_GROUP = PlotKit.FLOOR_COLLISION_GROUP
-
-local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "Dropper1", "ClaimButton", "PlotOrigin", "SpawnLocation" }
+-- The TycoonTemplate parts the plot is built from. Anything else in the
+-- template (e.g. the retired dropper part still saved in the .rbxm) is
+-- stripped from each clone.
+local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "ClaimButton", "PlotOrigin", "SpawnLocation" }
 
 --[[ State --------------------------------------------------------------------- ]]
 
@@ -149,17 +145,6 @@ end
 
 --[[ Helpers ------------------------------------------------------------------- ]]
 
-local function setupCollisionGroups()
-	-- pcall: "already exists" if this ever re-runs without a server restart.
-	pcall(function()
-		PhysicsService:RegisterCollisionGroup(CASH_COLLISION_GROUP)
-	end)
-	pcall(function()
-		PhysicsService:RegisterCollisionGroup(PLOT_ENVIRONMENT_COLLISION_GROUP)
-	end)
-	PhysicsService:CollisionGroupSetCollidable(CASH_COLLISION_GROUP, "Default", false)
-end
-
 local function getPlotsFolder(): Folder
 	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
 	if not folder then
@@ -192,6 +177,15 @@ end
 local function findPart(plot: Model, name: string): BasePart?
 	local part = plot:FindFirstChild(name, true)
 	return if part and part:IsA("BasePart") then part else nil
+end
+
+-- Removes template children the plot is no longer built from.
+local function stripTemplateLeftovers(plot: Model)
+	for _, child in plot:GetChildren() do
+		if not table.find(EXPECTED_TEMPLATE_PART_NAMES, child.Name) then
+			child:Destroy()
+		end
+	end
 end
 
 local function validatePlotClone(plot: Model, player: Player)
@@ -738,17 +732,11 @@ local function createPlotForPlayer(player: Player)
 	plot:SetAttribute("OwnerUserId", player.UserId)
 	plot:SetAttribute("Claimed", false)
 	plot:SetAttribute("SlotIndex", slotIndex)
+	stripTemplateLeftovers(plot)
 	validatePlotClone(plot, player)
 
 	buildShell(plot, origin, player)
 	plotSignByUserId[player.UserId] = PlotKit.BuildSignGate(origin, plot)
-
-	-- Dropper 1 stands at its spot from the start (the template part becomes
-	-- its Body); it produces once claimed.
-	local dropper1Body = findPart(plot, "Dropper1")
-	if dropper1Body then
-		DropperKit.Build(origin, PlotLayout.DROPPER1, "Dropper1", plot, dropper1Body)
-	end
 
 	plot.Parent = getPlotsFolder()
 	FusionMachineService.Build(origin, PlotLayout.FUSION_MACHINE, plot)
@@ -775,8 +763,6 @@ local function removePlotForPlayer(player: Player)
 end
 
 function TycoonService:Init()
-	setupCollisionGroups()
-
 	RemoteEvents.RequestUpgrade.OnServerEvent:Connect(onRequestUpgrade)
 
 	Players.PlayerAdded:Connect(createPlotForPlayer)

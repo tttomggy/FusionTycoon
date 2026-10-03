@@ -19,9 +19,6 @@ local PlotKit = {}
 local World = UITheme.World
 
 PlotKit.WALL_STRIP_TAG = "FT_WallStrip"
-PlotKit.FLOOR_COLLISION_GROUP = "PlotEnvironment"
--- Dropper cash balls; they pass through characters but land on plot floors.
-PlotKit.CASH_COLLISION_GROUP = "CashParts"
 
 -- Sizes/places `floor` (or a new part) as the 64x64 plot floor, top at y 0.
 function PlotKit.BuildFloor(origin: CFrame, parent: Instance, floor: BasePart?): BasePart
@@ -39,8 +36,6 @@ function PlotKit.BuildFloor(origin: CFrame, parent: Instance, floor: BasePart?):
 	else
 		part = PartKit.Part({ Name = "Floor", Size = size, CFrame = cframe, Color = World.Floor, Parent = parent })
 	end
-	-- Cash balls (which pass through characters) still land on it.
-	part.CollisionGroup = PlotKit.FLOOR_COLLISION_GROUP
 	return part
 end
 

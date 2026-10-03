@@ -9,8 +9,8 @@
 	    show the "Need $X" toast when you can't afford it.
 	  * A successful upgrade (from either place) bursts the Core in the tier
 	    colour, bumps the Body 1 -> 1.08 -> 1 and toasts "+$X/s".
-	  * Once a second, each owned generator within PopRadius of the camera
-	    floats "+$X" (its income/s, multiplier included) over its Core.
+
+	The income itself is pictured by FactoryController's cash balls.
 ]]
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
@@ -21,21 +21,17 @@ local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
-local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
-local HudController = require(script.Parent.HudController)
 
 local GeneratorController = {}
 
 local BUMP_SCALE = 1.08
 local BUMP_SECONDS = 0.25
 local BURST_COUNT = 30
-local POP_ABOVE_CORE = 1
 
 local localPlayer = Players.LocalPlayer
 
@@ -133,37 +129,9 @@ local function onUpgradeResolved(result: any)
 	end
 end
 
---[[ Income pops ---------------------------------------------------------------- ]]
-
--- One pop per owned generator per tick; a pop lives 0.8 s, under the 1 s
--- tick, so they never stack.
-local function popIncome()
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-	local multiplier = getMultiplier()
-	for _, generator in TycoonConfig.Generators do
-		local level = TycoonController.GetGeneratorLevel(generator.Id)
-		local model = level > 0 and getModel(generator.Id)
-		local core = model and getCore(model)
-		if core and (core.Position - camera.CFrame.Position).Magnitude <= PlotLayout.Generator.PopRadius then
-			local rate = TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier
-			local top = core.Position + Vector3.new(0, core.Size.Y / 2 + POP_ABOVE_CORE, 0)
-			HudController.FloatPop(top, "+" .. NumberFormat.Money(rate), UITheme.GetTierLight(generator.Tier))
-		end
-	end
-end
-
 function GeneratorController.Init()
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	TycoonController.UpgradeResolved:Connect(onUpgradeResolved)
-	task.spawn(function()
-		while true do
-			task.wait(TycoonConfig.PassiveIncomeIntervalSeconds)
-			popIncome()
-		end
-	end)
 end
 
 return GeneratorController

@@ -35,7 +35,7 @@ function TycoonConfig.GetGachaPullCost(pullsSoFar: number): number
 end
 
 -- Multiplier Pad: 10 fixed levels with a hard cap. The multiplier now applies
--- to ALL income (droppers, generators and pedestals). Before, it only touched
+-- to ALL income (generators and pedestals). It once touched only the old
 -- dropper balls, which made a $1.85B upgrade worth a few cents per second.
 TycoonConfig.CashMultiplierLevels = {
 	{ Level = 1, Cost = 5000, Multiplier = 1.5 },

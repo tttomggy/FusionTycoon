@@ -16,7 +16,6 @@
 	Lifecycle: :Init() builds the world and every placeholder (self-contained,
 	no other services). No :Start().
 ]]
-local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -33,7 +32,6 @@ WorldService.Name = "WorldService"
 local World = UITheme.World
 
 -- Belts carry characters but never cash balls.
-local BELT_COLLISION_GROUP = "StreetBelts"
 
 type State = {
 	worldFolder: Folder?,
@@ -70,17 +68,6 @@ local function buildGroundAndStreet(folder: Folder)
 	})
 end
 
-local function setupBeltCollisions()
-	-- pcall: a group may already exist (TycoonService registers CashParts;
-	-- Init order is not something to depend on).
-	for _, group in { BELT_COLLISION_GROUP, PlotKit.CASH_COLLISION_GROUP } do
-		pcall(function()
-			PhysicsService:RegisterCollisionGroup(group)
-		end)
-	end
-	PhysicsService:CollisionGroupSetCollidable(BELT_COLLISION_GROUP, PlotKit.CASH_COLLISION_GROUP, false)
-end
-
 -- Two conveyor belts down the street's middle (east lane moves +X, west
 -- lane -X) with a median between, a Neon rail on each belt's outer edge and
 -- a roller at each end. Anchored parts with an AssemblyLinearVelocity carry
@@ -94,14 +81,13 @@ local function buildBelts(folder: Folder)
 	local streetTop = StreetLayout.STREET_TOP_Y
 	local beltTop = StreetLayout.GetBeltTopY()
 
-	local median = PartKit.Part({
+	PartKit.Part({
 		Name = "Median",
 		Size = Vector3.new(length, StreetLayout.MEDIAN_HEIGHT, StreetLayout.MEDIAN_WIDTH),
 		CFrame = CFrame.new(0, streetTop + StreetLayout.MEDIAN_HEIGHT / 2, 0),
 		Color = World.StructureLight,
 		Parent = belts,
 	})
-	median.CollisionGroup = BELT_COLLISION_GROUP
 
 	for _, lane in StreetLayout.LANES do
 		local z = lane.Side * StreetLayout.BELT_CENTER_Z
@@ -112,7 +98,6 @@ local function buildBelts(folder: Folder)
 			Color = World.Belt,
 			Parent = belts,
 		})
-		belt.CollisionGroup = BELT_COLLISION_GROUP
 		local velocity = Vector3.new(lane.Direction * StreetLayout.BELT_SPEED, 0, 0)
 		belt.AssemblyLinearVelocity = velocity
 		table.insert(state.belts, { Part = belt, Velocity = velocity })
@@ -130,7 +115,7 @@ local function buildBelts(folder: Folder)
 
 		-- Rollers: cylinders whose axis runs along Z, across the belt.
 		for _, endSign in { -1, 1 } do
-			local roller = PartKit.Part({
+			PartKit.Part({
 				Name = "Roller",
 				Shape = Enum.PartType.Cylinder,
 				Size = Vector3.new(StreetLayout.BELT_WIDTH, StreetLayout.ROLLER_DIAMETER, StreetLayout.ROLLER_DIAMETER),
@@ -139,7 +124,6 @@ local function buildBelts(folder: Folder)
 				Color = World.StructureLight,
 				Parent = belts,
 			})
-			roller.CollisionGroup = BELT_COLLISION_GROUP
 		end
 	end
 end
@@ -195,7 +179,6 @@ function WorldService:Init()
 	state.worldFolder = folder
 
 	buildGroundAndStreet(folder)
-	setupBeltCollisions()
 	buildBelts(folder)
 	-- Re-assert the belt velocities in case anything resets them.
 	task.spawn(function()

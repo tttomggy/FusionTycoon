@@ -63,7 +63,6 @@ local function onPlayerChatted(player: Player, message: string)
 			data.CashMultiplierLevel = 0
 			data.PedestalDisplays = {}
 			data.GachaPulls = 0
-			data.HasDropper2 = false
 			data.GoalIndex = 1
 			data.TotalFusions = 0
 		end

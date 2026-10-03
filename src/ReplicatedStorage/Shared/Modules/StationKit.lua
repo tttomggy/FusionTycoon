@@ -3,7 +3,7 @@
 	StationKit
 	----------
 	Builds a station: the round pad you walk up to for an E prompt (claim,
-	Dropper 2, gacha, multiplier).
+	gacha, multiplier).
 
 	  Pad       8-wide cylinder, Structure colour, top at y 1. Holds the
 	            ProximityPrompt and the label. (The claim station passes the
@@ -26,7 +26,7 @@ local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local StationKit = {}
 
-export type Hologram = "Capsule" | "Chevrons" | "Arrow" | "Ghost"
+export type Hologram = "Capsule" | "Chevrons" | "Arrow"
 
 local S = PlotLayout.Station
 local World = UITheme.World
@@ -136,27 +136,8 @@ local function buildArrow(model: Model, top: CFrame, accent: Color3)
 	setHover(model, 0, S.ArrowBob, S.ArrowBobPeriod, "Bob")
 end
 
--- `ghost` is a dropper Model to show translucent on the pad (Dropper 2 slot).
-local function buildGhost(model: Model, top: CFrame, accent: Color3, ghost: Model?)
-	if not ghost then
-		return
-	end
-	ghost:PivotTo(top)
-	for _, descendant in ghost:GetDescendants() do
-		if descendant:IsA("BasePart") then
-			descendant.Material = Enum.Material.ForceField
-			descendant.Color = accent
-			descendant.Transparency = S.GhostTransparency
-			PartKit.MakeDecorative(descendant)
-		end
-	end
-	ghost.Name = "Ghost"
-	ghost.Parent = model
-end
-
 export type BuildOptions = {
 	Pad: BasePart?, -- reuse this part as the Pad (the claim station's ClaimButton)
-	Ghost: Model?, -- the model shown for the "Ghost" hologram
 	Word: string?, -- printed on the pad face ("PULL", "BOOST", "BUY", "CLAIM")
 }
 
@@ -224,8 +205,6 @@ function StationKit.Build(
 		buildChevrons(holo, top, accent)
 	elseif hologram == "Arrow" then
 		buildArrow(holo, top, accent)
-	elseif hologram == "Ghost" then
-		buildGhost(holo, top, accent, options and options.Ghost)
 	end
 	holo.Parent = model
 

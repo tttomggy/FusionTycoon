@@ -5,7 +5,7 @@
 	  * Goal tracker (top-left, under the Roblox top bar)
 	  * Cash card: coin + counting-up cash, income/s and the multiplier pill
 	  * Bottom buttons: UPGRADES (with an affordable-count badge) and ITEMS
-	  * Cash pops: "+$24" floating up from the Collector on every pickup
+	  * FloatPop: the "+$X" world pop FactoryController shows at the collector
 
 	Nothing is placed in the top-left 170x60 px, which belongs to the Roblox
 	top bar.
@@ -60,8 +60,7 @@ local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
 
 local CASH_POP_LIFETIME = 0.8
-local CASH_POP_RISE_STUDS = 4
-local CASH_POP_MAX_ALIVE = 6
+local CASH_POP_RISE_STUDS = 3
 
 local screenGui: ScreenGui
 local displayedCash = 0
@@ -507,19 +506,9 @@ end
 
 --[[ Cash pops ------------------------------------------------------------- ]]
 
-type CashPop = { Amount: number, Label: TextLabel }
-local alivePops: { CashPop } = {}
-
-local function removePop(pop: CashPop)
-	local index = table.find(alivePops, pop)
-	if index then
-		table.remove(alivePops, index)
-	end
-end
-
 -- Floats `text` up from `position` and fades it over CASH_POP_LIFETIME.
 -- Returns the label so a caller can fold more into it while it's alive.
--- Shared by the dropper pops here and GeneratorController's income pops.
+-- FactoryController's collector pops use it.
 function HudController.FloatPop(position: Vector3, text: string, color: Color3): TextLabel
 	local anchor = Instance.new("Attachment")
 	anchor.Name = "CashPopAnchor"
@@ -559,25 +548,6 @@ function HudController.FloatPop(position: Vector3, text: string, color: Color3):
 		anchor:Destroy()
 	end)
 	return label
-end
-
-local function onCashCollected(payload: any)
-	if typeof(payload) ~= "table" or typeof(payload.Amount) ~= "number" or typeof(payload.Position) ~= "Vector3" then
-		return
-	end
-
-	-- Throttle: past the cap, fold the amount into the newest pop instead.
-	if #alivePops >= CASH_POP_MAX_ALIVE then
-		local newest = alivePops[#alivePops]
-		newest.Amount += payload.Amount
-		newest.Label.Text = "+" .. NumberFormat.Money(newest.Amount)
-		return
-	end
-
-	local label = HudController.FloatPop(payload.Position, "+" .. NumberFormat.Money(payload.Amount), Colors.Cash)
-	local pop: CashPop = { Amount = payload.Amount, Label = label }
-	table.insert(alivePops, pop)
-	task.delay(CASH_POP_LIFETIME, removePop, pop)
 end
 
 --[[ Layout ---------------------------------------------------------------- ]]
@@ -643,7 +613,6 @@ function HudController.Init()
 
 	TycoonController.TycoonChanged:Connect(refreshAll)
 	InventoryController.InventoryChanged:Connect(refreshAll)
-	RemoteEvents.CashCollected.OnClientEvent:Connect(onCashCollected)
 	-- Arrives just before the snapshot that carries the next goal, so the
 	-- flash plays on the finished goal and the swap follows.
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(function()

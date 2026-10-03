@@ -489,7 +489,7 @@ function PlayerDataService.SetPedestalDisplay(player: Player, pedestalIndex: num
 	data.PedestalDisplays[pedestalIndex] = uid
 end
 
---[[ Public API: gacha / dropper2 ----------------------------------------- ]]
+--[[ Public API: gacha ---------------------------------------------------- ]]
 
 function PlayerDataService.GetGachaPulls(player: Player): number
 	local data = state.sessionCache[player.UserId]
@@ -616,7 +616,7 @@ end
 
 local dataLoaded = Instance.new("BindableEvent")
 -- Fires (player) once a player's data is in the session cache. TycoonService
--- waits on this before restoring saved pedestals/Dropper2 on claim.
+-- waits on this before restoring saved pedestals on claim.
 PlayerDataService.DataLoaded = dataLoaded.Event
 
 local function onPlayerAdded(player: Player)

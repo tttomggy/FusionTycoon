@@ -50,9 +50,6 @@ PlotLayout.SPAWN_CHARACTER_CLEARANCE = 3 -- above the spawn top when moving a ch
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
 PlotLayout.CLAIM_STATION = v3(0, 0, 24)
-PlotLayout.DROPPER1 = v3(-25, 0, 8) -- faces +X
-PlotLayout.DROPPER2 = v3(-25, 0, 20)
-PlotLayout.COLLECTOR = v3(-16, 0, 14)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
@@ -68,25 +65,52 @@ PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES = 30
 PlotLayout.SIGN_POST_X = 9 -- posts at (+-9, +32)
 PlotLayout.SIGN_Z = 32
 
--- The two back-corner bays holding the five generators.
-PlotLayout.GENERATOR_BAYS = { v3(-24, 0, -24), v3(24, 0, -24) }
-PlotLayout.GENERATOR_BAY_SIZE = 10
+-- Back-right corner, held for the rebirth machine: nothing may be built here.
+PlotLayout.REBIRTH_RESERVE = v3(24, 0, -24)
+PlotLayout.REBIRTH_RESERVE_SIZE = 10
 
+--[[ Factory line --------------------------------------------------------------
+	The five generators stand in one row along the left wall, cheapest at the
+	front (near the gate), each facing +X with a Spout over the FactoryBelt.
+	The belt runs toward -Z (the back) into the Collector in the back-left
+	corner. The cash balls riding it are client-side only (FactoryController).
+]]
 export type GeneratorSpot = {
 	Position: Vector3, -- plot-local centre
 	Footprint: number, -- square body width
 	Height: number, -- body height
-	Bay: number, -- index into GENERATOR_BAYS
 }
 
--- Keyed by TycoonConfig generator Id. Every generator faces +Z.
+-- Keyed by TycoonConfig generator Id. Every generator faces +X (the belt).
 PlotLayout.GENERATORS = {
-	basic_generator = { Position = v3(-27.5, 0, -24), Footprint = 3, Height = 3, Bay = 1 },
-	ember_forge = { Position = v3(-24, 0, -24), Footprint = 3, Height = 4, Bay = 1 },
-	flare_reactor = { Position = v3(-20.5, 0, -24), Footprint = 3, Height = 5, Bay = 1 },
-	core_engine = { Position = v3(21, 0, -24), Footprint = 4, Height = 6, Bay = 2 },
-	singularity_core = { Position = v3(26.5, 0, -24), Footprint = 5, Height = 8, Bay = 2 },
+	basic_generator = { Position = v3(-27, 0, 22), Footprint = 3, Height = 3 },
+	ember_forge = { Position = v3(-27, 0, 14), Footprint = 3, Height = 4 },
+	flare_reactor = { Position = v3(-27, 0, 6), Footprint = 3, Height = 5 },
+	core_engine = { Position = v3(-27, 0, -3), Footprint = 4, Height = 6 },
+	singularity_core = { Position = v3(-27, 0, -13), Footprint = 5, Height = 8 },
 } :: { [string]: GeneratorSpot }
+
+PlotLayout.FactoryBelt = {
+	X = -21, -- centre line
+	StartZ = 27, -- front end
+	EndZ = -21, -- back end, at the collector's front edge
+	Width = 3,
+	Height = 0.4, -- bottom on the floor, top at y 0.4
+	EdgeSize = v3(0.25, 0.12, 0), -- Neon strip along each long side (Z = belt length)
+	Speed = 10, -- studs/s the balls ride at (the belt itself doesn't move players)
+}
+
+PlotLayout.Collector = {
+	Position = v3(-21, 0, -24),
+	Size = v3(6, 0.4, 6), -- top at y 0.4
+	EdgeHeight = 0.12,
+	EdgeWidth = 0.25,
+	LightRange = 10,
+	LightBrightness = 1,
+	LabelOffsetY = 6, -- pad label, above the collector's centre
+	LabelMaxDistance = 60,
+	PopHeight = 1.5, -- "+$X" pops start this far above its top
+}
 
 PlotLayout.Generator = {
 	BandHeight = 0.3,
@@ -107,8 +131,15 @@ PlotLayout.Generator = {
 	LabelAboveCore = 1.5, -- owner label, studs above the core's top
 	LabelMaxDistance = 30,
 	PromptDistance = 7,
-	PopRadius = 60, -- income pops only within this many studs of the camera
+	SpoutSize = 1.4, -- cube on the +X face (toward the belt)
+	SpoutAt = 0.7, -- fraction of body height
+	SpoutLipWidth = 0.15, -- Neon lip framing the opening, tier colour
 }
+
+function PlotLayout.GetBeltLength(): number
+	local belt = PlotLayout.FactoryBelt
+	return belt.StartZ - belt.EndZ
+end
 
 function PlotLayout.GetPedestalPosition(index: number): Vector3
 	return v3(PlotLayout.PEDESTAL_XS[index], 0, PlotLayout.PEDESTAL_Z)
@@ -172,25 +203,6 @@ PlotLayout.Face = {
 	LightBrightness = 1.2,
 	LightRange = 9,
 }
-
---[[ Droppers + collector ------------------------------------------------------- ]]
-
-PlotLayout.Dropper = {
-	BodySize = v3(4, 6, 4),
-	HopperSize = v3(5, 2, 5), -- trapezoid on top of the body
-	HopperLipHeight = 0.3,
-	BeltHeight = 0.3,
-	BeltY = 3,
-	BeltInflate = 0.2, -- how far the belt stands proud of the body
-	SpoutSize = 1.4,
-	SpoutY = 4.5, -- on the body's +X face
-	BallDiameter = 1.2,
-}
-
-PlotLayout.COLLECTOR_SIZE = v3(6, 0.4, 18)
-PlotLayout.COLLECTOR_TOP_Y = 0.2
-PlotLayout.COLLECTOR_EDGE_SIZE = v3(0.3, 0.12, 18) -- Neon strips along its long (Z) sides
-PlotLayout.CASH_POP_HEIGHT = 1 -- "+$X" pop, above the collector's top
 
 --[[ Pedestals ------------------------------------------------------------------- ]]
 
@@ -332,14 +344,6 @@ local function overlaps(a: Footprint, b: Footprint): boolean
 	return aMinX < bMaxX and bMinX < aMaxX and aMinZ < bMaxZ and bMinZ < aMaxZ
 end
 
-local function dropperFootprint(name: string, position: Vector3): Footprint
-	local d = PlotLayout.Dropper
-	local half = d.HopperSize.X / 2
-	-- The spout sticks out of the body's +X face.
-	local spoutReach = d.BodySize.X / 2 + d.SpoutSize
-	return rect(name, position.X - half, position.X + math.max(half, spoutReach), position.Z - half, position.Z + half)
-end
-
 local function boxFootprint(name: string, position: Vector3, sizeX: number, sizeZ: number): Footprint
 	return rect(name, position.X - sizeX / 2, position.X + sizeX / 2, position.Z - sizeZ / 2, position.Z + sizeZ / 2)
 end
@@ -350,9 +354,6 @@ local function checkLayout()
 		circle("ClaimStation", PlotLayout.CLAIM_STATION, stationRadius),
 		circle("GachaStation", PlotLayout.GACHA_STATION, stationRadius),
 		circle("MultiplierStation", PlotLayout.MULTIPLIER_STATION, stationRadius),
-		dropperFootprint("Dropper1", PlotLayout.DROPPER1),
-		dropperFootprint("Dropper2", PlotLayout.DROPPER2),
-		boxFootprint("Collector", PlotLayout.COLLECTOR, PlotLayout.COLLECTOR_SIZE.X, PlotLayout.COLLECTOR_SIZE.Z),
 		circle("FusionMachine", PlotLayout.FUSION_MACHINE, PlotLayout.Machine.RimDiameter / 2),
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
 	}
@@ -360,18 +361,51 @@ local function checkLayout()
 		local cap = PlotLayout.Pedestal.CapSize
 		table.insert(footprints, boxFootprint("Pedestal" .. index, PlotLayout.GetPedestalPosition(index), cap.X, cap.Z))
 	end
+	-- The factory line: generators (with the Spout reaching toward the belt),
+	-- the belt, the collector, and the reserved rebirth corner.
+	local factory: { Footprint } = {}
 	for id, spot in PlotLayout.GENERATORS do
-		table.insert(footprints, boxFootprint("Generator_" .. id, spot.Position, spot.Footprint, spot.Footprint))
-		-- Each generator must sit inside its bay.
-		local bay = PlotLayout.GENERATOR_BAYS[spot.Bay]
-		local half = PlotLayout.GENERATOR_BAY_SIZE / 2
-		assert(bay, ("PlotLayout: Generator_%s names a missing bay"):format(id))
-		assert(
-			math.abs(spot.Position.X - bay.X) + spot.Footprint / 2 <= half
-				and math.abs(spot.Position.Z - bay.Z) + spot.Footprint / 2 <= half,
-			("PlotLayout: Generator_%s sits outside its bay"):format(id)
+		local half = spot.Footprint / 2
+		local p = spot.Position
+		table.insert(
+			factory,
+			rect("Generator_" .. id, p.X - half, p.X + half + PlotLayout.Generator.SpoutSize, p.Z - half, p.Z + half)
 		)
 	end
+	local belt = PlotLayout.FactoryBelt
+	table.insert(factory, rect("FactoryBelt", belt.X - belt.Width / 2, belt.X + belt.Width / 2, belt.EndZ, belt.StartZ))
+	local collector = PlotLayout.Collector
+	table.insert(factory, boxFootprint("Collector", collector.Position, collector.Size.X, collector.Size.Z))
+	local reserve = PlotLayout.REBIRTH_RESERVE_SIZE
+	table.insert(factory, boxFootprint("RebirthReserve", PlotLayout.REBIRTH_RESERVE, reserve, reserve))
+	local walkwayHalfWidth = PlotLayout.WALKWAY_WIDTH / 2
+	local walkway = rect(
+		"Walkway",
+		PlotLayout.WALKWAY_X - walkwayHalfWidth,
+		PlotLayout.WALKWAY_X + walkwayHalfWidth,
+		PlotLayout.WALKWAY_Z_MIN,
+		PlotLayout.WALKWAY_Z_MAX
+	)
+	for _, footprint in factory do
+		assert(not overlaps(footprint, walkway), ("PlotLayout: %s overlaps the walkway"):format(footprint.Name))
+		table.insert(footprints, footprint)
+	end
+	-- Each Spout must reach no further than the belt's near edge, and the
+	-- belt must end where the collector begins.
+	for id, spot in PlotLayout.GENERATORS do
+		assert(
+			spot.Position.X + spot.Footprint / 2 + PlotLayout.Generator.SpoutSize <= belt.X - belt.Width / 2,
+			("PlotLayout: Generator_%s's spout reaches over the belt"):format(id)
+		)
+		assert(
+			spot.Position.Z <= belt.StartZ and spot.Position.Z >= belt.EndZ,
+			("PlotLayout: Generator_%s is not alongside the belt"):format(id)
+		)
+	end
+	assert(
+		belt.X == collector.Position.X and belt.EndZ == collector.Position.Z + collector.Size.Z / 2,
+		"PlotLayout: the belt must end at the collector's front edge, on its centre line"
+	)
 
 	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
 	for _, footprint in footprints do
