@@ -21,6 +21,8 @@ local rebirths = 0
 local indexFound: { [string]: boolean } = {}
 local indexMultiplier = 1
 local pendingOffline = 0
+-- Uids of displayed items a thief is carrying: they earn nothing meanwhile.
+local carriedUids: { [string]: boolean } = {}
 local awaySeconds = 0
 
 local tycoonChanged = Instance.new("BindableEvent")
@@ -105,8 +107,13 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 	return pedestalDisplays[pedestalIndex]
 end
 
+-- One of this player's displayed items is being carried off by a thief.
+function TycoonController.IsItemCarried(uid: string): boolean
+	return carriedUids[uid] == true
+end
+
 -- Tier and mutation of the items on this player's pedestals (from the
--- inventory cache).
+-- inventory cache), minus any being carried off (same as the server).
 function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 	local byUid: { [string]: any } = {}
 	for _, item in InventoryController.GetInventory() do
@@ -115,7 +122,7 @@ function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 	local items = {}
 	for _, uid in pedestalDisplays do
 		local item = byUid[uid]
-		if item then
+		if item and not carriedUids[uid] then
 			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 		end
 	end
@@ -183,6 +190,14 @@ local function onSyncTycoon(snapshot: any)
 		end
 	end
 	InventoryController.SetDisplayedUids(displayedUids)
+	carriedUids = {}
+	if typeof(snapshot.CarriedUids) == "table" then
+		for _, uid in snapshot.CarriedUids do
+			if typeof(uid) == "string" then
+				carriedUids[uid] = true
+			end
+		end
+	end
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	hasSynced = true

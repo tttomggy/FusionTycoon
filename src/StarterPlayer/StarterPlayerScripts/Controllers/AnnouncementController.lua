@@ -379,6 +379,39 @@ local function onRareFusionAnnouncement(payload: any)
 	})
 end
 
+-- "Har stole a Golden Rift Engine from Bob!" (Legendary+ only; the server
+-- filters). The mutation word in its colour, the item in its tier's.
+local function heistItemText(payload: any): string
+	local def = typeof(payload.ItemId) == "string" and ItemConfig.GetItemById(payload.ItemId) or nil
+	local tier = if typeof(payload.Tier) == "string" then payload.Tier else "Legendary"
+	local base = UIKit.Colored(UIKit.EscapeRichText(def and def.Name or tostring(payload.ItemName)), UITheme.GetTierLight(tier))
+	local mutation = if typeof(payload.Mutation) == "string" then payload.Mutation else nil
+	local color = UITheme.GetMutationColor(mutation)
+	if mutation and color then
+		return UIKit.Colored(mutation, color) .. " " .. base
+	end
+	return base
+end
+
+local function onHeistFeed(payload: any)
+	if typeof(payload) ~= "table" or typeof(payload.Thief) ~= "string" or typeof(payload.Victim) ~= "string" then
+		return
+	end
+	local thief = UIKit.EscapeRichText(payload.Thief)
+	local victim = UIKit.EscapeRichText(payload.Victim)
+	local text
+	if payload.Kind == "Stole" then
+		text = ("%s stole a %s from %s!"):format(thief, heistItemText(payload), victim)
+	elseif payload.Kind == "Caught" then
+		text = ("%s caught %s!"):format(victim, thief)
+	elseif payload.Kind == "Grab" then
+		text = ("%s is stealing %s's %s!"):format(thief, victim, heistItemText(payload))
+	else
+		return
+	end
+	enqueue({ Text = text, AccentColor = Colors.Danger })
+end
+
 local function onRebirthAnnouncement(payload: any)
 	if typeof(payload) ~= "table" or typeof(payload.Name) ~= "string" or typeof(payload.Rebirths) ~= "number" then
 		return
@@ -458,6 +491,7 @@ function AnnouncementController.Init()
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(onGoalCompleted)
 	RemoteEvents.RebirthAnnouncement.OnClientEvent:Connect(onRebirthAnnouncement)
+	RemoteEvents.HeistFeed.OnClientEvent:Connect(onHeistFeed)
 end
 
 return AnnouncementController

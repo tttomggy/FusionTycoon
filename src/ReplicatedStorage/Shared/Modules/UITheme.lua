@@ -27,6 +27,8 @@ UITheme.Colors = {
 	Faint = hex("#7D77A8"), -- captions, empty states
 	Cash = hex("#4CF08A"), -- every money number
 	Danger = hex("#FF5470"), -- badges, error toasts
+	ShieldTeal = hex("#1FB49A"), -- shield up: HUD chip, PROTECTED sign pill
+	ShieldAmber = hex("#FFBE28"), -- shield down: HUD chip
 	Goal = hex("#FFBE28"), -- goal tracker label and bar
 
 	-- One-off accents the design calls for by exact value.
@@ -60,6 +62,7 @@ UITheme.World = {
 	Structure = hex("#221E42"), -- walls, pads, pedestal columns, generator bodies, belt-side parts, machine platform
 	StructureLight = hex("#2D2856"), -- pylons, posts, locked/unclaimed trim
 	AccentViolet = hex("#8B5CFF"), -- wall strips, machine rim, multiplier
+	Shield = hex("#FF4FD8"), -- lab shield fence (ForceField) and gate line
 	AccentGreen = hex("#3BEB7E"), -- claim
 	AccentGold = hex("#FFBE28"), -- gacha, collector
 	Unclaimed = hex("#3A3560"), -- wall strip before claiming
@@ -81,6 +84,7 @@ UITheme.Gradients = {
 	Gold = { Top = hex("#FFD566"), Bottom = hex("#F0A100") }, -- gacha, goal bar
 	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
 	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
+	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 } :: { [string]: GradientPair }
 

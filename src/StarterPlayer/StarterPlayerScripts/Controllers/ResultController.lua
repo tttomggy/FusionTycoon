@@ -16,6 +16,8 @@
 	    also gets the big card.
 	  * Rebirth card (centre) - "REBIRTH 3!" with "Income x2.5 · Luck +15%"
 	    on a successful RebirthResult (RebirthPanel plays the flash).
+	  * Heist cards (centre) - "HEIST COMPLETE!" for a thief who got home,
+	    "<name> stole your <item>" for the victim (HeistController).
 	  * Welcome-back card (modal) - offline earnings, once per snapshot that
 	    brings new PendingOffline; COLLECT fires ClaimOffline and bursts coins.
 
@@ -606,6 +608,128 @@ local function onRebirthResult(result: any)
 	if typeof(result) == "table" and result.Success == true and typeof(result.Rebirths) == "number" then
 		showRebirthCard(result.Rebirths)
 	end
+end
+
+--[[ Heist cards ------------------------------------------------------------------- ]]
+
+local HEIST_CARD_SIZE = Vector2.new(380, 360)
+
+export type HeistItem = { ItemId: string, Tier: string, Mutation: string?, Name: string }
+
+local function showHeistCard(title: string, titleColor: Color3, caption: string, item: HeistItem, subline: string, buttonStyle: string)
+	if bigHolder then
+		if sunburstConnection then
+			sunburstConnection:Disconnect()
+			sunburstConnection = nil
+		end
+		(bigHolder :: Frame):Destroy()
+		bigHolder = nil
+	end
+	local body, holder = UIKit.Panel({
+		Name = "HeistResult",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(HEIST_CARD_SIZE.X, HEIST_CARD_SIZE.Y),
+		Gradient = {
+			{ 0, Colors.Panel },
+			{ 0.5, UITheme.TowardInk(titleColor, 0.55) },
+			{ 1, Colors.Panel },
+		},
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	bigHolder = holder
+	UIKit.MutationCardStroke(body, item.Mutation)
+	local z = body.ZIndex + 3
+	UIKit.Label({
+		Name = "Caption",
+		Text = caption,
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = Colors.Muted,
+		Position = UDim2.fromOffset(12, 20),
+		Size = UDim2.new(1, -24, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Title",
+		Text = title,
+		Font = Fonts.Display,
+		TextSize = 40,
+		TextColor3 = titleColor,
+		TextScaled = true,
+		Position = UDim2.fromOffset(16, 42),
+		Size = UDim2.new(1, -32, 0, 48),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = 4,
+		Parent = body,
+	})
+	local orb = UIKit.TierOrb(item.Tier, 96, nil, item.Mutation)
+	orb.AnchorPoint = Vector2.new(0.5, 0)
+	orb.Position = UDim2.new(0.5, 0, 0, 100)
+	orb.ZIndex = z
+	orb.Parent = body
+	UIKit.Label({
+		Name = "ItemName",
+		Text = item.Name,
+		Font = Fonts.Display,
+		TextSize = 22,
+		TextColor3 = UITheme.GetTierLight(item.Tier),
+		Position = UDim2.fromOffset(12, 204),
+		Size = UDim2.new(1, -24, 0, 28),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Subline",
+		Text = subline,
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(16, 234),
+		Size = UDim2.new(1, -32, 0, 36),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Button({
+		Name = "Ok",
+		Parent = body,
+		Style = buttonStyle,
+		Text = "OK",
+		TextSize = 20,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 282),
+		Size = UDim2.fromOffset(160, 52),
+		ZIndex = z,
+		OnClick = closeBigCard,
+	})
+	UIKit.PopIn(holder)
+end
+
+-- The thief got home: the item is theirs.
+function ResultController.ShowHeistComplete(item: HeistItem, victimName: string)
+	showHeistCard("HEIST COMPLETE!", Colors.Rebirth, ("FROM %s'S LAB"):format(victimName:upper()), item, "It's in your inventory now", "Orange")
+end
+
+-- The victim lost an item.
+function ResultController.ShowItemStolen(item: HeistItem, thiefName: string, shieldSeconds: number)
+	showHeistCard(
+		("%s stole your"):format(thiefName),
+		Colors.Danger,
+		"ROBBED!",
+		item,
+		("Your shield is up for %d min"):format(math.floor(shieldSeconds / 60 + 0.5)),
+		"Red"
+	)
 end
 
 --[[ Fuse All summary card ---------------------------------------------------------- ]]

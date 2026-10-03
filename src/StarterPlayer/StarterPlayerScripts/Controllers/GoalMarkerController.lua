@@ -10,6 +10,10 @@
 	    Hidden while you're within HIDE_RADIUS of it.
 	  * UI target ("ui:Upgrades"): a pulsing gold outline on that HUD button.
 
+	An override (SetOverride) replaces the goal while it lasts: the heist
+	points a thief at their own gate (gold) and a victim at the thief's root
+	(Danger red, following them, no floor ring).
+
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
 	claimed warns once (a renamed part or a stale GoalConfig entry).
@@ -55,6 +59,11 @@ local markerAnchor: Attachment? = nil
 local distanceText: TextLabel? = nil
 local ring: BasePart? = nil
 local targetPosition: Vector3? = nil
+-- A moving override target (the thief's root): distance is measured to it live.
+local movingTarget: BasePart? = nil
+
+type Override = { Target: Instance, Text: string, Danger: boolean }
+local override: Override? = nil
 
 -- os.clock() a target name was first missed on a claimed plot; names that
 -- already warned.
@@ -115,10 +124,11 @@ local function clearWorldMarker()
 	end
 	distanceText = nil
 	targetPosition = nil
+	movingTarget = nil
 	currentTarget = nil
 end
 
-local function buildMarker(goalText: string)
+local function buildMarker(goalText: string, danger: boolean)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "GoalMarker"
 	gui.AlwaysOnTop = true -- a guide, meant to be seen through walls
@@ -142,7 +152,7 @@ local function buildMarker(goalText: string)
 	pill.BackgroundColor3 = Colors.White
 	pill.ZIndex = 2
 	pill.Parent = content
-	UIKit.PairGradient(pill, UITheme.Gradients.Gold)
+	UIKit.PairGradient(pill, if danger then UITheme.Gradients.Heist else UITheme.Gradients.Gold)
 	UIKit.Corner(pill, 999)
 	UIKit.Stroke(pill, 3)
 	UIKit.Padding(pill, 4, 12, 4, 12)
@@ -151,7 +161,7 @@ local function buildMarker(goalText: string)
 		Text = goalText:upper(),
 		Font = Fonts.Display,
 		TextSize = 20,
-		TextColor3 = Colors.GoldText,
+		TextColor3 = if danger then Colors.Text else Colors.GoldText,
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextScaled = true,
@@ -167,7 +177,7 @@ local function buildMarker(goalText: string)
 	pointer.Position = UDim2.new(0.5, 0, 0, 38)
 	pointer.Size = UDim2.fromOffset(14, 14)
 	pointer.Rotation = 45
-	pointer.BackgroundColor3 = UITheme.Gradients.Gold.Bottom
+	pointer.BackgroundColor3 = if danger then UITheme.Gradients.Heist.Bottom else UITheme.Gradients.Gold.Bottom
 	pointer.ZIndex = 1
 	pointer.Parent = content
 	UIKit.Stroke(pointer, 3)
@@ -176,7 +186,7 @@ local function buildMarker(goalText: string)
 		Name = "Distance",
 		Font = Fonts.Body,
 		TextSize = 13,
-		TextColor3 = Colors.GoldLabel,
+		TextColor3 = if danger then Colors.Danger else Colors.GoldLabel,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 52),
 		Size = UDim2.new(1, 0, 0, 18),
@@ -222,7 +232,18 @@ local function buildRing(bottomCenter: Vector3, footprint: number)
 	ring = face
 end
 
-local function showWorldMarker(target: Instance, goalText: string)
+local function showWorldMarker(target: Instance, goalText: string, danger: boolean?)
+	-- An unanchored part (a character's root) moves: adorn to it directly.
+	if target:IsA("BasePart") and not target.Anchored then
+		clearWorldMarker()
+		currentTarget = target
+		movingTarget = target
+		buildMarker(goalText, danger == true)
+		local gui = marker :: BillboardGui
+		gui.Adornee = target
+		gui.StudsOffset = Vector3.new(0, MARKER_HEIGHT_ABOVE_TARGET + 2, 0)
+		return
+	end
 	local center, size = getBounds(target)
 	if not center or not size then
 		return
@@ -240,7 +261,7 @@ local function showWorldMarker(target: Instance, goalText: string)
 	anchor.Parent = Workspace.Terrain
 	markerAnchor = anchor
 
-	buildMarker(goalText)
+	buildMarker(goalText, danger == true)
 	local gui = marker :: BillboardGui
 	gui.Adornee = anchor
 	buildRing(bottom, math.max(size.X, size.Z))
@@ -277,6 +298,14 @@ local function setUiTarget(name: string?)
 end
 
 local function refresh()
+	local active = override
+	if active then
+		setUiTarget(nil)
+		if active.Target ~= currentTarget then
+			showWorldMarker(active.Target, active.Text, active.Danger)
+		end
+		return
+	end
 	local index = TycoonController.GetGoalIndex()
 	local goal = index and GoalConfig.GetGoal(index)
 	if not goal then
@@ -310,7 +339,7 @@ end
 
 local function update()
 	local gui = marker
-	local position = targetPosition
+	local position = if movingTarget then movingTarget.Position else targetPosition
 	if not gui or not position then
 		return
 	end
@@ -326,6 +355,19 @@ local function update()
 	if distanceText then
 		distanceText.Text = ("%d studs"):format(math.floor(distance + 0.5))
 	end
+end
+
+-- Points the marker at `target` instead of the goal until cleared (nil).
+-- `danger` tints it red (the heist's victim arrow).
+function GoalMarkerController.SetOverride(target: Instance?, text: string?, danger: boolean?)
+	if target then
+		override = { Target = target, Text = text or "", Danger = danger == true }
+	else
+		override = nil
+	end
+	clearWorldMarker()
+	currentGoalIndex = nil -- re-show the goal marker when the override ends
+	refresh()
 end
 
 function GoalMarkerController.Init()

@@ -27,6 +27,7 @@ local PlotNaming = require(Config.PlotNaming)
 local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
@@ -118,6 +119,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 
 	if not PlayerDataService.IsDataLoaded(player) then
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "DataNotLoaded", GeneratorId = generatorId })
+		return
+	end
+	-- Hands full: no upgrades while carrying a stolen item (HeistService).
+	if PlayerDataService.IsCarrying(player) then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "Carrying", GeneratorId = generatorId })
 		return
 	end
 
@@ -260,6 +266,7 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 	PlotKit.BuildWalkway(origin, plot)
 	PlotKit.BuildWalls(origin, plot, false)
 	PlotKit.BuildGateRamp(origin, plot)
+	PlotKit.BuildShieldFence(origin, plot)
 
 	-- Spawn on the street in front of the gate; RespawnLocation picks it.
 	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)
@@ -467,6 +474,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
+			return
+		end
 		local rolled = rollPulls(1, getLuck(player))
 		if not rolled then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
@@ -500,6 +511,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 
 	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
 			return
 		end
 		-- Roll all of them before charging anything.
@@ -589,6 +604,10 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = false, Reason = "Carrying" })
+			return
+		end
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
 		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
 			return
@@ -629,7 +648,7 @@ end
 -- The folder is built complete and parented LAST, so it replicates to the
 -- client in one piece (parenting it first let it arrive before its children,
 -- and the client wired only the pedestals it could see at that moment).
-local function createPedestals(plot: Model, origin: CFrame)
+local function createPedestals(plot: Model, origin: CFrame, player: Player)
 	local folder = Instance.new("Folder")
 	folder.Name = "Pedestals"
 
@@ -670,6 +689,17 @@ local function createPedestals(plot: Model, origin: CFrame)
 		-- every other client hides it (WorldLabelController, OwnerOnly).
 		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
 		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+
+		-- Hold E to steal (HeistService). Enemy-only: each client enables it
+		-- only for an eligible non-owner (WorldLabelController); the server
+		-- re-checks everything on RequestSteal.
+		local steal = newPrompt(pedestal, "StealPrompt", "Steal", "", HeistConfig.PromptDistance)
+		steal.HoldDuration = HeistConfig.GrabHoldSeconds
+		steal.Enabled = false
+		steal:SetAttribute("EnemyOnly", true)
+		steal:SetAttribute("OwnerUserId", player.UserId)
+		pedestal:SetAttribute("Filled", false)
+		pedestal:SetAttribute("BeingStolen", false)
 
 		BillboardKit.SetPedestalLabel(pedestal, nil)
 	end
@@ -835,16 +865,26 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 		if pedestal and pedestal:IsA("BasePart") then
 			local uid = displays[index]
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
+			local steal = pedestal:FindFirstChild("StealPrompt")
+			pedestal:SetAttribute("Filled", item ~= nil)
 			if item then
 				local def = ItemConfig.GetItemById(item.ItemId)
+				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					Mutation = item.Mutation,
-					ItemName = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation),
+					ItemName = name,
 					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
+					Stolen = PlayerDataService.IsItemCarried(player, item.Uid),
 				})
+				if steal and steal:IsA("ProximityPrompt") then
+					steal.ObjectText = name
+				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
+				if steal and steal:IsA("ProximityPrompt") then
+					steal.ObjectText = ""
+				end
 			end
 		end
 	end
@@ -874,6 +914,9 @@ local function refreshPlotSigns()
 		local player = Players:GetPlayerByUserId(userId)
 		local plot = plotByUserId[userId]
 		if player and plot then
+			-- HeistService keeps the plot's Protected attribute (owner under
+			-- HeistConfig.MinRebirths): the sign says so with a teal pill.
+			sign.SetPill(if plot:GetAttribute("Protected") == true then "🛡 PROTECTED · NEW LAB" else nil)
 			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
 				sign.Set("FREE LAB", "Step on the green pad")
 			else
@@ -948,7 +991,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 
 		createMultiplierStation(plot, origin, player)
 		createGachaStation(plot, origin, player)
-		createPedestals(plot, origin)
+		createPedestals(plot, origin, player)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
 		createFactoryLine(plot, origin, player)

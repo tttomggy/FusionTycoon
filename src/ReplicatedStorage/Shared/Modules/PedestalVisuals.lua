@@ -158,11 +158,11 @@ local function buildShell(group: Model, center: CFrame, diameter: number, mutati
 	end
 end
 
-local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance, mutation: string?): BasePart
+-- The orb group (glass orb, Neon core, light, mutation shell and
+-- satellites) centred on `center`. `hover` tags it FT_Hover (pedestals);
+-- the heist's carried orb is welded to a head instead.
+local function buildOrbAt(center: CFrame, tier: string, tierColor: Color3, parent: Instance, mutation: string?, hover: boolean): Model
 	local p = PlotLayout.Pedestal
-	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
-	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
-	local center = bottom * CFrame.new(0, p.OrbCenterY, 0)
 	local diameter = p.OrbDiameter[tier] or p.OrbDiameter.Common
 
 	local group = Instance.new("Model")
@@ -206,9 +206,28 @@ local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, par
 	end
 
 	group.PrimaryPart = orb
-	PartKit.SetHover(group, p.OrbSpinDegPerSec, p.OrbBob, p.OrbBobPeriod, "Bob")
+	if hover then
+		PartKit.SetHover(group, p.OrbSpinDegPerSec, p.OrbBob, p.OrbBobPeriod, "Bob")
+	end
 	group.Parent = parent
-	return orb
+	return group
+end
+
+local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance, mutation: string?): BasePart
+	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
+	local center = bottom * CFrame.new(0, PlotLayout.Pedestal.OrbCenterY, 0)
+	local group = buildOrbAt(center, tier, tierColor, parent, mutation, true)
+	return group.PrimaryPart :: BasePart
+end
+
+-- A cosmetic copy of a pedestal orb (mutation shell and satellites
+-- included) for the heist's carried item, built on each client. Not
+-- hovering: the caller welds the orb (PrimaryPart) to a character.
+function PedestalVisuals.BuildCarryOrb(tier: string, mutation: string?, center: CFrame, parent: Instance): Model
+	local config = RarityVisuals.Tiers[tier]
+	local tierColor = FusionConfig.TierAccentColors[tier] or (config and config.GlowColor) or UITheme.Colors.Text
+	return buildOrbAt(center, tier, tierColor, parent, mutation, false)
 end
 
 -- Removes every effect PedestalVisuals.Apply may have added, restoring the
@@ -247,6 +266,22 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 	if sound then
 		sound:Destroy()
 	end
+end
+
+-- A thief is carrying this pedestal's item: the orb, light and effects go
+-- and a dim Danger ghost ring sits on the cap until it's back (Apply) or
+-- gone (Clear).
+function PedestalVisuals.SetStolen(pedestal: BasePart)
+	PedestalVisuals.Clear(pedestal)
+	local elements = Instance.new("Folder")
+	elements.Name = ELEMENTS_FOLDER_NAME
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		local top = cap.CFrame * CFrame.new(0, cap.Size.Y / 2, 0)
+		local ring = BillboardKit.BuildPadFace(elements, top, PlotLayout.Pedestal.CapSize.X, UITheme.Colors.Danger, nil)
+		ring.Name = "StolenRing"
+	end
+	elements.Parent = pedestal
 end
 
 -- Applies tier's RarityVisuals entry to `pedestal`, plus a mutation shell

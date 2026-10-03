@@ -101,6 +101,9 @@ export type TycoonSnapshot = {
 	-- cover, for the welcome-back card.
 	PendingOffline: number,
 	AwaySeconds: number,
+	-- Uids of this player's displayed items a thief is carrying right now:
+	-- they earn nothing until back (the client's income skips them too).
+	CarriedUids: { string },
 }
 
 type State = {
@@ -114,6 +117,14 @@ type State = {
 	goalProgress: { [number]: GoalProgress? },
 	-- Session-only: offline earnings computed on load, until claimed.
 	pendingOffline: { [number]: PendingOffline },
+	-- Session-only heist flags HeistService sets (it owns the heist state;
+	-- these are the parts income, sync and other services' guards need):
+	-- each owner's displayed Uids being carried, and who is carrying.
+	carriedUids: { [number]: { [string]: boolean } },
+	carrying: { [number]: boolean },
+	-- Called synchronously before a player's data is saved and released
+	-- (leaving, or the server closing). See OnRelease.
+	releaseHooks: { (Player) -> () },
 	-- Called synchronously at the start of every SyncTycoon (see OnSync).
 	syncHooks: { (Player) -> () },
 	-- os.clock() of each player's last honoured RequestSync.
@@ -153,6 +164,9 @@ local state: State = {
 	noSave = {},
 	goalProgress = {},
 	pendingOffline = {},
+	carriedUids = {},
+	carrying = {},
+	releaseHooks = {},
 	syncHooks = {},
 	lastSyncRequest = {},
 	connections = {},
@@ -666,8 +680,10 @@ end
 -- Tier and mutation of every item on the player's pedestals.
 function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
 	local items = {}
+	local carried = state.carriedUids[player.UserId]
 	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
-		if uid then
+		-- A pedestal whose item is being carried off earns nothing.
+		if uid and not (carried and carried[uid]) then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
 				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
@@ -727,7 +743,69 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		IndexKeys = indexKeys(PlayerDataService.GetIndex(player)),
 		PendingOffline = if pending then pending.Amount else 0,
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
+		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 	}
+end
+
+--[[ Public API: heist flags ---------------------------------------------- ]]
+-- HeistService owns the heist; these flags are what the rest of the server
+-- needs to see of it without referencing HeistService (income, sync, and
+-- the "not while carrying / being stolen" guards in other services).
+
+-- Marks one of `owner`'s displayed items as being carried off (or not).
+function PlayerDataService.SetItemCarried(owner: Player, uid: string, carried: boolean)
+	local set = state.carriedUids[owner.UserId]
+	if carried then
+		if not set then
+			set = {}
+			state.carriedUids[owner.UserId] = set
+		end
+		set[uid] = true
+	elseif set then
+		set[uid] = nil
+		if next(set) == nil then
+			state.carriedUids[owner.UserId] = nil
+		end
+	end
+end
+
+function PlayerDataService.IsItemCarried(owner: Player, uid: string): boolean
+	local set = state.carriedUids[owner.UserId]
+	return set ~= nil and set[uid] == true
+end
+
+-- Any of `owner`'s items is being carried right now.
+function PlayerDataService.HasCarriedItems(owner: Player): boolean
+	return state.carriedUids[owner.UserId] ~= nil
+end
+
+-- `player` is carrying a stolen item (can't pull, fuse, upgrade or rebirth).
+function PlayerDataService.SetCarrying(player: Player, carrying: boolean)
+	if carrying then
+		state.carrying[player.UserId] = true
+	else
+		state.carrying[player.UserId] = nil
+	end
+end
+
+function PlayerDataService.IsCarrying(player: Player): boolean
+	return state.carrying[player.UserId] == true
+end
+
+-- Registers `callback(player)` to run synchronously before `player`'s data
+-- is saved and released: at the start of PlayerRemoving, and for every
+-- loaded player when the server closes. HeistService fails active carries
+-- here, so a save never races a half-finished steal.
+function PlayerDataService.OnRelease(callback: (Player) -> ())
+	table.insert(state.releaseHooks, callback)
+end
+
+local function runReleaseHooks(player: Player)
+	for _, hook in state.releaseHooks do
+		xpcall(hook, function(err)
+			warn(("PlayerDataService: OnRelease hook failed for %s: %s"):format(player.Name, tostring(err)))
+		end, player)
+	end
 end
 
 --[[ Public API: offline earnings ------------------------------------------ ]]
@@ -840,6 +918,10 @@ end
 
 local function onPlayerRemoving(player: Player)
 	local userId = player.UserId
+	-- Before anything is saved: active steals on either side resolve first.
+	runReleaseHooks(player)
+	state.carriedUids[userId] = nil
+	state.carrying[userId] = nil
 	local data = state.sessionCache[userId]
 	-- Left before collecting (or before the auto-claim): pay it, never lose it.
 	local pending = state.pendingOffline[userId]
@@ -882,7 +964,15 @@ function PlayerDataService:Init()
 		task.spawn(onPlayerAdded, player)
 	end
 
-	game:BindToClose(saveAll)
+	-- Release hooks (active steals fail and return) run before any save.
+	game:BindToClose(function()
+		for _, player in Players:GetPlayers() do
+			if state.sessionCache[player.UserId] then
+				runReleaseHooks(player)
+			end
+		end
+		saveAll()
+	end)
 
 	task.spawn(function()
 		while true do

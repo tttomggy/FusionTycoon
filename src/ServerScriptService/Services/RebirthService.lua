@@ -79,6 +79,16 @@ local function onRequestRebirth(player: Player)
 		reject(player, "NoPlot")
 		return
 	end
+	-- Not mid-heist on either side: the thief has their hands full, and a
+	-- victim can't reset while one of their items is out the door.
+	if PlayerDataService.IsCarrying(player) then
+		reject(player, "Carrying")
+		return
+	end
+	if PlayerDataService.HasCarriedItems(player) then
+		reject(player, "ItemBeingStolen")
+		return
+	end
 	local cost = RebirthConfig.GetCost(PlayerDataService.GetRebirths(player))
 	if PlayerDataService.GetCash(player) < cost then
 		reject(player, "NotReady")

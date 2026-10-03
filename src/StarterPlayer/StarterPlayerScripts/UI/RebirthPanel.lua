@@ -56,6 +56,8 @@ local REJECTION_TOASTS: { [string]: string } = {
 	TooFast = "One moment, then try again",
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
+	Carrying = "Get home with that item first!",
+	ItemBeingStolen = "A thief has one of your items! Get it back first",
 }
 local FALLBACK_TOAST = "Couldn't rebirth, try again"
 

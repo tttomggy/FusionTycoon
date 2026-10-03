@@ -192,6 +192,11 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 		reject(player, "PedestalEmpty", pedestalIndex)
 		return
 	end
+	-- A thief is carrying it: it stays put until the heist ends (HeistService).
+	if PlayerDataService.IsItemCarried(player, uid) then
+		reject(player, "BeingStolen", pedestalIndex)
+		return
+	end
 
 	PlayerDataService.SetItemInUse(player, uid, false)
 	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)

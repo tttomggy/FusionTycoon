@@ -90,7 +90,44 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/rebirths <n>`, `/give <itemId> [mutation]`, `/offline <minutes>`
   (pending offline earnings as if away that long, then re-sync: the only
   way to test the welcome-back card, since Studio profiles never save),
-  `/wipe`.
+  `/shield <s>` (0 drops it), `/heistcd 0` (clears your thief cooldown),
+  `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
+  `/wipe` (fails your active steals first).
+- **Heist** (`HeistService`, every number in `HeistConfig`): from Rebirth 1,
+  items **on pedestals** can be stolen by another Rebirth 1+ player;
+  inventory items never are. Hold E 1.5 s on an enemy pedestal's
+  `StealPrompt` (victim's shield down) → carry it home within 45 s at
+  WalkSpeed 12. Delivered = the thief's root inside their own walls;
+  saved = the owner within 5 studs; timeout, thief death, either side
+  leaving, the victim's plot going, shutdown or `/wipe` = it goes back.
+  Thief cooldown 60 s after any attempt; a victim gets a 120 s auto-shield
+  per loss and loses at most 3 per 10 min. While carrying: no pulls,
+  fusing, upgrades, Multiplier Pad, rebirth, shield pad or second steal
+  (Reason `Carrying`); the owner can't remove a carried item or rebirth
+  (`BeingStolen` / `ItemBeingStolen`). A carried pedestal earns nothing.
+  - **Transaction order (no duplication, no loss):** a grab only records
+    the carry in HeistService and flags it (`PlayerDataService.SetItemCarried`
+    / `SetCarrying`, pedestal attribute `BeingStolen`). Neither inventory
+    changes until **delivery**, which is one synchronous block: clear the
+    victim's pedestal, remove the item from the victim, `AddItem` the same
+    item to the thief (new Uid), then syncs and `SaveNow` for both. Every
+    other ending just drops the carry: the item never left. An item is in
+    at most one carry and a thief in at most one.
+  - **`PlayerDataService.OnRelease(callback)`** runs before a player's save
+    on PlayerRemoving and for everyone before `saveAll` on BindToClose;
+    HeistService fails that player's carries (either side) there.
+  - **Shield:** per player until a server time, published as the plot
+    attribute `ShieldUntil`. Raised 60 s on claim and when the owner steps
+    on their YOURS pad while it's down (server region check). While up, a
+    0.25 s **eject loop** moves any non-owner whose root is inside the walls
+    (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
+    Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
+    the sign's teal PROTECTED pill): no StealPrompt, no eject needed.
+  - Client: WorldLabelController enables a StealPrompt only for an eligible
+    viewer; HeistController draws every carrier's orb (`PedestalVisuals.
+    BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
+    banners, arrows (`GoalMarkerController.SetOverride`) and fades every
+    plot's shield fence; HudController shows the shield chip.
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
@@ -111,6 +148,7 @@ src/ReplicatedStorage/Shared/
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
+                 HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
@@ -136,7 +174,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   (banners), WorldLabelController (hides owner-only labels,
                   and any label within 7 studs of the camera),
                   WorldAnimationController (FT_Hover spin/bob, client-only),
-                  GoalMarkerController (points at the current goal),
+                  GoalMarkerController (points at the current goal, or
+                  a heist override), HeistController (steal prompt, carried
+                  orbs, heist banners, shield fences),
                   BeltController (client-only belt chevrons),
                   GeneratorController (world Buy/Upgrade prompts, upgrade
                   toast + bump), FactoryController (client-only cash balls
@@ -224,6 +264,7 @@ calls left in `Services/`.
 | `WorldService` | `:Init()` | — | `--!strict` |
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `OfflineService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -264,6 +305,11 @@ and makes the client `WaitForChild` it. Never call `Instance.new("RemoteEvent")`
 in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
+Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
+`HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
+`HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
+Legendary+).
+
 ### Sync hooks
 
 `PlayerDataService.OnSync(callback)` registers a function that runs
@@ -299,8 +345,9 @@ checks that no footprints overlap and everything sits inside the walls.
   80`; row 0 at z = −50 facing +Z, row 1 at z = +50 turned 180°, so both rows'
   gates face the street at z = 0. `PlotLayout.GetSlotCFrame(i)`.
 - **Materials:** every solid part is SmoothPlastic, accents Neon (colours
-  from `UITheme.World`); the ground's Grass is the one exception. No Basalt,
-  Slate, Metal or Plastic. **No flat Neon circles:** Roblox draws a cylinder
+  from `UITheme.World`); the ground's Grass and the lab shield fence's
+  **ForceField** (`PlotKit.BuildShieldFence`, `World.Shield`) are the only
+  exceptions. No Basalt, Slate, Metal or Plastic. **No flat Neon circles:** Roblox draws a cylinder
   top as a fan of triangles that bloom unevenly ("pizza slices"). Glowing
   rings on flat surfaces are SurfaceGui faces (`BillboardKit.BuildPadFace`);
   Neon cylinders are only thin bands seen from the side (station/machine

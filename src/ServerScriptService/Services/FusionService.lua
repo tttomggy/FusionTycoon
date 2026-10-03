@@ -224,6 +224,11 @@ end
 -- ownership check and the inventory mutation), so two requests can never
 -- both pass validation against the same items.
 local function onFusionRequest(player: Player, rawPayload: unknown)
+	-- Hands full: no fusing while carrying a stolen item (HeistService).
+	if PlayerDataService.IsDataLoaded(player) and PlayerDataService.IsCarrying(player) then
+		reject(player, "Carrying")
+		return
+	end
 	if typeof(rawPayload) ~= "table" or typeof((rawPayload :: any).Uids) ~= "table" then
 		reject(player, "InvalidItems", true)
 		return
@@ -350,6 +355,10 @@ end
 local function onFuseAllRequest(player: Player)
 	if not PlayerDataService.IsDataLoaded(player) then
 		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0 })
+		return
+	end
+	if PlayerDataService.IsCarrying(player) then
+		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "Carrying" })
 		return
 	end
 	local last = state.lastFuseAllAt[player.UserId]
