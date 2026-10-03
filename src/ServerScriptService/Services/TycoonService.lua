@@ -39,6 +39,7 @@ local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
+local PortalKit = require(ReplicatedStorage.Shared.Modules.PortalKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -84,6 +85,8 @@ local plotByUserId: { [number]: Model } = {}
 local originByUserId: { [number]: CFrame } = {}
 local plotSignByUserId: { [number]: BillboardKit.SignSurface } = {}
 local collectorLabelByUserId: { [number]: BillboardKit.PadLabel } = {}
+type PortalState = { Model: Model, Label: BillboardKit.ProgressPadLabel }
+local portalByUserId: { [number]: PortalState } = {}
 
 local function syncTycoon(player: Player)
 	PlayerDataService.SyncTycoon(player)
@@ -586,6 +589,52 @@ local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
 	end
 end
 
+--[[ Rebirth Portal ------------------------------------------------------------------- ]]
+
+-- The portal in the back-right corner, with its owner-only progress label.
+-- Its prompt only opens the client's Rebirth panel; RebirthService handles
+-- the actual request.
+local function createRebirthPortal(plot: Model, origin: CFrame, player: Player)
+	local P = PlotLayout.RebirthPortal
+	local model = PortalKit.Build(origin, plot)
+	local label = BillboardKit.ProgressPad(model.PrimaryPart :: BasePart, {
+		Name = "RebirthLabel",
+		Title = "REBIRTH",
+		TitleColor = UITheme.Colors.Rebirth,
+		Pill = "",
+		PillGradient = UITheme.Gradients.Orange,
+		BarColor = UITheme.Colors.Rebirth,
+		CaptionColor = UITheme.Colors.RebirthLabel,
+		StudsOffset = Vector3.new(0, P.LabelOffsetY, 0),
+		MaxDistance = P.LabelMaxDistance,
+		OwnerOnly = true,
+	})
+	portalByUserId[player.UserId] = { Model = model, Label = label }
+end
+
+-- Text, bar and Ready state only (no rebuilds); runs on every sync, which
+-- includes every payout tick.
+local function refreshRebirthPortal(player: Player)
+	local portal = portalByUserId[player.UserId]
+	if not portal then
+		return
+	end
+	local rebirths = PlayerDataService.GetRebirths(player)
+	local earned = PlayerDataService.GetRunEarnings(player)
+	local requirement = RebirthConfig.GetRequirement(rebirths)
+	local ready = earned >= requirement
+	local now = NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths))
+	local nextValue = NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths + 1))
+	PortalKit.SetReady(portal.Model, ready)
+	portal.Label.SetPill(
+		if ready then ("READY · %s → %s"):format(now, nextValue) else ("%s → %s income"):format(now, nextValue)
+	)
+	portal.Label.SetProgress(earned / requirement)
+	portal.Label.SetCaption(
+		("%s / %s this run"):format(NumberFormat.Money(math.min(earned, requirement)), NumberFormat.Money(requirement))
+	)
+end
+
 -- OnSync hook: runs before every snapshot, so the world matches what the
 -- client is about to be told: station labels, pedestal labels, the
 -- collector, generator states (SetState skips unchanged ones). An upgrade,
@@ -607,6 +656,7 @@ local function refreshFactoryLine(player: Player)
 	end
 	-- Pedestal rates include the income multiplier (pad x rebirth).
 	TycoonService.RefreshPedestalLabels(player)
+	refreshRebirthPortal(player)
 	local label = collectorLabelByUserId[player.UserId]
 	if label then
 		local inputs = PlayerDataService.GetIncomeInputs(player)
@@ -764,6 +814,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
 		createFactoryLine(plot, origin, player)
+		createRebirthPortal(plot, origin, player)
 		syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
 		refreshPlotSigns()
 	end)
@@ -822,6 +873,7 @@ local function removePlotForPlayer(player: Player)
 	plotSignByUserId[player.UserId] = nil
 	collectorLabelByUserId[player.UserId] = nil
 	stationRefreshesByUserId[player.UserId] = nil
+	portalByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
 		occupiedSlots[slotIndex] = nil

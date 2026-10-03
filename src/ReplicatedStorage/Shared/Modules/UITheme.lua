@@ -42,6 +42,9 @@ UITheme.Colors = {
 	FuseAllTop = hex("#3A1F6E"), -- Fuse All summary card gradient top
 	MythicBannerLeft = hex("#6E0F24"), -- server Mythic banner gradient left
 	MythicBannerLabel = hex("#FF8FA0"), -- "SERVER · MYTHIC"
+	Rebirth = hex("#FF8A3D"), -- REBIRTH titles, HUD rebirth pill, banner right
+	RebirthLabel = hex("#FFD9B8"), -- "SERVER · REBIRTH", rebirth captions
+	RebirthBannerLeft = hex("#7A2A00"), -- server rebirth banner gradient left
 	White = hex("#FFFFFF"),
 	Black = hex("#000000"),
 }
@@ -62,6 +65,7 @@ UITheme.World = {
 	AccentBlue = hex("#4FB3FF"), -- west belt rail + chevrons
 	Belt = hex("#1B1834"), -- speed belt surface
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
+	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
 }
 
 export type GradientPair = { Top: Color3, Bottom: Color3 }
@@ -73,8 +77,12 @@ UITheme.Gradients = {
 	Violet = { Top = hex("#A47BFF"), Bottom = hex("#6A3FE0") }, -- fusion, multiplier
 	Red = { Top = hex("#FF7A8E"), Bottom = hex("#E0304E") }, -- close (X), error toasts
 	Gold = { Top = hex("#FFD566"), Bottom = hex("#F0A100") }, -- gacha, goal bar
+	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 } :: { [string]: GradientPair }
+
+-- The Rebirth Portal's swirl: a UIGradient through these three stops.
+UITheme.RebirthPortal = { hex("#FF8A3D"), hex("#FFD566"), hex("#FF4F7A") }
 
 --[[ Tiers ------------------------------------------------------------------
 	The saturated tier colours themselves stay FusionConfig.TierAccentColors.

@@ -65,9 +65,35 @@ PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES = 30
 PlotLayout.SIGN_POST_X = 9 -- posts at (+-9, +32)
 PlotLayout.SIGN_Z = 32
 
--- Back-right corner, held for the rebirth machine: nothing may be built here.
-PlotLayout.REBIRTH_RESERVE = v3(24, 0, -24)
-PlotLayout.REBIRTH_RESERVE_SIZE = 10
+--[[ Rebirth Portal (back-right corner) ----------------------------------------
+	Faces +Z (toward the plot's centre). A round base with a SurfaceGui ring
+	face, two pillars and a beam framing a swirl sheet (SurfaceGui on both
+	faces, animated client-side), a light, an owner-only progress label and
+	an owner-only prompt that opens the client's Rebirth panel.
+]]
+PlotLayout.RebirthPortal = {
+	Position = v3(24, 0, -24),
+	Footprint = 10, -- square footprint kept clear in the overlap check
+	BaseDiameter = 8,
+	BaseHeight = 0.4, -- top at y 0.4
+	PillarSize = v3(1.2, 9, 1.2), -- standing on the base
+	PillarX = 3.4, -- pillar centres at x +-3.4 from the portal centre
+	BeamSize = v3(8, 1.2, 1.2), -- on top of the pillars
+	EdgeWidth = 0.25, -- Neon strip on each pillar's inner face
+	EdgeDepth = 0.05,
+	SheetSize = v3(5.6, 7.6, 0.2), -- between the pillars, Transparency 1
+	SheetPixelsPerStud = 30,
+	LightRange = 14,
+	LightBrightnessIdle = 0.5,
+	LightBrightnessReady = 1.5,
+	SwirlIdleTransparency = 0.65,
+	SwirlDegPerSec = 40, -- while ready
+	RingPulsePeriod = 1.2, -- the base ring pulses while ready
+	LabelOffsetY = 13, -- above the portal's base centre
+	LabelMaxDistance = 80,
+	PromptDistance = 8,
+	PromptHoldSeconds = 0.5,
+}
 
 --[[ Factory line --------------------------------------------------------------
 	The five generators stand in one row along the left wall, cheapest at the
@@ -377,7 +403,7 @@ local function checkLayout()
 		table.insert(footprints, boxFootprint("Pedestal" .. index, PlotLayout.GetPedestalPosition(index), cap.X, cap.Z))
 	end
 	-- The factory line: generators (with the Spout reaching toward the belt),
-	-- the belt, the collector, and the reserved rebirth corner.
+	-- the belt, the collector, and the Rebirth Portal's corner.
 	local factory: { Footprint } = {}
 	for id, spot in PlotLayout.GENERATORS do
 		local half = spot.Footprint / 2
@@ -391,8 +417,8 @@ local function checkLayout()
 	table.insert(factory, rect("FactoryBelt", belt.X - belt.Width / 2, belt.X + belt.Width / 2, belt.EndZ, belt.StartZ))
 	local collector = PlotLayout.Collector
 	table.insert(factory, boxFootprint("Collector", collector.Position, collector.Size.X, collector.Size.Z))
-	local reserve = PlotLayout.REBIRTH_RESERVE_SIZE
-	table.insert(factory, boxFootprint("RebirthReserve", PlotLayout.REBIRTH_RESERVE, reserve, reserve))
+	local portal = PlotLayout.RebirthPortal
+	table.insert(factory, boxFootprint("RebirthPortal", portal.Position, portal.Footprint, portal.Footprint))
 	local walkwayHalfWidth = PlotLayout.WALKWAY_WIDTH / 2
 	local walkway = rect(
 		"Walkway",
@@ -417,6 +443,19 @@ local function checkLayout()
 			("PlotLayout: Generator_%s is not alongside the belt"):format(id)
 		)
 	end
+	-- The portal's parts must fit its footprint, and the sheet its pillars.
+	assert(
+		portal.BeamSize.X <= portal.Footprint and portal.BaseDiameter <= portal.Footprint,
+		"PlotLayout: the Rebirth Portal is wider than its footprint"
+	)
+	assert(
+		math.abs((portal.PillarX - portal.PillarSize.X / 2) * 2 - portal.SheetSize.X) < 1e-6,
+		"PlotLayout: the portal sheet must span exactly between the pillars"
+	)
+	assert(
+		math.abs(portal.BeamSize.X - (portal.PillarX + portal.PillarSize.X / 2) * 2) < 1e-6,
+		"PlotLayout: the portal beam must span exactly across the pillars"
+	)
 	assert(
 		belt.X == collector.Position.X and belt.EndZ == collector.Position.Z + collector.Size.Z / 2,
 		"PlotLayout: the belt must end at the collector's front edge, on its centre line"

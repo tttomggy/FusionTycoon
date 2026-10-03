@@ -38,6 +38,7 @@ local PAD_LABEL_STUDS = Vector2.new(9, 3.4)
 local PEDESTAL_LABEL_STUDS = Vector2.new(6.5, 2.6)
 local EMPTY_PILL_STUDS = Vector2.new(3.6, 1.1)
 local GENERATOR_LABEL_STUDS = Vector2.new(4.4, 1.7)
+local PROGRESS_PAD_STUDS = Vector2.new(9, 4.4)
 local MAX_TEXT_SIZE = 64
 
 --[[ Primitives ------------------------------------------------------------- ]]
@@ -177,6 +178,102 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 			pillText.Text = text
 		end,
 		SetDetail = setDetail,
+	}
+end
+
+--[[ Progress pad label --------------------------------------------------------
+	A pad label with a progress bar: title, gradient pill, bar and a caption
+	(the Rebirth Portal). Updates only set text and the bar's size; nothing
+	is rebuilt.
+]]
+
+export type ProgressPadProps = {
+	Name: string?,
+	Title: string,
+	TitleColor: Color3,
+	Pill: string,
+	PillGradient: UITheme.GradientPair,
+	BarColor: Color3,
+	Caption: string?,
+	CaptionColor: Color3?,
+	StudsOffset: Vector3,
+	MaxDistance: number,
+	OwnerOnly: boolean?,
+}
+
+export type ProgressPadLabel = {
+	Gui: BillboardGui,
+	SetPill: (text: string) -> (),
+	SetProgress: (fraction: number) -> (),
+	SetCaption: (text: string) -> (),
+}
+
+-- A horizontal bar (Panel2 track, Ink stroke, a fill in `color`) filling
+-- `parent` at the given scale position/size. Returns a setter for 0..1.
+function BillboardKit.Bar(parent: Instance, position: UDim2, size: UDim2, color: Color3): (number) -> ()
+	local track = Instance.new("Frame")
+	track.Name = "Bar"
+	track.BackgroundColor3 = Colors.Panel2
+	track.AnchorPoint = Vector2.new(0.5, 0)
+	track.Position = position
+	track.Size = size
+	track.ClipsDescendants = true
+	track.Parent = parent
+	corner(track, UDim.new(0.5, 0))
+	borderStroke(track, 2)
+
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.BackgroundColor3 = color
+	fill.BorderSizePixel = 0
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.Parent = track
+	corner(fill, UDim.new(0.5, 0))
+
+	return function(fraction: number)
+		fill.Size = UDim2.fromScale(math.clamp(fraction, 0, 1), 1)
+	end
+end
+
+function BillboardKit.ProgressPad(parent: Instance, props: ProgressPadProps): ProgressPadLabel
+	local gui = newBillboard(parent, props.Name or "ProgressLabel", PROGRESS_PAD_STUDS, props.StudsOffset, props.MaxDistance)
+	if props.OwnerOnly then
+		gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	end
+
+	local title = scaledLabel(gui, "Title", Fonts.Display, props.TitleColor, 0, 0.3)
+	title.Text = props.Title
+	textStroke(title, 2.5)
+
+	local pill = Instance.new("Frame")
+	pill.Name = "Pill"
+	pill.AnchorPoint = Vector2.new(0.5, 0)
+	pill.Position = UDim2.fromScale(0.5, 0.32)
+	pill.Size = UDim2.fromScale(0.86, 0.24)
+	pill.BackgroundColor3 = Colors.White
+	pill.Parent = gui
+	gradient(pill, props.PillGradient.Top, props.PillGradient.Bottom)
+	corner(pill, UDim.new(0.5, 0))
+	borderStroke(pill, 3)
+	local pillText = scaledLabel(pill, "Text", Fonts.Display, Colors.Text, 0.12, 0.76)
+	textStroke(pillText, 2)
+	pillText.Text = props.Pill
+
+	local setBar = BillboardKit.Bar(gui, UDim2.fromScale(0.5, 0.62), UDim2.fromScale(0.8, 0.1), props.BarColor)
+
+	local caption = scaledLabel(gui, "Caption", Fonts.Body, props.CaptionColor or Colors.Text, 0.78, 0.2)
+	textStroke(caption, 1.5)
+	caption.Text = props.Caption or ""
+
+	return {
+		Gui = gui,
+		SetPill = function(text: string)
+			pillText.Text = text
+		end,
+		SetProgress = setBar,
+		SetCaption = function(text: string)
+			caption.Text = text
+		end,
 	}
 end
 

@@ -15,6 +15,10 @@
 	A tagged Model moves as one group via PivotTo. Each target's resting
 	CFrame is captured when it's first seen; only targets within
 	ANIMATE_RADIUS of the camera are animated.
+
+	Rebirth Portal sheets (tagged FT_PortalSwirl) follow their portal's Ready
+	attribute: not ready, the swirl is translucent and still; ready, it's
+	opaque, its gradient turns at SwirlDegPerSec and the base ring pulses.
 ]]
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -22,6 +26,8 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local PortalKit = require(ReplicatedStorage.Shared.Modules.PortalKit)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 
 local WorldAnimationController = {}
 
@@ -34,6 +40,16 @@ type Entry = {
 }
 
 local entries: { [Instance]: Entry } = {}
+
+type Swirl = {
+	Sheet: BasePart,
+	Portal: Instance,
+	Frames: { Frame },
+	Gradients: { UIGradient },
+	RingStroke: UIStroke?,
+}
+
+local swirls: { [Instance]: Swirl } = {}
 
 local function getPivot(target: Instance): CFrame?
 	if target:IsA("BasePart") then
@@ -81,13 +97,62 @@ local function offsetFor(target: Instance, t: number): CFrame
 	return CFrame.new(0, rise, 0) * CFrame.Angles(0, math.rad(spin * t), 0)
 end
 
-local function step()
+local function trackSwirl(sheet: Instance)
+	if swirls[sheet] or not sheet:IsA("BasePart") or not sheet:IsDescendantOf(Workspace) then
+		return
+	end
+	local portal = sheet.Parent
+	if not portal then
+		return
+	end
+	local swirl: Swirl = { Sheet = sheet, Portal = portal, Frames = {}, Gradients = {}, RingStroke = nil }
+	for _, descendant in sheet:GetDescendants() do
+		if descendant:IsA("Frame") and descendant.Name == "Swirl" then
+			table.insert(swirl.Frames, descendant)
+		elseif descendant:IsA("UIGradient") then
+			table.insert(swirl.Gradients, descendant)
+		end
+	end
+	local face = portal:FindFirstChild("Face")
+	local gui = face and face:FindFirstChild("PadFace")
+	local ring = gui and gui:FindFirstChild("Ring")
+	local stroke = ring and ring:FindFirstChild("RingStroke")
+	if stroke and stroke:IsA("UIStroke") then
+		swirl.RingStroke = stroke
+	end
+	swirls[sheet] = swirl
+end
+
+local function stepSwirls(dt: number, cameraPosition: Vector3, now: number)
+	local P = PlotLayout.RebirthPortal
+	for _, swirl in swirls do
+		if (swirl.Sheet.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
+			local ready = swirl.Portal:GetAttribute(PortalKit.READY_ATTRIBUTE) == true
+			local transparency = if ready then 0 else P.SwirlIdleTransparency
+			for _, frame in swirl.Frames do
+				frame.BackgroundTransparency = transparency
+			end
+			if ready then
+				for _, gradient in swirl.Gradients do
+					gradient.Rotation = (gradient.Rotation + P.SwirlDegPerSec * dt) % 360
+				end
+			end
+			if swirl.RingStroke then
+				local pulse = 0.5 * (1 - math.cos((now % P.RingPulsePeriod) / P.RingPulsePeriod * math.pi * 2))
+				swirl.RingStroke.Transparency = if ready then pulse * 0.6 else 0
+			end
+		end
+	end
+end
+
+local function step(dt: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
 	end
 	local cameraPosition = camera.CFrame.Position
 	local now = os.clock()
+	stepSwirls(dt, cameraPosition, now)
 	for target, entry in entries do
 		if (entry.Base.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
 			local cframe = entry.Base * offsetFor(target, now + entry.Phase)
@@ -109,6 +174,16 @@ function WorldAnimationController.Init()
 		task.defer(track, target)
 	end)
 	CollectionService:GetInstanceRemovedSignal(PartKit.HOVER_TAG):Connect(untrack)
+
+	for _, sheet in CollectionService:GetTagged(PortalKit.SWIRL_TAG) do
+		trackSwirl(sheet)
+	end
+	CollectionService:GetInstanceAddedSignal(PortalKit.SWIRL_TAG):Connect(function(sheet)
+		task.defer(trackSwirl, sheet)
+	end)
+	CollectionService:GetInstanceRemovedSignal(PortalKit.SWIRL_TAG):Connect(function(sheet)
+		swirls[sheet] = nil
+	end)
 	RunService.RenderStepped:Connect(step)
 end
 
