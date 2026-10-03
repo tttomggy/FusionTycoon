@@ -38,8 +38,12 @@
 	    three). LOCK rejections toast ("Get back to your lab to lock it!").
 	  * Teaching: every enemy pedestal you could grab right now (its
 	    StealPrompt's local Mode is "Steal", WorldLabelController) gets a red
-	    hand marker over its label (client-only, hidden while you carry), and
-	    the first time you walk into such a lab a one-time toast says how.
+	    hand marker over its label (client-only, hidden while you carry).
+	  * One-time tips, saved per account (PlayerData.Tips, TipConfig):
+	    stealHowTo (first robbable lab you walk into), intruder (someone in
+	    your unlocked lab), guarded (at a pedestal its owner guards), catch
+	    (first time as a victim: TOUCH THEM! and a throbbing arrow),
+	    lockAfterLoss (after the first real loss card). Big 4 s toasts.
 	    Tapping the Rebirth-0 teaser prompt explains the unlock.
 	  * GUARDED made visible (guarding itself is server-side, GuardedByOwner):
 	    every viewer sees a teal "🛡 GUARDED" chip over a guarded pedestal,
@@ -72,6 +76,7 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
 local GoalMarkerController = require(script.Parent.GoalMarkerController)
+local TycoonController = require(script.Parent.TycoonController)
 
 local HeistController = {}
 
@@ -157,8 +162,13 @@ local guardRings: { [Instance]: BasePart } = {}
 local GUARD_CHIP_SIZE = UDim2.fromOffset(150, 34)
 local GUARD_RING_ALPHA = 0.25 -- faint, while the owner is home
 local GUARD_RING_GUARDED_ALPHA = 0.6 -- while that pedestal is guarded
--- The one-time "how to steal" toast, once per session.
-local tipShown = false
+-- One-time tips (saved in PlayerData.Tips via TycoonController).
+local GUARDED_TIP = "They're guarding it. Wait for them to walk away."
+local INTRUDER_TIP = "Someone's in your lab! Stand by your items or LOCK your lab!"
+local LOCK_AFTER_LOSS_TIP = "Tip: press LOCK LAB when you leave your lab."
+local LOSS_TIP_DELAY_SECONDS = 2.5
+-- Set per carry: this is the player's first time as a victim.
+local firstCatch = false
 
 -- Plot -> whether its fence is currently shown on this client.
 local fenceShown: { [Instance]: boolean } = {}
@@ -444,7 +454,10 @@ local function clearBanner()
 	end
 end
 
-local function buildBanner(isThief: boolean): Banner
+local TOUCH_LINE_HEIGHT = 40
+
+-- `extraLine`: a big line under the detail (the first-catch tip, "TOUCH THEM!").
+local function buildBanner(isThief: boolean, extraLine: string?): Banner
 	if banner then
 		banner.Holder:Destroy()
 		banner = nil
@@ -455,7 +468,7 @@ local function buildBanner(isThief: boolean): Banner
 		Parent = screenGui,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, BANNER_TOP),
-		Size = UDim2.fromOffset(BANNER_SIZE.X, BANNER_SIZE.Y),
+		Size = UDim2.fromOffset(BANNER_SIZE.X, BANNER_SIZE.Y + (if extraLine then TOUCH_LINE_HEIGHT else 0)),
 		Gradient = { { 0, gradient.Top }, { 1, gradient.Bottom } },
 		Radius = 18,
 		StrokeThickness = UITheme.Stroke.Modal,
@@ -487,6 +500,22 @@ local function buildBanner(isThief: boolean): Banner
 		Stroke = 1.5,
 		Parent = body,
 	})
+	if extraLine then
+		UIKit.Label({
+			Name = "ExtraLine",
+			Text = extraLine,
+			Font = Fonts.Display,
+			TextSize = 34,
+			TextColor3 = Colors.Text,
+			AnchorPoint = Vector2.new(0, 1),
+			Position = UDim2.new(0, 16, 1, -6),
+			Size = UDim2.new(1, -32, 0, TOUCH_LINE_HEIGHT),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z,
+			Stroke = UITheme.Stroke.Text,
+			Parent = body,
+		})
+	end
 	local bar: Frame? = nil
 	if isThief then
 		bar = UIKit.ProgressBar({
@@ -656,7 +685,12 @@ local function onHeistStarted(payload: any)
 			end
 		end)
 	else
-		buildBanner(false)
+		-- First time as a victim: a big TOUCH THEM! line and a throbbing arrow.
+		firstCatch = not TycoonController.HasSeenTip("catch")
+		if firstCatch then
+			TycoonController.MarkTipSeen("catch")
+		end
+		buildBanner(false, if firstCatch then "TOUCH THEM!" else nil)
 		updateBanner()
 	end
 	if isThief then
@@ -669,7 +703,7 @@ local function onHeistStarted(payload: any)
 		local thief = Players:GetPlayerByUserId(started.OtherUserId)
 		local thiefRoot = thief and getRoot(thief)
 		if thiefRoot then
-			GoalMarkerController.SetOverride(thiefRoot, "THIEF!", true)
+			GoalMarkerController.SetOverride(thiefRoot, "THIEF!", true, firstCatch)
 		end
 		playAlarm()
 	end
@@ -717,6 +751,13 @@ local function onHeistEnded(payload: any)
 	else
 		if payload.Outcome == "Delivered" then
 			ResultController.ShowItemStolen(item, other, HeistConfig.VictimShieldSeconds)
+			-- First real loss: after the card, how to stop the next one.
+			if not TycoonController.HasSeenTip("lockAfterLoss") then
+				TycoonController.MarkTipSeen("lockAfterLoss")
+				task.delay(LOSS_TIP_DELAY_SECONDS, function()
+					ToastController.Show(LOCK_AFTER_LOSS_TIP, "Neutral", { Big = true })
+				end)
+			end
 		elseif payload.Outcome == "Saved" then
 			ToastController.Show(("SAVED! You got your %s back"):format(tostring(item.Name)), "Neutral")
 		else
@@ -764,6 +805,21 @@ local function updateConsole()
 		consoleState = nil
 	end
 	local state, seconds = ShieldState.Get(plot)
+	-- Someone walked into your unlocked lab: tell you once (the HUD LOCK
+	-- button pulses on its own while LOCK is ready).
+	if (state == "Ready" or state == "Recharging") and not TycoonController.HasSeenTip("intruder") then
+		local origin = plot:IsA("Model") and plot.PrimaryPart
+		if origin then
+			for _, other in Players:GetPlayers() do
+				local root = other ~= localPlayer and getRoot(other)
+				if root and PlotLayout.IsInsidePlot(origin.CFrame:PointToObjectSpace(root.Position)) then
+					TycoonController.MarkTipSeen("intruder")
+					ToastController.Show(INTRUDER_TIP, "Neutral", { Big = true })
+					break
+				end
+			end
+		end
+	end
 	local label = consoleLabel
 	if label then
 		if state == "Locked" then
@@ -1007,10 +1063,26 @@ local function updateTeaching()
 		end
 		-- First time inside a lab you could rob: say how, once.
 		local origin = plot:IsA("Model") and plot.PrimaryPart
-		if hasTarget and not tipShown and myRoot and origin then
+		if hasTarget and myRoot and origin and not TycoonController.HasSeenTip("stealHowTo") then
 			if PlotLayout.IsInsidePlot(origin.CFrame:PointToObjectSpace(myRoot.Position)) then
-				tipShown = true
-				ToastController.Show(STEAL_TIP, "Neutral")
+				TycoonController.MarkTipSeen("stealHowTo")
+				ToastController.Show(STEAL_TIP, "Neutral", { Big = true })
+			end
+		end
+		-- Standing at a pedestal its owner is guarding: wait them out.
+		if pedestals and myRoot and not TycoonController.HasSeenTip("guarded") then
+			for _, pedestal in pedestals:GetChildren() do
+				local prompt = pedestal:FindFirstChild("StealPrompt")
+				if
+					pedestal:IsA("BasePart")
+					and prompt
+					and prompt:GetAttribute("Mode") == "Guarded"
+					and (pedestal.Position - myRoot.Position).Magnitude <= HeistConfig.PromptDistance
+				then
+					TycoonController.MarkTipSeen("guarded")
+					ToastController.Show(GUARDED_TIP, "Neutral", { Big = true })
+					break
+				end
 			end
 		end
 	end

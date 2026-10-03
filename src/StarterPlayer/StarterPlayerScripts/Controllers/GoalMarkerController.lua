@@ -62,7 +62,7 @@ local targetPosition: Vector3? = nil
 -- A moving override target (the thief's root): distance is measured to it live.
 local movingTarget: BasePart? = nil
 
-type Override = { Target: Instance, Text: string, Danger: boolean }
+type Override = { Target: Instance, Text: string, Danger: boolean, Pulse: boolean }
 local override: Override? = nil
 
 -- os.clock() a target name was first missed on a claimed plot; names that
@@ -155,7 +155,10 @@ local function clearWorldMarker()
 	currentTarget = nil
 end
 
-local function buildMarker(goalText: string, danger: boolean)
+local PULSE_SCALE = 1.25
+local PULSE_SECONDS = 0.6
+
+local function buildMarker(goalText: string, danger: boolean, pulse: boolean?)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "GoalMarker"
 	gui.AlwaysOnTop = true -- a guide, meant to be seen through walls
@@ -228,6 +231,16 @@ local function buildMarker(goalText: string, danger: boolean)
 		TweenInfo.new(BOB_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 		{ Position = UDim2.fromOffset(0, -BOB_PIXELS) }
 	):Play()
+	if pulse then
+		-- The heist's first-catch tip: the red arrow throbs.
+		local scale = Instance.new("UIScale")
+		scale.Parent = content
+		TweenService:Create(
+			scale,
+			TweenInfo.new(PULSE_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = PULSE_SCALE }
+		):Play()
+	end
 
 	gui.Parent = localPlayer:WaitForChild("PlayerGui")
 	marker = gui
@@ -259,13 +272,13 @@ local function buildRing(bottomCenter: Vector3, footprint: number)
 	ring = face
 end
 
-local function showWorldMarker(target: Instance, goalText: string, danger: boolean?)
+local function showWorldMarker(target: Instance, goalText: string, danger: boolean?, pulse: boolean?)
 	-- An unanchored part (a character's root) moves: adorn to it directly.
 	if target:IsA("BasePart") and not target.Anchored then
 		clearWorldMarker()
 		currentTarget = target
 		movingTarget = target
-		buildMarker(goalText, danger == true)
+		buildMarker(goalText, danger == true, pulse)
 		local gui = marker :: BillboardGui
 		gui.Adornee = target
 		gui.StudsOffset = Vector3.new(0, MARKER_HEIGHT_ABOVE_TARGET + 2, 0)
@@ -329,7 +342,7 @@ local function refresh()
 	if active then
 		setUiTarget(nil)
 		if active.Target ~= currentTarget then
-			showWorldMarker(active.Target, active.Text, active.Danger)
+			showWorldMarker(active.Target, active.Text, active.Danger, active.Pulse)
 		end
 		return
 	end
@@ -385,10 +398,10 @@ local function update()
 end
 
 -- Points the marker at `target` instead of the goal until cleared (nil).
--- `danger` tints it red (the heist's victim arrow).
-function GoalMarkerController.SetOverride(target: Instance?, text: string?, danger: boolean?)
+-- `danger` tints it red (the heist's victim arrow); `pulse` makes it throb.
+function GoalMarkerController.SetOverride(target: Instance?, text: string?, danger: boolean?, pulse: boolean?)
 	if target then
-		override = { Target = target, Text = text or "", Danger = danger == true }
+		override = { Target = target, Text = text or "", Danger = danger == true, Pulse = pulse == true }
 	else
 		override = nil
 	end
