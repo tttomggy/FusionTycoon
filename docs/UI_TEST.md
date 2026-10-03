@@ -532,3 +532,68 @@ testable without luck.
     (`/rebirths 1` first): it lists exactly the 2 free copies, AUTO-FILL
     takes only those, and fusing them succeeds. The 3 on pedestals are
     untouched.
+
+## 16. Heist (stealing + lab shield)
+
+Test → Clients and Servers, **2 players** (A and B). Both run
+`/rebirths 1`, then `/give mythic_rift golden` and display it.
+
+- [ ] **Protected at Rebirth 0.** Before `/rebirths 1`: A's sign shows the
+  teal **🛡 PROTECTED · NEW LAB** pill, B sees no Steal prompt on A's
+  pedestals, and A's HUD has no shield chip. After `/rebirths 1` (wait
+  ~5 s for the sign) the pill goes and the chip appears.
+- [ ] **Shield + eject.** On claim the shield is up 60 s: a pink ForceField
+  fence round A's walls and a line across the gate, seen by both players.
+  A's chip reads **🛡 SHIELD · 42s**. B walking in is moved to the street in
+  front of A's gate. When it ends the fence fades, the chip turns amber
+  and pulses (**SHIELD DOWN · step on YOURS**), and A stepping on the YOURS
+  pad raises it again for 60 s. `/shield 0` drops it at once.
+- [ ] **Steal and deliver.** Shield down: B holds E on A's pedestal
+  (**Steal**, the item's name, 1.5 s).
+  - [ ] B: the orb over B's head (Golden shell and 2 satellites), a red
+    beam, **THIEF · 45s** (A sees them too), B walks slower, an orange
+    **GET HOME!** banner with a draining bar, and the arrow on B's gate.
+  - [ ] A: the pedestal shows a red ghost ring and **STOLEN!** +$0/s, A's
+    income drops by that item, a red **THIEF IN YOUR LAB!** banner with
+    the distance, a red **THIEF!** arrow following B, and the alarm.
+  - [ ] B reaches home: **HEIST COMPLETE!** for B, the item (still Golden)
+    in B's inventory with a new Uid; A gets the stolen card (shield up
+    2 min), the pedestal is empty, and A's shield auto-raises for 120 s.
+  - [ ] Server banner (Legendary+): **B stole a Golden <item> from A!** (Golden in its colour)
+- [ ] **Steal and tag.** B grabs, A touches B (within 5 studs): A gets
+  **SAVED! You got your … back**, B **Caught!**, the item is back on the
+  pedestal, the banner reads **A caught B!**.
+- [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
+- [ ] **Cooldown.** Right after any attempt B gets **Lay low for 60s**;
+  `/heistcd 0` clears it.
+- [ ] **Loss cap.** With A's shield dropped (`/shield 0`) after each loss,
+  B steals 3 items in under 10 min: the 4th grab says **This lab has been
+  robbed enough for now**.
+- [ ] **Two thieves, one pedestal** (3 players): both hold E on the same
+  pedestal at once; one carries it, the other is told **Someone's already
+  carrying that**.
+- [ ] **Owner can't remove mid-carry.** While B carries A's item, A's
+  pedestal shows no Display/Remove prompt; a forced remove request is
+  rejected (**A thief has it!**).
+- [ ] **Owner can't rebirth mid-carry:** A's rebirth toasts **A thief has
+  one of your items! Get it back first**.
+- [ ] **Thief hands full.** While carrying, B's pull, Pull ×10, generator
+  upgrade, Multiplier Pad and rebirth all toast **Get home with that item
+  first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B
+  stepping on their YOURS pad doesn't raise B's shield.
+- [ ] **Victim /wipe mid-carry:** A's `/wipe` kicks A; B gets **The heist
+  was called off** and nothing is added to B.
+- [ ] **Thief leaves mid-carry:** B leaves; the item is back on A's
+  pedestal at once, and B's save (with saving on) doesn't have it.
+- [ ] **Victim leaves mid-carry:** A leaves; B's carry ends (**The heist
+  was called off**). With saving on, A rejoins still owning the item on
+  its pedestal (the fail runs in `OnRelease`, before A's save).
+- [ ] **Shutdown mid-carry** (saving on, close the server while B carries):
+  both rejoin with the item still A's.
+- [ ] **Thief dies mid-carry** (reset): **You dropped it!**, the item
+  returns.
+- [ ] **Exploit requests** (Studio command bar on B's client,
+  `game.ReplicatedStorage.RemoteEvents.RequestSteal:FireServer({ OwnerUserId = …, PedestalIndex = 1 })`):
+  a far pedestal, B's own pedestal, a shielded lab, an empty pedestal and
+  a Rebirth-0 owner are all rejected, each with a `HeistService: rejected
+  steal …` warning in the server output.
