@@ -14,6 +14,8 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
         python3 tools/econ_sim.py 40 14         # 40 seeds, 14 h horizon
         python3 tools/econ_sim.py --no-depth    # Polish 4 only (no Secret,
                                                 # mutations or Index)
+        python3 tools/econ_sim.py --fuse=3      # player puts 3 items per
+                                                # fusion (default 2)
 """
 import random, sys
 
@@ -41,16 +43,27 @@ GACHA_GROWTH = 1.045
 GACHA_RATES = {"Common": 0.77998, "Rare": 0.18, "Epic": 0.035, "Legendary": 0.0045,
                "Mythic": 0.0005, "Secret": 0.00002}
 LUCKY_TIERS = ("Legendary", "Mythic", "Secret")  # luck multiplies these; Common absorbs
-FUSE_SUCCESS = {"Common": 0.70, "Rare": 0.50, "Epic": 0.35, "Legendary": 0.20, "Mythic": 0.08}
+# Fusion: put 2-6 same-tier items in; success -> 1 item of the next tier,
+# fail -> you keep 1 (your best) and lose the rest. Chance by input count:
+FUSE_CHANCE = {  # tier: {count: chance}
+    "Common":    {2: 0.55, 3: 0.68, 4: 0.78, 5: 0.90, 6: 1.00},
+    "Rare":      {2: 0.45, 3: 0.57, 4: 0.66, 5: 0.74, 6: 0.80},
+    "Epic":      {2: 0.35, 3: 0.45, 4: 0.53, 5: 0.60, 6: 0.66},
+    "Legendary": {2: 0.20, 3: 0.27, 4: 0.33, 5: 0.39, 6: 0.45},
+    "Mythic":    {2: 0.07, 3: 0.09, 4: 0.11, 5: 0.13, 6: 0.15},
+}
+FUSE_COUNT = 2  # how many items the simulated player puts in (--fuse N)
 SECRET_FUSION_REBIRTHS = 1  # Mythic -> Secret fusion unlocks at this many rebirths
 FUSE_SECONDS = 4.0
 PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # Mutations: (name, income mult, gacha chance, fusion-success chance)
 MUTATIONS = [("Rainbow", 12, 0.001, 0.0005), ("Diamond", 5, 0.008, 0.004), ("Golden", 2, 0.04, 0.02)]
 MUT_MULT = {"None": 1, "Golden": 2, "Diamond": 5, "Rainbow": 12}
-# Rebirth: needs RunEarnings >= REBIRTH_BASE * REBIRTH_GROWTH ** rebirths.
-REBIRTH_BASE = 3e7
+# Rebirth costs REBIRTH_BASE * REBIRTH_GROWTH ** rebirths cash. The player
+# stops spending once the rebirth is within SAVE_SECONDS of income.
+REBIRTH_BASE = 1.5e7
 REBIRTH_GROWTH = 3.2
+SAVE_SECONDS = 600
 REBIRTH_INCOME_PER = 0.5   # income x(1 + 0.5 * rebirths)
 REBIRTH_LUCK_PER = 0.05    # luck x(1 + 0.05 * rebirths)
 INDEX_PER_ENTRY = 0.01     # +1% income per Index entry discovered
@@ -65,7 +78,6 @@ def run(seed, horizon=10 * 3600):
     cash = 0.0
     t = 0.0
     rebirths = 0
-    run_earn = 0.0
     gen = {g[0]: 0 for g in GENS}
     gen['basic'] = START_BASIC
     mult_lvl = 0
@@ -139,13 +151,13 @@ def run(seed, horizon=10 * 3600):
     while t < horizon:
         income = cps()
         cash += income * step
-        run_earn += income * step
         t += step
-        # rebirth as soon as possible
-        if run_earn >= REBIRTH_BASE * REBIRTH_GROWTH ** rebirths:
+        # rebirth as soon as affordable
+        rebirth_cost = REBIRTH_BASE * REBIRTH_GROWTH ** rebirths
+        if cash >= rebirth_cost:
             rebirths += 1
             mark(f"rebirth{rebirths}")
-            cash = 0; run_earn = 0; pulls = 0; mult_lvl = 0
+            cash = 0; pulls = 0; mult_lvl = 0
             gen = {g[0]: 0 for g in GENS}; gen['basic'] = START_BASIC
             continue
         opts = []
@@ -158,7 +170,8 @@ def run(seed, horizon=10 * 3600):
         if mult_lvl < len(MULT_LEVELS):
             cost, m = MULT_LEVELS[mult_lvl]
             opts.append((cost, income / mult() * (m - mult()), "m"))
-        bought = True
+        saving = (rebirth_cost - cash) / max(income, 1e-9) <= SAVE_SECONDS
+        bought = not saving
         while bought:
             bought = False
             gcost = GACHA_COST * GACHA_GROWTH ** pulls
@@ -176,15 +189,15 @@ def run(seed, horizon=10 * 3600):
                     else:
                         gen[a[1]] += 1; mark(f"gen_{a[1]}")
                     opts = []
-        # fuse plain surplus pairs (mutated items are kept, like Fuse All)
+        # fuse plain surplus in groups of FUSE_COUNT (mutated items are kept)
         fusable = TIERS[:-1] if DEPTH and rebirths >= SECRET_FUSION_REBIRTHS else TIERS[:-2]
         for tr in fusable:
             def keep():
                 return sum(1 for _, ptr, pmu in ped_items() if ptr == tr and pmu == "None")
-            while inv.get((tr, "None"), 0) - keep() >= 2:
+            while inv.get((tr, "None"), 0) - keep() >= FUSE_COUNT:
                 t += FUSE_SECONDS
-                inv[(tr, "None")] -= 2
-                if rng.random() < FUSE_SUCCESS[tr]:
+                inv[(tr, "None")] -= FUSE_COUNT
+                if rng.random() < FUSE_CHANCE[tr][FUSE_COUNT]:
                     add(TIERS[TIERS.index(tr) + 1], roll_mut(True))
                 else:
                     inv[(tr, "None")] += 1
@@ -211,6 +224,9 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--no-depth" in sys.argv:
         DEPTH = False
+    for a in sys.argv:
+        if a.startswith("--fuse="):
+            FUSE_COUNT = int(a.split("=")[1])
     seeds = int(args[0]) if len(args) > 0 else 20
     hours = float(args[1]) if len(args) > 1 else 10
     keys = ["first_pull", "gen_ember", "first_Rare", "first_Epic", "mult1", "first_Golden", "gen_flare",
