@@ -90,27 +90,28 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 	return pedestalDisplays[pedestalIndex]
 end
 
--- Tiers of the items on this player's pedestals (from the inventory cache).
-function TycoonController.GetDisplayedTiers(): { string }
+-- Tier and mutation of the items on this player's pedestals (from the
+-- inventory cache).
+function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 	local byUid: { [string]: any } = {}
 	for _, item in InventoryController.GetInventory() do
 		byUid[item.Uid] = item
 	end
-	local tiers = {}
+	local items = {}
 	for _, uid in pedestalDisplays do
 		local item = byUid[uid]
 		if item then
-			table.insert(tiers, item.Tier)
+			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 		end
 	end
-	return tiers
+	return items
 end
 
 -- The one place the client builds TycoonConfig.IncomeInputs.
 function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 	return {
 		GeneratorLevels = generatorLevels,
-		PedestalTiers = TycoonController.GetDisplayedTiers(),
+		PedestalItems = TycoonController.GetDisplayedItems(),
 		CashMultiplierLevel = cashMultiplierLevel,
 		Rebirths = rebirths,
 	}

@@ -61,8 +61,9 @@ local function itemName(item: any): string
 	return if def then def.Name else tostring(item.ItemId)
 end
 
-local function earnRate(tier: string): number
-	return TycoonConfig.GetPedestalCashPerSecond(tier) * TycoonController.GetIncomeMultiplier()
+-- What `item` earns on a pedestal, income multiplier included.
+local function earnRate(item: any): number
+	return TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * TycoonController.GetIncomeMultiplier()
 end
 
 --[[ Big result card -------------------------------------------------------------- ]]
@@ -831,7 +832,7 @@ local function onFusionResolved(result: any)
 			Description = ("2x %s → %s · earns %s/s on a pedestal"):format(
 				tostring(result.ConsumedTier),
 				newItem.Tier,
-				NumberFormat.Money(earnRate(newItem.Tier))
+				NumberFormat.Money(earnRate(newItem))
 			),
 		})
 	end
@@ -846,7 +847,7 @@ local function onGachaPullResult(payload: any)
 		showBigCard({
 			Caption = "YOU PULLED",
 			Item = newItem,
-			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem.Tier))),
+			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
 		})
 	else
 		showPullCard(newItem)

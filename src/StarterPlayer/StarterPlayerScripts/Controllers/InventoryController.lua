@@ -1,6 +1,7 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local InventoryController = {}
 
@@ -27,10 +28,27 @@ end
 -- Items of `tier` that can go into the Fusion Machine: anything not on a
 -- pedestal. Counting displayed items here used to make the machine offer a
 -- pair that included a displayed item, which the server then rejected.
+-- Sorted normal first, then by mutation rank, so the machine pairs plain
+-- items before it touches a mutated one.
 function InventoryController.GetFusableItemsByTier(tier: string): { any }
 	local results = {}
 	for _, item in inventory do
 		if item.Tier == tier and not item.InUse then
+			table.insert(results, item)
+		end
+	end
+	table.sort(results, function(a, b)
+		return MutationConfig.GetRank(a.Mutation) < MutationConfig.GetRank(b.Mutation)
+	end)
+	return results
+end
+
+-- Fusable items Fuse All may use: unmutated only (mutated items are never
+-- auto-fused).
+function InventoryController.GetFuseAllItemsByTier(tier: string): { any }
+	local results = {}
+	for _, item in InventoryController.GetFusableItemsByTier(tier) do
+		if item.Mutation == nil then
 			table.insert(results, item)
 		end
 	end

@@ -84,7 +84,7 @@ end
 local function countFuseAllPairs(): number
 	local pairCount = 0
 	for _, tier in FusionConfig.GetFuseAllTiers() do
-		pairCount += #InventoryController.GetFusableItemsByTier(tier) // FusionConfig.ItemsRequiredPerFusion
+		pairCount += #InventoryController.GetFuseAllItemsByTier(tier) // FusionConfig.ItemsRequiredPerFusion
 	end
 	return pairCount
 end

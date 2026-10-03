@@ -1,5 +1,6 @@
 --!strict
 local RebirthConfig = require(script.Parent.RebirthConfig)
+local MutationConfig = require(script.Parent.MutationConfig)
 
 local TycoonConfig = {}
 
@@ -87,6 +88,13 @@ TycoonConfig.PedestalCashPerSecond = {
 
 function TycoonConfig.GetPedestalCashPerSecond(tier: string): number
 	return TycoonConfig.PedestalCashPerSecond[tier] or 0
+end
+
+-- What one item earns on a pedestal, before the income multiplier: its
+-- tier's rate x its mutation's multiplier. Every item $/s shown or paid
+-- goes through this.
+function TycoonConfig.GetItemCashPerSecond(tier: string, mutation: string?): number
+	return TycoonConfig.GetPedestalCashPerSecond(tier) * MutationConfig.GetMultiplier(mutation)
 end
 
 export type GeneratorDef = {
@@ -210,9 +218,11 @@ end
 	TycoonController.GetIncomeInputs (client); later features add fields
 	here, so nothing else should assemble one by hand.
 ]]
+export type PedestalItem = { Tier: string, Mutation: string? }
+
 export type IncomeInputs = {
 	GeneratorLevels: { [string]: number },
-	PedestalTiers: { string },
+	PedestalItems: { PedestalItem },
 	CashMultiplierLevel: number,
 	Rebirths: number,
 }
@@ -243,8 +253,8 @@ end
 -- (generators + pedestals) x pad x rebirth.
 function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
 	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels)
-	for _, tier in inputs.PedestalTiers do
-		total += TycoonConfig.GetPedestalCashPerSecond(tier)
+	for _, item in inputs.PedestalItems do
+		total += TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
 	end
 	return total * TycoonConfig.GetIncomeMultiplier(inputs)
 end

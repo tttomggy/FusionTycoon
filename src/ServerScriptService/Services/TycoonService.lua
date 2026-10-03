@@ -28,6 +28,7 @@ local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local RebirthConfig = require(Config.RebirthConfig)
+local MutationConfig = require(Config.MutationConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
@@ -383,7 +384,9 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		-- Roll first: a config gap can then never charge for nothing.
-		local resultTier = FusionConfig.RollGachaTier(gachaRng, getLuck(player))
+		local luck = getLuck(player)
+		local resultTier = FusionConfig.RollGachaTier(gachaRng, luck)
+		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull")
 		local rewardItem = ItemConfig.PickRandomOfTier(resultTier, gachaRng)
 		if not rewardItem then
 			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
@@ -402,7 +405,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		syncTycoon(player)
 		refreshLabel()
 
-		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
+		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
 		burst(pad, FusionConfig.TierAccentColors[resultTier] or World.AccentGold, BURST_COUNT)
@@ -703,7 +706,7 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					ItemName = def and def.Name or item.ItemId,
-					Rate = TycoonConfig.GetPedestalCashPerSecond(item.Tier) * multiplier,
+					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
 				})
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)

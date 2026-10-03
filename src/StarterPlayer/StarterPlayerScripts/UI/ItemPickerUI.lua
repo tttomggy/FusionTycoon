@@ -19,6 +19,7 @@ local TweenService = game:GetService("TweenService")
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -32,6 +33,7 @@ export type PickerEntry = {
 	ItemId: string?,
 	Name: string,
 	Tier: string,
+	Mutation: string?,
 	InUse: boolean?,
 }
 
@@ -41,8 +43,9 @@ export type PickerOptions = {
 
 type Card = {
 	ItemId: string,
-	Name: string,
+	Name: string, -- includes the mutation ("Golden Star Core")
 	Tier: string,
+	Mutation: string?,
 	Count: number,
 	InUseCount: number,
 	FreeEntries: { PickerEntry },
@@ -86,26 +89,29 @@ local function getMultiplier(): number
 	return TycoonController.GetIncomeMultiplier()
 end
 
-local function earnRate(tier: string): number
-	return TycoonConfig.GetPedestalCashPerSecond(tier) * getMultiplier()
+local function earnRate(tier: string, mutation: string?): number
+	return TycoonConfig.GetItemCashPerSecond(tier, mutation) * getMultiplier()
 end
 
 local function groupCards(entries: { PickerEntry }): { Card }
 	local byId: { [string]: Card } = {}
 	local cards: { Card } = {}
 	for _, entry in entries do
+		-- Mutated and normal copies of an item are separate stacks.
 		local id = entry.ItemId or entry.Name
-		local card = byId[id]
+		local key = ("%s|%s"):format(id, entry.Mutation or "Normal")
+		local card = byId[key]
 		if not card then
 			card = {
 				ItemId = id,
-				Name = entry.Name,
+				Name = MutationConfig.GetDisplayName(entry.Name, entry.Mutation),
 				Tier = entry.Tier,
+				Mutation = entry.Mutation,
 				Count = 0,
 				InUseCount = 0,
 				FreeEntries = {},
 			}
-			byId[id] = card
+			byId[key] = card
 			table.insert(cards, card)
 		end
 		card.Count += 1
@@ -115,8 +121,14 @@ local function groupCards(entries: { PickerEntry }): { Card }
 			table.insert(card.FreeEntries, entry)
 		end
 	end
-	-- Best items first: tier descending, then name.
+	-- Best items first: what they earn (tier x mutation) descending, then
+	-- tier, then name.
 	table.sort(cards, function(a, b)
+		local rateA = TycoonConfig.GetItemCashPerSecond(a.Tier, a.Mutation)
+		local rateB = TycoonConfig.GetItemCashPerSecond(b.Tier, b.Mutation)
+		if rateA ~= rateB then
+			return rateA > rateB
+		end
 		local rankA, rankB = tierRank(a.Tier), tierRank(b.Tier)
 		if rankA ~= rankB then
 			return rankA > rankB
@@ -154,7 +166,7 @@ local function refreshFooter()
 	orb.Parent = footerOrbSlot
 	footerName.Text = card.Name
 	footerDetail.Text = ("Earns %s with your %s · %s"):format(
-		UIKit.Colored(NumberFormat.Money(earnRate(card.Tier)) .. "/s", Colors.Cash),
+		UIKit.Colored(NumberFormat.Money(earnRate(card.Tier, card.Mutation)) .. "/s", Colors.Cash),
 		NumberFormat.Multiplier(getMultiplier()),
 		pedestals
 	)
@@ -264,7 +276,7 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 	})
 	UIKit.Label({
 		Name = "Earn",
-		Text = NumberFormat.Money(earnRate(card.Tier)) .. "/s",
+		Text = NumberFormat.Money(earnRate(card.Tier, card.Mutation)) .. "/s",
 		Font = Fonts.Body,
 		TextSize = 12,
 		TextColor3 = Colors.Cash,

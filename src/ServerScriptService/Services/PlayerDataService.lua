@@ -21,6 +21,7 @@ local RunService = game:GetService("RunService")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -30,6 +31,8 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
+	-- MutationConfig name ("Golden", "Diamond", "Rainbow"); nil = normal.
+	Mutation: string?,
 }
 
 export type PlayerData = {
@@ -233,6 +236,11 @@ local function reconcile(raw: any): PlayerData
 	end
 	for _, item in data.Inventory do
 		item.InUse = displayed[item.Uid] == true
+		-- Old saves have no mutation; an unknown one (renamed/removed) is
+		-- dropped rather than left to break lookups.
+		if item.Mutation ~= nil and not MutationConfig.IsValid(item.Mutation) then
+			item.Mutation = nil
+		end
 	end
 	return data
 end
@@ -485,7 +493,7 @@ function PlayerDataService.RemoveItemsByUid(player: Player, uids: { string }): (
 	return true, removedEntries
 end
 
-function PlayerDataService.AddItem(player: Player, itemId: string, tier: string): InventoryItem?
+function PlayerDataService.AddItem(player: Player, itemId: string, tier: string, mutation: string?): InventoryItem?
 	local data = state.sessionCache[player.UserId]
 	if not data then
 		return nil
@@ -496,6 +504,7 @@ function PlayerDataService.AddItem(player: Player, itemId: string, tier: string)
 		ItemId = itemId,
 		Tier = tier,
 		InUse = false,
+		Mutation = if MutationConfig.IsValid(mutation) then mutation else nil,
 	}
 	table.insert(data.Inventory, entry)
 	return entry
@@ -636,17 +645,18 @@ end
 --[[ Public API: income + sync -------------------------------------------- ]]
 
 -- Tiers of the items currently on this player's pedestals.
-function PlayerDataService.GetDisplayedTiers(player: Player): { string }
-	local tiers = {}
+-- Tier and mutation of every item on the player's pedestals.
+function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
+	local items = {}
 	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
 		if uid then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
-				table.insert(tiers, item.Tier)
+				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 			end
 		end
 	end
-	return tiers
+	return items
 end
 
 -- The one place the server builds TycoonConfig.IncomeInputs. nil until the
@@ -658,7 +668,7 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 	end
 	return {
 		GeneratorLevels = data.Generators,
-		PedestalTiers = PlayerDataService.GetDisplayedTiers(player),
+		PedestalItems = PlayerDataService.GetDisplayedItems(player),
 		CashMultiplierLevel = data.CashMultiplierLevel,
 		Rebirths = data.Rebirths,
 	}
