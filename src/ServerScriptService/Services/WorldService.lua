@@ -3,7 +3,7 @@
 	WorldService
 	------------
 	Builds the shared world once at server start: the grass ground, the
-	street between the two rows of plots with its lane dashes, and a
+	street between the two rows of plots with its two speed belts, and a
 	placeholder foundation ("FREE LAB") on every plot slot nobody has taken.
 	Removes the default Baseplate if the place still has one.
 
@@ -16,10 +16,12 @@
 	Lifecycle: :Init() builds the world and every placeholder (self-contained,
 	no other services). No :Start().
 ]]
+local PhysicsService = game:GetService("PhysicsService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
@@ -30,16 +32,21 @@ WorldService.Name = "WorldService"
 
 local World = UITheme.World
 
+-- Belts carry characters but never cash balls.
+local BELT_COLLISION_GROUP = "StreetBelts"
+
 type State = {
 	worldFolder: Folder?,
 	placeholders: { [number]: Model },
 	occupied: { [number]: boolean },
+	belts: { { Part: BasePart, Velocity: Vector3 } },
 }
 
 local state: State = {
 	worldFolder = nil,
 	placeholders = {},
 	occupied = {},
+	belts = {},
 }
 
 local function buildGroundAndStreet(folder: Folder)
@@ -53,34 +60,87 @@ local function buildGroundAndStreet(folder: Folder)
 		Parent = folder,
 	})
 
-	local street = PlotLayout.STREET_SIZE
+	local street = StreetLayout.STREET_SIZE
 	PartKit.Part({
 		Name = "Street",
 		Size = street,
-		CFrame = CFrame.new(0, PlotLayout.STREET_TOP_Y - street.Y / 2, 0),
+		CFrame = CFrame.new(0, StreetLayout.STREET_TOP_Y - street.Y / 2, 0),
 		Color = World.Street,
 		Parent = folder,
 	})
+end
 
-	-- Dashes along the street's centre line, one every LANE_DASH_SPACING.
-	local dashes = Instance.new("Folder")
-	dashes.Name = "LaneDashes"
-	dashes.Parent = folder
-	local dash = PlotLayout.LANE_DASH_SIZE
-	local spacing = PlotLayout.LANE_DASH_SPACING
-	local count = math.floor(street.X / spacing)
-	local firstX = -street.X / 2 + spacing / 2
-	for index = 0, count - 1 do
-		local strip = PartKit.Part({
-			Name = "Dash",
-			Size = dash,
-			CFrame = CFrame.new(firstX + index * spacing, PlotLayout.STREET_TOP_Y + dash.Y / 2, 0),
-			Color = World.AccentViolet,
-			Material = Enum.Material.Neon,
-			Transparency = PlotLayout.LANE_DASH_TRANSPARENCY,
-			Parent = dashes,
+local function setupBeltCollisions()
+	-- pcall: a group may already exist (TycoonService registers CashParts;
+	-- Init order is not something to depend on).
+	for _, group in { BELT_COLLISION_GROUP, PlotKit.CASH_COLLISION_GROUP } do
+		pcall(function()
+			PhysicsService:RegisterCollisionGroup(group)
+		end)
+	end
+	PhysicsService:CollisionGroupSetCollidable(BELT_COLLISION_GROUP, PlotKit.CASH_COLLISION_GROUP, false)
+end
+
+-- Two conveyor belts down the street's middle (east lane moves +X, west
+-- lane -X) with a median between, a Neon rail on each belt's outer edge and
+-- a roller at each end. Anchored parts with an AssemblyLinearVelocity carry
+-- whatever stands on them: the standard Roblox conveyor.
+local function buildBelts(folder: Folder)
+	local belts = Instance.new("Folder")
+	belts.Name = "Belts"
+	belts.Parent = folder
+
+	local length = StreetLayout.GetBeltLength()
+	local streetTop = StreetLayout.STREET_TOP_Y
+	local beltTop = StreetLayout.GetBeltTopY()
+
+	local median = PartKit.Part({
+		Name = "Median",
+		Size = Vector3.new(length, StreetLayout.MEDIAN_HEIGHT, StreetLayout.MEDIAN_WIDTH),
+		CFrame = CFrame.new(0, streetTop + StreetLayout.MEDIAN_HEIGHT / 2, 0),
+		Color = World.StructureLight,
+		Parent = belts,
+	})
+	median.CollisionGroup = BELT_COLLISION_GROUP
+
+	for _, lane in StreetLayout.LANES do
+		local z = lane.Side * StreetLayout.BELT_CENTER_Z
+		local belt = PartKit.Part({
+			Name = lane.Belt,
+			Size = Vector3.new(length, StreetLayout.BELT_HEIGHT, StreetLayout.BELT_WIDTH),
+			CFrame = CFrame.new(0, beltTop - StreetLayout.BELT_HEIGHT / 2, z),
+			Color = World.Belt,
+			Parent = belts,
 		})
-		PartKit.MakeDecorative(strip)
+		belt.CollisionGroup = BELT_COLLISION_GROUP
+		local velocity = Vector3.new(lane.Direction * StreetLayout.BELT_SPEED, 0, 0)
+		belt.AssemblyLinearVelocity = velocity
+		table.insert(state.belts, { Part = belt, Velocity = velocity })
+
+		local railColor = (World :: any)[lane.RailColor] :: Color3
+		local rail = PartKit.Part({
+			Name = lane.Rail,
+			Size = Vector3.new(length, StreetLayout.RAIL_HEIGHT, StreetLayout.RAIL_WIDTH),
+			CFrame = CFrame.new(0, beltTop, lane.Side * StreetLayout.RAIL_CENTER_Z),
+			Color = railColor,
+			Material = Enum.Material.Neon,
+			Parent = belts,
+		})
+		PartKit.MakeDecorative(rail)
+
+		-- Rollers: cylinders whose axis runs along Z, across the belt.
+		for _, endSign in { -1, 1 } do
+			local roller = PartKit.Part({
+				Name = "Roller",
+				Shape = Enum.PartType.Cylinder,
+				Size = Vector3.new(StreetLayout.BELT_WIDTH, StreetLayout.ROLLER_DIAMETER, StreetLayout.ROLLER_DIAMETER),
+				CFrame = CFrame.new(endSign * length / 2, beltTop - StreetLayout.BELT_HEIGHT / 2, z)
+					* CFrame.Angles(0, math.rad(90), 0),
+				Color = World.StructureLight,
+				Parent = belts,
+			})
+			roller.CollisionGroup = BELT_COLLISION_GROUP
+		end
 	end
 end
 
@@ -135,6 +195,19 @@ function WorldService:Init()
 	state.worldFolder = folder
 
 	buildGroundAndStreet(folder)
+	setupBeltCollisions()
+	buildBelts(folder)
+	-- Re-assert the belt velocities in case anything resets them.
+	task.spawn(function()
+		while true do
+			task.wait(StreetLayout.BELT_VELOCITY_REFRESH_SECONDS)
+			for _, belt in state.belts do
+				if belt.Part.Parent then
+					belt.Part.AssemblyLinearVelocity = belt.Velocity
+				end
+			end
+		end
+	end)
 	for index = 1, PlotLayout.MAX_PLOT_SLOTS do
 		if not state.occupied[index] then
 			buildPlaceholder(index)

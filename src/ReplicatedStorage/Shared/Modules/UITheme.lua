@@ -60,6 +60,8 @@ UITheme.World = {
 	AccentGreen = hex("#3BEB7E"), -- claim, droppers, Dropper 2
 	AccentGold = hex("#FFBE28"), -- gacha, collector
 	Unclaimed = hex("#3A3560"), -- wall strip before claiming
+	AccentBlue = hex("#4FB3FF"), -- west belt rail + chevrons
+	Belt = hex("#1B1834"), -- speed belt surface
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 }
 

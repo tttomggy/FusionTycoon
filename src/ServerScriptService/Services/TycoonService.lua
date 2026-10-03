@@ -25,6 +25,7 @@ local Config = ReplicatedStorage.Shared.Config
 local TycoonConfig = require(Config.TycoonConfig)
 local PlotNaming = require(Config.PlotNaming)
 local PlotLayout = require(Config.PlotLayout)
+local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -73,7 +74,7 @@ local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
 -- Cash balls pass through characters ("Default") but still hit the plot
 -- floor/collector (PlotEnvironment).
-local CASH_COLLISION_GROUP = "CashParts"
+local CASH_COLLISION_GROUP = PlotKit.CASH_COLLISION_GROUP
 local PLOT_ENVIRONMENT_COLLISION_GROUP = PlotKit.FLOOR_COLLISION_GROUP
 
 local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "Dropper1", "ClaimButton", "PlotOrigin", "SpawnLocation" }
@@ -263,8 +264,11 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)
 	if spawn then
 		spawn.Size = PlotLayout.SPAWN_SIZE
-		spawn.CFrame = PartKit.At(origin, PlotLayout.SPAWN_POSITION, PlotLayout.STREET_TOP_Y + PlotLayout.SPAWN_SIZE.Y / 2)
+		spawn.CFrame = PartKit.At(origin, PlotLayout.SPAWN_POSITION, StreetLayout.STREET_TOP_Y + PlotLayout.SPAWN_SIZE.Y / 2)
 		spawn.Transparency = 1
+		-- Non-solid: its edge reaches the speed belt's outer edge, and an
+		-- invisible solid block there would snag riders.
+		spawn.CanCollide = false
 		spawn.Anchored = true
 		for _, child in spawn:GetChildren() do
 			if child:IsA("Decal") then

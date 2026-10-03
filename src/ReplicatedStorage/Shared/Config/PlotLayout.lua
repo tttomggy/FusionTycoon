@@ -241,15 +241,10 @@ function PlotLayout.GetSlotCFrame(index: number): CFrame
 	return CFrame.new(x, 0, PlotLayout.SLOT_ROW_Z) * CFrame.Angles(0, math.pi, 0)
 end
 
---[[ World: ground and street ------------------------------------------------------------ ]]
+--[[ World: ground (the street and its belts are in StreetLayout) ------------------------ ]]
 
 PlotLayout.GROUND_SIZE = v3(900, 1, 600)
 PlotLayout.GROUND_TOP_Y = -1
-PlotLayout.STREET_SIZE = v3(520, 0.1, 36)
-PlotLayout.STREET_TOP_Y = -0.95
-PlotLayout.LANE_DASH_SIZE = v3(8, 0.05, 0.6)
-PlotLayout.LANE_DASH_SPACING = 16
-PlotLayout.LANE_DASH_TRANSPARENCY = 0.45
 
 --[[ Layout assertions ---------------------------------------------------------------------
 	Runs at require time. Footprints are circles (radius) or rectangles
