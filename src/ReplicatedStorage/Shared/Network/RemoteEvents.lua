@@ -25,6 +25,7 @@ local REMOTE_EVENT_NAMES = {
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
 	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
 	"ClaimOffline", -- client -> server: collect the pending offline earnings (no args; the server knows the amount)
+	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"RequestLock", -- client -> server: LOCK LAB from the HUD button (no payload; HeistService.TryLock decides; a rejection is HeistEnded { Role = "Lock", Outcome = "Rejected", Reason, Seconds? })
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }

@@ -38,6 +38,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
 local TycoonController = require(script.Parent.TycoonController)
@@ -620,7 +621,14 @@ local function showRebirthCard(rebirths: number)
 		Position = UDim2.new(0.5, 0, 0, if unlocksStealing then 186 + REBIRTH_UNLOCK_EXTRA else 186),
 		Size = UDim2.fromOffset(180, 52),
 		ZIndex = z,
-		OnClick = closeBigCard,
+		OnClick = function()
+			closeBigCard()
+			-- The moment stealing unlocks: HOW TO HEIST, once per account.
+			if unlocksStealing and not TycoonController.HasSeenTip("howToHeist") then
+				TycoonController.MarkTipSeen("howToHeist")
+				HowToHeistPanel.Open()
+			end
+		end,
 	})
 	UIKit.PopIn(holder)
 end

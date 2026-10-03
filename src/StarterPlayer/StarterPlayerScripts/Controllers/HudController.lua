@@ -34,6 +34,7 @@ local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
+local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
@@ -654,6 +655,9 @@ local LOCK_REFRESH_SECONDS = 0.25
 
 local lockButton: TextButton
 local lockHolder: Frame
+-- The round "?" beside it: opens HOW TO HEIST (visible from Rebirth 1).
+local HELP_BUTTON_SIZE = 52 -- >= 44 px after the phone UIScale
+local helpHolder: Frame
 local lockScale: UIScale
 local lockPulse: Tween? = nil
 local lockStyle: string? = nil
@@ -673,6 +677,19 @@ local function buildLockButton()
 	lockHolder.Visible = false
 	lockScale = Instance.new("UIScale")
 	lockScale.Parent = lockHolder
+
+	local _, help = UIKit.Button({
+		Name = "HowToHeistButton",
+		Parent = screenGui,
+		Style = "Blue",
+		Text = "?",
+		TextSize = 26,
+		Radius = 999,
+		Size = UDim2.fromOffset(HELP_BUTTON_SIZE, HELP_BUTTON_SIZE),
+		OnClick = HowToHeistPanel.Open,
+	})
+	helpHolder = help
+	helpHolder.Visible = false
 end
 
 local function setLockPulse(on: boolean)
@@ -722,7 +739,9 @@ end
 
 local function refreshLockButton()
 	local plot = getOwnPlot()
-	if not plot or plot:GetAttribute("Claimed") ~= true or TycoonController.GetRebirths() < HeistConfig.MinRebirths then
+	local eligible = TycoonController.GetRebirths() >= HeistConfig.MinRebirths
+	helpHolder.Visible = eligible
+	if not plot or plot:GetAttribute("Claimed") ~= true or not eligible then
 		lockHolder.Visible = false
 		setLockPulse(false)
 		return
@@ -760,6 +779,7 @@ local function applyLayout(isPhone: boolean)
 	lockHolder.Position = if isPhone
 		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
+	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_BUTTON_SIZE.X + LOCK_BUTTON_GAP, 0)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -819,6 +839,7 @@ function HudController.Init()
 	RebirthPanel.Init()
 	IndexPanel.Init()
 	FusePanel.Init()
+	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)
