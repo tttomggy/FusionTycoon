@@ -34,7 +34,7 @@ export type EventSlot = {
 
 EventConfig.SlotSeconds = 15 * 60
 EventConfig.NightMinute = 0 -- the hh:00 slot is always a night
-EventConfig.VoidMoonChance = 0.3
+EventConfig.VoidMoonChance = 0.15
 
 EventConfig.Durations = {
 	GoldenRain = 5 * 60,
@@ -77,11 +77,11 @@ EventConfig.Icons = {
 -- One line of what it does (the start banner).
 EventConfig.Blurbs = {
 	GoldenRain = "Grab the gold coins in your lab! Golden odds x3",
-	PowerSurge = "Generators x1.5 · lightning can CHARGE a displayed item",
+	PowerSurge = "Generators x1.25 · lightning can CHARGE a displayed item",
 	MeteorShower = "Meteors hit the street: grab a core first!",
 	RainbowStorm = "Every mutation chance x5!",
 	Night = "Fusion mutation odds x2",
-	VoidMoon = "Fusion success +10% · fusions can come out VOID",
+	VoidMoon = "Fusion success +5% · fusions can come out VOID",
 } :: { [string]: string }
 
 --[[ Effect numbers (at strength 1) ------------------------------------------ ]]
@@ -91,16 +91,16 @@ EventConfig.Strengths = { 1, 2, 3 } -- what the admin panel offers
 -- Golden Rain: a coin per claimed plot every CoinIntervalSeconds / strength,
 -- each worth CoinIncomeSeconds x strength of the owner's passive income.
 EventConfig.CoinIntervalSeconds = 4
-EventConfig.CoinIncomeSeconds = 5
+EventConfig.CoinIncomeSeconds = 3
 EventConfig.CoinMaxIncomeSeconds = 15 -- clamp
 EventConfig.CoinMaxLive = 30 -- per plot
 EventConfig.CoinLifetimeSeconds = 20
 EventConfig.CoinCollectDistance = 5 -- server distance check for a touch
 EventConfig.GoldenRainGoldenOdds = 3
 
--- Power Surge: generators x(1 + 0.5 x strength), clamped; a lightning strike
+-- Power Surge: generators x(1 + 0.25 x strength), clamped; a lightning strike
 -- every LightningIntervalSeconds / strength on one random displayed item.
-EventConfig.SurgeGeneratorBonus = 0.5
+EventConfig.SurgeGeneratorBonus = 0.25 -- was 0.5; cut with the Void Moon halving (15% target)
 EventConfig.MaxGeneratorMultiplier = 3 -- clamp
 EventConfig.LightningIntervalSeconds = 20
 EventConfig.LightningChargeChance = 0.25
@@ -121,10 +121,12 @@ EventConfig.MeteorCoreTiers = {
 EventConfig.MeteorCelestialChance = 0.15
 
 -- Night: fusion mutation odds x2. Void Moon (a night): also fusion success
--- +10 points (capped at 100%) and VoidChance of a success coming out Void.
+-- +5 points (capped at 100%) and VoidChance of a success coming out Void.
+-- Void Moon numbers were halved (and VoidMoonChance 0.3 -> 0.15) to keep
+-- events within 15% of the no-event Rebirth 1-3 pace (econ_sim --events).
 EventConfig.NightFusionMutationOdds = 2
-EventConfig.VoidMoonFusionBonus = 0.10
-EventConfig.VoidChance = 0.10
+EventConfig.VoidMoonFusionBonus = 0.05
+EventConfig.VoidChance = 0.05
 
 -- Rainbow Storm: every normal mutation chance x5 on pulls and fusions.
 EventConfig.RainbowStormOdds = 5

@@ -701,9 +701,12 @@ failed").
   generator bands are solid again.
 - [ ] **Golden Rain coins.** Gold coins (edge-on, spinning, bobbing) appear
   in your lab on open floor, never inside a station or pedestal, one every
-  4 s, max 30, each gone after 20 s. Touching one pays **5 s of your
-  income** (cash jumps by income × 5) with a green "+$X" pop. A second
+  4 s, max 30, each gone after 20 s. Touching one pays **3 s of your
+  income** (cash jumps by income × 3) with a green "+$X" pop. A second
   player can't pick up yours.
+- [ ] **Surge income.** `/event PowerSurge`: the collector pill's generator
+  income (and the HUD's income/s, generator share only) reads ×1.25 of what
+  it was; back to normal when it ends. Pedestal rates don't change.
 - [ ] **Lightning Charge.** `/event PowerSurge`, display a plain item: every
   20 s a white-blue bolt hits a displayed item somewhere with a flash and a
   low rumble. When yours turns Charged: the toast "⚡ Your <item> got
@@ -718,8 +721,9 @@ failed").
   card (Epic+ item, sometimes Celestial); the other gets **Too slow!**. A
   Rebirth 0 player can grab. Unclaimed craters vanish after 60 s.
 - [ ] **Void Moon.** `/event VoidMoon`, open the Fuse panel: the success
-  chance reads 10 points higher (2 Commons 55% → 65%), and the machine's
-  odds board cells rise by the same. Some successes come out Void.
+  chance reads 5 points higher (2 Commons 55% → 60%), and the machine's
+  odds board cells rise by the same. About 1 success in 20 comes out
+  Void. The banner line reads "Fusion success +5%".
 - [ ] **Rainbow Storm odds.** `/event RainbowStorm`: the gacha pad and odds
   board mutation lines show ×5 numbers (Golden 4% → 20%); the big SERVER ·
   EVENT rainbow banner plays once.

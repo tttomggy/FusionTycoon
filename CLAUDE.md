@@ -104,7 +104,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
   seeds `Random.new(slotStart)`, so every server and client computes the
-  same lineup with no messaging. hh:00 Night 10 min (30% Void Moon);
+  same lineup with no messaging. hh:00 Night 10 min (15% Void Moon);
   hh:15/:30/:45 one weather by weight (Golden Rain 40 / Power Surge 35 /
   Meteor Shower 20 / Rainbow Storm 5). An override (`/event`, admin) replaces
   the scheduled event until it ends, then the clock resumes.
@@ -124,17 +124,20 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - Strength ×1–×3 (admin) is clamped: coin ≤ 15 s of income, generators
     ≤ ×3, mutation odds ≤ ×15.
   - `tools/econ_sim.py <seeds> <hours> --events` runs the clock and compares
-    with the same seeds without it. **Open:** at the spec numbers events speed
-    Rebirth 1–3 by ~20–26% (target ≤ 15%). Coins aren't the lever (coin
-    value 0 still gives ~20%); it's the sum of every event, Void Moon the
-    biggest single part (~8 points). Re-tune together, then re-run.
+    with the same seeds without it. **Target: events speed Rebirth 1–3 by
+    ≤ 15%.** The first spec numbers gave 20–27% (Void Moon the biggest
+    part, coins minor), so they were cut: Void Moon 30% → 15% of nights,
+    fusion bonus +10 → +5 points, Void roll 10% → 5%, coin 5 s → 3 s of
+    income, Surge ×1.5 → ×1.25. Now +10.5% / +12.5% / +10.8% (30 seeds,
+    12 h). Any change to an event number: re-run and keep it ≤ 15%.
   - Rewards are server-side (EventService): Golden Rain coins (owner-only,
-    touch + distance check, 5 s of income), Power Surge lightning (25% of a
+    touch + distance check, 3 s of income), Power Surge (generators ×1.25;
+    lightning: 25% of a
     plain displayed item turns Charged, carried items skipped; inventory,
     Index, pedestal visuals/labels, SyncInventory), Meteor Shower craters on
     the street (`StreetLayout.MeteorBounds`; first finished hold wins a core:
     Epic 60 / Legendary 30 / Mythic 9 / Secret 1, 15% Celestial). Void Moon:
-    fusion +10 points, 10% Void replacing the normal fusion roll.
+    fusion +5 points, 5% Void replacing the normal fusion roll.
   - Visuals are client-side (`EventController`): start banner (3-2-1),
     sound, end toast, sky from a captured Lighting baseline restored exactly
     (never raise a light: Night just darkens), band flicker through

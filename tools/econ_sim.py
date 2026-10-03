@@ -97,15 +97,15 @@ AWAY_SECONDS = 8 * 3600
 # from its own seeded RNG per slot.
 EVENTS = False
 EV_SLOT = 15 * 60
-EV_VOID_MOON_CHANCE = 0.3
+EV_VOID_MOON_CHANCE = 0.15
 EV_DURATION = {"GoldenRain": 300, "PowerSurge": 300, "MeteorShower": 180, "RainbowStorm": 300,
                "Night": 600, "VoidMoon": 600}
 EV_WEATHER = [("GoldenRain", 40), ("PowerSurge", 35), ("MeteorShower", 20), ("RainbowStorm", 5)]
 COIN_INTERVAL = 4          # a coin per plot every 4 s
-COIN_INCOME_SECONDS = 5    # each worth 5 s of income
+COIN_INCOME_SECONDS = 3    # each worth 3 s of income
 COIN_PICKUP = 0.70         # share of coins the player actually collects
 GOLDEN_RAIN_GOLDEN_ODDS = 3
-SURGE_GENERATOR_MULT = 1.5
+SURGE_GENERATOR_MULT = 1.25
 LIGHTNING_INTERVAL = 20
 LIGHTNING_CHARGE_CHANCE = 0.25
 SERVER_PLAYERS = 6         # lightning picks one displayed item in the server;
@@ -114,8 +114,8 @@ METEOR_COUNT = 6
 METEOR_CORE_TIERS = [("Epic", 60), ("Legendary", 30), ("Mythic", 9), ("Secret", 1)]
 METEOR_CELESTIAL = 0.15
 NIGHT_FUSION_MUT_ODDS = 2
-VOID_MOON_FUSION_BONUS = 0.10
-VOID_CHANCE = 0.10
+VOID_MOON_FUSION_BONUS = 0.05
+VOID_CHANCE = 0.05
 RAINBOW_STORM_ODDS = 5
 
 
