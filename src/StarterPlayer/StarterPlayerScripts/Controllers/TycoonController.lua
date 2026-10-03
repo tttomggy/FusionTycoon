@@ -20,6 +20,8 @@ local hasSynced = false
 local rebirths = 0
 local indexFound: { [string]: boolean } = {}
 local indexMultiplier = 1
+local pendingOffline = 0
+local awaySeconds = 0
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -85,6 +87,11 @@ function TycoonController.GetIndex(): { [string]: boolean }
 end
 
 -- False until the first snapshot arrives (so the HUD doesn't flash $0).
+-- Uncollected offline earnings (0 = none) and the away time they cover.
+function TycoonController.GetPendingOffline(): (number, number)
+	return pendingOffline, awaySeconds
+end
+
 function TycoonController.HasSynced(): boolean
 	return hasSynced
 end
@@ -173,6 +180,8 @@ local function onSyncTycoon(snapshot: any)
 			pedestalDisplays[index] = uid
 		end
 	end
+	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
+	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	hasSynced = true
 	tycoonChanged:Fire(cash, generatorLevels)
 end

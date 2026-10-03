@@ -24,6 +24,7 @@ local REMOTE_EVENT_NAMES = {
 	"RequestRebirth", -- client -> server: rebirth now (no args); validated by RebirthService
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
 	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
+	"ClaimOffline", -- client -> server: collect the pending offline earnings (no args; the server knows the amount)
 }
 
 local function getOrCreateFolder(): Folder

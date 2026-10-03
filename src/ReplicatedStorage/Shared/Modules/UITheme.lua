@@ -40,6 +40,7 @@ UITheme.Colors = {
 	CardBottom = hex("#2A2140"), -- Inventory card gradient bottom
 	ResultMid = hex("#2A1550"), -- big result card gradient mid
 	FuseAllTop = hex("#3A1F6E"), -- Fuse All summary card gradient top
+	WelcomeTop = hex("#1B5A3A"), -- welcome-back (offline earnings) card gradient top
 	MythicBannerLeft = hex("#6E0F24"), -- server Mythic banner gradient left
 	MythicBannerLabel = hex("#FF8FA0"), -- "SERVER · MYTHIC"
 	Rebirth = hex("#FF8A3D"), -- REBIRTH titles, HUD rebirth pill, banner right

@@ -16,17 +16,21 @@
 	    also gets the big card.
 	  * Rebirth card (centre) - "REBIRTH 3!" with "Income x2.5 · Luck +15%"
 	    on a successful RebirthResult (RebirthPanel plays the flash).
+	  * Welcome-back card (modal) - offline earnings, once per snapshot that
+	    brings new PendingOffline; COLLECT fires ClaimOffline and bursts coins.
 
 	Rare fusion successes keep the top banner (AnnouncementController).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -1083,8 +1087,197 @@ local function onGachaPullResult(payload: any)
 	end
 end
 
+--[[ Welcome-back card (offline earnings) ------------------------------------------ ]]
+
+local WELCOME_SIZE = Vector2.new(460, 300)
+local WELCOME_DISPLAY_ORDER = 125 -- over the Fuse panel, under Results (130)
+local COLLECT_SIZE = Vector2.new(200, 56)
+local COIN_COUNT = 16
+local COIN_SIZE = 26
+local COIN_SECONDS = 0.6
+local COIN_SPREAD = 170
+
+local welcome: UIKit.Modal? = nil
+local welcomeAway: TextLabel
+local welcomeAmount: TextLabel
+local lastPendingOffline = 0
+
+-- "3h 12m", "45m"; capped at "4h+" (OfflineConfig.MaxSeconds).
+local function formatAway(seconds: number): string
+	if seconds >= OfflineConfig.MaxSeconds then
+		return ("%dh+"):format(OfflineConfig.MaxSeconds // 3600)
+	end
+	local hours = seconds // 3600
+	local minutes = (seconds % 3600) // 60
+	if hours > 0 then
+		return ("%dh %dm"):format(hours, minutes)
+	end
+	return ("%dm"):format(minutes)
+end
+
+-- Green "$" coins fly out of the amount and fade (UI only). They go on the
+-- Results gui, which stays enabled after the modal's own gui switches off.
+local function coinBurst(gui: ScreenGui, from: GuiObject)
+	local scale = gui:FindFirstChildOfClass("UIScale")
+	local factor = if scale then scale.Scale else 1
+	local centre = (from.AbsolutePosition + from.AbsoluteSize / 2) / factor
+	for index = 1, COIN_COUNT do
+		local coin = Instance.new("Frame")
+		coin.Name = "Coin"
+		coin.AnchorPoint = Vector2.new(0.5, 0.5)
+		coin.Position = UDim2.fromOffset(centre.X, centre.Y)
+		coin.Size = UDim2.fromOffset(COIN_SIZE, COIN_SIZE)
+		coin.BackgroundColor3 = Colors.White
+		coin.ZIndex = 50
+		UIKit.Corner(coin, 999)
+		UIKit.PairGradient(coin, UITheme.Gradients.Green)
+		UIKit.Stroke(coin, 2)
+		UIKit.Label({
+			Name = "Sign",
+			Text = "$",
+			Font = Fonts.Display,
+			TextSize = 16,
+			TextColor3 = Colors.CoinText,
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = 51,
+			Parent = coin,
+		})
+		coin.Parent = gui
+		local angle = (index / COIN_COUNT) * math.pi * 2 + math.random() * 0.4
+		local distance = COIN_SPREAD * (0.6 + math.random() * 0.4)
+		local info = TweenInfo.new(COIN_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		TweenService:Create(coin, info, {
+			Position = UDim2.fromOffset(centre.X + math.cos(angle) * distance, centre.Y + math.sin(angle) * distance),
+			BackgroundTransparency = 1,
+			Rotation = math.random(-90, 90),
+		}):Play()
+		for _, child in coin:GetDescendants() do
+			if child:IsA("UIStroke") then
+				TweenService:Create(child, info, { Transparency = 1 }):Play()
+			elseif child:IsA("TextLabel") then
+				TweenService:Create(child, info, { TextTransparency = 1 }):Play()
+			end
+		end
+		task.delay(COIN_SECONDS, coin.Destroy, coin)
+	end
+end
+
+local function buildWelcome(): UIKit.Modal
+	local modal = UIKit.Modal({
+		Name = "WelcomeBack",
+		Title = "WELCOME BACK!",
+		DisplayOrder = WELCOME_DISPLAY_ORDER,
+		MaxSize = WELCOME_SIZE,
+		HeaderTop = Colors.WelcomeTop,
+	})
+	local content = modal.Content
+	welcomeAway = UIKit.Label({
+		Name = "Away",
+		Font = Fonts.BodyHeavy,
+		TextSize = 18,
+		TextColor3 = Colors.Muted,
+		Size = UDim2.new(1, 0, 0, 24),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = content.ZIndex + 1,
+		Parent = content,
+	})
+	welcomeAmount = UIKit.Label({
+		Name = "Amount",
+		Font = Fonts.Display,
+		TextSize = 54,
+		TextColor3 = Colors.Cash,
+		Position = UDim2.fromOffset(0, 28),
+		Size = UDim2.new(1, 0, 0, 62),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = content.ZIndex + 1,
+		Stroke = 4,
+		Parent = content,
+	})
+	UIKit.Label({
+		Name = "Rule",
+		Text = ("Your lab earned %d%% while you were gone"):format(math.floor(OfflineConfig.Rate * 100 + 0.5)),
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextColor3 = Colors.Faint,
+		Position = UDim2.fromOffset(0, 94),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = content.ZIndex + 1,
+		Parent = content,
+	})
+
+	-- Buttons centre themselves; COLLECT x2 is a hidden slot for the
+	-- monetization pass (a Developer Product), not built out yet.
+	local row = Instance.new("Frame")
+	row.Name = "Buttons"
+	row.BackgroundTransparency = 1
+	row.Position = UDim2.fromOffset(0, 126)
+	row.Size = UDim2.new(1, 0, 0, COLLECT_SIZE.Y + UITheme.ShadowOffset)
+	row.ZIndex = content.ZIndex + 1
+	row.Parent = content
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.Padding = UDim.new(0, 12)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = row
+	UIKit.Button({
+		Name = "Collect",
+		Parent = row,
+		Style = "Green",
+		Text = "COLLECT",
+		TextSize = 24,
+		Size = UDim2.fromOffset(COLLECT_SIZE.X, COLLECT_SIZE.Y),
+		LayoutOrder = 1,
+		ZIndex = row.ZIndex,
+		OnClick = function()
+			if lastPendingOffline > 0 then
+				RemoteEvents.ClaimOffline:FireServer()
+				coinBurst(screenGui, welcomeAmount)
+			end
+			modal.Close()
+		end,
+	})
+	local _, doubleHolder = UIKit.Button({
+		Name = "CollectDouble",
+		Parent = row,
+		Style = "Gold",
+		Text = "COLLECT ×2",
+		TextSize = 22,
+		Size = UDim2.fromOffset(COLLECT_SIZE.X, COLLECT_SIZE.Y),
+		LayoutOrder = 2,
+		ZIndex = row.ZIndex,
+	})
+	doubleHolder.Visible = false
+	return modal
+end
+
+-- Shows the card when a snapshot brings new offline earnings (the first
+-- sync after joining, or /offline); closes it once they're paid elsewhere
+-- (the server's 30 s auto-claim).
+local function onTycoonChanged()
+	local amount, away = TycoonController.GetPendingOffline()
+	local modal = welcome or buildWelcome()
+	welcome = modal
+	if amount > 0 then
+		welcomeAway.Text = ("You were away %s"):format(formatAway(away))
+		welcomeAmount.Text = "+" .. NumberFormat.Money(amount)
+		if lastPendingOffline <= 0 then
+			modal.Open()
+		end
+	elseif lastPendingOffline > 0 and modal.IsOpen() then
+		modal.Close()
+	end
+	lastPendingOffline = amount
+end
+
 function ResultController.Init()
 	screenGui = UIKit.Screen("Results", 130)
+	TycoonController.TycoonChanged:Connect(onTycoonChanged)
+	if TycoonController.HasSynced() then
+		onTycoonChanged()
+	end
 	FusionController.FusionResolved:Connect(onFusionResolved)
 	FusionController.FuseAllResolved:Connect(onFuseAllResolved)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)

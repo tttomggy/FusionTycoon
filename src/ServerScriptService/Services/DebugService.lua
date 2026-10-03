@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
@@ -50,6 +51,10 @@ local REBIRTHS_COMMAND = "/rebirths"
 -- "/give legendary_core golden" adds an item (optionally mutated) without
 -- needing the luck: mutations, Secrets and the Index are testable.
 local GIVE_COMMAND = "/give"
+-- "/offline 180" pretends you were away 180 minutes: sets the pending
+-- offline earnings and re-sends the snapshot, so the welcome-back card can
+-- be tested (Studio profiles never save, so a real absence can't be).
+local OFFLINE_COMMAND = "/offline"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -96,6 +101,13 @@ local function onPlayerChatted(player: Player, message: string)
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: gave %s a %s"):format(player.Name, MutationConfig.GetDisplayName(def.Name, mutation)))
+	elseif command == OFFLINE_COMMAND then
+		local minutes = tonumber(argument) or 180
+		local awaySeconds = math.max(0, math.floor(minutes * 60))
+		local amount = OfflineConfig.Compute(PlayerDataService.GetPassiveCashPerSecond(player), awaySeconds)
+		PlayerDataService.SetPendingOffline(player, amount, awaySeconds)
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: %s away %d min -> pending %s"):format(player.Name, math.floor(minutes), tostring(amount)))
 	elseif command == WIPE_COMMAND then
 		local data = PlayerDataService.GetData(player)
 		if data then
@@ -109,7 +121,9 @@ local function onPlayerChatted(player: Player, message: string)
 			data.TotalFusions = 0
 			data.Rebirths = 0
 			data.Index = {}
+			data.LastOnline = nil
 		end
+		PlayerDataService.SetPendingOffline(player, 0, 0)
 		player:Kick("Profile wiped (Studio debug). Press Play again.")
 	end
 end
@@ -133,7 +147,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /wipe")
 end
 
 function DebugService:Start()

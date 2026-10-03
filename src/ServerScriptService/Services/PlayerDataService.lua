@@ -22,6 +22,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
+local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -61,6 +62,16 @@ export type PlayerData = {
 	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
 	-- through rebirths; see IndexConfig.
 	Index: { [string]: boolean },
+	-- os.time() when this profile was last saved (every autosave and on
+	-- leaving) or loaded. nil on old saves: no offline payout the first time.
+	LastOnline: number?,
+}
+
+-- Offline earnings waiting to be collected (session only, never saved).
+export type PendingOffline = {
+	Amount: number,
+	AwaySeconds: number,
+	Since: number, -- os.clock() when it was computed (auto-claim timer)
 }
 
 -- Server-computed progress toward the current goal, sent with the snapshot.
@@ -86,6 +97,10 @@ export type TycoonSnapshot = {
 	-- Found Index keys as a dense list (the client builds the set and
 	-- computes the Index multiplier).
 	IndexKeys: { string },
+	-- Offline earnings not yet collected (0 = none) and the away time they
+	-- cover, for the welcome-back card.
+	PendingOffline: number,
+	AwaySeconds: number,
 }
 
 type State = {
@@ -97,6 +112,8 @@ type State = {
 	noSave: { [number]: boolean },
 	-- Session-only: GoalService's latest progress readout per UserId.
 	goalProgress: { [number]: GoalProgress? },
+	-- Session-only: offline earnings computed on load, until claimed.
+	pendingOffline: { [number]: PendingOffline },
 	-- Called synchronously at the start of every SyncTycoon (see OnSync).
 	syncHooks: { (Player) -> () },
 	-- os.clock() of each player's last honoured RequestSync.
@@ -135,6 +152,7 @@ local state: State = {
 	sessionCache = {},
 	noSave = {},
 	goalProgress = {},
+	pendingOffline = {},
 	syncHooks = {},
 	lastSyncRequest = {},
 	connections = {},
@@ -221,6 +239,9 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
+	end
+	if typeof(raw.LastOnline) == "number" then
+		data.LastOnline = raw.LastOnline
 	end
 	if typeof(raw.Index) == "table" then
 		for key, found in raw.Index do
@@ -309,6 +330,7 @@ local function saveData(userId: number, data: PlayerData?): boolean
 	if not data or state.noSave[userId] then
 		return false
 	end
+	data.LastOnline = os.time()
 
 	local toSave = deepCopy(data) :: any
 	toSave.PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays)
@@ -692,6 +714,7 @@ local function indexKeys(index: { [string]: boolean }): { string }
 end
 
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
+	local pending = state.pendingOffline[player.UserId]
 	return {
 		Cash = PlayerDataService.GetCash(player),
 		Generators = PlayerDataService.GetGenerators(player) or {},
@@ -702,7 +725,54 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		GoalProgress = state.goalProgress[player.UserId],
 		Rebirths = PlayerDataService.GetRebirths(player),
 		IndexKeys = indexKeys(PlayerDataService.GetIndex(player)),
+		PendingOffline = if pending then pending.Amount else 0,
+		AwaySeconds = if pending then pending.AwaySeconds else 0,
 	}
+end
+
+--[[ Public API: offline earnings ------------------------------------------ ]]
+
+-- Uncollected offline earnings, or nil.
+function PlayerDataService.GetPendingOffline(player: Player): PendingOffline?
+	return state.pendingOffline[player.UserId]
+end
+
+-- Replaces the pending offline earnings (0 clears them). /offline uses it.
+function PlayerDataService.SetPendingOffline(player: Player, amount: number, awaySeconds: number)
+	if amount > 0 then
+		state.pendingOffline[player.UserId] = { Amount = amount, AwaySeconds = awaySeconds, Since = os.clock() }
+	else
+		state.pendingOffline[player.UserId] = nil
+	end
+end
+
+-- Clears the pending offline earnings and returns the amount (0 if none).
+-- The caller pays it; taking and paying happen with no yield between them.
+function PlayerDataService.TakePendingOffline(player: Player): number
+	local pending = state.pendingOffline[player.UserId]
+	state.pendingOffline[player.UserId] = nil
+	return if pending then pending.Amount else 0
+end
+
+-- On load: what the lab earned while away, at the income the player left
+-- with. LastOnline moves to now straight away (and is saved), so a rejoin
+-- can't claim the same time twice.
+local function computeOfflineEarnings(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	local lastOnline = data.LastOnline
+	data.LastOnline = os.time()
+	if not lastOnline then
+		return
+	end
+	local away = math.max(0, os.time() - lastOnline)
+	local amount = OfflineConfig.Compute(PlayerDataService.GetPassiveCashPerSecond(player), away)
+	PlayerDataService.SetPendingOffline(player, amount, away)
+	if amount > 0 then
+		PlayerDataService.SaveNow(player)
+	end
 end
 
 -- Registers `callback(player)` to run synchronously at the start of every
@@ -761,6 +831,7 @@ local function onPlayerAdded(player: Player)
 	createLeaderstats(player)
 	updateLeaderstatsCash(player)
 	updateLeaderstatsRebirths(player)
+	computeOfflineEarnings(player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
@@ -770,6 +841,12 @@ end
 local function onPlayerRemoving(player: Player)
 	local userId = player.UserId
 	local data = state.sessionCache[userId]
+	-- Left before collecting (or before the auto-claim): pay it, never lose it.
+	local pending = state.pendingOffline[userId]
+	if data and pending then
+		data.Cash += pending.Amount
+	end
+	state.pendingOffline[userId] = nil
 	state.sessionCache[userId] = nil
 	if data then
 		saveData(userId, data)

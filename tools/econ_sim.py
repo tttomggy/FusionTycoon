@@ -16,6 +16,10 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # mutations or Index)
         python3 tools/econ_sim.py --fuse=3      # player puts 3 items per
                                                 # fusion (default 2)
+        python3 tools/econ_sim.py --sessions=3  # 3 sessions of 45 min, 8 h
+                                                # away between: Rebirth 1-3
+                                                # in played time, with vs.
+                                                # without offline earnings
 """
 import random, sys
 
@@ -72,8 +76,22 @@ INDEX_PER_PAGE = 0.05      # +5% per completed tier page (all items x all mutati
 # Index). Run with --no-depth.
 DEPTH = True
 
+# Offline earnings (OfflineConfig.lua): while away, Rate x income per second
+# for at most MaxSeconds; nothing under MinSeconds. Only --sessions uses it.
+OFFLINE_RATE = 0.25
+OFFLINE_MAX_SECONDS = 4 * 3600
+OFFLINE_MIN_SECONDS = 120
+SESSION_SECONDS = 45 * 60
+AWAY_SECONDS = 8 * 3600
 
-def run(seed, horizon=10 * 3600):
+
+def run(seed, horizon=10 * 3600, sessions=0, offline=True):
+    """t is played time. With sessions > 0 the player plays that many
+    SESSION_SECONDS sessions with AWAY_SECONDS between them, collecting
+    offline earnings (unless offline=False) at the start of each new one."""
+    if sessions:
+        horizon = sessions * SESSION_SECONDS
+    next_break = SESSION_SECONDS if sessions else horizon + 1
     rng = random.Random(seed)
     cash = 0.0
     t = 0.0
@@ -149,6 +167,11 @@ def run(seed, horizon=10 * 3600):
 
     step = 1.0
     while t < horizon:
+        # Session boundary: away AWAY_SECONDS, paid at the income left with.
+        while next_break <= t and next_break < horizon:
+            next_break += SESSION_SECONDS
+            if offline and AWAY_SECONDS >= OFFLINE_MIN_SECONDS:
+                cash += cps() * OFFLINE_RATE * min(AWAY_SECONDS, OFFLINE_MAX_SECONDS)
         income = cps()
         cash += income * step
         t += step
@@ -220,14 +243,45 @@ def fmt(s):
     return f"{h}:{m:02d}:{sec:02d}"
 
 
+def report_sessions(seeds, sessions):
+    """Rebirth 1-3 in played time for an N-session player, offline on/off."""
+    on = [run(s, sessions=sessions, offline=True) for s in range(seeds)]
+    off = [run(s, sessions=sessions, offline=False) for s in range(seeds)]
+    mid = seeds // 2
+    print(f"{sessions} sessions x {SESSION_SECONDS // 60} min, {AWAY_SECONDS // 3600} h away between "
+          f"(offline {OFFLINE_RATE:.0%} for up to {OFFLINE_MAX_SECONDS // 3600} h); played time, {seeds} seeds")
+    print(f"{'':10s} {'no offline':>12s} {'offline':>12s}  {'reached (off/on)':>16s}  speed-up")
+    for k in ["rebirth1", "rebirth2", "rebirth3"]:
+        a = sorted(r[0].get(k, 1e12) for r in off)
+        b = sorted(r[0].get(k, 1e12) for r in on)
+        f = lambda v: fmt(v if v < 1e12 else None)
+        got_a = sum(1 for v in a if v < 1e12)
+        got_b = sum(1 for v in b if v < 1e12)
+        if a[mid] < 1e12 and b[mid] < 1e12:
+            speed = f"{(a[mid] - b[mid]) / 60:+.0f} min ({a[mid] / b[mid]:.2f}x faster)"
+        elif b[mid] < 1e12:
+            speed = "only reached with offline"
+        else:
+            speed = "-"
+        print(f"{k:10s} {f(a[mid]):>12s} {f(b[mid]):>12s}  {got_a:>7d}/{got_b:<8d}  {speed}")
+    print("rebirths after the last session, median: no offline", sorted(r[2] for r in off)[mid],
+          " offline", sorted(r[2] for r in on)[mid])
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--no-depth" in sys.argv:
         DEPTH = False
+    sessions = 0
     for a in sys.argv:
         if a.startswith("--fuse="):
             FUSE_COUNT = int(a.split("=")[1])
+        if a.startswith("--sessions="):
+            sessions = int(a.split("=")[1])
     seeds = int(args[0]) if len(args) > 0 else 20
+    if sessions:
+        report_sessions(seeds, sessions)
+        sys.exit(0)
     hours = float(args[1]) if len(args) > 1 else 10
     keys = ["first_pull", "gen_ember", "first_Rare", "first_Epic", "mult1", "first_Golden", "gen_flare",
             "first_Legendary", "first_Diamond", "gen_core", "first_Mythic", "rebirth1", "gen_sing", "rebirth2",
