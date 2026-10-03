@@ -256,8 +256,9 @@ function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
 	}
 end
 
--- Diamond and Rainbow mutations get the major reveal whatever the tier.
-FusionConfig.MajorRevealMutationRank = 2
+-- Diamond and up (Diamond, Void, Rainbow, Celestial) get the major reveal
+-- whatever the tier.
+FusionConfig.MajorRevealMutationRank = 3
 
 function FusionConfig.IsMajorReveal(tier: string, mutation: string?): boolean
 	return FusionConfig.MajorRevealTiers[tier] == true

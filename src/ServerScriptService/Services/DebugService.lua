@@ -114,7 +114,8 @@ local function onPlayerChatted(player: Player, message: string)
 			warn(("DebugService: /give: unknown item id %q"):format(tostring(itemId)))
 			return
 		end
-		-- Chat is lowercased above; mutations are "Golden", "Diamond", "Rainbow".
+		-- Chat is lowercased above; mutations are MutationConfig names ("Golden",
+		-- "Charged", "Diamond", "Void", "Rainbow", "Celestial").
 		local mutation = if rawMutation ~= "" then rawMutation:sub(1, 1):upper() .. rawMutation:sub(2) else nil
 		if mutation and not MutationConfig.IsValid(mutation) then
 			warn(("DebugService: /give: unknown mutation %q"):format(rawMutation))

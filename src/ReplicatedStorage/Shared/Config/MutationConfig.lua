@@ -6,11 +6,19 @@
 	keeps its tier colour; a mutation multiplies what it earns on a pedestal
 	and gives it a shell (PedestalVisuals) and a name prefix.
 
-	  Mutation   Rank  Income x  Pull chance  Fusion-success chance
+	  Mutation   Rank  Income x  Pull chance  Fusion-success chance  Source
 	  (none)     0     1         -            -
-	  Golden     1     2         4%           2%
-	  Diamond    2     5         0.8%         0.4%
-	  Rainbow    3     12        0.1%         0.05%
+	  Golden     1     2         4%           2%                     pulls / fusions
+	  Charged    2     3         0            0                      Power Surge lightning only
+	  Diamond    3     5         0.8%         0.4%                   pulls / fusions
+	  Void       4     8         0            0                      Void Moon fusions only
+	  Rainbow    5     12        0.1%         0.05%                  pulls / fusions
+	  Celestial  6     20        0            0                      Meteor Shower cores only
+
+	Ranks follow the multiplier. Saves store the NAME, so re-ranking is safe;
+	the fusion rules compare ranks (a success keeps the lowest input rank, a
+	fail keeps the best input). Event-only mutations (EventOnly) have no
+	normal chance: only their event grants them (EventService).
 
 	Every chance is x luck (RebirthConfig.GetLuck) x an optional per-mutation
 	event multiplier (EventState.GetMutationMultipliers; this config never
@@ -26,16 +34,26 @@ export type MutationDef = {
 	Multiplier: number,
 	PullChance: number,
 	FusionChance: number,
+	EventOnly: boolean?, -- only an event grants it (no normal chance)
 }
 
 MutationConfig.Mutations = {
 	Golden = { Rank = 1, Multiplier = 2, PullChance = 0.04, FusionChance = 0.02 },
-	Diamond = { Rank = 2, Multiplier = 5, PullChance = 0.008, FusionChance = 0.004 },
-	Rainbow = { Rank = 3, Multiplier = 12, PullChance = 0.001, FusionChance = 0.0005 },
+	Charged = { Rank = 2, Multiplier = 3, PullChance = 0, FusionChance = 0, EventOnly = true },
+	Diamond = { Rank = 3, Multiplier = 5, PullChance = 0.008, FusionChance = 0.004 },
+	Void = { Rank = 4, Multiplier = 8, PullChance = 0, FusionChance = 0, EventOnly = true },
+	Rainbow = { Rank = 5, Multiplier = 12, PullChance = 0.001, FusionChance = 0.0005 },
+	Celestial = { Rank = 6, Multiplier = 20, PullChance = 0, FusionChance = 0, EventOnly = true },
 } :: { [string]: MutationDef }
 
 -- Lowest rank first; "Normal" (no mutation) is not in this list.
-MutationConfig.Order = { "Golden", "Diamond", "Rainbow" }
+MutationConfig.Order = { "Golden", "Charged", "Diamond", "Void", "Rainbow", "Celestial" }
+
+-- Granted only by an event (the Index marks these columns with a clock).
+function MutationConfig.IsEventOnly(mutation: string?): boolean
+	local def = mutation and MutationConfig.Mutations[mutation]
+	return def ~= nil and def.EventOnly == true
+end
 
 -- True for a known mutation name (nil = normal is handled by callers).
 function MutationConfig.IsValid(mutation: any): boolean

@@ -345,9 +345,7 @@ local function onRareFusionAnnouncement(payload: any)
 		return
 	end
 	local tier = payload.Tier :: string
-	local mutation = if payload.Mutation == "Rainbow" or payload.Mutation == "Golden" or payload.Mutation == "Diamond"
-		then payload.Mutation :: string
-		else nil
+	local mutation = if MutationConfig.IsValid(payload.Mutation) then payload.Mutation :: string else nil
 	local verb = if payload.Verb == "displayed"
 		then "just displayed"
 		elseif payload.Verb == "pulled" then "pulled"

@@ -5,7 +5,8 @@
 	Rainbow }, and the income it pays for collecting them (IndexConfig).
 
 	  * Header INDEX with a green "+42% income" pill
-	  * "37 / 68 found · +1% each · +5% per full tier page"
+	  * "37 / 119 found · +1% each · +5% per full tier page"; 7 variant columns
+	    (Normal + six mutations; unfound event-only cells show a clock)
 	  * Tier tabs with counts ("Legendary 9/12")
 	  * A page per tier: one row per item, a cell per variant. Found cells
 	    are filled in the tier colour (Normal) or mutation colour (Rainbow
@@ -36,11 +37,14 @@ local IndexPanel = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local MAX_SIZE = Vector2.new(560, 560)
+-- Seven variant columns (Normal + six mutations) need the width; on a phone
+-- the Modal's 92% fit applies and the page scrolls.
+local MAX_SIZE = Vector2.new(720, 560)
 local TAB_SIZE = Vector2.new(132, UITheme.MinTapSize)
 local ROW_HEIGHT = 52
 local CELL_SIZE = UITheme.MinTapSize
-local NAME_COLUMN = 0.36 -- of the page width
+local NAME_COLUMN = 0.3 -- of the page width
+local HEADING_TEXT_SIZE = 12
 
 local modal: UIKit.Modal
 local bonusPill: TextLabel
@@ -75,9 +79,10 @@ local function buildCell(parent: Instance, tier: string, variant: string, found:
 
 	if not found then
 		cell.BackgroundColor3 = Colors.Panel2
+		-- Event-only mutations: a clock, since only an event can grant them.
 		UIKit.Label({
 			Name = "Missing",
-			Text = "?",
+			Text = if MutationConfig.IsEventOnly(variant) then "🕐" else "?",
 			Font = Fonts.Display,
 			TextSize = 20,
 			TextColor3 = Colors.Faint,
@@ -264,7 +269,7 @@ local function build()
 			Name = variant .. "Heading",
 			Text = variant:upper(),
 			Font = Fonts.BodyHeavy,
-			TextSize = 11,
+			TextSize = HEADING_TEXT_SIZE,
 			TextColor3 = UITheme.GetMutationColor(if variant == IndexConfig.NORMAL then nil else variant)
 				or Colors.Muted,
 			Position = UDim2.new(NAME_COLUMN + (index - 1) * columnWidth, 0, 0, headerY),

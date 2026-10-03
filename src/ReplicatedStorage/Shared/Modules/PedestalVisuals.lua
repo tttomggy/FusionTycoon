@@ -37,9 +37,16 @@ local MUTATION_SHELL_TRANSPARENCY = 0.6
 type ShellSparkle = { Rate: number, Size: number, Speed: NumberRange }
 local MUTATION_SPARKLES: { [string]: ShellSparkle } = {
 	Golden = { Rate = 6, Size = 0.35, Speed = NumberRange.new(0.5, 1) },
+	Charged = { Rate = 14, Size = 0.2, Speed = NumberRange.new(2, 3) },
 	Diamond = { Rate = 12, Size = 0.22, Speed = NumberRange.new(1.5, 2.5) },
+	Void = { Rate = 8, Size = 0.3, Speed = NumberRange.new(0.3, 0.8) },
 	Rainbow = { Rate = 10, Size = 0.3, Speed = NumberRange.new(1, 2) },
+	-- Celestial: a big, slow white star sparkle.
+	Celestial = { Rate = 9, Size = 0.5, Speed = NumberRange.new(0.4, 0.9) },
 }
+-- Void's shell is the dark VoidShell glass (a dark core shell) with its
+-- violet sparkle; every other shell is the mutation colour.
+local DARK_SHELL_MUTATIONS: { [string]: boolean } = { Void = true }
 
 local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
@@ -65,8 +72,11 @@ local PROXIMITY_BURST_COUNT = 40
 type SatelliteSpec = { Count: number, Period: number, Trail: boolean }
 local MUTATION_SATELLITES: { [string]: SatelliteSpec } = {
 	Golden = { Count = 2, Period = 2.4, Trail = false },
+	Charged = { Count = 3, Period = 1.4, Trail = true }, -- a lightning-blue trail
 	Diamond = { Count = 4, Period = 1.8, Trail = true },
+	Void = { Count = 5, Period = 2.2, Trail = false },
 	Rainbow = { Count = 6, Period = 1.5, Trail = true },
+	Celestial = { Count = 6, Period = 1.2, Trail = true },
 }
 
 -- Neon balls the client orbits round the orb (FT_Orbit). Built here so
@@ -132,9 +142,9 @@ local function buildShell(group: Model, center: CFrame, diameter: number, mutati
 		Shape = Enum.PartType.Ball,
 		Size = Vector3.one * diameter * MUTATION_SHELL_SCALE,
 		CFrame = center,
-		Color = color,
+		Color = if DARK_SHELL_MUTATIONS[mutation] then UITheme.World.VoidShell else color,
 		Material = Enum.Material.Glass,
-		Transparency = MUTATION_SHELL_TRANSPARENCY,
+		Transparency = if DARK_SHELL_MUTATIONS[mutation] then SECRET_SHELL_TRANSPARENCY else MUTATION_SHELL_TRANSPARENCY,
 		Parent = group,
 	})
 	PartKit.MakeDecorative(shell)

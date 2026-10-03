@@ -2,8 +2,11 @@
 --[[
 	IndexConfig
 	-----------
-	The collection book. One entry per ItemConfig item x { Normal, Golden,
-	Diamond, Rainbow } (17 items x 4 = 68). Every entry found adds
+	The collection book. One entry per ItemConfig item x { Normal, then every
+	MutationConfig mutation in rank order: Golden, Charged, Diamond, Void,
+	Rainbow, Celestial } (17 items x 7 = 119). The event-only mutations
+	(Charged, Void, Celestial) make a full page the long-term chase. Every
+	entry found adds
 	BonusPerEntry to income, and a tier page with every item in every
 	variant adds BonusPerCompletedTier on top. The Index survives rebirths.
 

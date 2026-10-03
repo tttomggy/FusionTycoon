@@ -129,20 +129,20 @@ UITheme.GlowTiers = {
 
 UITheme.Mutation = {
 	Golden = hex("#FFD23F"),
+	Charged = hex("#7DF9FF"), -- event: Power Surge lightning
 	Diamond = hex("#BFF4FF"),
+	Void = hex("#A47BFF"), -- event: Void Moon fusions
+	Celestial = hex("#C9F0FF"), -- event: Meteor Shower cores
 	RainbowStops = { hex("#FF5470"), hex("#FFBE28"), hex("#4CF08A"), hex("#4FB3FF"), hex("#A47BFF") },
 }
 
 -- A mutation's solid colour (Rainbow's first stop; nil for normal items).
 function UITheme.GetMutationColor(mutation: string?): Color3?
-	if mutation == "Golden" then
-		return UITheme.Mutation.Golden
-	elseif mutation == "Diamond" then
-		return UITheme.Mutation.Diamond
-	elseif mutation == "Rainbow" then
+	if mutation == "Rainbow" then
 		return UITheme.Mutation.RainbowStops[1]
 	end
-	return nil
+	local color = mutation and (UITheme.Mutation :: any)[mutation]
+	return if typeof(color) == "Color3" then color else nil
 end
 
 -- The five Rainbow stops as an evenly spaced ColorSequence (UIGradient,

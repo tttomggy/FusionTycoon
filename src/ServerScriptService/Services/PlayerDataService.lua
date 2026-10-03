@@ -34,7 +34,7 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
-	-- MutationConfig name ("Golden", "Diamond", "Rainbow"); nil = normal.
+	-- MutationConfig name ("Golden", "Charged", ...); nil = normal.
 	Mutation: string?,
 }
 
