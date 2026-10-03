@@ -39,6 +39,7 @@ local REJECTION_TOASTS: { [string]: string } = {
 	PedestalEmpty = "Nothing on that pedestal",
 	ItemInUse = "That item is already on display",
 	ItemNotOwned = "You don't have that item anymore",
+	BeingStolen = "A thief has it! Tag them to get it back",
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
 }

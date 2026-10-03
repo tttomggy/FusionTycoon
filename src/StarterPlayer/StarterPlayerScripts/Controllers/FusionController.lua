@@ -8,6 +8,7 @@ local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
+local ToastController = require(script.Parent.ToastController)
 
 local FusionController = {}
 
@@ -94,8 +95,18 @@ end
 -- or with no argument repeats the last fusion's tier and count with
 -- unmutated items (AGAIN). Plays the machine's charge-up and reveal, then
 -- fires FusionResolved. Yields for the whole cycle; call it with task.spawn.
+-- Carrying a stolen item (HeistService sets Heist* attributes): hands full.
+-- The server rejects it too; this just skips the charge-up.
+local function blockedByHeist(): boolean
+	if Players.LocalPlayer:GetAttribute("HeistTier") ~= nil then
+		ToastController.Show("Get home with that item first!", "Neutral")
+		return true
+	end
+	return false
+end
+
 local function requestFusion(uids: { string }?)
-	if isRequestPending then
+	if isRequestPending or blockedByHeist() then
 		return
 	end
 	local inputs = uids
@@ -166,7 +177,7 @@ FusionController.RequestFusion = requestFusion
 -- then fires FuseAllResolved with the server's summary. Yields; call it
 -- with task.spawn.
 function FusionController.RequestFuseAll()
-	if isRequestPending or not core then
+	if isRequestPending or not core or blockedByHeist() then
 		return
 	end
 	isRequestPending = true

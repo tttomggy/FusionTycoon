@@ -499,6 +499,20 @@ function HeistController.Init()
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	RemoteEvents.HeistStarted.OnClientEvent:Connect(onHeistStarted)
 	RemoteEvents.HeistEnded.OnClientEvent:Connect(onHeistEnded)
+	-- Pulls, upgrades and the Multiplier Pad all refuse a carrying thief
+	-- with Reason "Carrying"; one toast for all of them.
+	for _, remote in {
+		RemoteEvents.GachaPullResult,
+		RemoteEvents.GachaMultiPullResult,
+		RemoteEvents.UpgradeResult,
+		RemoteEvents.MultiplierUpgraded,
+	} do
+		remote.OnClientEvent:Connect(function(payload: any)
+			if typeof(payload) == "table" and payload.Success == false and payload.Reason == "Carrying" then
+				ToastController.Show("Get home with that item first!", "Neutral")
+			end
+		end)
+	end
 
 	for _, player in Players:GetPlayers() do
 		watchPlayer(player)

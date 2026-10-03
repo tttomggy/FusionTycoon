@@ -44,6 +44,9 @@ local watched: { [Instance]: boolean } = {}
 local proximityLabels: { [BillboardGui]: boolean } = {}
 -- Every pedestal StealPrompt (EnemyOnly) on any plot.
 local stealPrompts: { [ProximityPrompt]: boolean } = {}
+-- This player's own pedestal DisplayPrompts: off while a thief carries that
+-- pedestal's item (BeingStolen), so it can't be picked up mid-heist.
+local ownDisplayPrompts: { [ProximityPrompt]: boolean } = {}
 local stealCheckAccumulator = 0
 
 local function getOwnerUserId(instance: Instance): number?
@@ -163,6 +166,13 @@ local function updateStealPrompts()
 			prompt.Enabled = enabled
 		end
 	end
+	for prompt in ownDisplayPrompts do
+		local pedestal = prompt.Parent
+		local enabled = not (pedestal and pedestal:GetAttribute("BeingStolen") == true)
+		if prompt.Enabled ~= enabled then
+			prompt.Enabled = enabled
+		end
+	end
 end
 
 local function trackStealPrompt(prompt: ProximityPrompt)
@@ -182,6 +192,13 @@ local function consider(instance: Instance)
 	if instance:IsA("ProximityPrompt") and instance:GetAttribute("EnemyOnly") == true then
 		trackStealPrompt(instance)
 		return
+	end
+	if instance:IsA("ProximityPrompt") and instance.Name == "DisplayPrompt" and getOwnerUserId(instance) == localUserId then
+		local prompt = instance
+		ownDisplayPrompts[prompt] = true
+		prompt.Destroying:Connect(function()
+			ownDisplayPrompts[prompt] = nil
+		end)
 	end
 	if instance:IsA("BillboardGui") then
 		trackProximity(instance)

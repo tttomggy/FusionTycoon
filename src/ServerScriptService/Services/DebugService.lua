@@ -133,6 +133,8 @@ local function onPlayerChatted(player: Player, message: string)
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: %s away %d min -> pending %s"):format(player.Name, math.floor(minutes), tostring(amount)))
 	elseif command == WIPE_COMMAND then
+		-- Any steal this player is part of resolves (returns) before the wipe.
+		HeistService.FailCarriesFor(player, "Left")
 		local data = PlayerDataService.GetData(player)
 		if data then
 			data.Cash = 0

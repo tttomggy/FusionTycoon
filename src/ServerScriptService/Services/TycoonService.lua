@@ -121,6 +121,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "DataNotLoaded", GeneratorId = generatorId })
 		return
 	end
+	-- Hands full: no upgrades while carrying a stolen item (HeistService).
+	if PlayerDataService.IsCarrying(player) then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "Carrying", GeneratorId = generatorId })
+		return
+	end
 
 	local generator = TycoonConfig.GetGeneratorById(generatorId)
 	if not generator then
@@ -469,6 +474,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
+			return
+		end
 		local rolled = rollPulls(1, getLuck(player))
 		if not rolled then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
@@ -502,6 +511,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 
 	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
 			return
 		end
 		-- Roll all of them before charging anything.
@@ -589,6 +602,10 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 	local debounce = false
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+		if PlayerDataService.IsCarrying(player) then
+			RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = false, Reason = "Carrying" })
 			return
 		end
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
