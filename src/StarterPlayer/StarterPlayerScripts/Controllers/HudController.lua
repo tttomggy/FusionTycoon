@@ -638,7 +638,7 @@ end
 
 --[[ Shield chip -----------------------------------------------------------
 	Under the cash card (beside it on a phone): teal "🛡 SHIELD · 42s" while
-	your lab's shield is up, amber "SHIELD RECHARGING · 12s" while the pad's
+	your lab's shield is up, muted "SHIELD RECHARGING · 12s" while the pad's
 	re-arm lock runs (ShieldRearmAt), then a pulsing amber "SHIELD DOWN ·
 	step on YOURS" once the pad can raise it again. Hidden under HeistConfig.MinRebirths (the plot sign
 	says PROTECTED instead) and before you claim. Reads the plot's
@@ -704,7 +704,7 @@ local function refreshShieldChip()
 		setShieldPulse(false)
 	elseif rearmLeft > 0 then
 		shieldChip.Text = ("SHIELD RECHARGING · %ds"):format(math.ceil(rearmLeft))
-		shieldChip.BackgroundColor3 = Colors.ShieldAmber
+		shieldChip.BackgroundColor3 = UITheme.Gradients.Disabled.Top -- muted
 		setShieldPulse(false)
 	else
 		shieldChip.Text = "SHIELD DOWN · step on YOURS"

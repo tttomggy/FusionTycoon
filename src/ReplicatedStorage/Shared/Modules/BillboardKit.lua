@@ -137,6 +137,8 @@ export type PadLabel = {
 	SetPill: (text: string) -> (),
 	SetDetail: (text: string?, color: Color3?) -> (),
 	SetSecondPill: (text: string?) -> (),
+	-- Recolours the main pill (the shield pad: muted while recharging).
+	SetPillGradient: (pair: UITheme.GradientPair) -> (),
 }
 
 -- Title (Display, coloured, ink stroke), a gradient price pill (Display,
@@ -223,6 +225,12 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 			if secondPill and secondText then
 				secondText.Text = text or ""
 				secondPill.Visible = text ~= nil
+			end
+		end,
+		SetPillGradient = function(pair: UITheme.GradientPair)
+			local g = pill:FindFirstChildOfClass("UIGradient")
+			if g then
+				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
 			end
 		end,
 	}

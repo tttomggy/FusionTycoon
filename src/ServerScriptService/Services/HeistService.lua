@@ -15,7 +15,8 @@
 	    standing on it does nothing, so an AFK owner can't hold a shield up.
 	  * After any shield ends (timeout or a drop) the pad is locked for
 	    ShieldRearmSeconds: the thieves' window. Published as the plot
-	    attribute ShieldRearmAt (server time) for the pad label and HUD chip.
+	    attribute ShieldRearmAt (server time) for the HUD chip, and on the
+	    pad's own owner-only label: READY IN 12s / SHIELD READY / UP · 42s.
 	    The claim and victim shields ignore the lock; /shield 0 clears it.
 	  * While up, a loop every EjectTickSeconds moves any non-owner whose
 	    root is inside the plot's walls to the street in front of its gate.
@@ -58,6 +59,8 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -102,6 +105,10 @@ type State = {
 	rearmAt: { [number]: number },
 	-- Whether each owner's root was on their pad last tick (edge trigger).
 	onPad: { [number]: boolean },
+	-- Each owner's shield pad label and the text it last showed (only
+	-- changes are written, so a countdown replicates once a second).
+	padLabels: { [number]: BillboardKit.PadLabel },
+	padLabelText: { [number]: string },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
 	-- Active carries by thief UserId, and the Uid -> thief index that keeps
@@ -122,6 +129,8 @@ local state: State = {
 	claimSeen = {},
 	rearmAt = {},
 	onPad = {},
+	padLabels = {},
+	padLabelText = {},
 	debugStealable = {},
 	carries = {},
 	carriedItems = {},
@@ -684,6 +693,58 @@ local function onPadCheck(player: Player, origin: CFrame)
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
 end
 
+-- The owner-only label over the YOURS pad: READY IN 12s (muted) during the
+-- re-arm lock, SHIELD READY when stepping on will raise it, UP · 42s while
+-- it's up. Hidden for protected (Rebirth 0) labs.
+local function refreshPadLabel(player: Player, plot: Model)
+	local label = state.padLabels[player.UserId]
+	if not label then
+		local station = plot:FindFirstChild("ClaimStation")
+		local pad = station and station:FindFirstChild("Pad")
+		if not pad or not pad:IsA("BasePart") then
+			return
+		end
+		label = BillboardKit.Pad(pad, {
+			Name = "ShieldPadLabel",
+			Title = "SHIELD",
+			TitleColor = UITheme.Colors.Text,
+			Pill = "",
+			PillGradient = UITheme.Gradients.Teal,
+			OwnerOnly = true,
+		})
+		state.padLabels[player.UserId] = label
+	end
+	local padLabel = label :: BillboardKit.PadLabel
+	local protected = HeistService.IsProtected(player)
+	padLabel.Gui.Enabled = not protected
+	if protected then
+		return
+	end
+	local now = serverNow()
+	local text: string
+	local gradient: UITheme.GradientPair
+	local detail: string?
+	if HeistService.IsShielded(player) then
+		text = ("UP · %ds"):format(math.ceil((state.shieldUntil[player.UserId] or now) - now))
+		gradient = UITheme.Gradients.Teal
+		detail = nil
+	elseif (state.rearmAt[player.UserId] or 0) > now then
+		text = ("READY IN %ds"):format(math.ceil((state.rearmAt[player.UserId] :: number) - now))
+		gradient = UITheme.Gradients.Disabled
+		detail = "Recharging"
+	else
+		text = "SHIELD READY"
+		gradient = UITheme.Gradients.Teal
+		detail = ("Step on for %ds"):format(HeistConfig.ShieldSeconds)
+	end
+	if state.padLabelText[player.UserId] ~= text then
+		state.padLabelText[player.UserId] = text
+		padLabel.SetPill(text)
+		padLabel.SetPillGradient(gradient)
+		padLabel.SetDetail(detail)
+	end
+end
+
 local function ejectIntruders(owner: Player, plot: Model, origin: CFrame)
 	local target: CFrame? = nil
 	for _, other in Players:GetPlayers() do
@@ -714,6 +775,7 @@ local function shieldTick()
 					plot:SetAttribute("Protected", protected)
 				end
 				onPadCheck(player, origin)
+				refreshPadLabel(player, plot)
 				-- A protected lab needs no eject: nothing there can be stolen.
 				if not protected and HeistService.IsShielded(player) then
 					ejectIntruders(player, plot, origin)
@@ -732,6 +794,8 @@ local function onPlayerRemoving(player: Player)
 	state.claimSeen[userId] = nil
 	state.rearmAt[userId] = nil
 	state.onPad[userId] = nil
+	state.padLabels[userId] = nil
+	state.padLabelText[userId] = nil
 	state.debugStealable[userId] = nil
 end
 

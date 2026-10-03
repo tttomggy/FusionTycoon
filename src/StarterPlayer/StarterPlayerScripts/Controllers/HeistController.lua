@@ -19,9 +19,6 @@
 	    for the rest.
 	  * Shield fences: every plot's ForceField fence fades in and out from its
 	    ShieldUntil attribute, so remote players see your shield too.
-	  * Your YOURS pad (Rebirth 1+, built here so only you see it): "SHIELD
-	    READY IN 12s" during the re-arm lock (ShieldRearmAt), "STEP ON FOR
-	    SHIELD" once it can raise one; hidden while the shield is up.
 
 	The alarm reuses the project's one proven sound id (AnnouncementController,
 	RevealEffects): rbxasset://sounds/electronicpingshort.wav, three low pings.
@@ -67,9 +64,6 @@ local FENCE_FADE_SECONDS = 0.3
 local FENCE_SHOWN_TRANSPARENCY = 0
 local FENCE_LINE_SHOWN_TRANSPARENCY = 0.2
 local FENCE_CHECK_SECONDS = 0.2
-local PAD_LABEL_SIZE = UDim2.fromOffset(220, 40)
-local PAD_LABEL_OFFSET = Vector3.new(0, 4, 0)
-local PAD_LABEL_MAX_DISTANCE = 80
 
 -- Rejection reason -> toast. Unlisted reasons (exploit-only) stay silent.
 local REJECT_MESSAGES: { [string]: string } = {
@@ -102,9 +96,6 @@ local banner: Banner? = nil
 -- The local player's active heist: role, item, other player, end time.
 type Active = { Role: string, Item: any, OtherName: string, OtherUserId: number, EndsAt: number }
 local active: Active? = nil
-
--- The local "SHIELD READY IN 12s" label over your own YOURS pad.
-local padLabel: TextLabel? = nil
 
 -- Plot -> whether its fence is currently shown on this client.
 local fenceShown: { [Instance]: boolean } = {}
@@ -501,74 +492,6 @@ local function updateFences()
 	end
 end
 
---[[ Your shield pad label ----------------------------------------------------------- ]]
-
-local function getOwnPad(plot: Instance): BasePart?
-	local station = plot:FindFirstChild("ClaimStation")
-	local pad = station and (station:FindFirstChild("Pad") or station:FindFirstChild("ClaimButton"))
-	return if pad and pad:IsA("BasePart") then pad else nil
-end
-
-local function ensurePadLabel(pad: BasePart): TextLabel
-	local existing = padLabel
-	if existing and existing.Parent then
-		return existing
-	end
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "ShieldPadLabel"
-	gui.Size = PAD_LABEL_SIZE
-	gui.StudsOffset = PAD_LABEL_OFFSET
-	gui.AlwaysOnTop = false
-	gui.LightInfluence = 0
-	gui.MaxDistance = PAD_LABEL_MAX_DISTANCE
-	gui.Adornee = pad
-	gui.Parent = pad -- created on this client: only the owner sees it
-	local label = UIKit.Pill({
-		Name = "Text",
-		Parent = gui,
-		Text = "",
-		Color = Colors.ShieldAmber,
-		TextColor3 = Colors.Ink,
-		Font = Fonts.Display,
-		TextSize = 18,
-		Height = 34,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-	})
-	padLabel = label
-	return label
-end
-
-local function updatePadLabel()
-	local plot = getOwnPlot()
-	local pad = plot and plot:GetAttribute("Claimed") == true and getOwnPad(plot)
-	local leaderstats = localPlayer:FindFirstChild("leaderstats")
-	local rebirths = leaderstats and leaderstats:FindFirstChild("Rebirths")
-	local eligible = rebirths and rebirths:IsA("IntValue") and rebirths.Value >= HeistConfig.MinRebirths
-	if not plot or not pad or not eligible then
-		if padLabel then
-			(padLabel.Parent :: BillboardGui).Enabled = false
-		end
-		return
-	end
-	local label = ensurePadLabel(pad)
-	local gui = label.Parent :: BillboardGui
-	local now = Workspace:GetServerTimeNow()
-	local shieldUntil = plot:GetAttribute("ShieldUntil")
-	local rearmAt = plot:GetAttribute("ShieldRearmAt")
-	if typeof(shieldUntil) == "number" and shieldUntil > now then
-		gui.Enabled = false
-	elseif typeof(rearmAt) == "number" and rearmAt > now then
-		gui.Enabled = true
-		label.Text = ("SHIELD READY IN %ds"):format(math.ceil(rearmAt - now))
-		label.BackgroundColor3 = Colors.ShieldAmber
-	else
-		gui.Enabled = true
-		label.Text = "STEP ON FOR SHIELD"
-		label.BackgroundColor3 = Colors.ShieldTeal
-	end
-end
-
 --[[ Init ------------------------------------------------------------------------- ]]
 
 function HeistController.Init()
@@ -604,7 +527,6 @@ function HeistController.Init()
 		if fenceAccumulator >= FENCE_CHECK_SECONDS then
 			fenceAccumulator = 0
 			updateFences()
-			updatePadLabel()
 		end
 	end)
 end
