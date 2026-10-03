@@ -8,7 +8,6 @@
 -- Runs server-side only: these are persistent, shared-world effects (not a
 -- one-off personal animation), so they need to be built by the server to
 -- replicate to every player, the same way TycoonService's pads/machine are.
-local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -42,44 +41,6 @@ local BEAM_TEXTURE_ID = "rbxassetid://5697446711"
 local PROXIMITY_RADIUS_STUDS = 14
 local PROXIMITY_COOLDOWN_SECONDS = 6
 local PROXIMITY_BURST_COUNT = 40
-
--- Continuous per-pedestal state that can't be cleaned up just by destroying
--- instances (an active looped Tween). Keyed by the part it runs on so
--- Clear() only ever touches what it itself started.
-local activePulses: { [BasePart]: Tween } = {}
-
-local function stopPulse(pedestal: BasePart)
-	local tween = activePulses[pedestal]
-	if tween then
-		tween:Cancel()
-		activePulses[pedestal] = nil
-	end
-	local baseSize = pedestal:GetAttribute("BaseSize")
-	if baseSize then
-		pedestal.Size = baseSize
-	end
-end
-
-local function startPulse(pedestal: BasePart)
-	stopPulse(pedestal)
-	local baseSize = pedestal:GetAttribute("BaseSize") :: Vector3?
-	if not baseSize then
-		baseSize = pedestal.Size
-		pedestal:SetAttribute("BaseSize", baseSize)
-	end
-
-	local tween = TweenService:Create(
-		pedestal,
-		TweenInfo.new(PULSE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Size = (baseSize :: Vector3) * PULSE_GROWTH }
-	)
-	activePulses[pedestal] = tween
-	tween:Play()
-
-	pedestal.Destroying:Connect(function()
-		stopPulse(pedestal)
-	end)
-end
 
 -- The floating item orb: a glass ball in the tier colour (bigger for
 -- higher tiers) around a Neon core, with a light. Its centre sits
@@ -133,7 +94,7 @@ end
 -- pedestal to its bare, unoccupied appearance. Safe to call on a pedestal
 -- that was never styled.
 function PedestalVisuals.Clear(pedestal: BasePart)
-	stopPulse(pedestal)
+	-- The orb pulse (PartKit.Pulse) dies with the orb in the elements folder.
 
 	local cap = pedestal:FindFirstChild("Cap")
 	if cap and cap:IsA("BasePart") then
@@ -243,7 +204,7 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 	-- The pulse breathes the orb (pulsing the column would push its cap
 	-- and bottom out of place).
 	if config.Pulse then
-		startPulse(orb)
+		PartKit.Pulse(orb, PULSE_GROWTH, PULSE_SECONDS, true)
 	end
 
 	if config.Beam then

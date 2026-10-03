@@ -7,6 +7,8 @@
 	vertical cylinders, and plot-local placement. Positions and sizes come
 	from the caller (PlotLayout); this module only knows how to make parts.
 ]]
+local TweenService = game:GetService("TweenService")
+
 local PartKit = {}
 
 export type PartProps = {
@@ -101,6 +103,76 @@ function PartKit.SetHover(target: Instance, spinDegPerSec: number, bob: number, 
 	target:SetAttribute("BobPeriod", period)
 	target:SetAttribute("Mode", mode)
 	target:AddTag(PartKit.HOVER_TAG)
+end
+
+--[[ Size animation ---------------------------------------------------------
+	Every runtime Size animation on a world part goes through here, against a
+	stored base size, never the part's live Size. Reading the live Size as the
+	"base" is how the Singularity Core grew past its fence: a second upgrade
+	bump started mid-tween took the already-scaled size as its base and
+	restored to it, compounding up to 1.08x per rapid upgrade.
+]]
+PartKit.BASE_SIZE_ATTRIBUTE = "BaseSize"
+
+-- Weak keys: a destroyed part's tween can be collected.
+local activeSizeTweens: { [BasePart]: Tween } = setmetatable({}, { __mode = "k" }) :: any
+
+-- The part's resting size: stored in the BaseSize attribute on first use
+-- and never overwritten after that.
+function PartKit.GetBaseSize(part: BasePart): Vector3
+	local stored = part:GetAttribute(PartKit.BASE_SIZE_ATTRIBUTE)
+	if typeof(stored) == "Vector3" then
+		return stored
+	end
+	part:SetAttribute(PartKit.BASE_SIZE_ATTRIBUTE, part.Size)
+	return part.Size
+end
+
+-- Cancels any size animation running on `part` and puts it back at its
+-- base size.
+function PartKit.StopSizeTween(part: BasePart)
+	local running = activeSizeTweens[part]
+	if running then
+		activeSizeTweens[part] = nil
+		running:Cancel()
+	end
+	part.Size = PartKit.GetBaseSize(part)
+end
+
+-- Tweens `part` from its base size to base * `scale` with `info`, cancelling
+-- whatever size animation was already running. However the tween ends
+-- (completed or cancelled), the part goes back to exactly its base size.
+function PartKit.TweenSize(part: BasePart, scale: number, info: TweenInfo): Tween
+	PartKit.StopSizeTween(part)
+	local base = PartKit.GetBaseSize(part)
+	local tween = TweenService:Create(part, info, { Size = base * scale })
+	activeSizeTweens[part] = tween
+	tween.Completed:Connect(function()
+		if activeSizeTweens[part] == tween then
+			activeSizeTweens[part] = nil
+		end
+		-- Whatever the playback state: never leave a scaled size behind.
+		if part.Parent and not activeSizeTweens[part] then
+			part.Size = base
+		end
+	end)
+	tween:Play()
+	return tween
+end
+
+-- A quick out-and-back bump: base -> base * scale -> base over `seconds`.
+-- Pass `loop` for an endless breathing pulse (stop it with StopSizeTween).
+-- Shared, but meant for clients (the generator upgrade bump); the server's
+-- only user is PedestalVisuals' looping orb pulse.
+function PartKit.Pulse(part: BasePart, scale: number, seconds: number, loop: boolean?): Tween
+	local info = TweenInfo.new(
+		if loop then seconds else seconds / 2,
+		if loop then Enum.EasingStyle.Sine else Enum.EasingStyle.Quad,
+		if loop then Enum.EasingDirection.InOut else Enum.EasingDirection.Out,
+		if loop then -1 else 0,
+		true
+	)
+	return PartKit.TweenSize(part, scale, info)
 end
 
 -- Decorative parts (holograms, glows): no collision, no queries, no touches.

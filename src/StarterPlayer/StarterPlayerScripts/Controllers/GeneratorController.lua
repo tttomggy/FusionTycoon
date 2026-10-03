@@ -16,13 +16,15 @@ local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
@@ -32,6 +34,10 @@ local GeneratorController = {}
 local BUMP_SCALE = 1.08
 local BUMP_SECONDS = 0.25
 local BURST_COUNT = 30
+local SIZE_CHECK_DELAY = 1
+local SIZE_TOLERANCE = 0.01
+
+local warnedSizes: { [string]: boolean } = {}
 
 local localPlayer = Players.LocalPlayer
 
@@ -84,14 +90,48 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	TycoonController.RequestUpgrade(id)
 end
 
-local function bump(body: BasePart)
-	local baseSize = body.Size
-	local info = TweenInfo.new(BUMP_SECONDS / 2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
-	local tween = TweenService:Create(body, info, { Size = baseSize * BUMP_SCALE })
-	tween.Completed:Connect(function()
-		body.Size = baseSize
-	end)
-	tween:Play()
+-- Studio only: 1 s after a bump, the Body must be back at its PlotLayout
+-- size (and the Core orb at its built size) within SIZE_TOLERANCE. Warns
+-- once per generator, so a regression of the compounding-size bug shows up.
+local function checkSize(id: string, model: Model)
+	if warnedSizes[id] then
+		return
+	end
+	local spot = PlotLayout.GENERATORS[id]
+	local body = model:FindFirstChild("Body")
+	if not spot or not body or not body:IsA("BasePart") then
+		return
+	end
+	local expected = Vector3.new(spot.Footprint, spot.Height, spot.Footprint)
+	local core = getCore(model)
+	local coreExpected = spot.Footprint * PlotLayout.Generator.CoreScale
+	local function off(actual: number, wanted: number): boolean
+		return math.abs(actual - wanted) > wanted * SIZE_TOLERANCE
+	end
+	if
+		off(body.Size.X, expected.X)
+		or off(body.Size.Y, expected.Y)
+		or off(body.Size.Z, expected.Z)
+		or (core ~= nil and off(core.Size.X, coreExpected))
+	then
+		warnedSizes[id] = true
+		warn(
+			("GeneratorController: Generator_%s has drifted from its PlotLayout size (body %s, core %s)"):format(
+				id,
+				tostring(body.Size),
+				if core then tostring(core.Size) else "-"
+			)
+		)
+	end
+end
+
+-- The upgrade bump: always against the Body's stored base size (PartKit),
+-- so rapid upgrades can't compound it.
+local function bump(id: string, model: Model, body: BasePart)
+	PartKit.Pulse(body, BUMP_SCALE, BUMP_SECONDS)
+	if RunService:IsStudio() then
+		task.delay(SIZE_CHECK_DELAY, checkSize, id, model)
+	end
 end
 
 local function burst(core: BasePart, color: Color3)
@@ -121,7 +161,7 @@ local function onUpgradeResolved(result: any)
 	local model = getModel(generator.Id)
 	local body = model and model:FindFirstChild("Body")
 	if model and body and body:IsA("BasePart") then
-		bump(body)
+		bump(generator.Id, model, body)
 		local core = getCore(model)
 		if core then
 			burst(core, GeneratorKit.GetTierColor(generator.Tier))
