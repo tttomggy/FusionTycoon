@@ -9,6 +9,13 @@
 	removed, which would replicate over a one-off local change, so this keeps
 	re-disabling it whenever Enabled flips back on.
 
+	Heist StealPrompts (EnemyOnly) start disabled everywhere and are enabled
+	here, re-checked every STEAL_CHECK_SECONDS, only when: the viewer isn't
+	the owner, the viewer has HeistConfig.MinRebirths (leaderstats), the lab
+	isn't Protected (owner under MinRebirths) or shielded (ShieldUntil), the
+	pedestal is Filled and not BeingStolen, and the viewer isn't already
+	carrying. The server re-checks all of it on RequestSteal.
+
 	It also hides every plot BillboardGui (pedestal and pad labels) drawn
 	within HIDE_NEAR_STUDS of the camera, showing it again past
 	SHOW_FAR_STUDS (the gap stops flicker), so a label can't fill the screen
@@ -21,18 +28,23 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local WorldLabelController = {}
 
 local HIDE_NEAR_STUDS = 7
 local SHOW_FAR_STUDS = 8
+local STEAL_CHECK_SECONDS = 0.25
 
 local localPlayer = Players.LocalPlayer
 local localUserId = localPlayer.UserId
 local watched: { [Instance]: boolean } = {}
 -- Every plot BillboardGui -> whether it's currently hidden for being close.
 local proximityLabels: { [BillboardGui]: boolean } = {}
+-- Every pedestal StealPrompt (EnemyOnly) on any plot.
+local stealPrompts: { [ProximityPrompt]: boolean } = {}
+local stealCheckAccumulator = 0
 
 local function getOwnerUserId(instance: Instance): number?
 	local current: Instance? = instance
@@ -106,9 +118,71 @@ local function updateProximity()
 	end
 end
 
+local function getLocalRebirths(): number
+	local leaderstats = localPlayer:FindFirstChild("leaderstats")
+	local value = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	return if value and value:IsA("IntValue") then value.Value else 0
+end
+
+local function findPlot(instance: Instance): Instance?
+	local current: Instance? = instance
+	while current and current.Parent do
+		if current:GetAttribute("SlotIndex") ~= nil then
+			return current
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+local function canSteal(prompt: ProximityPrompt, viewerOk: boolean): boolean
+	if not viewerOk then
+		return false
+	end
+	local owner = prompt:GetAttribute("OwnerUserId")
+	if owner == localUserId then
+		return false
+	end
+	local pedestal = prompt.Parent
+	if not pedestal or pedestal:GetAttribute("Filled") ~= true or pedestal:GetAttribute("BeingStolen") == true then
+		return false
+	end
+	local plot = findPlot(prompt)
+	if not plot or plot:GetAttribute("Protected") ~= false then
+		return false
+	end
+	local shieldUntil = plot:GetAttribute("ShieldUntil")
+	return not (typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow())
+end
+
+local function updateStealPrompts()
+	local viewerOk = getLocalRebirths() >= HeistConfig.MinRebirths and localPlayer:GetAttribute("HeistTier") == nil
+	for prompt in stealPrompts do
+		local enabled = canSteal(prompt, viewerOk)
+		if prompt.Enabled ~= enabled then
+			prompt.Enabled = enabled
+		end
+	end
+end
+
+local function trackStealPrompt(prompt: ProximityPrompt)
+	if stealPrompts[prompt] ~= nil then
+		return
+	end
+	stealPrompts[prompt] = true
+	prompt.Enabled = false
+	prompt.Destroying:Connect(function()
+		stealPrompts[prompt] = nil
+	end)
+end
+
 -- Owner-only labels and prompts on someone else's plot are hidden here; the
 -- server can't hide them per player.
 local function consider(instance: Instance)
+	if instance:IsA("ProximityPrompt") and instance:GetAttribute("EnemyOnly") == true then
+		trackStealPrompt(instance)
+		return
+	end
 	if instance:IsA("BillboardGui") then
 		trackProximity(instance)
 	end
@@ -132,6 +206,13 @@ function WorldLabelController.Init()
 	end
 	plots.DescendantAdded:Connect(consider)
 	RunService.Heartbeat:Connect(updateProximity)
+	RunService.Heartbeat:Connect(function(dt: number)
+		stealCheckAccumulator += dt
+		if stealCheckAccumulator >= STEAL_CHECK_SECONDS then
+			stealCheckAccumulator = 0
+			updateStealPrompts()
+		end
+	end)
 end
 
 return WorldLabelController

@@ -27,6 +27,7 @@ local PlotNaming = require(Config.PlotNaming)
 local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
@@ -629,7 +630,7 @@ end
 -- The folder is built complete and parented LAST, so it replicates to the
 -- client in one piece (parenting it first let it arrive before its children,
 -- and the client wired only the pedestals it could see at that moment).
-local function createPedestals(plot: Model, origin: CFrame)
+local function createPedestals(plot: Model, origin: CFrame, player: Player)
 	local folder = Instance.new("Folder")
 	folder.Name = "Pedestals"
 
@@ -670,6 +671,17 @@ local function createPedestals(plot: Model, origin: CFrame)
 		-- every other client hides it (WorldLabelController, OwnerOnly).
 		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
 		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+
+		-- Hold E to steal (HeistService). Enemy-only: each client enables it
+		-- only for an eligible non-owner (WorldLabelController); the server
+		-- re-checks everything on RequestSteal.
+		local steal = newPrompt(pedestal, "StealPrompt", "Steal", "", HeistConfig.PromptDistance)
+		steal.HoldDuration = HeistConfig.GrabHoldSeconds
+		steal.Enabled = false
+		steal:SetAttribute("EnemyOnly", true)
+		steal:SetAttribute("OwnerUserId", player.UserId)
+		pedestal:SetAttribute("Filled", false)
+		pedestal:SetAttribute("BeingStolen", false)
 
 		BillboardKit.SetPedestalLabel(pedestal, nil)
 	end
@@ -835,16 +847,26 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 		if pedestal and pedestal:IsA("BasePart") then
 			local uid = displays[index]
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
+			local steal = pedestal:FindFirstChild("StealPrompt")
+			pedestal:SetAttribute("Filled", item ~= nil)
 			if item then
 				local def = ItemConfig.GetItemById(item.ItemId)
+				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					Mutation = item.Mutation,
-					ItemName = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation),
+					ItemName = name,
 					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
+					Stolen = PlayerDataService.IsItemCarried(player, item.Uid),
 				})
+				if steal and steal:IsA("ProximityPrompt") then
+					steal.ObjectText = name
+				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
+				if steal and steal:IsA("ProximityPrompt") then
+					steal.ObjectText = ""
+				end
 			end
 		end
 	end
@@ -951,7 +973,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 
 		createMultiplierStation(plot, origin, player)
 		createGachaStation(plot, origin, player)
-		createPedestals(plot, origin)
+		createPedestals(plot, origin, player)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
 		createFactoryLine(plot, origin, player)

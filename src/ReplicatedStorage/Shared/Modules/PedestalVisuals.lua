@@ -249,6 +249,22 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 	end
 end
 
+-- A thief is carrying this pedestal's item: the orb, light and effects go
+-- and a dim Danger ghost ring sits on the cap until it's back (Apply) or
+-- gone (Clear).
+function PedestalVisuals.SetStolen(pedestal: BasePart)
+	PedestalVisuals.Clear(pedestal)
+	local elements = Instance.new("Folder")
+	elements.Name = ELEMENTS_FOLDER_NAME
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		local top = cap.CFrame * CFrame.new(0, cap.Size.Y / 2, 0)
+		local ring = BillboardKit.BuildPadFace(elements, top, PlotLayout.Pedestal.CapSize.X, UITheme.Colors.Danger, nil)
+		ring.Name = "StolenRing"
+	end
+	elements.Parent = pedestal
+end
+
 -- Applies tier's RarityVisuals entry to `pedestal`, plus a mutation shell
 -- when the item has one. Clears any previous styling first, so this is
 -- also how a pedestal gets reset/restyled.

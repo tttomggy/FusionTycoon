@@ -331,6 +331,7 @@ export type PedestalInfo = {
 	Mutation: string?, -- shows as an Ink "GOLDEN ×2" chip on the label's top edge
 	ItemName: string,
 	Rate: number, -- per second, owner's multiplier included
+	Stolen: boolean?, -- a thief is carrying it: "STOLEN!" in Danger, no income
 }
 
 -- PlotLayout's label heights are measured from the pedestal's bottom;
@@ -494,11 +495,12 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 		local tierLabel = panel:FindFirstChild("Tier") :: TextLabel
 		local nameLabel = panel:FindFirstChild("ItemName") :: TextLabel
 		local rateLabel = panel:FindFirstChild("Rate") :: TextLabel
-		tierLabel.Text = info.Tier:upper()
-		tierLabel.TextColor3 = UITheme.GetTierLight(info.Tier)
+		tierLabel.Text = if info.Stolen then "STOLEN!" else info.Tier:upper()
+		tierLabel.TextColor3 = if info.Stolen then Colors.Danger else UITheme.GetTierLight(info.Tier)
 		setMutationChip(filledGui, info.Mutation)
 		nameLabel.Text = info.ItemName
-		rateLabel.Text = ("+%s/s"):format(NumberFormat.Money(info.Rate))
+		rateLabel.Text = if info.Stolen then "+$0/s" else ("+%s/s"):format(NumberFormat.Money(info.Rate))
+		rateLabel.TextColor3 = if info.Stolen then Colors.Muted else Colors.Cash
 	end
 	filledGui.Enabled = info ~= nil
 	emptyGui.Enabled = info == nil
