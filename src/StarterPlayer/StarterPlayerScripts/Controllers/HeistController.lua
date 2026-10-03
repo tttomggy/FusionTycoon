@@ -30,6 +30,11 @@
 	    for the rest.
 	  * Shield fences: every plot's ForceField fence fades in and out from its
 	    ShieldUntil attribute, so remote players see your shield too.
+	  * Teaching: every enemy pedestal you could grab right now (its
+	    StealPrompt's local Mode is "Steal", WorldLabelController) gets a red
+	    hand marker over its label (client-only, hidden while you carry), and
+	    the first time you walk into such a lab a one-time toast says how.
+	    Tapping the Rebirth-0 teaser prompt explains the unlock.
 
 	The alarm reuses the project's one proven sound id (AnnouncementController,
 	RevealEffects): rbxasset://sounds/electronicpingshort.wav, three low pings.
@@ -117,6 +122,15 @@ local banner: Banner? = nil
 -- The local player's active heist: role, item, other player, end time.
 type Active = { Role: string, Item: any, OtherName: string, OtherUserId: number, EndsAt: number, GraceEndsAt: number }
 local active: Active? = nil
+
+local MARKER_SIZE = UDim2.fromOffset(48, 48)
+local MARKER_MAX_DISTANCE = 60
+local STEAL_TIP = "Hold E on their pedestal to steal it!"
+
+-- Pedestal -> its red hand marker (client-only BillboardGui).
+local markers: { [Instance]: BillboardGui } = {}
+-- The one-time "how to steal" toast, once per session.
+local tipShown = false
 
 -- Plot -> whether its fence is currently shown on this client.
 local fenceShown: { [Instance]: boolean } = {}
@@ -577,10 +591,14 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
 		return
 	end
-	-- WorldLabelController's local Mode: a guarded pedestal is an instant
-	-- tap that only explains itself.
-	if prompt:GetAttribute("Mode") == "Guarded" then
+	-- WorldLabelController's local Mode: a guarded pedestal and the
+	-- Rebirth-0 teaser are instant taps that only explain themselves.
+	local mode = prompt:GetAttribute("Mode")
+	if mode == "Guarded" then
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
+		return
+	elseif mode == "Locked" then
+		ToastController.Show(("Stealing unlocks at Rebirth %d"):format(HeistConfig.MinRebirths), "Neutral")
 		return
 	end
 	RemoteEvents.RequestSteal:FireServer({ OwnerUserId = owner, PedestalIndex = index })
@@ -709,6 +727,80 @@ local function updateFences()
 	end
 end
 
+--[[ Teaching: hand markers and the one-time tip ------------------------------------- ]]
+
+local function buildMarker(pedestal: BasePart): BillboardGui
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "StealMarker"
+	gui.Size = MARKER_SIZE
+	-- Offsets are from the pedestal's centre; PlotLayout's are from its bottom.
+	local p = PlotLayout.Pedestal
+	gui.StudsOffset = Vector3.new(0, p.StealMarkerOffsetY - p.ColumnSize.Y / 2, 0)
+	gui.AlwaysOnTop = false
+	gui.LightInfluence = 0
+	gui.MaxDistance = MARKER_MAX_DISTANCE
+	gui.Adornee = pedestal
+	local circle = Instance.new("Frame")
+	circle.Name = "Circle"
+	circle.Size = UDim2.fromScale(1, 1)
+	circle.BackgroundColor3 = Colors.Danger
+	circle.Parent = gui
+	UIKit.Corner(circle, 999)
+	UIKit.Stroke(circle, 3)
+	UIKit.Label({
+		Name = "Hand",
+		Text = "🫳",
+		Font = Fonts.Display,
+		TextSize = 26,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Parent = circle,
+	})
+	gui.Parent = pedestal -- created on this client: nobody else sees it
+	return gui
+end
+
+-- Markers on every grabbable enemy pedestal, and the first-visit tip.
+local function updateTeaching()
+	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	if not folder then
+		return
+	end
+	local myRoot = getRoot(localPlayer)
+	local seen: { [Instance]: boolean } = {}
+	for _, plot in folder:GetChildren() do
+		local pedestals = plot:FindFirstChild("Pedestals")
+		local hasTarget = false
+		if pedestals then
+			for _, pedestal in pedestals:GetChildren() do
+				local prompt = pedestal:FindFirstChild("StealPrompt")
+				if pedestal:IsA("BasePart") and prompt and prompt:GetAttribute("Mode") == "Steal" then
+					hasTarget = true
+					seen[pedestal] = true
+					local marker = markers[pedestal]
+					if not marker or not marker.Parent then
+						markers[pedestal] = buildMarker(pedestal)
+					end
+				end
+			end
+		end
+		-- First time inside a lab you could rob: say how, once.
+		local origin = plot:IsA("Model") and plot.PrimaryPart
+		if hasTarget and not tipShown and myRoot and origin then
+			if PlotLayout.IsInsidePlot(origin.CFrame:PointToObjectSpace(myRoot.Position)) then
+				tipShown = true
+				ToastController.Show(STEAL_TIP, "Neutral")
+			end
+		end
+	end
+	for pedestal, marker in markers do
+		if not seen[pedestal] then
+			marker:Destroy()
+			markers[pedestal] = nil
+		end
+	end
+end
+
 --[[ Init ------------------------------------------------------------------------- ]]
 
 function HeistController.Init()
@@ -744,6 +836,7 @@ function HeistController.Init()
 		if fenceAccumulator >= FENCE_CHECK_SECONDS then
 			fenceAccumulator = 0
 			updateFences()
+			updateTeaching()
 		end
 	end)
 end

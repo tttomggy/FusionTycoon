@@ -33,6 +33,7 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -519,6 +520,7 @@ end
 --[[ Rebirth card -------------------------------------------------------------------- ]]
 
 local REBIRTH_CARD_SIZE = Vector2.new(360, 270)
+local REBIRTH_UNLOCK_EXTRA = 54 -- taller card when a heist unlock line shows
 
 local function showRebirthCard(rebirths: number)
 	if bigHolder then
@@ -589,6 +591,25 @@ local function showRebirthCard(rebirths: number)
 		Stroke = UITheme.Stroke.Text,
 		Parent = body,
 	})
+	-- The rebirth that unlocks stealing says so.
+	local unlocksStealing = rebirths == HeistConfig.MinRebirths
+	if unlocksStealing then
+		holder.Size = UDim2.fromOffset(REBIRTH_CARD_SIZE.X, REBIRTH_CARD_SIZE.Y + REBIRTH_UNLOCK_EXTRA)
+		UIKit.Label({
+			Name = "Unlock",
+			Text = "🫳 STEALING UNLOCKED: grab items off other labs' pedestals and run them home!",
+			Font = Fonts.BodyHeavy,
+			TextSize = 15,
+			TextColor3 = Colors.RebirthLabel,
+			TextWrapped = true,
+			Position = UDim2.fromOffset(16, 166),
+			Size = UDim2.new(1, -32, 0, 44),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z,
+			Stroke = 1.5,
+			Parent = body,
+		})
+	end
 	UIKit.Button({
 		Name = "Nice",
 		Parent = body,
@@ -596,7 +617,7 @@ local function showRebirthCard(rebirths: number)
 		Text = "LET'S GO",
 		TextSize = 20,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 186),
+		Position = UDim2.new(0.5, 0, 0, if unlocksStealing then 186 + REBIRTH_UNLOCK_EXTRA else 186),
 		Size = UDim2.fromOffset(180, 52),
 		ZIndex = z,
 		OnClick = closeBigCard,

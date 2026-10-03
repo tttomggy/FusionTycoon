@@ -411,6 +411,7 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 
 	if outcome == "Delivered" then
 		if thief and victim and transferItem(thief, victim, carry) then
+			PlayerDataService.IncrementTotalSteals(thief) -- first_steal goal (paid by the sync below)
 			local losses = state.recentLosses[victim.UserId] or {}
 			table.insert(losses, os.clock())
 			state.recentLosses[victim.UserId] = losses
@@ -729,6 +730,8 @@ local function onPadCheck(player: Player, origin: CFrame)
 		return
 	end
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
+	PlayerDataService.IncrementShieldRaises(player)
+	PlayerDataService.SyncTycoon(player) -- first_shield goal
 end
 
 -- The owner-only label over the YOURS pad: READY IN 12s (muted) during the

@@ -18,7 +18,7 @@ RebirthConfig.IncomePerRebirth = 0.5 -- income x(1 + 0.5 * rebirths)
 RebirthConfig.LuckPerRebirth = 0.05 -- luck x(1 + 0.05 * rebirths)
 RebirthConfig.SecretFusionRebirths = 1 -- Mythic -> Secret fusion unlocks at this many rebirths
 RebirthConfig.Unlocks = { -- rebirth number -> what it unlocks (shown in the Rebirth panel)
-	[1] = "Mythic fusion → Secret",
+	[1] = "Stealing + Mythic → Secret fusion",
 } :: { [number]: string }
 
 -- Cash price of the next rebirth after `rebirths` so far.

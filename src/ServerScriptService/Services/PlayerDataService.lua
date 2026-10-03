@@ -57,6 +57,10 @@ export type PlayerData = {
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
+	-- Heist: items delivered home, and shields raised on the YOURS pad
+	-- (drive the first_steal / first_shield goals).
+	TotalSteals: number,
+	ShieldRaises: number,
 	-- How many times the player has rebirthed (RebirthConfig).
 	Rebirths: number,
 	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
@@ -153,6 +157,8 @@ local DEFAULT_DATA: PlayerData = {
 	HasDropper2 = false,
 	GoalIndex = 1,
 	TotalFusions = 0,
+	TotalSteals = 0,
+	ShieldRaises = 0,
 	Rebirths = 0,
 	Index = {},
 }
@@ -250,6 +256,12 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.TotalFusions) == "number" then
 		data.TotalFusions = raw.TotalFusions
+	end
+	if typeof(raw.TotalSteals) == "number" then
+		data.TotalSteals = raw.TotalSteals
+	end
+	if typeof(raw.ShieldRaises) == "number" then
+		data.ShieldRaises = raw.ShieldRaises
 	end
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
@@ -665,6 +677,22 @@ function PlayerDataService.IncrementTotalFusions(player: Player)
 	local data = state.sessionCache[player.UserId]
 	if data then
 		data.TotalFusions += 1
+	end
+end
+
+-- A heist delivered (HeistService).
+function PlayerDataService.IncrementTotalSteals(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.TotalSteals += 1
+	end
+end
+
+-- A shield raised by stepping onto the YOURS pad (HeistService).
+function PlayerDataService.IncrementShieldRaises(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.ShieldRaises += 1
 	end
 end
 

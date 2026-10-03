@@ -149,6 +149,8 @@ local function onPlayerChatted(player: Player, message: string)
 			data.GachaPulls = 0
 			data.GoalIndex = 1
 			data.TotalFusions = 0
+			data.TotalSteals = 0
+			data.ShieldRaises = 0
 			data.Rebirths = 0
 			data.Index = {}
 			data.LastOnline = nil

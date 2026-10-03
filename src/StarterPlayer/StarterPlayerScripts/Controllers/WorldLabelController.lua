@@ -143,14 +143,18 @@ end
 -- What a StealPrompt shows on this client (the prompt's local "Mode"
 -- attribute; HeistController reads it on trigger):
 --   Hidden   not stealable for this viewer (own lab, empty, shielded, ...)
+--   Locked   the viewer is under MinRebirths: the teaser "🔒 Steal" /
+--            "Unlocks at Rebirth 1", an instant tap that only toasts
 --   Guarded  the owner is standing guard: "Owner is guarding", instant tap
 --            that only toasts, so the thief doesn't waste the 1.5 s hold
---   Steal    "Steal" / item, hold to grab
-export type StealMode = "Hidden" | "Guarded" | "Steal"
+--   Steal    "Steal" / item and $/s, hold to grab
+-- Roblox hides a disabled prompt, so Locked and Guarded stay enabled with
+-- no hold and HeistController answers the tap with a toast instead.
+export type StealMode = "Hidden" | "Locked" | "Guarded" | "Steal"
 
 local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
 	local owner = prompt:GetAttribute("OwnerUserId")
-	if owner == localUserId or viewerCarrying or viewerRebirths < HeistConfig.MinRebirths then
+	if owner == localUserId or viewerCarrying then
 		return "Hidden"
 	end
 	local pedestal = prompt.Parent
@@ -165,6 +169,9 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 	if typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow() then
 		return "Hidden"
 	end
+	if viewerRebirths < HeistConfig.MinRebirths then
+		return "Locked"
+	end
 	if pedestal:GetAttribute("GuardedByOwner") == true then
 		return "Guarded"
 	end
@@ -172,12 +179,22 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 end
 
 local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
+	-- The item and its $/s (server's StealLabel), except on the teaser.
+	local pedestal = prompt.Parent
+	local label = pedestal and pedestal:GetAttribute("StealLabel")
+	local objectText = if mode == "Locked" then "Unlocks at Rebirth 1" elseif typeof(label) == "string" then label else ""
+	if prompt.ObjectText ~= objectText then
+		prompt.ObjectText = objectText
+	end
 	if prompt:GetAttribute("Mode") == mode then
 		return
 	end
 	prompt:SetAttribute("Mode", mode)
 	prompt.Enabled = mode ~= "Hidden"
-	if mode == "Guarded" then
+	if mode == "Locked" then
+		prompt.ActionText = "🔒 Steal"
+		prompt.HoldDuration = 0
+	elseif mode == "Guarded" then
 		prompt.ActionText = "Owner is guarding"
 		prompt.HoldDuration = 0
 	else

@@ -302,6 +302,7 @@ PlotLayout.Pedestal = {
 	OrbBobPeriod = 2.4,
 	LabelOffsetY = 8.5, -- filled label, above the pedestal's bottom
 	EmptyLabelOffsetY = 5, -- the small EMPTY pill, above the pedestal's bottom
+	StealMarkerOffsetY = 11.5, -- the heist's red hand marker, above the filled label
 	PromptDistance = 6,
 }
 

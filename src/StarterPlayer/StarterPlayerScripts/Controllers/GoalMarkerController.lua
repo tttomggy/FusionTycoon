@@ -94,6 +94,33 @@ local function resolveTarget(name: string): Instance?
 		end
 		return nil
 	end
+	if name == "NearestEnemyPedestal" then
+		-- The closest pedestal in another lab you could grab right now
+		-- (WorldLabelController marks its StealPrompt Mode "Steal").
+		local folder = plot.Parent
+		local character = localPlayer.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not folder or not root or not root:IsA("BasePart") then
+			return nil
+		end
+		local best: Instance? = nil
+		local bestDistance = math.huge
+		for _, other in folder:GetChildren() do
+			local pedestals = other ~= plot and other:FindFirstChild("Pedestals")
+			if pedestals then
+				for _, pedestal in pedestals:GetChildren() do
+					local prompt = pedestal:FindFirstChild("StealPrompt")
+					if pedestal:IsA("BasePart") and prompt and prompt:GetAttribute("Mode") == "Steal" then
+						local distance = (pedestal.Position - root.Position).Magnitude
+						if distance < bestDistance then
+							best, bestDistance = pedestal, distance
+						end
+					end
+				end
+			end
+		end
+		return best
+	end
 	return plot:FindFirstChild(name)
 end
 
@@ -274,7 +301,7 @@ end
 -- "FirstEmptyPedestal", which is legitimately missing when all are full.
 local function checkTargetExists(name: string, target: Instance?)
 	local plot = getPlot()
-	if target or name == "FirstEmptyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
+	if target or name == "FirstEmptyPedestal" or name == "NearestEnemyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
 		missingSince[name] = nil
 		return
 	end
@@ -374,7 +401,8 @@ function GoalMarkerController.Init()
 	TycoonController.TycoonChanged:Connect(refresh)
 	RunService.Heartbeat:Connect(update)
 	-- Targets that don't exist yet (stations built on claim) and targets that
-	-- move (the first empty pedestal) are re-resolved on a slow timer.
+	-- move (the first empty pedestal, the nearest enemy pedestal) are
+	-- re-resolved on a slow timer.
 	task.spawn(function()
 		while true do
 			task.wait(RESOLVE_INTERVAL)
