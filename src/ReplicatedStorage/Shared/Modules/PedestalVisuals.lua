@@ -162,6 +162,10 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 	if cap and cap:IsA("BasePart") then
 		cap.Material = Enum.Material.SmoothPlastic
 		cap.Color = UITheme.World.StructureLight
+		local lip = cap:FindFirstChild("CapLip")
+		if lip and lip:IsA("BasePart") then
+			lip.Transparency = 1
+		end
 	end
 
 	local elements = pedestal:FindFirstChild(ELEMENTS_FOLDER_NAME)
@@ -212,8 +216,14 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 	local tierColor = FusionConfig.TierAccentColors[tier] or config.GlowColor
 	local cap = pedestal:FindFirstChild("Cap")
 	if cap and cap:IsA("BasePart") then
-		cap.Material = Enum.Material.Neon
+		-- The cap itself stays matte; only the thin lip under it glows.
+		cap.Material = Enum.Material.SmoothPlastic
 		cap.Color = tierColor
+		local lip = cap:FindFirstChild("CapLip")
+		if lip and lip:IsA("BasePart") then
+			lip.Color = tierColor
+			lip.Transparency = 0
+		end
 	end
 	local orb = buildOrb(pedestal, tier, tierColor, elements)
 

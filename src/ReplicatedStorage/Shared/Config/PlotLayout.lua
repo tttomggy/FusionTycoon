@@ -35,8 +35,8 @@ PlotLayout.WALKWAY_TOP_Y = 0.02
 
 PlotLayout.WALL_THICKNESS = 1
 PlotLayout.WALL_HEIGHT = 1.5
-PlotLayout.WALL_STRIP_HEIGHT = 0.25
-PlotLayout.WALL_STRIP_WIDTH = 1
+PlotLayout.WALL_STRIP_HEIGHT = 0.12
+PlotLayout.WALL_STRIP_WIDTH = 0.35
 PlotLayout.GATE_HALF_WIDTH = 7 -- front wall gap, x -7..+7
 
 PlotLayout.GATE_RAMP_WIDTH = 14
@@ -151,6 +151,7 @@ PlotLayout.Dropper = {
 
 PlotLayout.COLLECTOR_SIZE = v3(6, 0.4, 18)
 PlotLayout.COLLECTOR_TOP_Y = 0.2
+PlotLayout.COLLECTOR_EDGE_SIZE = v3(0.3, 0.12, 18) -- Neon strips along its long (Z) sides
 PlotLayout.CASH_POP_HEIGHT = 1 -- "+$X" pop, above the collector's top
 
 --[[ Pedestals ------------------------------------------------------------------- ]]
@@ -158,6 +159,8 @@ PlotLayout.CASH_POP_HEIGHT = 1 -- "+$X" pop, above the collector's top
 PlotLayout.Pedestal = {
 	ColumnSize = v3(3.2, 3.5, 3.2),
 	CapSize = v3(3.6, 0.4, 3.6),
+	CapLipInflate = 0.2, -- lip is (cap + this) wide
+	CapLipHeight = 0.12,
 	OrbCenterY = 5.8, -- above the pedestal's bottom
 	OrbDiameter = {
 		Common = 1.6,
@@ -168,8 +171,8 @@ PlotLayout.Pedestal = {
 	} :: { [string]: number },
 	OrbTransparency = 0.15,
 	InnerOrbScale = 0.65,
-	OrbLightRangeBase = 8,
-	OrbLightRangePerRank = 2,
+	OrbLightRangeBase = 6,
+	OrbLightRangePerRank = 1.5,
 	OrbLightBrightness = 2,
 	OrbSpinDegPerSec = 45,
 	OrbBob = 0.25,

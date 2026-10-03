@@ -1,6 +1,7 @@
 --!strict
--- Lighting mood: late-afternoon golden hour (ClockTime 17.2) with a violet
--- haze, gentle bloom that only catches Neon, and slight contrast/saturation.
+-- Lighting mood: late-afternoon golden hour (ClockTime 17.2) with a soft
+-- violet haze, a light bloom on only the brightest Neon, and slight
+-- contrast/saturation.
 -- Set once at server start. Lighting.Technology can't be set from a script:
 -- set it to Future in Studio.
 local Lighting = game:GetService("Lighting")
@@ -23,9 +24,9 @@ function LightingService:Init()
 	Lighting.ClockTime = 17.2
 	Lighting.GeographicLatitude = 25
 	Lighting.Brightness = 2.4
-	Lighting.Ambient = Color3.fromRGB(70, 62, 110)
-	Lighting.OutdoorAmbient = Color3.fromRGB(120, 110, 160)
-	Lighting.ColorShift_Top = Color3.fromRGB(255, 180, 120)
+	Lighting.Ambient = Color3.fromRGB(58, 54, 82)
+	Lighting.OutdoorAmbient = Color3.fromRGB(118, 112, 140)
+	Lighting.ColorShift_Top = Color3.fromRGB(255, 200, 150)
 	Lighting.ColorShift_Bottom = Color3.fromRGB(60, 40, 100)
 	Lighting.EnvironmentDiffuseScale = 0.5
 	Lighting.EnvironmentSpecularScale = 0.4
@@ -40,9 +41,9 @@ function LightingService:Init()
 	atmosphere.Decay = Color3.fromRGB(90, 70, 150)
 
 	local bloom = getOrCreate("BloomEffect") :: BloomEffect
-	bloom.Intensity = 0.7
-	bloom.Size = 28
-	bloom.Threshold = 1.4 -- only Neon blooms
+	bloom.Intensity = 0.35
+	bloom.Size = 20
+	bloom.Threshold = 2 -- only the brightest Neon blooms
 
 	local colorCorrection = getOrCreate("ColorCorrectionEffect") :: ColorCorrectionEffect
 	colorCorrection.Brightness = 0.02

@@ -354,10 +354,23 @@ local function createCollector(plot: Model, origin: CFrame, player: Player)
 		Size = size,
 		CFrame = PartKit.At(origin, PlotLayout.COLLECTOR, PlotLayout.COLLECTOR_TOP_Y - size.Y / 2),
 		Color = World.AccentGold,
-		Material = Enum.Material.Neon,
 		Parent = plot,
 	})
 	collector.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
+
+	-- Matte strip; the glow is two thin Neon edges along its long sides.
+	local edge = PlotLayout.COLLECTOR_EDGE_SIZE
+	for _, side in { -1, 1 } do
+		local strip = PartKit.Part({
+			Name = "CollectorEdge",
+			Size = edge,
+			CFrame = collector.CFrame * CFrame.new(side * (size.X / 2 - edge.X / 2), size.Y / 2 + edge.Y / 2, 0),
+			Color = World.AccentGold,
+			Material = Enum.Material.Neon,
+			Parent = collector,
+		})
+		PartKit.MakeDecorative(strip)
+	end
 
 	collector.Touched:Connect(function(hit: BasePart)
 		if hit.Parent == nil or hit:GetAttribute("Collected") then
@@ -598,15 +611,26 @@ local function createPedestals(plot: Model, origin: CFrame)
 		pedestal:SetAttribute("BaseSize", pedestal.Size)
 		pedestal:SetAttribute("PedestalIndex", index)
 
-		-- Plate on top: StructureLight while empty, tier colour when filled
+		-- Plate on top: StructureLight while empty, tier colour when filled,
+		-- with a thin Neon lip under it that only shows when filled
 		-- (PedestalVisuals).
-		PartKit.Part({
+		local cap = PartKit.Part({
 			Name = "Cap",
 			Size = p.CapSize,
 			CFrame = pedestal.CFrame * CFrame.new(0, p.ColumnSize.Y / 2 + p.CapSize.Y / 2, 0),
 			Color = World.StructureLight,
 			Parent = pedestal,
 		})
+		local lip = PartKit.Part({
+			Name = "CapLip",
+			Size = Vector3.new(p.CapSize.X + p.CapLipInflate, p.CapLipHeight, p.CapSize.Z + p.CapLipInflate),
+			CFrame = cap.CFrame * CFrame.new(0, -(p.CapSize.Y / 2 + p.CapLipHeight / 2), 0),
+			Color = World.StructureLight,
+			Material = Enum.Material.Neon,
+			Transparency = 1,
+			Parent = cap,
+		})
+		PartKit.MakeDecorative(lip)
 
 		-- Always enabled: the owner's client handles it (picker or remove) and
 		-- every other client hides it (WorldLabelController, OwnerOnly).

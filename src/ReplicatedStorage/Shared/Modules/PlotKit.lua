@@ -88,10 +88,11 @@ function PlotKit.BuildWalls(origin: CFrame, parent: Instance, claimed: boolean):
 		})
 		local strip = PartKit.Part({
 			Name = "WallStrip",
+			-- Full wall length, but only WALL_STRIP_WIDTH across the wall top.
 			Size = Vector3.new(
-				math.max(segment.Length.X, PlotLayout.WALL_STRIP_WIDTH),
+				if segment.Length.X > segment.Length.Z then segment.Length.X else PlotLayout.WALL_STRIP_WIDTH,
 				PlotLayout.WALL_STRIP_HEIGHT,
-				math.max(segment.Length.Z, PlotLayout.WALL_STRIP_WIDTH)
+				if segment.Length.Z > segment.Length.X then segment.Length.Z else PlotLayout.WALL_STRIP_WIDTH
 			),
 			CFrame = PartKit.At(origin, segment.Center, PlotLayout.WALL_HEIGHT + PlotLayout.WALL_STRIP_HEIGHT / 2),
 			Color = if claimed then World.AccentViolet else World.Unclaimed,
