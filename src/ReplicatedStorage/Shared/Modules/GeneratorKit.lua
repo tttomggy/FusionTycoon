@@ -2,16 +2,21 @@
 --[[
 	GeneratorKit
 	------------
-	The five generators in the plot's back-corner bays (PlotLayout.GENERATORS),
-	built by TycoonService. Each is a Model "Generator_<id>" facing +Z:
+	The five generators on the factory line along the left wall
+	(PlotLayout.GENERATORS), built by TycoonService. Each is a Model
+	"Generator_<id>" facing +X, toward the FactoryBelt:
 
 	  * Body   footprint x height, Structure SmoothPlastic, bottom at y 0.
+	  * Spout  a block on the +X face at 70% height with a Neon lip in the
+	           tier colour framing its opening; the client's cash balls
+	           (FactoryController) leave from here.
 	  * Band   a thin ring at 40% height in the tier colour: matte below
 	           level 10, Neon from 10, plus a PointLight at max level.
 	  * Core   the pedestal-orb look (Glass ball around a Neon ball), tagged
 	           FT_Hover so clients spin and bob it.
-	  * Screen a SurfaceGui on the Body's +Z face: name and "LV n" / "MAX",
-	           or a lock while locked.
+	  * Screen a SurfaceGui on the Body's +Z face (the side you see walking
+	           in from the gate): name, "LV n" / "MAX" with the generator's
+	           own income/s under it, or a lock while locked.
 	  * GeneratorLabel  owner-only "LOCKED" / "BUY" panel (BillboardKit).
 	  * GeneratorPrompt owner-only Buy / Upgrade prompt; the client fires
 	           the existing RequestUpgrade remote from it.
@@ -42,16 +47,21 @@ GeneratorKit.ID_ATTRIBUTE = "GeneratorId"
 
 type Parts = {
 	Body: BasePart,
+	Spout: BasePart,
+	SpoutLips: { BasePart },
 	Band: BasePart,
 	Light: PointLight,
 	Outer: BasePart,
 	Inner: BasePart,
 	NameText: TextLabel,
 	LevelText: TextLabel,
+	IncomeText: TextLabel,
 	Lock: Frame,
 	Label: BillboardKit.GeneratorLabel,
 	Prompt: ProximityPrompt,
 }
+
+local LIP_DEPTH = 0.05 -- how far the spout's Neon lip stands proud of its face
 
 -- Built parts per model, so SetState never searches by name.
 local partsByModel: { [Model]: Parts } = {}
@@ -62,6 +72,13 @@ end
 
 function GeneratorKit.GetTierColor(tier: string): Color3
 	return FusionConfig.TierAccentColors[tier] or World.StructureLight
+end
+
+-- The Spout opening's centre (where balls leave), relative to the Body's
+-- centre. FactoryController uses the same numbers.
+function GeneratorKit.GetSpoutOffset(spot: PlotLayout.GeneratorSpot): Vector3
+	local g = PlotLayout.Generator
+	return Vector3.new(spot.Footprint / 2 + g.SpoutSize, spot.Height * g.SpoutAt - spot.Height / 2, 0)
 end
 
 -- The core's centre, relative to the Body's centre.
@@ -127,12 +144,13 @@ local function buildLock(parent: Instance): Frame
 	return lock
 end
 
--- Name (Body, Muted) over a dark Ink panel with the level (Display, Cash),
--- kept above the band. Returns (name, level, lock).
-local function buildScreen(body: BasePart, displayName: string): (TextLabel, TextLabel, Frame)
+-- Name (Body, Muted) over a dark Ink panel with the level (Display, Cash)
+-- and the income/s under it, kept above the band. Returns (name, level,
+-- income, lock).
+local function buildScreen(body: BasePart, displayName: string): (TextLabel, TextLabel, TextLabel, Frame)
 	local gui = Instance.new("SurfaceGui")
 	gui.Name = "Screen"
-	gui.Face = Enum.NormalId.Back -- the +Z face, toward the lab centre
+	gui.Face = Enum.NormalId.Back -- the +Z face, seen walking in from the gate
 	gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
 	gui.PixelsPerStud = PlotLayout.Generator.ScreenPixelsPerStud
 	gui.LightInfluence = 0
@@ -148,13 +166,14 @@ local function buildScreen(body: BasePart, displayName: string): (TextLabel, Tex
 	panel.Name = "Panel"
 	panel.BackgroundColor3 = Colors.Ink
 	panel.BorderSizePixel = 0
-	panel.Position = UDim2.fromScale(0.12, 0.2)
-	panel.Size = UDim2.fromScale(0.76, 0.3)
+	panel.Position = UDim2.fromScale(0.1, 0.2)
+	panel.Size = UDim2.fromScale(0.8, 0.34)
 	panel.Parent = gui
-	corner(panel, UDim.new(0.18, 0))
+	corner(panel, UDim.new(0.16, 0))
 
-	local level = newText(panel, "Level", Fonts.Display, Colors.Cash, 0.1, 0.8)
-	return name, level, buildLock(panel)
+	local level = newText(panel, "Level", Fonts.Display, Colors.Cash, 0.06, 0.54)
+	local income = newText(panel, "Income", Fonts.Body, Colors.Text, 0.62, 0.32)
+	return name, level, income, buildLock(panel)
 end
 
 --[[ Build ------------------------------------------------------------------- ]]
@@ -214,6 +233,35 @@ function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model
 	light.Enabled = false
 	light.Parent = band
 
+	-- Spout on the +X face, with a Neon lip (four thin strips) framing its
+	-- opening.
+	local spoutCenter = body.CFrame * CFrame.new(GeneratorKit.GetSpoutOffset(spot) - Vector3.new(g.SpoutSize / 2, 0, 0))
+	local spout = PartKit.Part({
+		Name = "Spout",
+		Size = Vector3.one * g.SpoutSize,
+		CFrame = spoutCenter,
+		Color = World.StructureLight,
+		Parent = model,
+	})
+	local lips: { BasePart } = {}
+	local face = spoutCenter * CFrame.new(g.SpoutSize / 2 + LIP_DEPTH / 2, 0, 0)
+	local edge = g.SpoutSize / 2 - g.SpoutLipWidth / 2
+	for _, offset in { Vector3.new(0, edge, 0), Vector3.new(0, -edge, 0), Vector3.new(0, 0, edge), Vector3.new(0, 0, -edge) } do
+		local horizontal = offset.Y ~= 0
+		local lip = PartKit.Part({
+			Name = "SpoutLip",
+			Size = if horizontal
+				then Vector3.new(LIP_DEPTH, g.SpoutLipWidth, g.SpoutSize)
+				else Vector3.new(LIP_DEPTH, g.SpoutSize, g.SpoutLipWidth),
+			CFrame = face * CFrame.new(offset),
+			Color = tierColor,
+			Material = Enum.Material.Neon,
+			Parent = spout,
+		})
+		PartKit.MakeDecorative(lip)
+		table.insert(lips, lip)
+	end
+
 	local coreCenter = body.CFrame * CFrame.new(GeneratorKit.GetCoreOffset(spot))
 	local diameter = spot.Footprint * g.CoreScale
 	local core = Instance.new("Model")
@@ -243,19 +291,22 @@ function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model
 	PartKit.SetHover(core, g.CoreSpinDegPerSec, g.CoreBob, g.CoreBobPeriod, "Bob")
 	core.Parent = model
 
-	local nameText, levelText, lock = buildScreen(body, generator.Name)
+	local nameText, levelText, incomeText, lock = buildScreen(body, generator.Name)
 
 	local labelOffset = GeneratorKit.GetCoreOffset(spot) + Vector3.new(0, diameter / 2 + g.LabelAboveCore, 0)
 	local label = BillboardKit.GeneratorLabel(body, labelOffset, g.LabelMaxDistance)
 
 	partsByModel[model] = {
 		Body = body,
+		Spout = spout,
+		SpoutLips = lips,
 		Band = band,
 		Light = light,
 		Outer = outer,
 		Inner = inner,
 		NameText = nameText,
 		LevelText = levelText,
+		IncomeText = incomeText,
 		Lock = lock,
 		Label = label,
 		Prompt = newPrompt(body, id),
@@ -270,27 +321,36 @@ end
 
 --[[ States ------------------------------------------------------------------ ]]
 
+local function setLipsVisible(parts: Parts, visible: boolean)
+	for _, lip in parts.SpoutLips do
+		lip.Transparency = if visible then 0 else 1
+	end
+end
+
 local function setGhost(parts: Parts, color: Color3, transparency: number)
-	for _, part in { parts.Body, parts.Outer } do
+	for _, part in { parts.Body, parts.Spout, parts.Outer } do
 		part.Material = Enum.Material.ForceField
 		part.Color = color
 		part.Transparency = transparency
 	end
 	parts.Inner.Transparency = 1
 	parts.Band.Transparency = 1
+	setLipsVisible(parts, false)
 	parts.Light.Enabled = false
+	parts.IncomeText.Visible = false
 end
 
--- Restyles `model` for `level` (0 = not bought) and `unlocked`. Cheap to
--- call on every sync: it does nothing when neither changed.
-function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean)
+-- Restyles `model` for `level` (0 = not bought), `unlocked` and the
+-- owner's `multiplier` (for the income line). Cheap to call on every sync:
+-- it does nothing when none of them changed.
+function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean, multiplier: number)
 	local parts = partsByModel[model]
 	local id = model:GetAttribute(GeneratorKit.ID_ATTRIBUTE)
 	local generator = typeof(id) == "string" and TycoonConfig.GetGeneratorById(id) or nil
 	if not parts or not generator then
 		return
 	end
-	local stateKey = ("%d:%s"):format(level, tostring(unlocked))
+	local stateKey = ("%d:%s:%s"):format(level, tostring(unlocked), tostring(multiplier))
 	if model:GetAttribute("StateKey") == stateKey then
 		return
 	end
@@ -334,6 +394,10 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean)
 	parts.Body.Material = Enum.Material.SmoothPlastic
 	parts.Body.Color = World.Structure
 	parts.Body.Transparency = 0
+	parts.Spout.Material = Enum.Material.SmoothPlastic
+	parts.Spout.Color = World.StructureLight
+	parts.Spout.Transparency = 0
+	setLipsVisible(parts, true)
 	parts.Outer.Material = Enum.Material.Glass
 	parts.Outer.Color = tierColor
 	parts.Outer.Transparency = g.CoreTransparency
@@ -342,6 +406,8 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean)
 	parts.Band.Material = if level >= g.NeonFromLevel then Enum.Material.Neon else Enum.Material.SmoothPlastic
 	parts.Light.Enabled = isMax
 	parts.LevelText.Text = if isMax then "MAX" else ("LV %d"):format(level)
+	parts.IncomeText.Text = ("%s/s"):format(NumberFormat.Money(TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier))
+	parts.IncomeText.Visible = true
 	parts.Label.Gui.Enabled = false
 	prompt.ActionText = "Upgrade"
 	prompt.ObjectText = if isMax then "MAX" else ("LV %d → %d · %s"):format(level, level + 1, cost)

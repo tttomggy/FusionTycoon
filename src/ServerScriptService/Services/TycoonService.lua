@@ -548,10 +548,11 @@ local function refreshGenerators(player: Player)
 	if not plot or not levels or plot:GetAttribute("Claimed") ~= true then
 		return
 	end
+	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
 	for _, generator in TycoonConfig.Generators do
 		local model = plot:FindFirstChild(GeneratorKit.GetModelName(generator.Id))
 		if model and model:IsA("Model") then
-			GeneratorKit.SetState(model, levels[generator.Id] or 0, TycoonConfig.IsUnlocked(generator, levels))
+			GeneratorKit.SetState(model, levels[generator.Id] or 0, TycoonConfig.IsUnlocked(generator, levels), multiplier)
 		end
 	end
 end
