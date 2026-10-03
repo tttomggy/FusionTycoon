@@ -44,20 +44,28 @@ local FusePanel = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local MAX_SIZE = Vector2.new(760, 470)
+-- 860 x 520 on desktop; on a phone the Modal's 92% x 90% fit takes over
+-- (844 x 390 after the 0.8 UIScale). No text in the panel is under 12 px.
+local MAX_SIZE = Vector2.new(860, 520)
 local DISPLAY_ORDER = 115 -- under Toasts (120) and Results (130)
 local FUSE_PROMPT_NAME = "FusePrompt"
 local LEFT_WIDTH = 0.44
 local COLUMN_GAP = 14
 local BAR_HEIGHT = 56
-local TAB_SIZE = Vector2.new(124, UITheme.MinTapSize)
-local CARD_SIZE = Vector2.new(88, 108)
+local TAB_HEIGHT = 50 -- tier name over its count; five equal tabs, no scroll
+local TAB_GAP = 6
+local CARD_SIZE = Vector2.new(100, 112)
+local CHIP_HEIGHT = 28
+local CHIP_GAP = 4
 local FLY_SECONDS = 0.35
 
--- Chamber geometry (px) per layout.
+-- Chamber geometry (px) per layout. Height = 2 x Radius + Slot. Desktop
+-- meets the legibility floor (slots 64, silhouette 96, chance 48); the
+-- phone column is ~270 px tall, so it shrinks to keep the chance, recipe
+-- and chips in view without scrolling.
 local HEX = {
-	Desktop = { Height = 190, Radius = 70, Slot = 52, Center = 66 },
-	Phone = { Height = 150, Radius = 54, Slot = 42, Center = 50 },
+	Desktop = { Height = 232, Radius = 84, Slot = 64, Center = 96, ChanceSize = 48 },
+	Phone = { Height = 160, Radius = 56, Slot = 48, Center = 60, ChanceSize = 40 },
 }
 local CHANCE_SAFE = 0.75 -- Cash colour at or above
 local CHANCE_OK = 0.40 -- Gold colour at or above; Danger below
@@ -72,7 +80,7 @@ local chanceLabel: TextLabel
 local recipeLabel: TextLabel
 local chipsRow: Frame
 local mutationLabel: TextLabel
-local tabsFrame: ScrollingFrame
+local tabsFrame: Frame
 local grid: ScrollingFrame
 local fuseButton: TextButton
 local fuseAllButton: TextButton
@@ -185,6 +193,8 @@ end
 local function layoutHex()
 	local hex = if isPhone then HEX.Phone else HEX.Desktop
 	hexFrame.Size = UDim2.new(1, 0, 0, hex.Height)
+	chanceLabel.TextSize = hex.ChanceSize
+	chanceLabel.Size = UDim2.new(1, 0, 0, hex.ChanceSize + 4)
 	for index, slot in slots do
 		local angle = math.rad(-90 + (index - 1) * 60)
 		slot.Size = UDim2.fromOffset(hex.Slot, hex.Slot)
@@ -247,18 +257,22 @@ local function refreshChamber()
 	end
 	for chipCount = FusionConfig.MinFusionInputs, FusionConfig.MaxFusionInputs do
 		local current = chipCount == count
-		UIKit.Pill({
+		-- Equal-width cells (the grid layout sizes them), so five always fit.
+		local chip = UIKit.Label({
 			Name = "Chip" .. chipCount,
-			Parent = chipsRow,
 			Text = ("%d · %s"):format(chipCount, percent(FusionConfig.GetFusionChance(selectedTier, chipCount))),
-			Color = if current then Colors.VioletPill else Colors.Panel2,
-			TextColor3 = if current then Colors.Text else Colors.Muted,
 			Font = Fonts.BodyHeavy,
-			TextSize = 12,
-			Height = 24,
+			TextSize = 14,
+			TextColor3 = if current then Colors.Text else Colors.Muted,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			BackgroundTransparency = 0,
 			LayoutOrder = chipCount,
 			ZIndex = chipsRow.ZIndex + 1,
 		})
+		chip.BackgroundColor3 = if current then Colors.VioletPill else Colors.Panel2
+		UIKit.Corner(chip, 999)
+		UIKit.Stroke(chip, 2)
+		chip.Parent = chipsRow
 	end
 
 	local mutation = mutationText(items)
@@ -309,7 +323,7 @@ local function buildCard(item: any, order: number)
 	})
 	UIKit.MutationCardStroke(body, item.Mutation)
 	local z = body.ZIndex + 1
-	local orb = UIKit.TierOrb(item.Tier, 44, nil, item.Mutation)
+	local orb = UIKit.TierOrb(item.Tier, 48, nil, item.Mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 8)
 	orb.ZIndex = z
@@ -320,20 +334,23 @@ local function buildCard(item: any, order: number)
 		Font = Fonts.Display,
 		TextSize = 12,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(4, 58),
-		Size = UDim2.new(1, -8, 0, 28),
+		Position = UDim2.fromOffset(4, 60),
+		Size = UDim2.new(1, -8, 0, 30),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = z,
 		Stroke = 1.5,
 		Parent = body,
 	})
+	-- The name already says the mutation; the pill carries the multiplier
+	-- so it stays legible at 12 px inside the card.
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = item.Mutation,
+		Label = if item.Mutation then ("×%d"):format(MutationConfig.GetMultiplier(item.Mutation)) else nil,
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -4),
-		TextSize = 10,
-		Height = 16,
+		TextSize = 12,
+		Height = 18,
 		ZIndex = z + 1,
 	})
 	if chosen then
@@ -403,9 +420,7 @@ local function refreshTabs()
 		local current = tier == selectedTier
 		UIKit.SetButton(button, {
 			Style = if current then "Violet" elseif needed then "Disabled" else "Blue",
-			Text = if needed
-				then ("🔒 %s"):format(tier)
-				else ("%s %d"):format(tier, #InventoryController.GetFusableItemsByTier(tier)),
+			SubText = if needed then "🔒" else tostring(#InventoryController.GetFusableItemsByTier(tier)),
 			TextColor3 = if needed and not current then Colors.Muted else Colors.Text,
 		})
 	end
@@ -528,9 +543,9 @@ local function buildChamber(column: ScrollingFrame)
 	recipeLabel = UIKit.Label({
 		Name = "Recipe",
 		Font = Fonts.Display,
-		TextSize = 16,
+		TextSize = 18,
 		RichText = true,
-		Size = UDim2.new(1, 0, 0, 20),
+		Size = UDim2.new(1, 0, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 3,
 		ZIndex = column.ZIndex + 1,
@@ -541,14 +556,14 @@ local function buildChamber(column: ScrollingFrame)
 	chipsRow = Instance.new("Frame")
 	chipsRow.Name = "Chips"
 	chipsRow.BackgroundTransparency = 1
-	chipsRow.Size = UDim2.new(1, 0, 0, 26)
+	chipsRow.Size = UDim2.new(1, 0, 0, CHIP_HEIGHT)
 	chipsRow.LayoutOrder = 4
 	chipsRow.ZIndex = column.ZIndex + 1
 	chipsRow.Parent = column
-	local chipLayout = Instance.new("UIListLayout")
-	chipLayout.FillDirection = Enum.FillDirection.Horizontal
-	chipLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	chipLayout.Padding = UDim.new(0, 4)
+	local chipCount = FusionConfig.MaxFusionInputs - FusionConfig.MinFusionInputs + 1
+	local chipLayout = Instance.new("UIGridLayout")
+	chipLayout.CellSize = UDim2.new(1 / chipCount, -CHIP_GAP * (chipCount - 1) / chipCount, 0, CHIP_HEIGHT)
+	chipLayout.CellPadding = UDim2.fromOffset(CHIP_GAP, 0)
 	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	chipLayout.Parent = chipsRow
 
@@ -556,9 +571,9 @@ local function buildChamber(column: ScrollingFrame)
 		Name = "FailRule",
 		Text = "Fail: keep your best orb, lose the rest",
 		Font = Fonts.Body,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.Faint,
-		Size = UDim2.new(1, 0, 0, 16),
+		Size = UDim2.new(1, 0, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 5,
 		ZIndex = column.ZIndex + 1,
@@ -567,10 +582,10 @@ local function buildChamber(column: ScrollingFrame)
 	mutationLabel = UIKit.Label({
 		Name = "MutationRule",
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.GoldLabel,
 		TextWrapped = true,
-		Size = UDim2.new(1, 0, 0, 30),
+		Size = UDim2.new(1, 0, 0, 34),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 6,
 		ZIndex = column.ZIndex + 1,
@@ -581,32 +596,30 @@ local function buildChamber(column: ScrollingFrame)
 end
 
 local function buildPicker(column: Frame)
-	tabsFrame = Instance.new("ScrollingFrame")
+	-- One row of equal-width tabs (no scrolling): name on top, count under.
+	local tiers = fusableTiers()
+	local tabCount = #tiers
+	tabsFrame = Instance.new("Frame")
 	tabsFrame.Name = "Tabs"
 	tabsFrame.BackgroundTransparency = 1
-	tabsFrame.BorderSizePixel = 0
-	tabsFrame.Size = UDim2.new(1, 0, 0, TAB_SIZE.Y + UITheme.SmallShadowOffset + 8)
-	tabsFrame.ScrollingDirection = Enum.ScrollingDirection.X
-	tabsFrame.AutomaticCanvasSize = Enum.AutomaticSize.X
-	tabsFrame.CanvasSize = UDim2.new()
-	tabsFrame.ScrollBarThickness = 4
-	tabsFrame.ScrollBarImageColor3 = Colors.Faint
+	tabsFrame.Size = UDim2.new(1, 0, 0, TAB_HEIGHT + UITheme.SmallShadowOffset + 4)
 	tabsFrame.ZIndex = column.ZIndex + 1
 	tabsFrame.Parent = column
-	UIKit.Padding(tabsFrame, 2, 4, 6, 2)
 	local tabLayout = Instance.new("UIListLayout")
 	tabLayout.FillDirection = Enum.FillDirection.Horizontal
-	tabLayout.Padding = UDim.new(0, 8)
+	tabLayout.Padding = UDim.new(0, TAB_GAP)
 	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	tabLayout.Parent = tabsFrame
-	for order, tier in fusableTiers() do
+	for order, tier in tiers do
 		tabButtons[tier] = UIKit.Button({
 			Name = tier .. "Tab",
 			Parent = tabsFrame,
 			Style = "Blue",
 			Text = tier,
+			SubText = "0",
 			TextSize = 14,
-			Size = UDim2.fromOffset(TAB_SIZE.X, TAB_SIZE.Y),
+			SubTextSize = 12,
+			Size = UDim2.new(1 / tabCount, -TAB_GAP * (tabCount - 1) / tabCount, 0, TAB_HEIGHT),
 			LayoutOrder = order,
 			ShadowOffset = UITheme.SmallShadowOffset,
 			ZIndex = tabsFrame.ZIndex + 1,
@@ -621,7 +634,7 @@ local function buildPicker(column: Frame)
 		})
 	end
 
-	local gridTop = TAB_SIZE.Y + UITheme.SmallShadowOffset + 14
+	local gridTop = TAB_HEIGHT + UITheme.SmallShadowOffset + 10
 	grid = Instance.new("ScrollingFrame")
 	grid.Name = "Grid"
 	grid.BackgroundTransparency = 1
@@ -702,7 +715,7 @@ local function buildBar(content: Frame)
 		Text = "FUSE ALL",
 		SubText = "pairs · skips mutated",
 		TextSize = 15,
-		SubTextSize = 10,
+		SubTextSize = 12,
 		Size = UDim2.new(0, allWidth, 1, 0),
 		LayoutOrder = 4,
 		ZIndex = bar.ZIndex,
