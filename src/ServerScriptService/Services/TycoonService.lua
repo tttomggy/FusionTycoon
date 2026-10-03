@@ -870,18 +870,25 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 			if item then
 				local def = ItemConfig.GetItemById(item.ItemId)
 				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
+				local rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					Mutation = item.Mutation,
 					ItemName = name,
-					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
+					Rate = rate,
 					Stolen = PlayerDataService.IsItemCarried(player, item.Uid),
 				})
+				-- What a thief sees on the StealPrompt: the item and its value.
+				-- Also an attribute, so the client can put it back after
+				-- showing its own text (the Rebirth-0 teaser).
+				local stealLabel = ("%s · +%s/s"):format(name, NumberFormat.Money(rate))
+				pedestal:SetAttribute("StealLabel", stealLabel)
 				if steal and steal:IsA("ProximityPrompt") then
-					steal.ObjectText = name
+					steal.ObjectText = stealLabel
 				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
+				pedestal:SetAttribute("StealLabel", "")
 				if steal and steal:IsA("ProximityPrompt") then
 					steal.ObjectText = ""
 				end

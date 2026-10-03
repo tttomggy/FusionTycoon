@@ -8,9 +8,15 @@
 	    just which pedestal: { OwnerUserId, PedestalIndex }. A rejection comes
 	    back as HeistEnded { Outcome = "Rejected", Reason } -> a toast.
 	  * Every client, for every carrying player (the server sets Heist*
-	    attributes on the Player): a cosmetic copy of the pedestal orb 3 studs
-	    over their head (mutation shell included), a 40-stud Danger beam up
-	    from it, and a "THIEF · 31s" pill.
+	    attributes on the Player), the thief's own client included: a
+	    cosmetic copy of the pedestal orb 3 studs over their head (mutation
+	    shell and satellites), welded to the head so it follows animation
+	    and jumps, a 40-stud Danger beam up from it, and a big "<item> · 31s"
+	    chip under a THIEF caption. The orb lives in Workspace, not the
+	    character, so first-person LocalTransparencyModifier never hides it.
+	  * A successful grab, on the thief's screen: a full-width "🫳 YOU GRABBED
+	    <item>! RUN HOME!" banner for GRAB_BANNER_SECONDS, a grab sound and a
+	    +8 FOV punch, then the GET HOME! bar.
 	  * The thief: an orange "GET HOME!" banner (item, seconds, a draining
 	    bar) and the goal arrow on their own gate.
 	  * The victim: a red "THIEF IN YOUR LAB!" banner with a live distance, a
@@ -59,7 +65,15 @@ local STEAL_PROMPT_NAME = "StealPrompt"
 local CARRY_HEIGHT_ABOVE_HEAD = 3
 local BEAM_LENGTH = 40
 local BEAM_WIDTH = 0.6
-local PILL_SIZE = UDim2.fromOffset(150, 36)
+local PILL_SIZE = UDim2.fromOffset(300, 64)
+local GRAB_BANNER_SECONDS = 1.5
+local GRAB_BANNER_HEIGHT = 96
+local FOV_PUNCH = 8
+local FOV_PUNCH_SECONDS = 0.3
+-- The project's one sound id proven to load (a free library whoosh can't
+-- be verified to load from here), pitched up into a quick pickup blip.
+local GRAB_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+local GRAB_SOUND_SPEED = 1.6
 local PILL_MAX_DISTANCE = 200
 local BANNER_SIZE = Vector2.new(480, 92)
 local BANNER_TOP = 118 -- under the server banners (AnnouncementController)
@@ -196,17 +210,28 @@ local function buildPill(orb: BasePart): TextLabel
 	gui.MaxDistance = PILL_MAX_DISTANCE
 	gui.Adornee = orb
 	gui.Parent = orb
+	UIKit.Label({
+		Name = "Caption",
+		Text = "THIEF",
+		Font = Fonts.Display,
+		TextSize = 16,
+		TextColor3 = Colors.Danger,
+		Size = UDim2.new(1, 0, 0, 20),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		Parent = gui,
+	})
 	local label = UIKit.Pill({
 		Name = "Text",
 		Parent = gui,
-		Text = "THIEF",
+		Text = "",
 		Gradient = UITheme.Gradients.Heist,
 		Font = Fonts.Display,
-		TextSize = 18,
-		Height = 32,
+		TextSize = 22,
+		Height = 38,
 		TextStroke = 1.5,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 22),
 	})
 	return label
 end
@@ -358,8 +383,9 @@ end
 local function updatePills()
 	for player, visual in visuals do
 		local endsAt = player:GetAttribute("HeistEndsAt")
+		local name = player:GetAttribute("HeistItemName")
 		if typeof(endsAt) == "number" then
-			visual.Pill.Text = ("THIEF · %ds"):format(secondsLeft(endsAt))
+			visual.Pill.Text = ("%s · %ds"):format(if typeof(name) == "string" then name else "Loot", secondsLeft(endsAt))
 		end
 	end
 end
@@ -469,6 +495,59 @@ local function updateBanner()
 	end
 end
 
+-- The grab moment on the thief's own screen: a full-width banner, a pickup
+-- blip and a quick FOV punch. Returns once the banner has shown.
+local function playGrabMoment(itemName: string)
+	local holder = Instance.new("Frame")
+	holder.Name = "GrabBanner"
+	holder.AnchorPoint = Vector2.new(0.5, 0)
+	holder.Position = UDim2.new(0.5, 0, 0, BANNER_TOP)
+	holder.Size = UDim2.new(1, 0, 0, GRAB_BANNER_HEIGHT)
+	holder.BackgroundColor3 = Colors.White
+	holder.BorderSizePixel = 0
+	holder.ZIndex = 5
+	holder.Parent = screenGui
+	UIKit.PairGradient(holder, UITheme.Gradients.Orange, 0)
+	UIKit.Stroke(holder, UITheme.Stroke.Modal)
+	UIKit.Label({
+		Name = "Text",
+		Text = ("🫳 YOU GRABBED %s! RUN HOME!"):format(itemName:upper()),
+		Font = Fonts.Display,
+		TextSize = 36,
+		TextScaled = true,
+		Position = UDim2.fromOffset(16, 12),
+		Size = UDim2.new(1, -32, 1, -24),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 6,
+		Stroke = UITheme.Stroke.Text,
+		Parent = holder,
+	})
+	UIKit.PopIn(holder)
+
+	local sound = Instance.new("Sound")
+	sound.SoundId = GRAB_SOUND_ID
+	sound.PlaybackSpeed = GRAB_SOUND_SPEED
+	sound.Volume = 1
+	sound.Parent = screenGui
+	sound:Play()
+	sound.Ended:Once(function()
+		sound:Destroy()
+	end)
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		local base = camera.FieldOfView
+		local half = TweenInfo.new(FOV_PUNCH_SECONDS / 2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out, 0, true)
+		TweenService:Create(camera, half, { FieldOfView = base + FOV_PUNCH }):Play()
+	end
+
+	task.delay(GRAB_BANNER_SECONDS, function()
+		UIKit.PopOut(holder).Completed:Once(function()
+			holder:Destroy()
+		end)
+	end)
+end
+
 local function playAlarm()
 	task.spawn(function()
 		for _ = 1, ALARM_PINGS do
@@ -521,8 +600,19 @@ local function onHeistStarted(payload: any)
 		GraceEndsAt = tonumber(payload.GraceEndsAt) or 0,
 	}
 	active = started
-	buildBanner(isThief)
-	updateBanner()
+	if isThief then
+		-- The big grab banner first, then the GET HOME! bar (if still carrying).
+		playGrabMoment(tostring(started.Item.Name))
+		task.delay(GRAB_BANNER_SECONDS, function()
+			if active == started then
+				buildBanner(true)
+				updateBanner()
+			end
+		end)
+	else
+		buildBanner(false)
+		updateBanner()
+	end
 	if isThief then
 		local plot = getOwnPlot()
 		local gate = plot and plot:FindFirstChild("SignGate")
