@@ -21,7 +21,11 @@
 
 	Your own plot only: each arriving ball adds income/s x multiplier x
 	interval to a running total, popped as one "+$X" over the collector
-	every POP_WINDOW seconds.
+	every POP_WINDOW seconds. Pedestal income has no balls, so each of your
+	filled pedestals within PEDESTAL_POP_RADIUS pops its own "+$X" (income
+	x multiplier x PEDESTAL_POP_SECONDS) over its orb every
+	PEDESTAL_POP_SECONDS. Collector + pedestal pops together add up to the
+	HUD's income.
 ]]
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -38,6 +42,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
 local TycoonController = require(script.Parent.TycoonController)
+local InventoryController = require(script.Parent.InventoryController)
 local HudController = require(script.Parent.HudController)
 
 local FactoryController = {}
@@ -50,6 +55,9 @@ local POP_WINDOW = 0.5
 local MAX_BALLS_PER_PLOT = 60
 local ACTIVE_RADIUS = 120
 local PARKED = CFrame.new(0, -1000, 0) -- where pooled balls wait, out of sight
+local PEDESTAL_POP_SECONDS = 2
+local PEDESTAL_POP_RADIUS = 60
+local PEDESTAL_POP_ABOVE_ORB = 1
 
 type Ball = {
 	Part: BasePart,
@@ -83,6 +91,7 @@ local movedCFrames: { CFrame } = {}
 local pendingValue = 0
 local pendingTier: string? = nil
 local popClock = 0
+local pedestalPopClock = 0
 
 --[[ Pool ------------------------------------------------------------------------ ]]
 
@@ -293,6 +302,45 @@ local function popCollector(dt: number)
 	pendingTier = nil
 end
 
+-- Every PEDESTAL_POP_SECONDS: one pop per filled pedestal of yours near
+-- the camera, over its orb, in the item's tier light colour.
+local function popPedestals(dt: number, cameraPosition: Vector3)
+	pedestalPopClock += dt
+	if pedestalPopClock < PEDESTAL_POP_SECONDS then
+		return
+	end
+	pedestalPopClock = 0
+	local own: PlotState? = nil
+	for _, state in plots do
+		if state.IsOwn then
+			own = state
+		end
+	end
+	local folder = own and own.Model:FindFirstChild("Pedestals")
+	if not folder then
+		return
+	end
+	local byUid: { [string]: any } = {}
+	for _, item in InventoryController.GetInventory() do
+		byUid[item.Uid] = item
+	end
+	local multiplier = TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	for index, uid in TycoonController.GetPedestalDisplays() do
+		local item = byUid[uid]
+		local pedestal = folder:FindFirstChild("Pedestal" .. index)
+		local elements = pedestal and pedestal:FindFirstChild("PedestalVisualElements")
+		local group = elements and elements:FindFirstChild("OrbGroup")
+		local orb = group and group:FindFirstChild("Orb")
+		if item and orb and orb:IsA("BasePart") and (orb.Position - cameraPosition).Magnitude <= PEDESTAL_POP_RADIUS then
+			local value = TycoonConfig.GetPedestalCashPerSecond(item.Tier) * multiplier * PEDESTAL_POP_SECONDS
+			if value > 0 then
+				local top = orb.Position + Vector3.new(0, orb.Size.Y / 2 + PEDESTAL_POP_ABOVE_ORB, 0)
+				HudController.FloatPop(top, "+" .. NumberFormat.Money(value), UITheme.GetTierLight(item.Tier))
+			end
+		end
+	end
+end
+
 --[[ Frame -------------------------------------------------------------------------- ]]
 
 local function step(dt: number)
@@ -318,6 +366,7 @@ local function step(dt: number)
 		Workspace:BulkMoveTo(movedParts, movedCFrames, Enum.BulkMoveMode.FireCFrameChanged)
 	end
 	popCollector(dt)
+	popPedestals(dt, cameraPosition)
 end
 
 function FactoryController.Init()

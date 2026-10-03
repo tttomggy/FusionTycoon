@@ -533,7 +533,7 @@ end
 
 --[[ Factory line ---------------------------------------------------------------------- ]]
 
--- The belt, the collector (with its owner-only income label) and the five
+-- The belt, the collector (with its owner-only generator-income label) and the five
 -- generators, built once on claim. The generators are restyled from the
 -- player's levels on every sync; the cash balls are client-side.
 local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
@@ -565,9 +565,13 @@ local function refreshFactoryLine(player: Player)
 	if not plot or not levels or plot:GetAttribute("Claimed") ~= true then
 		return
 	end
+	-- Generator income only (what the balls add up to); pedestals pop their
+	-- own share on the client. Same formula as the payout, minus pedestals.
 	local label = collectorLabelByUserId[player.UserId]
 	if label then
-		label.SetPill(("+%s/s"):format(NumberFormat.Money(PlayerDataService.GetPassiveCashPerSecond(player))))
+		local generatorIncome =
+			TycoonConfig.GetPassiveCashPerSecond(levels, {}, PlayerDataService.GetCashMultiplierLevel(player))
+		label.SetPill(("+%s/s"):format(NumberFormat.Money(generatorIncome)))
 	end
 	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
 	for _, generator in TycoonConfig.Generators do

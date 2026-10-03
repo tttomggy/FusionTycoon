@@ -305,13 +305,20 @@ otherwise.
   levels: its balls come visibly faster (one every 2 s at LV 1, one every
   0.5 s at LV 25). Higher-tier generators drop bigger, brighter balls.
   Legendary and Mythic balls light the belt.
-- [ ] **Pops match income.** With **no items on pedestals**, watch the
-  Collector for about 10 s.
+- [ ] **Collector pops match generator income.** With **no items on
+  pedestals**, watch the Collector for about 10 s.
   - [ ] Its pops (one every 0.5 s) add up to roughly the HUD's **$X/s**
     × 10.
-  - [ ] With items displayed, the pops cover generator income only
-    (pedestal income isn't a ball). The COLLECTOR label's **+$X/s** and
-    the HUD still show the total.
+  - [ ] The COLLECTOR label's **+$X/s** shows generator income only (the
+    balls' total). The HUD shows the full total.
+- [ ] **Pedestal pops.** Display items. Every 2 s each filled pedestal of
+  yours within about 60 studs floats one **+$X** over its orb, in the
+  item's tier light colour (pedestal income × multiplier × 2). Other
+  players don't see them.
+- [ ] **Collector + pedestal pops match the HUD.** With items displayed,
+  stand where you can see the collector and the pedestals for about 10 s.
+  The collector pops plus the pedestal pops together add up to roughly the
+  HUD's **$X/s** × 10.
 - [ ] **Cash still comes from the server.** The HUD cash keeps counting up
   every second at the same rate whether or not you're watching the balls,
   including from more than 120 studs away.
