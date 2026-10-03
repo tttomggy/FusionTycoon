@@ -1197,6 +1197,19 @@ end
 
 -- Exposed so AnnouncementController can skip the banner for these cases.
 -- Epic+ tiers, and Diamond/Rainbow at any tier.
+-- The big card for an item granted outside a pull or fusion (a meteor core,
+-- an admin gift): `caption` over the tier name, the earn rate under it.
+function ResultController.ShowItemCard(caption: string, item: any, description: string?)
+	if typeof(item) ~= "table" or typeof(item.Tier) ~= "string" or typeof(item.Uid) ~= "string" then
+		return
+	end
+	showBigCard({
+		Caption = caption,
+		Item = item,
+		Description = description or ("Earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(item))),
+	})
+end
+
 function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean
 	return FusionConfig.IsMajorReveal(tier, mutation)
 end

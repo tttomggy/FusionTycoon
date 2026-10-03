@@ -842,13 +842,15 @@ local function refreshFactoryLine(player: Player)
 	end
 	-- Pedestal rates include the income multiplier (pad x rebirth x Index).
 	TycoonService.RefreshPedestalLabels(player)
-	-- The odds board's fusion mutation line scales with the owner's luck.
+	-- The odds board's fusion mutation line scales with the owner's luck;
+	-- its chance cells with the live event (Void Moon +10 points).
 	local board = plot:FindFirstChild("OddsBoard")
 	local boardPart = board and board:FindFirstChild("Board")
 	local surface = boardPart and boardPart:FindFirstChild("OddsSurface")
 	if surface and surface:IsA("SurfaceGui") then
 		local odds = FusionConfig.FormatOdds(getLuck(player), EventState.GetOddsEvent())
 		BillboardKit.SetOddsMutations(surface, "Mutations · " .. odds.FusionMutations)
+		BillboardKit.SetOddsChances(surface, odds.Fusion)
 	end
 	refreshRebirthPortal(player)
 	local label = collectorLabelByUserId[player.UserId]

@@ -25,6 +25,9 @@ local REMOTE_EVENT_NAMES = {
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
 	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
 	"ClaimOffline", -- client -> server: collect the pending offline earnings (no args; the server knows the amount)
+	"EventFx", -- server -> clients: an event's world moment; { Kind = "Lightning", Position } | { Kind = "Meteor", From, To, Seconds } | { Kind = "Coin", Position, Amount } (coin: owner only)
+	"EventNotice", -- server -> client: an event toast for one player; { Text, Big? } ("⚡ Your <item> got CHARGED!", "Too slow!")
+	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"RequestLock", -- client -> server: LOCK LAB from the HUD button (no payload; HeistService.TryLock decides; a rejection is HeistEnded { Role = "Lock", Outcome = "Rejected", Reason, Seconds? })
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)

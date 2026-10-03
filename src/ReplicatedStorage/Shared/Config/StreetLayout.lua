@@ -58,6 +58,38 @@ StreetLayout.LANES = {
 	{ Belt = "WestBelt", Rail = "WestRail", Side = 1, Direction = -1, RailColor = "AccentBlue" },
 } :: { Lane }
 
+-- Meteor Shower landing zone: the plain street strips between each rail and
+-- the gate ramps (|z| from MinAbsZ to MaxAbsZ, either side), clear of the
+-- belts' edges and of every plot, inset from the street's ends.
+StreetLayout.MeteorBounds = {
+	EndInset = 30, -- from each end of the street
+	MinAbsZ = 9.5, -- beyond the rails (8.15 + 0.15) with a margin
+	MaxAbsZ = 13.5, -- short of the gate ramps (they reach |z| 15)
+	GateRampReachAbsZ = 15, -- the ramps poke 3 studs into the street from the kerb
+}
+
+-- The crater a meteor leaves: a dark rock disc (SmoothPlastic, not Neon)
+-- with orange Neon crack strips and a glowing core rock.
+StreetLayout.MeteorCrater = {
+	Diameter = 7,
+	Height = 0.5,
+	CrackCount = 5,
+	CrackLength = 3,
+	CrackWidth = 0.22,
+	CrackHeight = 0.08,
+	CoreDiameter = 1.4,
+	FallFrom = Vector3.new(70, 140, 30), -- start offset of the falling rock
+	RockDiameter = 3,
+}
+
+-- A random street point inside MeteorBounds (y = street top).
+function StreetLayout.GetRandomMeteorPoint(rng: Random): Vector3
+	local b = StreetLayout.MeteorBounds
+	local halfX = StreetLayout.STREET_SIZE.X / 2 - b.EndInset
+	local side = if rng:NextNumber() < 0.5 then -1 else 1
+	return Vector3.new(rng:NextNumber(-halfX, halfX), StreetLayout.STREET_TOP_Y, side * rng:NextNumber(b.MinAbsZ, b.MaxAbsZ))
+end
+
 function StreetLayout.GetBeltLength(): number
 	return StreetLayout.STREET_SIZE.X - StreetLayout.BELT_END_INSET
 end
@@ -92,6 +124,13 @@ do
 		"StreetLayout: rails leave less than MIN_PLAIN_STREET to the kerb"
 	)
 	assert(StreetLayout.GetBeltLength() > 0, "StreetLayout: belts are longer than the street")
+
+	-- Meteors land on plain street: past the rails, short of the gate ramps
+	-- and inside the kerb, so never on a belt or in a plot.
+	local meteor = StreetLayout.MeteorBounds
+	assert(meteor.MinAbsZ > railOuter, "StreetLayout: meteor zone overlaps the rails/belts")
+	assert(meteor.MaxAbsZ < meteor.GateRampReachAbsZ, "StreetLayout: meteor zone reaches the gate ramps")
+	assert(meteor.MaxAbsZ < halfStreet and meteor.MinAbsZ < meteor.MaxAbsZ, "StreetLayout: meteor zone is off the street")
 end
 
 return StreetLayout

@@ -679,6 +679,23 @@ function BillboardKit.SetOddsMutations(gui: SurfaceGui, text: string)
 	end
 end
 
+-- Updates the board's chance cells (a Void Moon raises every fusion chance).
+-- `rows` must be the same recipes OddsSurface was built with.
+function BillboardKit.SetOddsChances(gui: SurfaceGui, rows: { OddsRow })
+	local panel = gui:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	for index, row in rows do
+		for column, text in row.ChanceTexts do
+			local cell = panel:FindFirstChild(("Chance%d_%d"):format(index, column))
+			if cell and cell:IsA("TextLabel") then
+				cell.Text = text
+			end
+		end
+	end
+end
+
 export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
 	-- A teal pill between title and detail ("🛡 PROTECTED · NEW LAB"); nil hides it.

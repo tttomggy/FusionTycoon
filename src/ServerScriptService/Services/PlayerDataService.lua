@@ -694,6 +694,22 @@ function PlayerDataService.IncrementTotalFusions(player: Player)
 	end
 end
 
+-- Changes an owned item's mutation in place (same Uid; Power Surge
+-- lightning Charging a displayed item) and marks its Index entry. Returns
+-- whether that Index entry is new. The caller re-syncs and restyles.
+function PlayerDataService.SetItemMutation(player: Player, uid: string, mutation: string?): boolean
+	local data = state.sessionCache[player.UserId]
+	local item = PlayerDataService.GetItemByUid(player, uid)
+	if not data or not item or (mutation ~= nil and not MutationConfig.IsValid(mutation)) then
+		return false
+	end
+	item.Mutation = mutation
+	local key = IndexConfig.GetKey(item.ItemId, mutation)
+	local isNew = data.Index[key] ~= true
+	data.Index[key] = true
+	return isNew
+end
+
 -- Marks a one-time tip seen (TipConfig ids only).
 function PlayerDataService.MarkTipSeen(player: Player, id: string)
 	local data = state.sessionCache[player.UserId]

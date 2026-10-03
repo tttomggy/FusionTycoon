@@ -349,12 +349,20 @@ local function onRareFusionAnnouncement(payload: any)
 	local verb = if payload.Verb == "displayed"
 		then "just displayed"
 		elseif payload.Verb == "pulled" then "pulled"
+		elseif payload.Verb == "grabbed" then "grabbed"
 		else "fused"
 	local text: string
 	if typeof(payload.PlayerName) == "string" and typeof(payload.ItemName) == "string" then
 		local who = UIKit.EscapeRichText(payload.PlayerName)
 		local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(payload.ItemName, mutation))
-		if mutation == "Rainbow" then
+		local mutationColor = UITheme.GetMutationColor(mutation)
+		if payload.Verb == "charged" then
+			-- "Har's Charged Rift Engine got CHARGED!" (Power Surge lightning)
+			text = ("%s's %s got %s!"):format(who, UIKit.Colored(name, UITheme.GetTierLight(tier)), UIKit.Colored("CHARGED", mutationColor or Colors.Text))
+		elseif payload.Verb == "grabbed" then
+			-- "Har grabbed a Celestial Star Core from a meteor!"
+			text = ("%s grabbed a %s from a meteor!"):format(who, UIKit.Colored(name, mutationColor or UITheme.GetTierLight(tier)))
+		elseif mutation == "Rainbow" then
 			-- "Har pulled a Rainbow Star Core!"
 			text = ("%s %s a %s!"):format(who, verb, name)
 		elseif tier == "Secret" and payload.Verb ~= "displayed" then
@@ -478,6 +486,24 @@ local function onFusionResolved(result: any)
 			UIKit.EscapeRichText(def and def.Name or tostring(newItem.ItemId))
 		),
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
+	})
+end
+
+-- Rainbow Storm's server-wide hype banner (every client sees the event at
+-- once; this is the big rainbow kit on top of the event's own banner).
+function AnnouncementController.ShowEventHype(text: string)
+	enqueue({
+		Text = UIKit.EscapeRichText(text),
+		AccentColor = UITheme.Mutation.RainbowStops[1],
+		Big = {
+			Caption = "SERVER · EVENT",
+			CaptionColor = Colors.White,
+			Left = RAINBOW_STYLE.Left,
+			Right = RAINBOW_STYLE.Right,
+			Stops = RAINBOW_STYLE.Stops,
+			Emblem = rainbowEmblem,
+			Shake = false,
+		},
 	})
 end
 

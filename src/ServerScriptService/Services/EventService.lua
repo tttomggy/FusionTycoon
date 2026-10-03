@@ -21,15 +21,45 @@
 
 	Other code reacts to start/end through EventService.OnEventChanged.
 
+	World effects (server-side rewards; every visual is client-side from the
+	attributes plus EventFx cues):
+	  Golden Rain    a coin in every claimed plot every CoinIntervalSeconds /
+	                 strength (PlotLayout.IsFloorPointFree spots, max
+	                 CoinMaxLive, gone after CoinLifetimeSeconds). Only the
+	                 owner collects (touch + server distance check): it pays
+	                 CoinIncomeSeconds x strength (clamped) of their income.
+	  Power Surge    a lightning strike every LightningIntervalSeconds /
+	                 strength on one random displayed item in the server
+	                 (never one being carried); a normal item has
+	                 LightningChargeChance to turn Charged.
+	  Meteor Shower  MeteorCount x strength meteors at random times; each
+	                 leaves a crater on the street (StreetLayout bounds) with
+	                 a "Grab Meteor Core" prompt: the first finished hold
+	                 wins an item (MeteorCoreTiers, MeteorCelestialChance).
+
 	Follows ServiceTemplate:
 	  :Init()   publishes the empty state.
-	  :Start()  starts the clock loop.
+	  :Start()  resolves PlayerDataService and TycoonService, starts the
+	            clock loop and the world effects.
 ]]
+local Debris = game:GetService("Debris")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+
+type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -56,6 +86,15 @@ local state: State = {
 }
 
 local TICK_SECONDS = 1
+local EFFECT_FEED_MIN_TIER = "Legendary"
+
+-- Resolved in :Start(), never at module scope.
+local PlayerDataService: PlayerDataServiceModule
+local TycoonService: TycoonServiceModule
+
+local rng = Random.new()
+-- Bumped on every event change, so an effect loop from the last event stops.
+local generation = 0
 
 local EventService = {}
 
@@ -67,10 +106,11 @@ local function serverNow(): number
 	return Workspace:GetServerTimeNow()
 end
 
+-- EventId last: a reader reacting to it sees the matching end and strength.
 local function publish(event: ActiveEvent)
-	Workspace:SetAttribute("EventId", event.Id or "")
 	Workspace:SetAttribute("EventEndsAt", event.EndsAt)
 	Workspace:SetAttribute("EventStrength", event.Strength)
+	Workspace:SetAttribute("EventId", event.Id or "")
 end
 
 -- What should be on right now: the override if it's live, else the clock.
@@ -176,6 +216,362 @@ function EventService.GetFusionEventMutation(): (string?, number)
 	return EventConfig.GetFusionEventMutation(event.Id, event.Strength)
 end
 
+--[[ World effects ------------------------------------------------------------ ]]
+
+local function isFeedTier(tier: string): boolean
+	return (ItemConfig.Tiers[tier] or 0) >= (ItemConfig.Tiers[EFFECT_FEED_MIN_TIER] or math.huge)
+end
+
+local function itemName(item: { ItemId: string, Mutation: string? }): string
+	local def = ItemConfig.GetItemById(item.ItemId)
+	return MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
+end
+
+local function getRoot(player: Player): BasePart?
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	return if root and root:IsA("BasePart") then root else nil
+end
+
+local function claimedPlot(player: Player): Model?
+	local plot = TycoonService.GetPlotForPlayer(player)
+	if plot and plot.Parent and plot:GetAttribute("Claimed") == true and plot.PrimaryPart then
+		return plot
+	end
+	return nil
+end
+
+-- Golden Rain ----------------------------------------------------------------
+
+local COIN_FOLDER = "EventCoins"
+
+local function clearCoins()
+	for _, player in Players:GetPlayers() do
+		local plot = TycoonService.GetPlotForPlayer(player)
+		local folder = plot and plot:FindFirstChild(COIN_FOLDER)
+		if folder then
+			folder:Destroy()
+		end
+	end
+end
+
+local function collectCoin(owner: Player, coin: BasePart, strength: number)
+	if coin:GetAttribute("Collected") then
+		return
+	end
+	coin:SetAttribute("Collected", true)
+	local position = coin.Position
+	coin:Destroy()
+	local seconds = math.min(EventConfig.CoinIncomeSeconds * strength, EventConfig.CoinMaxIncomeSeconds)
+	local amount = math.floor(PlayerDataService.GetPassiveCashPerSecond(owner) * seconds)
+	if amount <= 0 then
+		return
+	end
+	PlayerDataService.AddCash(owner, amount)
+	PlayerDataService.SyncTycoon(owner)
+	RemoteEvents.EventFx:FireClient(owner, { Kind = "Coin", Position = position, Amount = amount })
+end
+
+local function spawnCoin(owner: Player, plot: Model, strength: number)
+	local coinFolder = plot:FindFirstChild(COIN_FOLDER)
+	if not coinFolder then
+		local created = Instance.new("Folder")
+		created.Name = COIN_FOLDER
+		created.Parent = plot
+		coinFolder = created
+	end
+	assert(coinFolder)
+	if #coinFolder:GetChildren() >= EventConfig.CoinMaxLive then
+		return
+	end
+	local c = PlotLayout.EventCoin
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
+	local origin = (plot.PrimaryPart :: BasePart).CFrame
+	for _ = 1, c.SpawnTries do
+		local x, z = rng:NextNumber(-inner, inner), rng:NextNumber(-inner, inner)
+		if PlotLayout.IsFloorPointFree(x, z, c.SpawnMargin) then
+			local coin = PartKit.Part({
+				Name = "Coin",
+				Shape = Enum.PartType.Cylinder,
+				Size = c.Size,
+				CFrame = PartKit.At(origin, Vector3.new(x, 0, z), c.CenterY),
+				Color = UITheme.World.AccentGold,
+				Material = Enum.Material.Neon,
+				CanCollide = false,
+				Parent = coinFolder,
+			})
+			coin.CanQuery = false
+			coin.CanTouch = true
+			PartKit.SetHover(coin, c.SpinDegPerSec, c.Bob, c.BobPeriod, "Bob")
+			-- Only the owner collects; the touch is re-checked by distance.
+			coin.Touched:Connect(function(hit: BasePart)
+				local character = hit:FindFirstAncestorWhichIsA("Model")
+				local toucher = character and Players:GetPlayerFromCharacter(character)
+				local root = toucher and getRoot(toucher)
+				if toucher == owner and root and (root.Position - coin.Position).Magnitude <= EventConfig.CoinCollectDistance then
+					collectCoin(owner, coin, strength)
+				end
+			end)
+			Debris:AddItem(coin, EventConfig.CoinLifetimeSeconds)
+			return
+		end
+	end
+end
+
+local function runGoldenRain(myGeneration: number, strength: number)
+	local interval = EventConfig.CoinIntervalSeconds / strength
+	while generation == myGeneration do
+		for _, player in Players:GetPlayers() do
+			local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
+			if plot then
+				spawnCoin(player, plot, strength)
+			end
+		end
+		task.wait(interval)
+	end
+	clearCoins()
+end
+
+-- Power Surge -------------------------------------------------------------------
+
+type Target = { Owner: Player, Uid: string, Index: number, Pedestal: BasePart }
+
+-- Every displayed item in the server that isn't being carried in a heist.
+local function displayedTargets(): { Target }
+	local targets = {}
+	for _, player in Players:GetPlayers() do
+		local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
+		local pedestals = plot and plot:FindFirstChild("Pedestals")
+		if pedestals then
+			for index, uid in PlayerDataService.GetPedestalDisplays(player) do
+				local pedestal = pedestals:FindFirstChild("Pedestal" .. index)
+				if uid and pedestal and pedestal:IsA("BasePart") and not PlayerDataService.IsItemCarried(player, uid) then
+					table.insert(targets, { Owner = player, Uid = uid, Index = index, Pedestal = pedestal })
+				end
+			end
+		end
+	end
+	return targets
+end
+
+local function strikeLightning()
+	local targets = displayedTargets()
+	if #targets == 0 then
+		return
+	end
+	local target = targets[rng:NextInteger(1, #targets)]
+	RemoteEvents.EventFx:FireAllClients({ Kind = "Lightning", Position = target.Pedestal.Position })
+	local item = PlayerDataService.GetItemByUid(target.Owner, target.Uid)
+	if not item or item.Mutation ~= nil or rng:NextNumber() >= EventConfig.LightningChargeChance then
+		return
+	end
+	-- Charged: inventory, Index, pedestal visuals and labels, then the syncs.
+	PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
+	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation)
+	TycoonService.RefreshPedestalLabels(target.Owner)
+	RemoteEvents.SyncInventory:FireClient(target.Owner, PlayerDataService.GetInventory(target.Owner))
+	PlayerDataService.SyncTycoon(target.Owner)
+	local name = itemName(item)
+	RemoteEvents.EventNotice:FireClient(target.Owner, { Text = ("⚡ Your %s got CHARGED!"):format(name), Big = true })
+	if isFeedTier(item.Tier) then
+		local def = ItemConfig.GetItemById(item.ItemId)
+		RemoteEvents.RareFusionAnnouncement:FireAllClients({
+			Message = ("%s's %s got CHARGED!"):format(target.Owner.DisplayName, name),
+			Tier = item.Tier,
+			Mutation = item.Mutation,
+			PlayerName = target.Owner.DisplayName,
+			Verb = "charged",
+			ItemName = def and def.Name or item.ItemId,
+		})
+	end
+end
+
+local function runPowerSurge(myGeneration: number, strength: number)
+	local interval = EventConfig.LightningIntervalSeconds / strength
+	while generation == myGeneration do
+		task.wait(interval)
+		if generation == myGeneration then
+			strikeLightning()
+		end
+	end
+end
+
+-- Meteor Shower -------------------------------------------------------------------
+
+local METEOR_FOLDER = "EventMeteors"
+
+local function rollCoreItem(): (string?, string, string?)
+	local total = 0
+	for _, entry in EventConfig.MeteorCoreTiers do
+		total += entry.Weight
+	end
+	local roll = rng:NextNumber() * total
+	local tier = EventConfig.MeteorCoreTiers[1].Tier
+	for _, entry in EventConfig.MeteorCoreTiers do
+		roll -= entry.Weight
+		if roll < 0 then
+			tier = entry.Tier
+			break
+		end
+	end
+	local def = ItemConfig.PickRandomOfTier(tier, rng)
+	local mutation = if rng:NextNumber() < EventConfig.MeteorCelestialChance then "Celestial" else nil
+	return def and def.Id, tier, mutation
+end
+
+local function grantCore(player: Player)
+	local itemId, tier, mutation = rollCoreItem()
+	if not itemId then
+		warn(("EventService: no ItemConfig entry for meteor tier %s"):format(tier))
+		return
+	end
+	local entry, isNew = PlayerDataService.AddItem(player, itemId, tier, mutation)
+	if not entry then
+		return
+	end
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	PlayerDataService.SyncTycoon(player)
+	RemoteEvents.EventReward:FireClient(player, { Caption = "☄ METEOR CORE", Item = entry, NewIndex = isNew })
+	if isFeedTier(tier) or mutation then
+		local def = ItemConfig.GetItemById(itemId)
+		RemoteEvents.RareFusionAnnouncement:FireAllClients({
+			Message = ("%s grabbed a %s from a meteor!"):format(player.DisplayName, itemName(entry)),
+			Tier = tier,
+			Mutation = mutation,
+			PlayerName = player.DisplayName,
+			Verb = "grabbed",
+			ItemName = def and def.Name or itemId,
+		})
+	end
+end
+
+-- The crater: a dark rock disc, orange Neon crack strips (never a flat Neon
+-- disc), a glowing core, and the race-to-grab prompt.
+local function buildCrater(point: Vector3)
+	local m = StreetLayout.MeteorCrater
+	local folder = Workspace:FindFirstChild(METEOR_FOLDER)
+	if not folder then
+		local created = Instance.new("Folder")
+		created.Name = METEOR_FOLDER
+		created.Parent = Workspace
+		folder = created
+	end
+	local crater = Instance.new("Model")
+	crater.Name = "MeteorCrater"
+	local base = CFrame.new(point + Vector3.new(0, m.Height / 2, 0))
+	local disc = PartKit.Part({
+		Name = "Crater",
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(m.Height, m.Diameter, m.Diameter),
+		CFrame = base * CFrame.Angles(0, 0, math.rad(90)),
+		Color = UITheme.World.Structure,
+		Parent = crater,
+	})
+	disc.CanCollide = false
+	for index = 1, m.CrackCount do
+		local angle = (index / m.CrackCount) * math.pi * 2 + rng:NextNumber(-0.3, 0.3)
+		local crack = PartKit.Part({
+			Name = "Crack",
+			Size = Vector3.new(m.CrackLength, m.CrackHeight, m.CrackWidth),
+			CFrame = base
+				* CFrame.Angles(0, angle, 0)
+				* CFrame.new(m.CrackLength / 2 + m.CoreDiameter / 2, m.Height / 2 + m.CrackHeight / 2, 0),
+			Color = UITheme.World.AccentRebirth,
+			Material = Enum.Material.Neon,
+			Parent = crater,
+		})
+		PartKit.MakeDecorative(crack)
+	end
+	local core = PartKit.Part({
+		Name = "Core",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * m.CoreDiameter,
+		CFrame = base * CFrame.new(0, m.Height / 2 + m.CoreDiameter / 2, 0),
+		Color = UITheme.World.AccentRebirth,
+		Material = Enum.Material.Neon,
+		Parent = crater,
+	})
+	PartKit.MakeDecorative(core)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "MeteorPrompt"
+	prompt.ActionText = "Grab Meteor Core"
+	prompt.ObjectText = "First to grab wins"
+	prompt.HoldDuration = EventConfig.MeteorGrabSeconds
+	prompt.MaxActivationDistance = EventConfig.MeteorPromptDistance
+	prompt.RequiresLineOfSight = false
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+	prompt.Parent = core
+	-- First valid completion wins; everyone after gets "Too slow!".
+	local claimed = false
+	prompt.Triggered:Connect(function(player: Player)
+		local root = getRoot(player)
+		if not root or (root.Position - core.Position).Magnitude > EventConfig.MeteorPromptDistance + 2 then
+			return
+		end
+		if claimed or not PlayerDataService.IsDataLoaded(player) then
+			RemoteEvents.EventNotice:FireClient(player, { Text = "Too slow!" })
+			return
+		end
+		claimed = true
+		prompt.Enabled = false
+		grantCore(player)
+		crater:Destroy()
+	end)
+	crater.PrimaryPart = disc
+	crater.Parent = folder
+	Debris:AddItem(crater, EventConfig.MeteorCraterLifetime)
+end
+
+local function dropMeteor()
+	local point = StreetLayout.GetRandomMeteorPoint(rng)
+	local m = StreetLayout.MeteorCrater
+	RemoteEvents.EventFx:FireAllClients({
+		Kind = "Meteor",
+		From = point + m.FallFrom,
+		To = point,
+		Seconds = EventConfig.MeteorFallSeconds,
+	})
+	task.delay(EventConfig.MeteorFallSeconds, buildCrater, point)
+end
+
+local function runMeteorShower(myGeneration: number, strength: number, endsAt: number)
+	local count = EventConfig.MeteorCount * strength
+	-- Random landing times inside the window, leaving room to fall.
+	local window = math.max(1, endsAt - Workspace:GetServerTimeNow() - EventConfig.MeteorFallSeconds - 5)
+	local times = {}
+	for index = 1, count do
+		times[index] = rng:NextNumber(0, window)
+	end
+	table.sort(times)
+	local started = os.clock()
+	for _, at in times do
+		local wait = at - (os.clock() - started)
+		if wait > 0 then
+			task.wait(wait)
+		end
+		if generation ~= myGeneration then
+			return
+		end
+		dropMeteor()
+	end
+end
+
+-- Starts the new event's world effects (its loop stops on the next change).
+local function startWorldEffects(event: ActiveEvent)
+	generation += 1
+	local myGeneration = generation
+	if event.Id == "GoldenRain" then
+		task.spawn(runGoldenRain, myGeneration, event.Strength)
+	else
+		clearCoins()
+	end
+	if event.Id == "PowerSurge" then
+		task.spawn(runPowerSurge, myGeneration, event.Strength)
+	elseif event.Id == "MeteorShower" then
+		task.spawn(runMeteorShower, myGeneration, event.Strength, event.EndsAt)
+	end
+end
+
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function EventService:Init()
@@ -183,6 +579,18 @@ function EventService:Init()
 end
 
 function EventService:Start()
+	PlayerDataService = require(script.Parent.PlayerDataService)
+	TycoonService = require(script.Parent.TycoonService)
+	EventService.OnEventChanged(function(newEvent: ActiveEvent)
+		startWorldEffects(newEvent)
+		-- Every odds display and income number re-reads the event on sync
+		-- (pad and board labels, the HUD's generator income).
+		for _, player in Players:GetPlayers() do
+			if PlayerDataService.IsDataLoaded(player) then
+				PlayerDataService.SyncTycoon(player)
+			end
+		end
+	end)
 	state.running = true
 	tick()
 	task.spawn(function()

@@ -324,6 +324,18 @@ PlotLayout.LockConsole = {
 	LabelMaxDistance = 60,
 }
 
+--[[ Golden Rain coins (EventService) ------------------------------------------------- ]]
+
+PlotLayout.EventCoin = {
+	Size = v3(0.3, 2, 2), -- a Neon cylinder on its edge (seen from the side)
+	CenterY = 1.6, -- above the floor top
+	SpawnMargin = 1.5, -- clear of walls and every footprint by this much
+	SpawnTries = 12, -- random points tried per coin
+	SpinDegPerSec = 120,
+	Bob = 0.35,
+	BobPeriod = 1.2,
+}
+
 --[[ Fusion Machine ---------------------------------------------------------------- ]]
 
 PlotLayout.Machine = {
@@ -439,7 +451,10 @@ local function boxFootprint(name: string, position: Vector3, sizeX: number, size
 	return rect(name, position.X - sizeX / 2, position.X + sizeX / 2, position.Z - sizeZ / 2, position.Z + sizeZ / 2)
 end
 
-local function checkLayout()
+-- Every footprint on the plan: (stations, machine, board, console and
+-- pedestals; the factory line; the walkway). The one list, shared by the
+-- assertions and IsFloorPointFree.
+local function collectFootprints(): ({ Footprint }, { Footprint }, Footprint)
 	local stationRadius = PlotLayout.Station.RimDiameter / 2
 	local footprints: { Footprint } = {
 		circle("ClaimStation", PlotLayout.CLAIM_STATION, stationRadius),
@@ -478,6 +493,34 @@ local function checkLayout()
 		PlotLayout.WALKWAY_Z_MIN,
 		PlotLayout.WALKWAY_Z_MAX
 	)
+	return footprints, factory, walkway
+end
+
+-- True when a point on the floor (plot-local x, z) is inside the walls by
+-- `margin` and at least `margin` from every station, pedestal, machine and
+-- factory footprint (the walkway is fine). Golden Rain drops coins here.
+function PlotLayout.IsFloorPointFree(x: number, z: number, margin: number): boolean
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS - margin
+	if math.abs(x) > inner or math.abs(z) > inner then
+		return false
+	end
+	local footprints, factory = collectFootprints()
+	local probe = circle("Probe", v3(x, 0, z), margin)
+	for _, list in { footprints, factory } do
+		for _, footprint in list do
+			if overlaps(probe, footprint) then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+local function checkLayout()
+	local footprints, factory, walkway = collectFootprints()
+	local belt = PlotLayout.FactoryBelt
+	local collector = PlotLayout.Collector
+	local portal = PlotLayout.RebirthPortal
 	for _, footprint in factory do
 		assert(not overlaps(footprint, walkway), ("PlotLayout: %s overlaps the walkway"):format(footprint.Name))
 		table.insert(footprints, footprint)

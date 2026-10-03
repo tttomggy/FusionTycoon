@@ -821,6 +821,10 @@ function FusePanel.Init()
 	end)
 	FusionController.FusionResolved:Connect(refreshIfOpen)
 	FusionController.FuseAllResolved:Connect(refreshIfOpen)
+	-- A Void Moon changes the success chance (and every event the odds line).
+	Workspace:GetAttributeChangedSignal("EventId"):Connect(function()
+		task.defer(refreshIfOpen)
+	end)
 	-- The machine's "Fuse" prompt opens this panel (owner-only).
 	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, triggeringPlayer: Player)
 		if triggeringPlayer ~= localPlayer or prompt.Name ~= FUSE_PROMPT_NAME then

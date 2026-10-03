@@ -87,7 +87,44 @@ UITheme.Gradients = {
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK LAB (ready): HUD button, console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
+	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
+	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.
+	GoldRain = { Top = hex("#FFD566"), Bottom = hex("#C98A00") },
+	Surge = { Top = hex("#4FB3FF"), Bottom = hex("#1F3C78") },
+	Meteor = { Top = hex("#FFB066"), Bottom = hex("#B33A1F") },
+	Night = { Top = hex("#3D3A8A"), Bottom = hex("#0B0A1A") },
+	VoidMoon = { Top = hex("#A47BFF"), Bottom = hex("#2A1550") },
+	Rainbow = { Top = hex("#FF5470"), Bottom = hex("#A47BFF") },
 } :: { [string]: GradientPair }
+
+-- Event id -> its gradient key above.
+UITheme.EventGradient = {
+	GoldenRain = "GoldRain",
+	PowerSurge = "Surge",
+	MeteorShower = "Meteor",
+	Night = "Night",
+	VoidMoon = "VoidMoon",
+	RainbowStorm = "Rainbow",
+} :: { [string]: string }
+
+function UITheme.GetEventGradient(eventId: string?): GradientPair
+	local key = eventId and UITheme.EventGradient[eventId]
+	return (key and UITheme.Gradients[key]) or UITheme.Gradients.Disabled
+end
+
+-- Event weather on the client (EventController): Lighting tints lerped in
+-- and restored after, and the world FX colours.
+UITheme.EventSky = {
+	GoldTint = hex("#FFE3A8"), -- Golden Rain ColorCorrection tint
+	StormTint = hex("#A8B8FF"), -- Power Surge tint
+	StormHaze = hex("#3A4A80"), -- Power Surge Atmosphere colour
+	VoidTint = hex("#D2B8FF"), -- Void Moon tint
+	Moon = hex("#A47BFF"), -- the Void Moon disc
+	MoonGlow = hex("#E4D6FF"), -- its centre
+	Lightning = hex("#D8F4FF"), -- strike beam
+	MeteorRock = hex("#3B2A22"), -- falling rock
+	MeteorGlow = hex("#FF8A3D"), -- its trail
+}
 
 -- The Rebirth Portal's swirl: a UIGradient through these three stops.
 UITheme.RebirthPortal = { hex("#FF8A3D"), hex("#FFD566"), hex("#FF4F7A") }
