@@ -15,12 +15,13 @@ again), `/cash <amount>`, `/resetmultiplier`.
 3. Step on the green CLAIM pad. Check for:
    - [ ] A **Goal complete! +$50** banner.
    - [ ] The tracker border flashes gold and pops.
-   - [ ] The tracker switches to **Buy Dropper 2 · +$60**.
+   - [ ] The tracker switches to **Upgrade your Basic Generator · +$60**.
    - [ ] The cash card goes up by $50.
 4. Continue in order and confirm each goal pays and advances only after the
    previous one:
-   - [ ] Buy Dropper 2 (+$60)
-   - [ ] Buy a Basic Generator from UPGRADES (+$100)
+   - [ ] Upgrade your Basic Generator to LV 2 (+$60)
+   - [ ] Get Basic Generator to LV 5 (+$100), with a **n / 5 Basic LV**
+     count line
    - [ ] Pull at the Gacha Pad (+$150)
    - [ ] Put an item on a pedestal (+$200)
    - [ ] Fuse at your Fusion Machine (+$300); `/cash 5000` and pull until you
@@ -117,12 +118,12 @@ As Player 2, look at Player 1's plot:
 
 ## 7. Spot checks
 
-- [ ] Pad labels (GACHA, MULTIPLIER, DROPPER 2) are no longer visible
+- [ ] Pad labels (GACHA, MULTIPLIER, COLLECTOR) are no longer visible
   through walls, and fade out beyond about 26 studs.
 - [ ] GACHA's detail line reads **Common 78% · Rare 18% · Epic 3.5%**.
 - [ ] MULTIPLIER reads **x1 → x1.5** and **$5K · press E**, then **x12.5
   MAX** with no detail line at the cap.
-- [ ] Collecting dropper cash floats a green **+$X** from the Collector.
+- [ ] Cash balls reaching the collector float a **+$X** over it (§11).
 - [ ] UPGRADES shows a red badge with the number of affordable upgrades, and
   the button pulses while that number is above 0.
 - [ ] Tapping an unaffordable upgrade shows the red **Need $X** toast.
@@ -146,28 +147,29 @@ Then press Play:
   sign reads FREE LAB, then your name once claimed). Respawning (reset)
   puts you back there.
 - [ ] **Layout.** Everything in the plan is within a short walk of the gate:
-  the claim pad straight ahead, Dropper 1 and the Dropper 2 slot on the
-  left with the gold collector strip, the gacha and multiplier stations on
-  the right, four pedestals across the middle, and the Fusion Machine at
-  the back. Nothing overlaps, and nothing clips through the walls.
+  the claim pad straight ahead, the factory line (five generators, the belt
+  and the collector) along the left wall, the gacha and multiplier stations
+  on the right, four pedestals across the middle, the Fusion Machine at the
+  back, and an empty back-right corner (reserved). Nothing overlaps, and
+  nothing clips through the walls.
 - [ ] **Gate ramp.** Walking from the street onto the floor goes up the
   ramp. If it's backwards (a step instead of a slope), flip the 180° in
   `PlotKit.BuildGateRamp`.
 - [ ] **Stations.** Each pad glows in its colour with a floating hologram:
   the gacha capsule spins and bobs, the multiplier chevrons rise and snap
-  back, the claim arrow bobs and disappears after claiming, and Dropper 2
-  shows a translucent ghost until bought. The E prompt appears at about 7
+  back, and the claim arrow bobs and disappears after claiming. The E
+  prompt appears at about 7
   studs, and only the nearest prompt shows.
-- [ ] **Droppers.** Green balls leave the spout on Dropper 1 (and Dropper 2
-  once bought) and roll onto the gold strip. A "+$X" pops over the strip.
+- [ ] **Factory line.** See §11 (the droppers were removed in Polish 3).
 - [ ] **Pedestal orbs.** Display an item: the cap lights up in the tier
   colour and a glass orb (bigger for higher tiers) floats above it,
   spinning and bobbing. The label sits above the orb. Removing the item
   clears it.
 - [ ] **Labels shrink with distance.** Walk away from a pad or pedestal
   label: it gets smaller like a real sign and never fills the screen up
-  close. Pad labels vanish past about 90 studs, filled pedestal labels past
-  70, and EMPTY labels past 25.
+  close (within 7 studs of the camera it hides, §11). Pad labels vanish
+  past about 90 studs, filled pedestal labels past 70, and EMPTY labels
+  past 25.
 - [ ] **Fusion Machine.** A round platform with a violet rim, four leaning
   pylons and a floating core. The camera doesn't end up inside it. Fusing
   still plays the charge-up and reveal on the core. The odds board beside
@@ -181,10 +183,10 @@ Then press Play:
   - [ ] With fewer than 2 pairs, the F prompt is hidden.
   - [ ] Legendaries are never consumed.
 - [ ] **Goal marker on a fresh save.** `/wipe` → Play → claim. A gold
-  marker labelled **BUY DROPPER 2** floats over the Dropper 2 slot (visible
-  through walls), with a live "N studs" line and a pulsing gold ring on the
-  floor. It hides within 8 studs. At the "Buy a Basic Generator" goal it
-  points at the Basic Generator in the back-left bay (Polish 2).
+  marker labelled **UPGRADE YOUR BASIC GENERATOR** floats over the Basic
+  Generator at the front of the factory line (visible through walls), with
+  a live "N studs" line and a pulsing gold ring on the floor. It hides
+  within 8 studs. The output shows no "goal target … not found" warning.
 - [ ] **Two players** (Test → Clients and Servers → 2 players): the two labs
   face each other across the street, with gates on the street. Empty slots
   show FREE LAB foundations, and a slot's foundation disappears when a
@@ -209,7 +211,7 @@ Then press Play:
   claim pad goes grey and reads **YOURS**. The machine platform shows a
   violet ring, and the station and machine rims are thin bands on the side.
 - [ ] **Less purple.** Pedestal caps are matte, with a thin glowing lip only
-  when filled. The collector is matte gold with two thin glowing edges.
+  when filled. The collector is matte gold with thin glowing edges.
   Wall strips are thin. Grass reads as grass, and the floor isn't
   black.
 - [ ] **EMPTY pill.** Empty pedestals show a small "⊕ EMPTY" pill about 5
@@ -219,8 +221,8 @@ Then press Play:
   carries you toward +X at about 28 studs/s, and walking with the flow is
   about 44 studs/s. The blue belt goes −X. Ride each belt end to end: the
   rollers at the ends don't trap you, and chevrons slide along both belts.
-- [ ] **Cash balls never ride a belt.** Belts don't collide with cash balls,
-  which stay on the plots anyway.
+- [ ] ~~Cash balls never ride a belt.~~ Superseded: cash balls are
+  client-side and never use physics (Polish 3).
 - [ ] **Spawn.** You still spawn on the street in front of your gate, and
   the spawn pad's edge doesn't snag you while riding the belt past it.
 
@@ -247,19 +249,17 @@ Then press Play:
   (**Need $X**, **Need $X for a pull**, **Pedestals full · remove one
   first**, the rejection toasts). White text on grey for neutral ones
   (**Nothing to fuse**, **+$X/s**). None is blank.
-- [ ] **Generator bays.** After claiming, the back-left bay holds three
-  generators (Basic, Ember Forge, Flare Reactor) and the back-right bay
-  two (Core Engine, Singularity Core), all facing the lab centre.
-  - [ ] Basic Generator is a ghost in its tier colour with a **BUY /
-    $25** label. The rest are faint ghosts with a lock on their screens
-    and **LOCKED / <Required> LV N**.
-- [ ] **Buying in the world.** Walk to the Basic Generator and press **E ·
-  Buy / Basic Generator · $25**. Then check:
-  - [ ] It turns into the real machine: dark body, tier band and a
-    hovering orb, with **LV 1** on its screen.
+- [ ] **Generators** (positions changed in Polish 3, see §11). After
+  claiming, Basic Generator is already LV 1. The rest are faint ghosts
+  with a lock on their screens and **LOCKED / <Required> LV N**, and
+  Ember Forge becomes a tier-coloured ghost with **BUY / $400** at
+  Basic LV 5.
+- [ ] **Upgrading in the world.** Walk to the Basic Generator and press
+  **E · Upgrade / LV 1 → 2 · $28**. Then check:
+  - [ ] Its screen reads **LV 2** with **$8/s** under it (×1).
   - [ ] There's a burst at the orb and the body bumps briefly.
-  - [ ] A grey **+$1/s** toast shows (scaled by your multiplier).
-  - [ ] The prompt now reads **Upgrade / LV 1 → 2 · $X**.
+  - [ ] A grey **+$2/s** toast shows (scaled by your multiplier).
+  - [ ] The prompt now reads **Upgrade / LV 2 → 3 · $X**.
   - [ ] Without enough cash, the prompt shows the red **Need $X** toast.
   - [ ] Buying from the UPGRADES panel gives the same toast and
     animation.
@@ -267,17 +267,70 @@ Then press Play:
   Forge (it becomes a BUY ghost). The band turns Neon at LV 10. At LV 25
   the screen reads **MAX**, the band glows with a light, and the prompt is
   gone.
-- [ ] **Income pops.** Each owned generator floats a **+$X** in its tier's
-  light colour above its orb once a second (its income/s with the
-  multiplier). There's one pop per generator, never stacked, and none
-  when you're more than about 60 studs away.
-- [ ] **Upgrades panel.** Under the title: **Generators earn every second,
-  even while you're away. Find them in the back corners of your lab.** The
+- [ ] ~~Income pops over each generator.~~ Replaced by the collector pops
+  (§11).
+- [ ] **Upgrades panel.** Under the title: **Generators earn every second.
+  They're the machines along the left wall of your lab.** The
   total generator income/s is on the right. The tabs and list sit below
   it without overlap (desktop and phone).
-- [ ] **Goal marker.** On a fresh save, the "Buy a Basic Generator" goal
-  marker points at the Basic Generator. The "Unlock the Ember Forge" goal
+- [ ] **Goal marker.** On a fresh save, the two Basic Generator goals
+  point at the Basic Generator. The "Unlock the Ember Forge" goal
   points at the Ember Forge.
 - [ ] **Two players** (2-player local server): as Player 2 you can see
   Player 1's generators but **not** their BUY/LOCKED labels or their
   Buy/Upgrade prompts, and you can't trigger them.
+
+## 11. Factory line (Polish 3)
+
+Start each item from a fresh save (`/wipe`, then Play) unless it says
+otherwise.
+
+- [ ] **Layout.** Along the left wall, the five generators stand in a row:
+  Basic (front, nearest the gate), Ember Forge, Flare Reactor, Core Engine,
+  then Singularity Core (back).
+  - [ ] Each faces the belt with a Spout halfway up its belt side. The
+    Spout has a lip glowing in the tier colour. Locked and buy ghosts show
+    the Spout as a ghost too.
+  - [ ] The dark belt with gold edge strips runs from the front to the
+    gold Collector in the back-left corner. The Collector has glowing
+    edges and a warm light.
+  - [ ] The back-right corner is empty.
+  - [ ] You can walk on the belt, and it doesn't carry you.
+- [ ] **Balls from the start.** Within 2 s of claiming, Basic Generator
+  (LV 1) drops a grey ball from its Spout in a short arc onto the belt.
+  - [ ] The ball rides to the Collector, drops in, shrinks away and pops
+    a green **+$X**.
+  - [ ] The generator's screen reads **LV 1** with **$2/s** under it.
+- [ ] **Upgrading speeds it up.** `/cash 5000`, then upgrade Basic a few
+  levels: its balls come visibly faster (one every 2 s at LV 1, one every
+  0.5 s at LV 25). Higher-tier generators drop bigger, brighter balls.
+  Legendary and Mythic balls light the belt.
+- [ ] **Pops match income.** With **no items on pedestals**, watch the
+  Collector for about 10 s.
+  - [ ] Its pops (one every 0.5 s) add up to roughly the HUD's **$X/s**
+    × 10.
+  - [ ] With items displayed, the pops cover generator income only
+    (pedestal income isn't a ball). The COLLECTOR label's **+$X/s** and
+    the HUD still show the total.
+- [ ] **Cash still comes from the server.** The HUD cash keeps counting up
+  every second at the same rate whether or not you're watching the balls,
+  including from more than 120 studs away.
+- [ ] **Labels too close.** Display an item, then walk so the camera is
+  right up against its pedestal label (the big tier bar).
+  - [ ] Within about 7 studs the label disappears.
+  - [ ] Back off past about 8 studs and it returns, with no flicker at
+    the edge.
+  - [ ] The same works for the GACHA, MULTIPLIER and COLLECTOR labels.
+- [ ] **Two players** (2-player local server):
+  - [ ] From your lab you see balls running on the other lab's belt.
+  - [ ] You see no "+$X" pops over their Collector and no COLLECTOR
+    label.
+  - [ ] Their pops still show on their own client.
+- [ ] **Frame rate with everything maxed.** `/cash 1e12`, then buy and max
+  all five generators (UPGRADES panel). Stand by the belt with the
+  MicroProfiler or Shift+F5 open.
+  - [ ] It stays smooth.
+  - [ ] Live balls stay under 60 per plot (`#workspace.FactoryBalls:
+    GetChildren()` is the pool size).
+- [ ] **No droppers left.** No Dropper 1, Dropper 2 slot, old gold
+  collector strip or DROPPER 2 label anywhere on the plot.

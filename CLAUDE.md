@@ -61,8 +61,9 @@ src/ReplicatedStorage/Shared/
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
                  tagging), PlotKit (plot shell + sign gate), StationKit
                  (station pads + holograms), DropperKit (dropper model),
-                 GeneratorKit (the five bay generators + their states),
-                 PedestalVisuals, NumberFormat
+                 GeneratorKit (the five factory-line generators + their
+                 states), FactoryKit (factory belt + collector, and the
+                 ball path), PedestalVisuals, NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
 src/ServerScriptService/
@@ -76,12 +77,14 @@ src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
                   (fusion/gacha result cards), AnnouncementController
-                  (banners), WorldLabelController (hides owner-only labels),
+                  (banners), WorldLabelController (hides owner-only labels,
+                  and any label within 7 studs of the camera),
                   WorldAnimationController (FT_Hover spin/bob, client-only),
                   GoalMarkerController (points at the current goal),
                   BeltController (client-only belt chevrons),
                   GeneratorController (world Buy/Upgrade prompts, upgrade
-                  pop, per-second income pops)…
+                  toast + bump), FactoryController (client-only cash balls
+                  on every nearby factory line, collector pops)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
