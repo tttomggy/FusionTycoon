@@ -146,11 +146,12 @@ local function fuseOnce(
 	return true, newEntry, { itemA.Uid, itemB.Uid }, nil
 end
 
--- Server-wide brag for a Legendary/Mythic/Secret result: the moment everyone else
--- in the server sees and wants for themselves.
+-- Server-wide brag for a Legendary+ result, or any Rainbow: the moment
+-- everyone else in the server sees and wants for themselves.
 local function announce(player: Player, item: InventoryItem)
 	local visual = RarityVisuals.Tiers[item.Tier]
-	if not visual or not visual.AnnounceServerWide then
+	local rainbow = item.Mutation == "Rainbow"
+	if not rainbow and (not visual or not visual.AnnounceServerWide) then
 		return
 	end
 	local def = ItemConfig.GetItemById(item.ItemId)
@@ -158,6 +159,7 @@ local function announce(player: Player, item: InventoryItem)
 	RemoteEvents.RareFusionAnnouncement:FireAllClients({
 		Message = ("%s fused a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 		Tier = item.Tier,
+		Mutation = item.Mutation,
 		-- Parts, so the client can colour the tier word.
 		PlayerName = player.DisplayName,
 		Verb = "fused",

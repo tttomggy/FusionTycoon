@@ -281,6 +281,7 @@ end
 
 export type PedestalInfo = {
 	Tier: string,
+	Mutation: string?, -- shows as "GOLDEN · MYTHIC" in the mutation colour
 	ItemName: string,
 	Rate: number, -- per second, owner's multiplier included
 }
@@ -386,8 +387,32 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 		local tierLabel = panel:FindFirstChild("Tier") :: TextLabel
 		local nameLabel = panel:FindFirstChild("ItemName") :: TextLabel
 		local rateLabel = panel:FindFirstChild("Rate") :: TextLabel
-		tierLabel.Text = info.Tier:upper()
-		tierLabel.TextColor3 = UITheme.GetTierLight(info.Tier)
+		local mutationColor = UITheme.GetMutationColor(info.Mutation)
+		local tint = tierLabel:FindFirstChild("RainbowTint")
+		if info.Mutation and mutationColor then
+			tierLabel.Text = ("%s · %s"):format(info.Mutation:upper(), info.Tier:upper())
+			if info.Mutation == "Rainbow" then
+				-- Intended tinting: white text under a rainbow UIGradient.
+				tierLabel.TextColor3 = Colors.White
+				if not tint then
+					local gradient = Instance.new("UIGradient")
+					gradient.Name = "RainbowTint"
+					gradient.Color = UITheme.GetRainbowSequence()
+					gradient.Parent = tierLabel
+				end
+			else
+				tierLabel.TextColor3 = mutationColor
+				if tint then
+					tint:Destroy()
+				end
+			end
+		else
+			tierLabel.Text = info.Tier:upper()
+			tierLabel.TextColor3 = UITheme.GetTierLight(info.Tier)
+			if tint then
+				tint:Destroy()
+			end
+		end
 		nameLabel.Text = info.ItemName
 		rateLabel.Text = ("+%s/s"):format(NumberFormat.Money(info.Rate))
 	end

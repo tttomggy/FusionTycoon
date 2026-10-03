@@ -22,6 +22,7 @@ local RunService = game:GetService("RunService")
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -56,9 +57,10 @@ local screenGui: ScreenGui
 
 --[[ Helpers ------------------------------------------------------------------- ]]
 
+-- "Golden Star Core" for a mutated item, "Star Core" otherwise.
 local function itemName(item: any): string
 	local def = ItemConfig.GetItemById(item.ItemId)
-	return if def then def.Name else tostring(item.ItemId)
+	return MutationConfig.GetDisplayName(if def then def.Name else tostring(item.ItemId), item.Mutation)
 end
 
 -- What `item` earns on a pedestal, income multiplier included.
@@ -219,6 +221,21 @@ local function showBigCard(info: BigCardInfo)
 	orb.Position = UDim2.new(0.5, 0, 0, 116)
 	orb.ZIndex = z
 	orb.Parent = body
+	UIKit.MutationPill({
+		Parent = body,
+		Mutation = info.Item.Mutation,
+		Label = if info.Item.Mutation
+			then ("%s ×%d"):format(
+				(info.Item.Mutation :: string):upper(),
+				MutationConfig.GetMultiplier(info.Item.Mutation)
+			)
+			else nil,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 228),
+		TextSize = 14,
+		Height = 24,
+		ZIndex = z + 1,
+	})
 
 	UIKit.Label({
 		Name = "ItemName",
@@ -770,6 +787,16 @@ local function showPullCard(item: any)
 	orb.Position = UDim2.new(0, 78, 0.5, 0)
 	orb.ZIndex = z
 	orb.Parent = body
+	-- Mutation tag on the orb's top-right.
+	UIKit.MutationPill({
+		Parent = body,
+		Mutation = item.Mutation,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromOffset(112, 4),
+		TextSize = 11,
+		Height = 18,
+		ZIndex = z + 1,
+	})
 
 	UIKit.Label({
 		Name = "ItemName",
@@ -812,8 +839,9 @@ end
 --[[ Event routing ------------------------------------------------------------------ ]]
 
 -- Exposed so AnnouncementController can skip the banner for these cases.
-function ResultController.ShowsBigCardFor(tier: string): boolean
-	return FusionConfig.MajorRevealTiers[tier] == true
+-- Epic+ tiers, and Diamond/Rainbow at any tier.
+function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean
+	return FusionConfig.IsMajorReveal(tier, mutation)
 end
 
 local function onFusionResolved(result: any)
@@ -825,7 +853,7 @@ local function onFusionResolved(result: any)
 		showFailCard(newItem)
 		return
 	end
-	if ResultController.ShowsBigCardFor(newItem.Tier) then
+	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
 			Item = newItem,
@@ -843,7 +871,7 @@ local function onGachaPullResult(payload: any)
 		return
 	end
 	local newItem = payload.NewItem
-	if ResultController.ShowsBigCardFor(newItem.Tier) then
+	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "YOU PULLED",
 			Item = newItem,

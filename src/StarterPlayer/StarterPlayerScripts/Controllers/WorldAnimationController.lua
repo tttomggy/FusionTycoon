@@ -16,6 +16,9 @@
 	CFrame is captured when it's first seen; only targets within
 	ANIMATE_RADIUS of the camera are animated.
 
+	Rainbow mutation shells (tagged FT_Rainbow) cycle their Color around the
+	hue wheel every RAINBOW_CYCLE_SECONDS.
+
 	Rebirth Portal sheets (tagged FT_PortalSwirl) follow their portal's Ready
 	attribute: not ready, the swirl is translucent and still; ready, it's
 	opaque, its gradient turns at SwirlDegPerSec and the base ring pulses.
@@ -32,6 +35,9 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local WorldAnimationController = {}
 
 local ANIMATE_RADIUS = 150
+local RAINBOW_CYCLE_SECONDS = 3
+local RAINBOW_SATURATION = 0.55
+local RAINBOW_VALUE = 1
 
 type Entry = {
 	Target: BasePart | Model,
@@ -50,6 +56,7 @@ type Swirl = {
 }
 
 local swirls: { [Instance]: Swirl } = {}
+local rainbows: { [BasePart]: boolean } = {}
 
 local function getPivot(target: Instance): CFrame?
 	if target:IsA("BasePart") then
@@ -123,6 +130,15 @@ local function trackSwirl(sheet: Instance)
 	swirls[sheet] = swirl
 end
 
+local function stepRainbows(cameraPosition: Vector3, now: number)
+	local color = Color3.fromHSV((now / RAINBOW_CYCLE_SECONDS) % 1, RAINBOW_SATURATION, RAINBOW_VALUE)
+	for part in rainbows do
+		if (part.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
+			part.Color = color
+		end
+	end
+end
+
 local function stepSwirls(dt: number, cameraPosition: Vector3, now: number)
 	local P = PlotLayout.RebirthPortal
 	for _, swirl in swirls do
@@ -153,6 +169,7 @@ local function step(dt: number)
 	local cameraPosition = camera.CFrame.Position
 	local now = os.clock()
 	stepSwirls(dt, cameraPosition, now)
+	stepRainbows(cameraPosition, now)
 	for target, entry in entries do
 		if (entry.Base.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
 			local cframe = entry.Base * offsetFor(target, now + entry.Phase)
@@ -181,6 +198,19 @@ function WorldAnimationController.Init()
 	CollectionService:GetInstanceAddedSignal(PortalKit.SWIRL_TAG):Connect(function(sheet)
 		task.defer(trackSwirl, sheet)
 	end)
+	local function trackRainbow(part: Instance)
+		if part:IsA("BasePart") then
+			rainbows[part] = true
+		end
+	end
+	for _, part in CollectionService:GetTagged(PartKit.RAINBOW_TAG) do
+		trackRainbow(part)
+	end
+	CollectionService:GetInstanceAddedSignal(PartKit.RAINBOW_TAG):Connect(trackRainbow)
+	CollectionService:GetInstanceRemovedSignal(PartKit.RAINBOW_TAG):Connect(function(part)
+		rainbows[part :: BasePart] = nil
+	end)
+
 	CollectionService:GetInstanceRemovedSignal(PortalKit.SWIRL_TAG):Connect(function(sheet)
 		swirls[sheet] = nil
 	end)

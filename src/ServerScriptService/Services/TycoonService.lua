@@ -352,6 +352,24 @@ local function getGachaRatesText(luck: number): string
 	return table.concat(parts, " · ")
 end
 
+-- A Secret or a Rainbow pull is a server-wide moment (SERVER · SECRET /
+-- SERVER · RAINBOW banners on every client).
+local function announcePull(player: Player, item: PlayerDataService.InventoryItem?)
+	if not item or (item.Tier ~= "Secret" and item.Mutation ~= "Rainbow") then
+		return
+	end
+	local def = ItemConfig.GetItemById(item.ItemId)
+	local itemName = if def then def.Name else item.ItemId
+	RemoteEvents.RareFusionAnnouncement:FireAllClients({
+		Message = ("%s pulled a %s!"):format(player.DisplayName, MutationConfig.GetDisplayName(itemName, item.Mutation)),
+		Tier = item.Tier,
+		Mutation = item.Mutation,
+		PlayerName = player.DisplayName,
+		Verb = "pulled",
+		ItemName = itemName,
+	})
+end
+
 local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule", { Word = "PULL" })
 	local padLabel = BillboardKit.Pad(pad, {
@@ -418,6 +436,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		playSound(pad, STATION_SOUND_ID, 0.8)
 
 		RemoteEvents.GachaPullResult:FireClient(player, { Success = true, NewItem = newEntry })
+		announcePull(player, newEntry)
 
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
@@ -559,7 +578,7 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 		local pedestal = folder:FindFirstChild("Pedestal" .. pedestalIndex)
 		local item = uid and PlayerDataService.GetItemByUid(player, uid)
 		if pedestal and pedestal:IsA("BasePart") and item then
-			PedestalVisuals.Apply(pedestal, item.Tier)
+			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
 		elseif uid and not item then
 			-- Points at an item that no longer exists; free the slot.
 			PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
@@ -705,7 +724,8 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 				local def = ItemConfig.GetItemById(item.ItemId)
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
-					ItemName = def and def.Name or item.ItemId,
+					Mutation = item.Mutation,
+					ItemName = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation),
 					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
 				})
 			else

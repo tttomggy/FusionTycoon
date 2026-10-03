@@ -95,6 +95,10 @@ end
 -- (WorldAnimationController); the attributes below drive the motion.
 PartKit.HOVER_TAG = "FT_Hover"
 
+-- Parts with this tag cycle their Color around the hue wheel on clients
+-- (WorldAnimationController): Rainbow mutation shells.
+PartKit.RAINBOW_TAG = "FT_Rainbow"
+
 -- mode "Bob": sine bob of `bob` studs per `period`; "Rise": move up `bob`
 -- studs over `period`, then snap back.
 function PartKit.SetHover(target: Instance, spinDegPerSec: number, bob: number, period: number, mode: string)

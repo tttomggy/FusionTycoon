@@ -118,6 +118,37 @@ UITheme.GlowTiers = {
 	Secret = true,
 } :: { [string]: boolean }
 
+--[[ Mutations ------------------------------------------------------------- ]]
+
+UITheme.Mutation = {
+	Golden = hex("#FFD23F"),
+	Diamond = hex("#BFF4FF"),
+	RainbowStops = { hex("#FF5470"), hex("#FFBE28"), hex("#4CF08A"), hex("#4FB3FF"), hex("#A47BFF") },
+}
+
+-- A mutation's solid colour (Rainbow's first stop; nil for normal items).
+function UITheme.GetMutationColor(mutation: string?): Color3?
+	if mutation == "Golden" then
+		return UITheme.Mutation.Golden
+	elseif mutation == "Diamond" then
+		return UITheme.Mutation.Diamond
+	elseif mutation == "Rainbow" then
+		return UITheme.Mutation.RainbowStops[1]
+	end
+	return nil
+end
+
+-- The five Rainbow stops as an evenly spaced ColorSequence (UIGradient,
+-- particles).
+function UITheme.GetRainbowSequence(): ColorSequence
+	local stops = UITheme.Mutation.RainbowStops
+	local keypoints = {}
+	for index, color in stops do
+		table.insert(keypoints, ColorSequenceKeypoint.new((index - 1) / (#stops - 1), color))
+	end
+	return ColorSequence.new(keypoints)
+end
+
 function UITheme.GetTierLight(tier: string): Color3
 	return UITheme.TierLight[tier] or UITheme.Colors.Text
 end

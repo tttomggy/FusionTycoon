@@ -20,6 +20,7 @@ local Debris = game:GetService("Debris")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -54,6 +55,7 @@ type BigStyle = {
 	CaptionColor: Color3,
 	Left: Color3,
 	Right: Color3,
+	Stops: { Color3 }?, -- a multi-stop gradient instead of Left -> Right
 	Emblem: () -> GuiObject,
 	Shake: boolean,
 }
@@ -109,6 +111,31 @@ local SECRET_STYLE: BigStyle = {
 	Shake = true,
 }
 
+-- A disc on the rainbow gradient.
+local function rainbowEmblem(): GuiObject
+	local disc = Instance.new("Frame")
+	disc.Name = "RainbowEmblem"
+	disc.Size = UDim2.fromOffset(50, 50)
+	disc.BackgroundColor3 = Colors.White
+	UIKit.Corner(disc, 999)
+	UIKit.Stroke(disc, 3)
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = UITheme.GetRainbowSequence()
+	gradient.Rotation = 45
+	gradient.Parent = disc
+	return disc
+end
+
+local RAINBOW_STYLE: BigStyle = {
+	Caption = "SERVER · RAINBOW",
+	CaptionColor = Colors.White,
+	Left = UITheme.Mutation.RainbowStops[1],
+	Right = UITheme.Mutation.RainbowStops[#UITheme.Mutation.RainbowStops],
+	Stops = UITheme.Mutation.RainbowStops,
+	Emblem = rainbowEmblem,
+	Shake = true,
+}
+
 local REBIRTH_STYLE: BigStyle = {
 	Caption = "SERVER · REBIRTH",
 	CaptionColor = Colors.RebirthLabel,
@@ -153,7 +180,14 @@ local function buildBanner(announcement: Announcement): Frame
 	if big then
 		-- Horizontal: the style's dark colour on the left fading right.
 		body.BackgroundColor3 = Colors.White
-		UIKit.Gradient(body, { { 0, big.Left }, { 1, big.Right } }, 0)
+		local stops = { { 0, big.Left }, { 1, big.Right } }
+		if big.Stops then
+			stops = {}
+			for index, color in big.Stops do
+				table.insert(stops, { (index - 1) / (#big.Stops - 1), color })
+			end
+		end
+		UIKit.Gradient(body, stops, 0)
 	end
 	local z = body.ZIndex + 1
 
@@ -311,21 +345,37 @@ local function onRareFusionAnnouncement(payload: any)
 		return
 	end
 	local tier = payload.Tier :: string
+	local mutation = if payload.Mutation == "Rainbow" or payload.Mutation == "Golden" or payload.Mutation == "Diamond"
+		then payload.Mutation :: string
+		else nil
+	local verb = if payload.Verb == "displayed"
+		then "just displayed"
+		elseif payload.Verb == "pulled" then "pulled"
+		else "fused"
 	local text: string
 	if typeof(payload.PlayerName) == "string" and typeof(payload.ItemName) == "string" then
-		text = ("%s %s a %s %s!"):format(
-			UIKit.EscapeRichText(payload.PlayerName),
-			if payload.Verb == "displayed" then "just displayed" else "fused",
-			tierWord(tier),
-			UIKit.EscapeRichText(payload.ItemName)
-		)
+		local who = UIKit.EscapeRichText(payload.PlayerName)
+		local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(payload.ItemName, mutation))
+		if mutation == "Rainbow" then
+			-- "Har pulled a Rainbow Star Core!"
+			text = ("%s %s a %s!"):format(who, verb, name)
+		elseif tier == "Secret" and payload.Verb ~= "displayed" then
+			-- "Har found Event Horizon!"
+			text = ("%s found %s!"):format(who, UIKit.Colored(name, UITheme.GetTierLight(tier)))
+		else
+			text = ("%s %s a %s %s!"):format(who, verb, tierWord(tier), name)
+		end
 	else
 		text = UIKit.EscapeRichText(tostring(payload.Message))
 	end
 	enqueue({
 		Text = text,
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
-		Big = if tier == "Secret" then SECRET_STYLE elseif tier == "Mythic" then MYTHIC_STYLE else nil,
+		Big = if mutation == "Rainbow"
+			then RAINBOW_STYLE
+			elseif tier == "Secret" then SECRET_STYLE
+			elseif tier == "Mythic" then MYTHIC_STYLE
+			else nil,
 	})
 end
 
@@ -378,7 +428,7 @@ local function onFusionResolved(result: any)
 	local newItem = result.NewItem
 	local tier = newItem.Tier :: string
 	-- Epic+ get the big result card; fails get the fail card.
-	if ResultController.ShowsBigCardFor(tier) then
+	if ResultController.ShowsBigCardFor(tier, newItem.Mutation) then
 		return
 	end
 	local def = ItemConfig.GetItemById(newItem.ItemId)

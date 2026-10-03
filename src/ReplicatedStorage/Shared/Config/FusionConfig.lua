@@ -2,6 +2,7 @@
 local FusionConfig = {}
 
 local RebirthConfig = require(script.Parent.RebirthConfig)
+local MutationConfig = require(script.Parent.MutationConfig)
 
 FusionConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" }
 
@@ -151,5 +152,13 @@ FusionConfig.MajorRevealTiers = {
 	Mythic = true,
 	Secret = true,
 } :: { [string]: boolean }
+
+-- Diamond and Rainbow mutations get the major reveal whatever the tier.
+FusionConfig.MajorRevealMutationRank = 2
+
+function FusionConfig.IsMajorReveal(tier: string, mutation: string?): boolean
+	return FusionConfig.MajorRevealTiers[tier] == true
+		or MutationConfig.GetRank(mutation) >= FusionConfig.MajorRevealMutationRank
+end
 
 return FusionConfig

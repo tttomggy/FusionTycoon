@@ -18,6 +18,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local UIKit = {}
 
@@ -538,6 +539,64 @@ function UIKit.Pill(props: PillProps): TextLabel
 	pill.Parent = fill
 	fill.Parent = props.Parent
 	return pill
+end
+
+-- A mutation tag pill ("×2" / "×5" / "×12"): Golden and Diamond in their
+-- colour with Ink text, Rainbow on the rainbow gradient with white text.
+-- Returns nil for a normal item. Returns the pill's outer Frame/label
+-- (whatever takes layout).
+function UIKit.MutationPill(props: {
+	Parent: Instance?,
+	Mutation: string?,
+	Position: UDim2?,
+	AnchorPoint: Vector2?,
+	ZIndex: number?,
+	TextSize: number?,
+	Height: number?,
+	Label: string?, -- default "×<multiplier>"
+}): GuiObject?
+	local mutation = props.Mutation
+	local color = UITheme.GetMutationColor(mutation)
+	if not mutation or not color then
+		return nil
+	end
+	local text = props.Label or ("×%d"):format(MutationConfig.GetMultiplier(mutation))
+	if mutation ~= "Rainbow" then
+		return UIKit.Pill({
+			Name = "Mutation",
+			Parent = props.Parent,
+			Text = text,
+			Color = color,
+			TextColor3 = Colors.Ink,
+			Font = Fonts.Display,
+			TextSize = props.TextSize or 12,
+			Height = props.Height or 20,
+			Position = props.Position,
+			AnchorPoint = props.AnchorPoint,
+			ZIndex = props.ZIndex,
+		})
+	end
+	local stops = UITheme.Mutation.RainbowStops
+	local label = UIKit.Pill({
+		Name = "Mutation",
+		Parent = props.Parent,
+		Text = text,
+		Gradient = { Top = stops[1], Bottom = stops[#stops] },
+		Font = Fonts.Display,
+		TextSize = props.TextSize or 12,
+		Height = props.Height or 20,
+		Position = props.Position,
+		AnchorPoint = props.AnchorPoint,
+		ZIndex = props.ZIndex,
+		TextStroke = 1.5,
+	})
+	local fill = label.Parent :: Frame
+	local gradient = fill:FindFirstChildOfClass("UIGradient")
+	if gradient then
+		gradient.Color = UITheme.GetRainbowSequence()
+		gradient.Rotation = 0
+	end
+	return fill
 end
 
 -- Red count badge pinned to the top-right corner of `parent`. Idempotent:

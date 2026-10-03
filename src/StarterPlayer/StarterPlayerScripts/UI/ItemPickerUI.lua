@@ -287,6 +287,16 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 		Parent = body,
 	})
 
+	-- Mutation tag top-right (×2 / ×5 / ×12); the stack count drops below it.
+	local mutationPill = UIKit.MutationPill({
+		Parent = body,
+		Mutation = card.Mutation,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -6, 0, 6),
+		ZIndex = z + 2,
+	})
+	local countY = if mutationPill then 28 else 6
+
 	if card.Count > 1 then
 		UIKit.Label({
 			Name = "Count",
@@ -294,7 +304,7 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 			Font = Fonts.Display,
 			TextSize = 16,
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -8, 0, 6),
+			Position = UDim2.new(1, -8, 0, countY),
 			Size = UDim2.fromOffset(50, 20),
 			TextXAlignment = Enum.TextXAlignment.Right,
 			ZIndex = z + 2,

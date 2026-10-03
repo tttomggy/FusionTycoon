@@ -29,6 +29,18 @@ local RING_HEIGHT_OFFSET_STUDS = 0.2
 
 local SECRET_SHELL_TRANSPARENCY = 0.35
 
+-- A mutation adds a second glass shell around the orb, in the mutation's
+-- colour, with its own sparkle. Rainbow's shell is tagged FT_Rainbow and
+-- cycles hue on clients (WorldAnimationController).
+local MUTATION_SHELL_SCALE = 1.15
+local MUTATION_SHELL_TRANSPARENCY = 0.6
+type ShellSparkle = { Rate: number, Size: number, Speed: NumberRange }
+local MUTATION_SPARKLES: { [string]: ShellSparkle } = {
+	Golden = { Rate = 6, Size = 0.35, Speed = NumberRange.new(0.5, 1) },
+	Diamond = { Rate = 12, Size = 0.22, Speed = NumberRange.new(1.5, 2.5) },
+	Rainbow = { Rate = 10, Size = 0.3, Speed = NumberRange.new(1, 2) },
+}
+
 local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
 
@@ -48,7 +60,43 @@ local PROXIMITY_BURST_COUNT = 40
 -- higher tiers) around a Neon core, with a light. Its centre sits
 -- PlotLayout.Pedestal.OrbCenterY above the pedestal's bottom. The group is
 -- tagged FT_Hover, so clients spin and bob it. Returns the glass Orb part.
-local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance): BasePart
+local function buildShell(group: Model, center: CFrame, diameter: number, mutation: string)
+	local color = UITheme.GetMutationColor(mutation)
+	if not color then
+		return
+	end
+	local shell = PartKit.Part({
+		Name = "MutationShell",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter * MUTATION_SHELL_SCALE,
+		CFrame = center,
+		Color = color,
+		Material = Enum.Material.Glass,
+		Transparency = MUTATION_SHELL_TRANSPARENCY,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(shell)
+	if mutation == "Rainbow" then
+		shell:AddTag(PartKit.RAINBOW_TAG)
+	end
+	local preset = MUTATION_SPARKLES[mutation]
+	if preset then
+		local sparkle = SparkleEmitter.Create({ Color = color, Rate = preset.Rate })
+		sparkle.Name = "MutationSparkle"
+		sparkle.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, preset.Size * 0.5),
+			NumberSequenceKeypoint.new(0.5, preset.Size),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		sparkle.Speed = preset.Speed
+		if mutation == "Rainbow" then
+			sparkle.Color = UITheme.GetRainbowSequence()
+		end
+		sparkle.Parent = shell
+	end
+end
+
+local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance, mutation: string?): BasePart
 	local p = PlotLayout.Pedestal
 	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
 	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
@@ -89,6 +137,10 @@ local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, par
 	light.Brightness = p.OrbLightBrightness
 	light.Parent = orb
 
+	if mutation then
+		buildShell(group, center, diameter, mutation)
+	end
+
 	group.PrimaryPart = orb
 	PartKit.SetHover(group, p.OrbSpinDegPerSec, p.OrbBob, p.OrbBobPeriod, "Bob")
 	group.Parent = parent
@@ -121,6 +173,7 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 		light:Destroy()
 	end
 
+	-- Older builds added a Highlight here; clear any left behind.
 	local highlight = pedestal:FindFirstChild("PedestalHighlight")
 	if highlight then
 		highlight:Destroy()
@@ -132,9 +185,10 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 	end
 end
 
--- Applies tier's RarityVisuals entry to `pedestal`. Clears any previous
--- styling first, so this is also how a pedestal gets reset/restyled.
-function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
+-- Applies tier's RarityVisuals entry to `pedestal`, plus a mutation shell
+-- when the item has one. Clears any previous styling first, so this is
+-- also how a pedestal gets reset/restyled.
+function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: string?)
 	PedestalVisuals.Clear(pedestal)
 
 	local config = RarityVisuals.Tiers[tier]
@@ -163,15 +217,11 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 			lip.Transparency = 0
 		end
 	end
-	local orb = buildOrb(pedestal, tier, tierColor, elements)
+	local orb = buildOrb(pedestal, tier, tierColor, elements, mutation)
 
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "PedestalHighlight"
-	highlight.FillTransparency = 1
-	highlight.OutlineColor = config.GlowColor
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = pedestal
+	-- No Highlight: Roblox renders at most 31 per client, and 12 plots x 4
+	-- pedestals can reach 48, so outlines silently vanish. The cap lip glow
+	-- above already marks a filled pedestal.
 
 	local light = Instance.new("PointLight")
 	light.Name = "PedestalLight"
