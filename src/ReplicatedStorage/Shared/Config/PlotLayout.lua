@@ -295,7 +295,6 @@ PlotLayout.Machine = {
 	RingSize = v3(0.6, 9, 9), -- Cylinder: X = thickness, Y/Z = diameter
 	PromptAnchorY = 3,
 	PromptDistance = 10,
-	FuseAllPromptOffsetPx = 72, -- screen offset stacking FuseAllPrompt under FusePrompt
 
 	OddsPostSize = v3(0.6, 6, 0.6),
 	OddsBoardSize = v3(7, 5, 0.4),

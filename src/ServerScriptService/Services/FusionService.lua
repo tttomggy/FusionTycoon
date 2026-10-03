@@ -7,7 +7,7 @@
 
 	Two items of tier N -> success: one item of tier N+1
 	                    -> fail:    one item of tier N back
-	Odds per tier live in FusionConfig.SuccessChance.
+	Odds per tier and input count live in FusionConfig.SuccessChanceByCount.
 
 	Follows the ServiceTemplate contract:
 	  :Init()   connects its own remote handler and nothing else.
@@ -89,62 +89,96 @@ end
 
 type InventoryItem = { Uid: string, ItemId: string, Tier: string, InUse: boolean, Mutation: string? }
 
--- Fuses two already-validated, same-tier, not-in-use items. Fires no
+type FuseOutcome = {
+	Upgraded: boolean,
+	Entry: InventoryItem, -- the new item, or on a fail the kept input
+	ConsumedUids: { string },
+	IsNewIndex: boolean,
+	Chance: number,
+	KeptUid: string?, -- fail only
+}
+
+-- Fuses 2-6 already-validated, same-tier, not-in-use items. Fires no
 -- remotes and never yields, so callers stay atomic.
---   success: both inputs go; the result (next tier) gets the better of
---            (the WORSE of the two inputs' mutations) and a fresh fusion
---            roll at the player's luck - so any normal input means only
---            the fresh roll can mutate it.
---   fail:    the input with the higher mutation rank (the first on a tie)
---            stays untouched, same Uid; only the other goes. A fail never
---            loses a mutation.
--- Returns (upgraded, resultEntry, consumedUids, isNewIndexEntry), or
--- (false, nil, nil, false, reason) if nothing changed.
-local function fuseOnce(
-	player: Player,
-	itemA: InventoryItem,
-	itemB: InventoryItem
-): (boolean, InventoryItem?, { string }?, boolean, string?)
-	local consumedTier = itemA.Tier
+--   success: every input goes; the result (next tier) gets the better of
+--            (the LOWEST mutation among all inputs - so every input must
+--            share a mutation for it to carry) and a fresh fusion roll at
+--            the player's luck.
+--   fail:    the input with the highest mutation rank (the first on a tie)
+--            stays untouched, same Uid; all the others go.
+-- Returns the outcome, or (nil, reason) if nothing changed.
+local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?, string?)
+	local count = #items
+	local consumedTier = items[1].Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
-	local successChance = FusionConfig.SuccessChance[consumedTier]
-	if not nextTier or not successChance then
-		return false, nil, nil, false, "MaxTier"
+	local chance = FusionConfig.GetFusionChance(consumedTier, count)
+	if not nextTier or chance <= 0 then
+		return nil, "MaxTier"
 	end
 
-	local upgraded = rng:NextNumber() < successChance
+	-- Roll before touching the inventory.
+	local upgraded = rng:NextNumber() < chance
 	if not upgraded then
-		local keep, lose = itemA, itemB
-		if MutationConfig.GetRank(itemB.Mutation) > MutationConfig.GetRank(itemA.Mutation) then
-			keep, lose = itemB, itemA
+		local keep = items[1]
+		for _, item in items do
+			if MutationConfig.GetRank(item.Mutation) > MutationConfig.GetRank(keep.Mutation) then
+				keep = item
+			end
 		end
-		local removed = PlayerDataService.RemoveItemsByUid(player, { lose.Uid })
-		if not removed then
-			return false, nil, nil, false, "ItemNotOwned"
+		local lost = {}
+		for _, item in items do
+			if item ~= keep then
+				table.insert(lost, item.Uid)
+			end
+		end
+		if not PlayerDataService.RemoveItemsByUid(player, lost) then
+			return nil, "ItemNotOwned"
 		end
 		PlayerDataService.IncrementTotalFusions(player)
-		return false, keep, { lose.Uid }, false, nil
+		return {
+			Upgraded = false,
+			Entry = keep,
+			ConsumedUids = lost,
+			IsNewIndex = false,
+			Chance = chance,
+			KeptUid = keep.Uid,
+		},
+			nil
 	end
 
 	-- Pick the result BEFORE touching the inventory, so a config gap can
-	-- never eat the player's two items.
+	-- never eat the player's items.
 	local rewardItem = ItemConfig.PickRandomOfTier(nextTier, rng)
 	if not rewardItem then
 		warn(("FusionService: no ItemConfig entry found for tier %s"):format(nextTier))
-		return false, nil, nil, false, "MissingRewardItem"
+		return nil, "MissingRewardItem"
+	end
+	local base = items[1].Mutation
+	local uids = {}
+	for _, item in items do
+		base = MutationConfig.Worse(base, item.Mutation)
+		table.insert(uids, item.Uid)
 	end
 	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
-	local base = MutationConfig.Worse(itemA.Mutation, itemB.Mutation)
 	local mutation = MutationConfig.Better(base, MutationConfig.Roll(rng, luck, "Fusion"))
 
-	local removed = PlayerDataService.RemoveItemsByUid(player, { itemA.Uid, itemB.Uid })
-	if not removed then
-		return false, nil, nil, false, "ItemNotOwned"
+	if not PlayerDataService.RemoveItemsByUid(player, uids) then
+		return nil, "ItemNotOwned"
 	end
-
 	local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
+	if not newEntry then
+		return nil, "DataNotLoaded"
+	end
 	PlayerDataService.IncrementTotalFusions(player)
-	return true, newEntry, { itemA.Uid, itemB.Uid }, isNewIndex, nil
+	return {
+		Upgraded = true,
+		Entry = newEntry,
+		ConsumedUids = uids,
+		IsNewIndex = isNewIndex,
+		Chance = chance,
+		KeptUid = nil,
+	},
+		nil
 end
 
 -- The tier whose Index page `item` just completed, if it was a new entry.
@@ -179,15 +213,32 @@ end
 -- Validates and resolves a fusion attempt entirely synchronously (no yields
 -- between the ownership check and the inventory mutation), so two requests
 -- from the same player can never both pass validation against the same items.
-local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknown)
-	if typeof(rawUidA) ~= "string" or typeof(rawUidB) ~= "string" then
+-- RequestFusion: { Uids = { string } } with 2-6 unique Uids of one tier.
+-- Validates and resolves entirely synchronously (no yields between the
+-- ownership check and the inventory mutation), so two requests can never
+-- both pass validation against the same items.
+local function onFusionRequest(player: Player, rawPayload: unknown)
+	if typeof(rawPayload) ~= "table" or typeof((rawPayload :: any).Uids) ~= "table" then
 		reject(player, "InvalidItems", true)
 		return
 	end
-	local uidA, uidB = rawUidA :: string, rawUidB :: string
-
-	if uidA == uidB then
-		reject(player, "DuplicateItem", true)
+	local rawUids = (rawPayload :: any).Uids
+	local uids: { string } = {}
+	local seen: { [string]: boolean } = {}
+	for _, uid in rawUids do
+		if typeof(uid) ~= "string" then
+			reject(player, "InvalidItems", true)
+			return
+		end
+		if seen[uid] then
+			reject(player, "DuplicateItem", true)
+			return
+		end
+		seen[uid] = true
+		table.insert(uids, uid)
+	end
+	if #uids < FusionConfig.MinFusionInputs or #uids > FusionConfig.MaxFusionInputs then
+		reject(player, "BadCount", true)
 		return
 	end
 
@@ -201,44 +252,44 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		return
 	end
 
-	-- Never trust client-supplied tiers/ownership: look both items up fresh
+	-- Never trust client-supplied tiers/ownership: look every item up fresh
 	-- from the player's authoritative server-side inventory.
-	local itemA = PlayerDataService.GetItemByUid(player, uidA)
-	local itemB = PlayerDataService.GetItemByUid(player, uidB)
-	if not itemA or not itemB then
-		reject(player, "ItemNotOwned", true)
-		return
+	local items: { InventoryItem } = {}
+	for _, uid in uids do
+		local item = PlayerDataService.GetItemByUid(player, uid)
+		if not item then
+			reject(player, "ItemNotOwned", true)
+			return
+		end
+		-- An item on a pedestal can't also be fused away - the pedestal
+		-- would be left showing an item that no longer exists.
+		if item.InUse then
+			reject(player, "ItemInUse", true)
+			return
+		end
+		if items[1] and item.Tier ~= items[1].Tier then
+			reject(player, "TierMismatch", true)
+			return
+		end
+		table.insert(items, item)
 	end
+	local tier = items[1].Tier
 
-	if itemA.Tier ~= itemB.Tier then
-		reject(player, "TierMismatch", true)
-		return
-	end
-
-	-- An item on a pedestal can't also be fused away - the pedestal would be
-	-- left showing an item that no longer exists.
-	if itemA.InUse or itemB.InUse then
-		reject(player, "ItemInUse", true)
-		return
-	end
-
-	-- Secret (top tier) can't be fused; the client never offers it, so a
-	-- request for it is a modified client.
-	if not FusionConfig.CanFuseTier(itemA.Tier) then
+	-- Secret (top tier) can't be fused; the client never offers it.
+	if not FusionConfig.CanFuseTier(tier) then
 		reject(player, "MaxTier", true)
 		return
 	end
 	-- Mythic -> Secret needs RebirthConfig.SecretFusionRebirths. The client
 	-- shows a lock instead, but its rebirth count could be a sync behind.
-	if not FusionConfig.CanFuseTierFor(itemA.Tier, PlayerDataService.GetRebirths(player)) then
+	if not FusionConfig.CanFuseTierFor(tier, PlayerDataService.GetRebirths(player)) then
 		reject(player, "NeedsRebirth")
 		return
 	end
 
-	local consumedTier = itemA.Tier
 	state.lastFusionAt[player.UserId] = os.clock()
-	local upgraded, newEntry, consumedUids, isNewIndex, failure = fuseOnce(player, itemA, itemB)
-	if not newEntry then
+	local outcome, failure = fuseOnce(player, items)
+	if not outcome then
 		reject(player, failure or "ItemNotOwned")
 		return
 	end
@@ -246,19 +297,23 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	RemoteEvents.FusionResult:FireClient(player, {
 		Success = true,
-		Upgraded = upgraded,
-		ConsumedUids = consumedUids,
-		ConsumedTier = consumedTier,
-		NewItem = newEntry,
-		NewIndex = isNewIndex,
-		IndexTierComplete = completedTier(player, newEntry, isNewIndex),
+		Upgraded = outcome.Upgraded,
+		Count = #items,
+		Chance = outcome.Chance,
+		ConsumedUids = outcome.ConsumedUids,
+		ConsumedTier = tier,
+		NewItem = outcome.Entry,
+		KeptUid = outcome.KeptUid,
+		LostCount = if outcome.Upgraded then nil else #outcome.ConsumedUids,
+		NewIndex = outcome.IsNewIndex,
+		IndexTierComplete = completedTier(player, outcome.Entry, outcome.IsNewIndex),
 	})
 	-- Fusions change goal progress (TotalFusions, tiers owned). Sent after
 	-- the result so a goal banner never lands ahead of the fusion itself.
 	PlayerDataService.SyncTycoon(player)
 
-	if upgraded then
-		announce(player, newEntry)
+	if outcome.Upgraded then
+		announce(player, outcome.Entry)
 	end
 end
 
@@ -311,24 +366,26 @@ local function onFuseAllRequest(player: Player)
 			break
 		end
 		local consumedTier = itemA.Tier
-		local upgraded, newEntry, _, isNewIndex = fuseOnce(player, itemA, itemB)
-		-- On a fail newEntry is the kept input: one of the two consumed
-		-- counts back, so the summary's net change is the same either way.
-		if not newEntry then
+		-- Always a pair (count 2) of unmutated items, at the count-2 chance.
+		local outcome = fuseOnce(player, { itemA, itemB })
+		if not outcome then
 			break
 		end
+		-- On a fail Entry is the kept input: one of the two consumed counts
+		-- back, so the summary's net change is the same either way.
+		local newEntry = outcome.Entry
 		count += 1
-		if upgraded then
+		if outcome.Upgraded then
 			upgradedCount += 1
 		end
-		if isNewIndex then
+		if outcome.IsNewIndex then
 			table.insert(newIndexItems, newEntry)
 			local tier = completedTier(player, newEntry, true)
 			if tier then
 				table.insert(tiersCompleted, tier)
 			end
 		end
-		consumed[consumedTier] = (consumed[consumedTier] or 0) + FusionConfig.ItemsRequiredPerFusion
+		consumed[consumedTier] = (consumed[consumedTier] or 0) + FusionConfig.MinFusionInputs
 		gained[newEntry.Tier] = (gained[newEntry.Tier] or 0) + 1
 		if not best or (ItemConfig.Tiers[newEntry.Tier] or 0) > (ItemConfig.Tiers[best.Tier] or 0) then
 			best = newEntry

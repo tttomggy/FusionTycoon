@@ -7,28 +7,36 @@ local MutationConfig = require(script.Parent.MutationConfig)
 FusionConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" }
 
 --[[ Fusion -------------------------------------------------------------------
-	Fusing two items of the same tier tries to make ONE item of the next tier.
-	  success -> 1 item of the next tier
-	  fail    -> 1 item of the SAME tier back (you lose one, not both)
-
-	The old machine ignored the input tier entirely (60% Common no matter
-	what), so fusing two Mythics usually handed back a Common. Nobody would
-	ever press that button twice.
+	Put 2 to 6 items of one tier into the Fuse panel:
+	  success -> 1 random item of the next tier
+	  fail    -> you keep your best input (highest mutation rank; the first
+	             on a tie) and lose the rest
+	More inputs = a higher chance. Mirrored in tools/econ_sim.py (FUSE_CHANCE).
 ]]
-FusionConfig.SuccessChance = {
-	Common = 0.70,
-	Rare = 0.50,
-	Epic = 0.35,
-	Legendary = 0.20,
-	Mythic = 0.08, -- needs RebirthConfig.SecretFusionRebirths (CanFuseTierFor)
+FusionConfig.MinFusionInputs = 2
+FusionConfig.MaxFusionInputs = 6
+
+-- Success chance by tier and input count.
+FusionConfig.SuccessChanceByCount = {
+	Common = { [2] = 0.55, [3] = 0.68, [4] = 0.78, [5] = 0.90, [6] = 1.00 },
+	Rare = { [2] = 0.45, [3] = 0.57, [4] = 0.66, [5] = 0.74, [6] = 0.80 },
+	Epic = { [2] = 0.35, [3] = 0.45, [4] = 0.53, [5] = 0.60, [6] = 0.66 },
+	Legendary = { [2] = 0.20, [3] = 0.27, [4] = 0.33, [5] = 0.39, [6] = 0.45 },
+	-- Needs RebirthConfig.SecretFusionRebirths (CanFuseTierFor).
+	Mythic = { [2] = 0.07, [3] = 0.09, [4] = 0.11, [5] = 0.13, [6] = 0.15 },
 	-- Secret is the top tier and can't be fused.
-} :: { [string]: number }
+} :: { [string]: { [number]: number } }
 
--- The Fusion Machine always consumes exactly this many same-tier items per attempt.
-FusionConfig.ItemsRequiredPerFusion = 2
+-- Chance that `count` items of `tier` fuse into the next tier; 0 if that
+-- tier or count can't be fused.
+function FusionConfig.GetFusionChance(tier: string, count: number): number
+	local byCount = FusionConfig.SuccessChanceByCount[tier]
+	return if byCount then byCount[count] or 0 else 0
+end
 
--- Fuse All only fuses pairs up to this tier (Common, Rare, Epic). A failed
--- Legendary fusion costs a Legendary, so that stays a manual choice.
+-- Fuse All only fuses pairs (count 2, unmutated) up to this tier (Common,
+-- Rare, Epic). A failed Legendary fusion costs a Legendary, so that stays
+-- a manual choice.
 FusionConfig.FuseAllMaxTier = "Epic"
 FusionConfig.FuseAllMaxFusions = 500 -- safety cap per Fuse All
 
@@ -56,7 +64,7 @@ function FusionConfig.GetNextTier(tier: string): string?
 end
 
 function FusionConfig.CanFuseTier(tier: string): boolean
-	return FusionConfig.SuccessChance[tier] ~= nil and FusionConfig.GetNextTier(tier) ~= nil
+	return FusionConfig.SuccessChanceByCount[tier] ~= nil and FusionConfig.GetNextTier(tier) ~= nil
 end
 
 -- Tiers whose fusion is gated behind a rebirth count: Mythic -> Secret.
@@ -177,8 +185,8 @@ end
 export type FusionOddsRow = {
 	FromTier: string,
 	ToTier: string,
-	Chance: number, -- 0..1
-	ChanceText: string, -- "8%"
+	-- Index i = MinFusionInputs + i - 1 inputs: "55%", "68%", ... "100%".
+	ChanceTexts: { string },
 	RebirthsNeeded: number?,
 }
 
@@ -208,13 +216,15 @@ function FusionConfig.FormatOdds(luck: number): Odds
 	local fusion: { FusionOddsRow } = {}
 	for _, tier in FusionConfig.TierOrder do
 		local nextTier = FusionConfig.GetNextTier(tier)
-		local chance = FusionConfig.SuccessChance[tier]
-		if nextTier and chance then
+		if nextTier and FusionConfig.CanFuseTier(tier) then
+			local texts = {}
+			for count = FusionConfig.MinFusionInputs, FusionConfig.MaxFusionInputs do
+				table.insert(texts, FusionConfig.FormatPercent(FusionConfig.GetFusionChance(tier, count) * 100) .. "%")
+			end
 			table.insert(fusion, {
 				FromTier = tier,
 				ToTier = nextTier,
-				Chance = chance,
-				ChanceText = FusionConfig.FormatPercent(chance * 100) .. "%",
+				ChanceTexts = texts,
 				RebirthsNeeded = FusionConfig.RebirthGatedTiers[tier],
 			})
 		end

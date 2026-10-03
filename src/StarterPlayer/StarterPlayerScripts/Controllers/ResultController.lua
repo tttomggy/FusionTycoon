@@ -893,7 +893,7 @@ local function newBottomCard(name: string, size: Vector2): (Frame, number)
 	return body, generation
 end
 
-local function showFailCard(item: any)
+local function showFailCard(item: any, lostCount: number)
 	local tier = item.Tier :: string
 	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
 	local z = body.ZIndex + 1
@@ -917,9 +917,9 @@ local function showFailCard(item: any)
 	})
 	UIKit.Label({
 		Name = "Detail",
-		Text = ("Fusion failed · you kept %s (%s)"):format(
-			"<b>" .. UIKit.Colored("1 " .. tier, UITheme.GetTierLight(tier)) .. "</b>",
-			UIKit.EscapeRichText(itemName(item))
+		Text = ("Kept %s, lost %d"):format(
+			"<b>" .. UIKit.Colored(UIKit.EscapeRichText(itemName(item)), UITheme.GetTierLight(tier)) .. "</b>",
+			lostCount
 		),
 		RichText = true,
 		Font = Fonts.Body,
@@ -1051,14 +1051,15 @@ local function onFusionResolved(result: any)
 	end
 	local newItem = result.NewItem
 	if not result.Upgraded then
-		showFailCard(newItem)
+		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1)
 		return
 	end
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
 			Item = newItem,
-			Description = ("2x %s → %s · earns %s/s on a pedestal"):format(
+			Description = ("%dx %s → %s · earns %s/s on a pedestal"):format(
+				if typeof(result.Count) == "number" then result.Count else 2,
 				tostring(result.ConsumedTier),
 				newItem.Tier,
 				NumberFormat.Money(earnRate(newItem))

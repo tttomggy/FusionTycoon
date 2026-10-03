@@ -509,17 +509,23 @@ end
 export type OddsRow = {
 	FromTier: string,
 	ToTier: string,
-	Chance: number, -- 0..1
-	ChanceText: string, -- FusionConfig.FormatOdds' text ("8%")
-	RebirthsNeeded: number?, -- shown as "(Rebirth n)" after the recipe
+	ChanceTexts: { string }, -- FusionConfig.FormatOdds: one per input count (2..6)
+	RebirthsNeeded: number?, -- shown as "(R1)" after the recipe
 }
 
 -- The odds board's content on the Front face of `board` (a real board part,
--- not a billboard): title, one row per recipe coloured by the tier it fuses
--- into, and the fail rule.
--- `mutations` is the fusion mutation line under the rows; update it later
--- (luck changes) with SetOddsMutations.
-function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, mutations: string, pixelsPerStud: number): SurfaceGui
+-- not a billboard): title, a header of input counts, one row per recipe
+-- (coloured by the tier it fuses into) with its chance at each count, the
+-- fail rule and the fusion mutation line. `firstCount` is the count of the
+-- first chance column. Update the mutation line later (luck changes) with
+-- SetOddsMutations.
+function BillboardKit.OddsSurface(
+	board: BasePart,
+	rows: { OddsRow },
+	firstCount: number,
+	mutations: string,
+	pixelsPerStud: number
+): SurfaceGui
 	local gui = newSurface(board, "OddsSurface", Enum.NormalId.Front, pixelsPerStud)
 
 	local panel = Instance.new("Frame")
@@ -529,33 +535,51 @@ function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, mutations:
 	panel.Parent = gui
 	borderStroke(panel, 6)
 
-	local titleHeight, footerHeight = 0.18, 0.09
-	local rowHeight = (1 - titleHeight - footerHeight * 2 - 0.08) / math.max(#rows, 1)
+	local columns = if rows[1] then #rows[1].ChanceTexts else 0
+	local recipeLeft, recipeWidth = 0.04, 0.4
+	local columnsLeft = recipeLeft + recipeWidth
+	local columnWidth = (0.96 - columnsLeft) / math.max(columns, 1)
+	local titleHeight, headerHeight, footerHeight = 0.15, 0.09, 0.08
+	local rowHeight = (1 - titleHeight - headerHeight - footerHeight * 2 - 0.08) / math.max(#rows, 1)
 
-	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.03, titleHeight)
-	title.Text = "FUSE 2 → TIER UP"
+	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.02, titleHeight)
+	title.Text = ("FUSE %d–%d → TIER UP"):format(firstCount, firstCount + columns - 1)
 	textStroke(title, 2)
 
+	local headerY = 0.03 + titleHeight
+	local inLabel = scaledLabel(panel, "HeaderIn", Fonts.BodyHeavy, Colors.Muted, headerY, headerHeight)
+	inLabel.Position = UDim2.fromScale(recipeLeft, headerY)
+	inLabel.Size = UDim2.fromScale(recipeWidth, headerHeight)
+	inLabel.TextXAlignment = Enum.TextXAlignment.Left
+	inLabel.Text = "ORBS IN →"
+	for column = 1, columns do
+		local header = scaledLabel(panel, "Count" .. column, Fonts.Display, Colors.Muted, headerY, headerHeight)
+		header.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, headerY)
+		header.Size = UDim2.fromScale(columnWidth, headerHeight)
+		header.Text = tostring(firstCount + column - 1)
+	end
+
 	for index, row in rows do
-		local y = 0.04 + titleHeight + (index - 1) * rowHeight
-		local left = scaledLabel(panel, "Recipe" .. index, Fonts.Body, UITheme.GetTierLight(row.ToTier), y, rowHeight * 0.9)
-		left.Position = UDim2.fromScale(0.06, y)
-		left.Size = UDim2.fromScale(0.66, rowHeight * 0.9)
+		local y = headerY + headerHeight + 0.01 + (index - 1) * rowHeight
+		local left = scaledLabel(panel, "Recipe" .. index, Fonts.Body, UITheme.GetTierLight(row.ToTier), y, rowHeight * 0.85)
+		left.Position = UDim2.fromScale(recipeLeft, y)
+		left.Size = UDim2.fromScale(recipeWidth, rowHeight * 0.85)
 		left.TextXAlignment = Enum.TextXAlignment.Left
-		left.Text = ("2 %s → %s"):format(row.FromTier, row.ToTier)
-			.. (if row.RebirthsNeeded then (" (Rebirth %d)"):format(row.RebirthsNeeded) else "")
+		left.Text = ("%s → %s"):format(row.FromTier, row.ToTier)
+			.. (if row.RebirthsNeeded then (" (R%d)"):format(row.RebirthsNeeded) else "")
 		textStroke(left, 1.5)
 
-		local right = scaledLabel(panel, "Chance" .. index, Fonts.Display, Colors.Text, y, rowHeight * 0.9)
-		right.Position = UDim2.fromScale(0.72, y)
-		right.Size = UDim2.fromScale(0.22, rowHeight * 0.9)
-		right.TextXAlignment = Enum.TextXAlignment.Right
-		right.Text = row.ChanceText
-		textStroke(right, 1.5)
+		for column, text in row.ChanceTexts do
+			local cell = scaledLabel(panel, ("Chance%d_%d"):format(index, column), Fonts.Display, Colors.Text, y, rowHeight * 0.85)
+			cell.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, y)
+			cell.Size = UDim2.fromScale(columnWidth, rowHeight * 0.85)
+			cell.Text = text
+			textStroke(cell, 1.5)
+		end
 	end
 
 	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight * 2 - 0.04, footerHeight)
-	footer.Text = "Fail = keep the better of the 2"
+	footer.Text = "Fail = keep your best orb, lose the rest"
 	local mutationText = scaledLabel(panel, "Mutations", Fonts.Body, Colors.GoldLabel, 1 - footerHeight - 0.03, footerHeight)
 	mutationText.Text = mutations
 	return gui

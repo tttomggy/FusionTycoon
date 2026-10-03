@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local FOLDER_NAME = "RemoteEvents"
 
 local REMOTE_EVENT_NAMES = {
-	"RequestFusion", -- client -> server: attempt to fuse two owned items (by Uid)
+	"RequestFusion", -- client -> server: fuse 2-6 owned same-tier items; { Uids = { string } }
 	"FusionResult", -- server -> client: validated outcome of a fusion attempt
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
 	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
@@ -48,7 +48,7 @@ end
 
 -- Populated once at require-time: the server creates each RemoteEvent, the
 -- client waits for the server to have created it. Either side then references
--- the events directly, e.g. RemoteEvents.RequestFusion:FireServer(tier).
+-- the events directly, e.g. RemoteEvents.RequestFusion:FireServer({ Uids = uids }).
 local RemoteEvents: { [string]: RemoteEvent } = {}
 
 local folder = getOrCreateFolder()

@@ -8,7 +8,6 @@ local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
-local ToastController = require(script.Parent.ToastController)
 
 local FusionController = {}
 
@@ -41,87 +40,44 @@ FusionController.FusionResolved = fusionResolved.Event
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil
-local fuseAllPrompt: ProximityPrompt? = nil
 -- The prompts live here (platform centre), not on the Core up in the air.
 local promptAnchor: BasePart? = nil
 
-local function hasPair(tier: string): boolean
-	return #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.ItemsRequiredPerFusion
-end
+-- The last fusion asked for, so the fail card's AGAIN can repeat it.
+local lastTier: string? = nil
+local lastCount = 0
 
--- Offers the LOWEST tier you have a spare pair of (not counting items on
--- pedestals). Fusing is a climb now (2x Common -> Rare, ...), so working up
--- from the bottom is what you want. Secret can't be fused at all, and
--- Mythic only after RebirthConfig.SecretFusionRebirths.
-local function getNextFusableTier(): string?
-	local rebirths = TycoonController.GetRebirths()
-	for _, tier in FusionConfig.TierOrder do
-		if FusionConfig.CanFuseTierFor(tier, rebirths) and hasPair(tier) then
-			return tier
+-- Up to `count` (default MaxFusionInputs) unmutated, not-displayed items
+-- of `tier`, as Uids: what AUTO-FILL and AGAIN put in. Never mutated ones.
+function FusionController.GetAutoFill(tier: string, count: number?): { string }
+	local wanted = count or FusionConfig.MaxFusionInputs
+	local uids = {}
+	for _, item in InventoryController.GetFuseAllItemsByTier(tier) do
+		if #uids >= wanted then
+			break
 		end
+		table.insert(uids, item.Uid)
 	end
-	return nil
-end
-
--- A tier you have a pair of but can't fuse yet (Mythic before Rebirth 1),
--- and the rebirths it needs. The prompt shows a lock for it.
-local function getLockedTier(): (string?, number)
-	local rebirths = TycoonController.GetRebirths()
-	for _, tier in FusionConfig.TierOrder do
-		local needed = FusionConfig.RebirthGatedTiers[tier]
-		if needed and FusionConfig.CanFuseTier(tier) and rebirths < needed and hasPair(tier) then
-			return tier, needed
-		end
-	end
-	return nil, 0
-end
-
-local function lockText(tier: string, needed: number): string
-	return ("Rebirth %d to fuse %ss"):format(needed, tier)
-end
-
--- Fusions possible right now without cascading: pairs per Fuse All tier.
-local function countFuseAllPairs(): number
-	local pairCount = 0
-	for _, tier in FusionConfig.GetFuseAllTiers() do
-		pairCount += #InventoryController.GetFuseAllItemsByTier(tier) // FusionConfig.ItemsRequiredPerFusion
-	end
-	return pairCount
-end
-
-local function updatePromptState()
-	if fuseAllPrompt then
-		local count = if isRequestPending then 0 else countFuseAllPairs()
-		fuseAllPrompt.Enabled = count >= 2
-		fuseAllPrompt.ActionText = ("Fuse All (%d)"):format(count)
-	end
-	if not prompt then
-		return
-	end
-	local tier = if isRequestPending then nil else getNextFusableTier()
-	local lockedTier, needed = getLockedTier()
-	prompt.Enabled = tier ~= nil or (lockedTier ~= nil and not isRequestPending)
-	if tier then
-		local nextTier = FusionConfig.GetNextTier(tier) :: string
-		local chance = FusionConfig.SuccessChance[tier] or 0
-		prompt.ActionText = ("Fuse 2x %s"):format(tier)
-		prompt.ObjectText = ("→ %s  (%d%% chance)"):format(nextTier, math.floor(chance * 100 + 0.5))
-	elseif lockedTier then
-		-- A lock instead of the fuse button: pressing it only explains.
-		prompt.ActionText = "🔒 Locked"
-		prompt.ObjectText = lockText(lockedTier, needed)
-	end
+	return uids
 end
 
 function FusionController.IsRequestPending(): boolean
 	return isRequestPending
 end
 
--- True while another fuse would be accepted right now: nothing in flight,
--- a spare pair exists, and the local character is within the machine
--- prompt's reach. Drives the fail card's AGAIN button.
+-- True while the last fusion could be repeated right now: nothing in
+-- flight, enough unmutated items of that tier for the same count, and the
+-- local character within the machine prompt's reach. Drives the fail
+-- card's AGAIN button.
 function FusionController.CanRequestFusion(): boolean
-	if isRequestPending or not core or not prompt or getNextFusableTier() == nil then
+	local tier = lastTier
+	if isRequestPending or not core or not prompt or not tier then
+		return false
+	end
+	if not FusionConfig.CanFuseTierFor(tier, TycoonController.GetRebirths()) then
+		return false
+	end
+	if #FusionController.GetAutoFill(tier, lastCount) < lastCount then
 		return false
 	end
 	local character = Players.LocalPlayer.Character
@@ -134,31 +90,37 @@ function FusionController.CanRequestFusion(): boolean
 	return (root.Position - anchor.Position).Magnitude <= reach
 end
 
--- Fire-and-forget: does not return until the full request/animation cycle
--- resolves, so run it in task.spawn if the caller needs to keep going.
-local function requestFusion()
+-- Fuses `uids` (2-6 same-tier items; the server validates everything),
+-- or with no argument repeats the last fusion's tier and count with
+-- unmutated items (AGAIN). Plays the machine's charge-up and reveal, then
+-- fires FusionResolved. Yields for the whole cycle; call it with task.spawn.
+local function requestFusion(uids: { string }?)
 	if isRequestPending then
 		return
 	end
-
-	local tier = getNextFusableTier()
-	if not tier then
-		local lockedTier, needed = getLockedTier()
-		if lockedTier then
-			ToastController.Show(lockText(lockedTier, needed), "Neutral")
+	local inputs = uids
+	if not inputs then
+		local tier = lastTier
+		if not tier or lastCount < FusionConfig.MinFusionInputs then
+			return
 		end
+		inputs = FusionController.GetAutoFill(tier, lastCount)
+	end
+	local chosen = inputs :: { string }
+	if #chosen < FusionConfig.MinFusionInputs or #chosen > FusionConfig.MaxFusionInputs then
 		return
 	end
-
-	local items = InventoryController.GetFusableItemsByTier(tier)
-	if #items < FusionConfig.ItemsRequiredPerFusion then
-		return
+	local first = nil
+	for _, item in InventoryController.GetInventory() do
+		if item.Uid == chosen[1] then
+			first = item
+		end
 	end
+	lastTier = if first then first.Tier else lastTier
+	lastCount = #chosen
 
 	isRequestPending = true
 	pendingResult = nil
-	updatePromptState()
-	local uidA, uidB = items[1].Uid, items[2].Uid
 
 	-- The client only ever plays this generic shell - it has no idea what
 	-- the outcome will be, and never will until FusionResult arrives below.
@@ -168,7 +130,7 @@ local function requestFusion()
 	end)
 
 	local startTime = os.clock()
-	RemoteEvents.RequestFusion:FireServer(uidA, uidB)
+	RemoteEvents.RequestFusion:FireServer({ Uids = chosen })
 
 	repeat
 		task.wait()
@@ -194,12 +156,10 @@ local function requestFusion()
 	end
 
 	isRequestPending = false
-	updatePromptState()
 	fusionResolved:Fire(result)
 end
 
--- Public entry point (the machine prompt and the fail card's AGAIN button).
--- Yields for the whole charge/reveal cycle; call it with task.spawn.
+-- Public entry point (the Fuse panel's FUSE and the fail card's AGAIN).
 FusionController.RequestFusion = requestFusion
 
 -- Fuse every Common/Rare/Epic pair in one go: plays the charge-up for 3 s,
@@ -211,7 +171,6 @@ function FusionController.RequestFuseAll()
 	end
 	isRequestPending = true
 	pendingFuseAllResult = nil
-	updatePromptState()
 
 	local handles = { Core = core :: BasePart, Ring = ring }
 	task.spawn(function()
@@ -232,7 +191,6 @@ function FusionController.RequestFuseAll()
 	end
 
 	isRequestPending = false
-	updatePromptState()
 	fuseAllResolved:Fire(result)
 end
 
@@ -255,29 +213,8 @@ function FusionController.Init()
 	local anchor = machine:WaitForChild("PromptAnchor") :: BasePart
 	promptAnchor = anchor
 	prompt = anchor:WaitForChild("FusePrompt") :: ProximityPrompt
-	fuseAllPrompt = anchor:WaitForChild("FuseAllPrompt") :: ProximityPrompt
-	local holdPrompt = fuseAllPrompt :: ProximityPrompt
-	holdPrompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if triggeringPlayer == Players.LocalPlayer then
-			task.spawn(FusionController.RequestFuseAll)
-		end
-	end)
-
-	-- Same fix as AnnouncementController: a line starting with "(" right
-	-- after a statement is ambiguous in Lua (could read as continuing the
-	-- previous line's expression as a function call), so this goes through a
-	-- local variable instead of an inline `(x :: T).Field` cast.
-	local fusePrompt = prompt :: ProximityPrompt
-	fusePrompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if triggeringPlayer == Players.LocalPlayer then
-			task.spawn(requestFusion)
-		end
-	end)
-
-	InventoryController.InventoryChanged:Connect(updatePromptState)
-	-- A rebirth can unlock Mythic fusion.
-	TycoonController.TycoonChanged:Connect(updatePromptState)
-	updatePromptState()
+	-- The prompt itself opens the Fuse panel (FusePanel, through
+	-- ProximityPromptService); this controller only runs the requests.
 end
 
 return FusionController

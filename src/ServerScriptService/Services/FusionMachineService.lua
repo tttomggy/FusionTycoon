@@ -5,14 +5,14 @@
 	Builds a plot's Fusion Machine: a round Structure platform with a violet
 	Neon rim, four leaning pylons, a floating Neon Core with its spinning
 	Ring, a floor glow, and an invisible PromptAnchor holding the fuse
-	prompts. Beside it stands the odds board: a post and a real board with
+	prompt. Beside it stands the odds board: a post and a real board with
 	the odds on a SurfaceGui.
 
 	TycoonService calls Build once per plot. Every position and size comes
 	from PlotLayout (Machine, FUSION_MACHINE, ODDS_BOARD).
 
 	RevealEffects animates `Core` (Size) and `Ring` (CFrame) by name, and
-	FusionController finds the prompts on `PromptAnchor`.
+	the owner's FusePanel opens from the FusePrompt on `PromptAnchor`.
 
 	Lifecycle: :Init() only removes a leftover shared machine from an older
 	build. No cross-service references.
@@ -44,7 +44,6 @@ local CORE_SPARKLE_RATE = 4
 local RING_TRANSPARENCY = 0.35
 local ORBIT_ATTACHMENT_COUNT = 4
 local ORBIT_SPARKLE_RATE = 6
-local FUSE_ALL_HOLD_SECONDS = 0.6
 
 local function buildPlatform(machine: Model, base: CFrame)
 	PartKit.Cylinder({
@@ -161,7 +160,9 @@ local function buildPromptAnchor(machine: Model, base: CFrame)
 		Parent = machine,
 	})
 
-	-- Left disabled until the owner's client confirms a fusable pair.
+	-- Opens the owner's Fuse panel (client, via ProximityPromptService);
+	-- Fuse All lives in the panel now. Owner-only: WorldLabelController
+	-- disables it on everyone else's client.
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "FusePrompt"
 	prompt.ActionText = "Fuse"
@@ -171,24 +172,8 @@ local function buildPromptAnchor(machine: Model, base: CFrame)
 	prompt.HoldDuration = 0
 	prompt.RequiresLineOfSight = false
 	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-	prompt.Enabled = false
+	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 	prompt.Parent = anchor
-
-	-- Hold F: fuse every Common/Rare/Epic pair at once. The owner's client
-	-- fills in "Fuse All (N)" and enables it when N >= 2.
-	local fuseAll = Instance.new("ProximityPrompt")
-	fuseAll.Name = "FuseAllPrompt"
-	fuseAll.ActionText = "Fuse All"
-	fuseAll.ObjectText = "Hold · Common, Rare, Epic"
-	fuseAll.KeyboardKeyCode = Enum.KeyCode.F
-	fuseAll.GamepadKeyCode = Enum.KeyCode.ButtonY
-	fuseAll.HoldDuration = FUSE_ALL_HOLD_SECONDS
-	fuseAll.MaxActivationDistance = M.PromptDistance
-	fuseAll.RequiresLineOfSight = false
-	fuseAll.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-	fuseAll.UIOffset = Vector2.new(0, M.FuseAllPromptOffsetPx) -- stacked under FusePrompt
-	fuseAll.Enabled = false
-	fuseAll.Parent = anchor
 end
 
 -- Post + board facing the gate, yawed toward the walkway, with the odds on
@@ -224,7 +209,13 @@ local function buildOddsBoard(originCFrame: CFrame, parent: Instance)
 	-- luck here; TycoonService refreshes the mutation line at the owner's
 	-- luck on every sync.
 	local odds = FusionConfig.FormatOdds(1)
-	BillboardKit.OddsSurface(boardPart, odds.Fusion, "Mutations · " .. odds.FusionMutations, M.SurfacePixelsPerStud)
+	BillboardKit.OddsSurface(
+		boardPart,
+		odds.Fusion,
+		FusionConfig.MinFusionInputs,
+		"Mutations · " .. odds.FusionMutations,
+		M.SurfacePixelsPerStud
+	)
 
 	board.Parent = parent
 end
