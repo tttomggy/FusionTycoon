@@ -541,6 +541,9 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		TitleColor = UITheme.Colors.VioletLight,
 		Pill = "",
 		PillGradient = UITheme.Gradients.Violet,
+		-- The price, in the same Gold pill as the Gacha's "$483 / pull".
+		SecondPillGradient = UITheme.Gradients.Gold,
+		SecondPillTextColor = UITheme.Colors.GoldText,
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
 	local prompt = newPrompt(pad, "UpgradePrompt", "Upgrade", "Cash Multiplier", PlotLayout.Station.PromptDistance)
@@ -552,6 +555,7 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		local current = TycoonConfig.GetCashMultiplierValue(level)
 		if level >= maxLevel then
 			padLabel.SetPill(("%s MAX"):format(NumberFormat.Multiplier(current)))
+			padLabel.SetSecondPill(nil)
 			padLabel.SetDetail(nil)
 			prompt.Enabled = false
 			return
@@ -559,8 +563,19 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		prompt.Enabled = true
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		local nextValue = TycoonConfig.GetCashMultiplierValue(level + 1)
-		padLabel.SetPill(("%s · LV %d/%d"):format(NumberFormat.Multiplier(current), level, maxLevel))
-		padLabel.SetDetail(("→ %s · %s · press E"):format(NumberFormat.Multiplier(nextValue), NumberFormat.Money(cost)))
+		padLabel.SetPill(
+			("%s → %s · LV %d/%d"):format(NumberFormat.Multiplier(current), NumberFormat.Multiplier(nextValue), level, maxLevel)
+		)
+		padLabel.SetSecondPill(NumberFormat.Money(cost))
+		prompt.ObjectText = NumberFormat.Money(cost)
+		-- Live "need" caption: this refresh runs on every sync (each payout
+		-- tick included), so it follows the owner's cash.
+		local cash = PlayerDataService.GetCash(player)
+		if cash < cost then
+			padLabel.SetDetail(("Need %s more"):format(NumberFormat.Money(cost - cash)), UITheme.Colors.MythicBannerLabel)
+		else
+			padLabel.SetDetail(nil)
+		end
 	end
 	refreshLabel()
 	addStationRefresh(player, refreshLabel)
@@ -576,6 +591,8 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		end
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		if not PlayerDataService.SpendCash(player, cost) then
+			-- Never silent: the client toasts "Need $X".
+			RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
 			return
 		end
 
@@ -594,7 +611,7 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		end
 		playSound(pad, STATION_SOUND_ID, 0.8)
 
-		RemoteEvents.MultiplierUpgraded:FireClient(player, { OldMultiplier = oldMultiplier, NewMultiplier = newMultiplier })
+		RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = true, OldMultiplier = oldMultiplier, NewMultiplier = newMultiplier })
 
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false

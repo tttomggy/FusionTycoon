@@ -394,6 +394,15 @@ local function onRebirthAnnouncement(payload: any)
 end
 
 local function onMultiplierUpgraded(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if payload.Success == false then
+		if payload.Reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
+			ToastController.Show(("Need %s"):format(NumberFormat.Money(payload.Cost)), "Error")
+		end
+		return
+	end
 	enqueue({
 		Text = ("Multiplier upgraded! %s → %s"):format(
 			UIKit.Colored(NumberFormat.Multiplier(payload.OldMultiplier), Colors.VioletLight),

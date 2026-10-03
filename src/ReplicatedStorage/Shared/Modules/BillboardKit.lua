@@ -125,12 +125,17 @@ export type PadProps = {
 	-- A taller label whose detail area wraps two lines (the gacha pad's
 	-- odds disclosure).
 	TallDetail: boolean?,
+	-- A second (price) pill under the first, in this gradient (the
+	-- Multiplier Pad's "$1.5T"). Hidden while its text is nil.
+	SecondPillGradient: UITheme.GradientPair?,
+	SecondPillTextColor: Color3?,
 }
 
 export type PadLabel = {
 	Gui: BillboardGui,
 	SetPill: (text: string) -> (),
-	SetDetail: (text: string?) -> (),
+	SetDetail: (text: string?, color: Color3?) -> (),
+	SetSecondPill: (text: string?) -> (),
 }
 
 -- Title (Display, coloured, ink stroke), a gradient price pill (Display,
@@ -148,10 +153,14 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 		gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 	end
 
-	-- Fractions of the label height: title, pill, detail.
+	-- Fractions of the label height: title, pill, (second pill), detail.
+	local secondGradient = props.SecondPillGradient
 	local titleH, pillY, pillH, detailY, detailH = 0.4, 0.42, 0.34, 0.8, 0.2
+	local secondY, secondH = 0, 0
 	if tall then
 		titleH, pillY, pillH, detailY, detailH = 0.27, 0.29, 0.23, 0.56, 0.44
+	elseif secondGradient then
+		titleH, pillY, pillH, secondY, secondH, detailY, detailH = 0.28, 0.3, 0.22, 0.55, 0.22, 0.8, 0.2
 	end
 
 	local title = scaledLabel(gui, "Title", Fonts.Display, props.TitleColor, 0, titleH)
@@ -174,12 +183,31 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 	end
 	pillText.Text = props.Pill
 
+	local secondPill: Frame? = nil
+	local secondText: TextLabel? = nil
+	if secondGradient then
+		local frame = Instance.new("Frame")
+		frame.Name = "SecondPill"
+		frame.AnchorPoint = Vector2.new(0.5, 0)
+		frame.Position = UDim2.fromScale(0.5, secondY)
+		frame.Size = UDim2.fromScale(0.46, secondH)
+		frame.BackgroundColor3 = Colors.White
+		frame.Visible = false
+		frame.Parent = gui
+		gradient(frame, secondGradient.Top, secondGradient.Bottom)
+		corner(frame, UDim.new(0.5, 0))
+		borderStroke(frame, 3)
+		secondText = scaledLabel(frame, "Text", Fonts.Display, props.SecondPillTextColor or Colors.Text, 0.12, 0.76)
+		secondPill = frame
+	end
+
 	local detail = scaledLabel(gui, "Detail", Fonts.Body, Colors.Text, detailY, detailH)
 	detail.TextWrapped = tall
 	textStroke(detail, 1.5)
 
-	local function setDetail(text: string?)
+	local function setDetail(text: string?, color: Color3?)
 		detail.Text = text or ""
+		detail.TextColor3 = color or Colors.Text
 		detail.Visible = text ~= nil and text ~= ""
 	end
 	setDetail(props.Detail)
@@ -190,6 +218,12 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 			pillText.Text = text
 		end,
 		SetDetail = setDetail,
+		SetSecondPill = function(text: string?)
+			if secondPill and secondText then
+				secondText.Text = text or ""
+				secondPill.Visible = text ~= nil
+			end
+		end,
 	}
 end
 
