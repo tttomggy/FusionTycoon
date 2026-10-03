@@ -502,16 +502,41 @@ function UIKit.Pill(props: PillProps): TextLabel
 		BackgroundTransparency = 0,
 		Stroke = props.TextStroke,
 	})
-	if props.Gradient then
-		pill.BackgroundColor3 = Colors.White
-		UIKit.PairGradient(pill, props.Gradient)
-	else
-		pill.BackgroundColor3 = props.Color or Colors.Panel2
-	end
-	UIKit.Corner(pill, 999)
-	UIKit.Stroke(pill, props.StrokeThickness or 2)
 	UIKit.Padding(pill, 0, 10, 0, 10)
-	pill.Parent = props.Parent
+
+	if not props.Gradient then
+		pill.BackgroundColor3 = props.Color or Colors.Panel2
+		UIKit.Corner(pill, 999)
+		UIKit.Stroke(pill, props.StrokeThickness or 2)
+		pill.Parent = props.Parent
+		return pill
+	end
+
+	-- A UIGradient on the label would tint its text too, so the gradient,
+	-- corner and stroke go on an auto-sized Frame and the (clear) label sits
+	-- inside it. The Frame takes the layout props; the label is returned so
+	-- callers can still set .Text.
+	local fill = Instance.new("Frame")
+	fill.Name = pill.Name
+	fill.BackgroundColor3 = Colors.White
+	fill.AutomaticSize = Enum.AutomaticSize.X
+	fill.Size = pill.Size
+	fill.Position = pill.Position
+	fill.AnchorPoint = pill.AnchorPoint
+	fill.LayoutOrder = pill.LayoutOrder
+	fill.ZIndex = pill.ZIndex
+	UIKit.Corner(fill, 999)
+	UIKit.Stroke(fill, props.StrokeThickness or 2)
+	UIKit.PairGradient(fill, props.Gradient)
+
+	pill.Name = "Text"
+	pill.BackgroundTransparency = 1
+	pill.Position = UDim2.new()
+	pill.AnchorPoint = Vector2.zero
+	pill.LayoutOrder = 0
+	pill.ZIndex = fill.ZIndex + 1
+	pill.Parent = fill
+	fill.Parent = props.Parent
 	return pill
 end
 

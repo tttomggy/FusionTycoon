@@ -83,24 +83,32 @@ function ToastController.Show(text: string, kind: ToastKind?)
 	holder.Size = UDim2.fromOffset(0, TOAST_HEIGHT + UITheme.SmallShadowOffset)
 	holder.LayoutOrder = order
 
-	local body = UIKit.Label({
-		Name = "Body",
+	-- The gradient lives on a background Frame and the words on a child
+	-- label: a UIGradient on a TextLabel tints its text too, which turned
+	-- white text red-on-red (blank toasts).
+	local body = Instance.new("Frame")
+	body.Name = "Body"
+	body.AutomaticSize = Enum.AutomaticSize.X
+	body.Size = UDim2.fromOffset(0, TOAST_HEIGHT)
+	body.BackgroundColor3 = Colors.White
+	body.ZIndex = 2
+	body.Parent = holder
+	UIKit.Padding(body, 0, 18, 0, 18)
+	UIKit.Corner(body, UITheme.Radius.Toast)
+	UIKit.Stroke(body, UITheme.Stroke.Default)
+	UIKit.PairGradient(body, if kind == "Neutral" then UITheme.Gradients.Disabled else UITheme.Gradients.Red)
+	UIKit.Label({
+		Name = "Text",
 		Text = text,
 		Font = UITheme.Fonts.Body,
 		TextSize = 16,
 		TextColor3 = Colors.Text,
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, TOAST_HEIGHT),
+		Size = UDim2.fromScale(0, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Colors.White,
-		ZIndex = 2,
-		Parent = holder,
+		ZIndex = 3,
+		Parent = body,
 	})
-	UIKit.Padding(body, 0, 18, 0, 18)
-	UIKit.Corner(body, UITheme.Radius.Toast)
-	UIKit.Stroke(body, UITheme.Stroke.Default)
-	UIKit.PairGradient(body, if kind == "Neutral" then UITheme.Gradients.Disabled else UITheme.Gradients.Red)
 	UIKit.Shadow(body, UITheme.SmallShadowOffset)
 
 	holder.Parent = parent

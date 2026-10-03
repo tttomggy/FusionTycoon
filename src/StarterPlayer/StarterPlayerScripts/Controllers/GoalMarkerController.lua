@@ -124,27 +124,32 @@ local function buildMarker(goalText: string)
 	content.Size = UDim2.fromScale(1, 1)
 	content.Parent = gui
 
-	local pill = UIKit.Label({
-		Name = "Pill",
-		Text = goalText:upper(),
-		Font = Fonts.Display,
-		TextSize = 20,
-		TextColor3 = Colors.GoldText,
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromScale(0.5, 0),
-		Size = UDim2.new(1, 0, 0, 36),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		TextWrapped = false,
-		TextScaled = true,
-		BackgroundTransparency = 0,
-		BackgroundColor3 = Colors.White,
-		ZIndex = 2,
-		Parent = content,
-	})
+	-- Gold gradient on a Frame with the words in a child label (a gradient on
+	-- the label itself would tint the text gold-on-gold).
+	local pill = Instance.new("Frame")
+	pill.Name = "Pill"
+	pill.AnchorPoint = Vector2.new(0.5, 0)
+	pill.Position = UDim2.fromScale(0.5, 0)
+	pill.Size = UDim2.new(1, 0, 0, 36)
+	pill.BackgroundColor3 = Colors.White
+	pill.ZIndex = 2
+	pill.Parent = content
 	UIKit.PairGradient(pill, UITheme.Gradients.Gold)
 	UIKit.Corner(pill, 999)
 	UIKit.Stroke(pill, 3)
 	UIKit.Padding(pill, 4, 12, 4, 12)
+	UIKit.Label({
+		Name = "Text",
+		Text = goalText:upper(),
+		Font = Fonts.Display,
+		TextSize = 20,
+		TextColor3 = Colors.GoldText,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextScaled = true,
+		ZIndex = 3,
+		Parent = pill,
+	})
 
 	-- Down-pointing triangle: a gold square turned 45 degrees, half tucked
 	-- under the pill.
