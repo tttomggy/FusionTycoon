@@ -225,7 +225,12 @@ local function buildOddsBoard(originCFrame: CFrame, parent: Instance)
 		local nextTier = FusionConfig.GetNextTier(tier)
 		local chance = FusionConfig.SuccessChance[tier]
 		if nextTier and chance then
-			table.insert(rows, { FromTier = tier, ToTier = nextTier, Chance = chance })
+			table.insert(rows, {
+				FromTier = tier,
+				ToTier = nextTier,
+				Chance = chance,
+				RebirthsNeeded = FusionConfig.RebirthGatedTiers[tier],
+			})
 		end
 	end
 	BillboardKit.OddsSurface(boardPart, rows, M.SurfacePixelsPerStud)

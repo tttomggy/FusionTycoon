@@ -7,6 +7,8 @@ local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
+local TycoonController = require(script.Parent.TycoonController)
+local ToastController = require(script.Parent.ToastController)
 
 local FusionController = {}
 
@@ -43,18 +45,39 @@ local fuseAllPrompt: ProximityPrompt? = nil
 -- The prompts live here (platform centre), not on the Core up in the air.
 local promptAnchor: BasePart? = nil
 
+local function hasPair(tier: string): boolean
+	return #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.ItemsRequiredPerFusion
+end
+
 -- Offers the LOWEST tier you have a spare pair of (not counting items on
 -- pedestals). Fusing is a climb now (2x Common -> Rare, ...), so working up
--- from the bottom is what you want, and Mythic can't be fused at all.
+-- from the bottom is what you want. Secret can't be fused at all, and
+-- Mythic only after RebirthConfig.SecretFusionRebirths.
 local function getNextFusableTier(): string?
+	local rebirths = TycoonController.GetRebirths()
 	for _, tier in FusionConfig.TierOrder do
-		if FusionConfig.CanFuseTier(tier)
-			and #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.ItemsRequiredPerFusion
-		then
+		if FusionConfig.CanFuseTierFor(tier, rebirths) and hasPair(tier) then
 			return tier
 		end
 	end
 	return nil
+end
+
+-- A tier you have a pair of but can't fuse yet (Mythic before Rebirth 1),
+-- and the rebirths it needs. The prompt shows a lock for it.
+local function getLockedTier(): (string?, number)
+	local rebirths = TycoonController.GetRebirths()
+	for _, tier in FusionConfig.TierOrder do
+		local needed = FusionConfig.RebirthGatedTiers[tier]
+		if needed and FusionConfig.CanFuseTier(tier) and rebirths < needed and hasPair(tier) then
+			return tier, needed
+		end
+	end
+	return nil, 0
+end
+
+local function lockText(tier: string, needed: number): string
+	return ("Rebirth %d to fuse %ss"):format(needed, tier)
 end
 
 -- Fusions possible right now without cascading: pairs per Fuse All tier.
@@ -76,12 +99,17 @@ local function updatePromptState()
 		return
 	end
 	local tier = if isRequestPending then nil else getNextFusableTier()
-	prompt.Enabled = tier ~= nil
+	local lockedTier, needed = getLockedTier()
+	prompt.Enabled = tier ~= nil or (lockedTier ~= nil and not isRequestPending)
 	if tier then
 		local nextTier = FusionConfig.GetNextTier(tier) :: string
 		local chance = FusionConfig.SuccessChance[tier] or 0
 		prompt.ActionText = ("Fuse 2x %s"):format(tier)
 		prompt.ObjectText = ("→ %s  (%d%% chance)"):format(nextTier, math.floor(chance * 100 + 0.5))
+	elseif lockedTier then
+		-- A lock instead of the fuse button: pressing it only explains.
+		prompt.ActionText = "🔒 Locked"
+		prompt.ObjectText = lockText(lockedTier, needed)
 	end
 end
 
@@ -115,6 +143,10 @@ local function requestFusion()
 
 	local tier = getNextFusableTier()
 	if not tier then
+		local lockedTier, needed = getLockedTier()
+		if lockedTier then
+			ToastController.Show(lockText(lockedTier, needed), "Neutral")
+		end
 		return
 	end
 
@@ -243,6 +275,8 @@ function FusionController.Init()
 	end)
 
 	InventoryController.InventoryChanged:Connect(updatePromptState)
+	-- A rebirth can unlock Mythic fusion.
+	TycoonController.TycoonChanged:Connect(updatePromptState)
 	updatePromptState()
 end
 

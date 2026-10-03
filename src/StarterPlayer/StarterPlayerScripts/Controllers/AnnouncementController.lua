@@ -98,6 +98,17 @@ local function rebirthEmblem(): GuiObject
 	return disc
 end
 
+local SECRET_STYLE: BigStyle = {
+	Caption = "SERVER · SECRET",
+	CaptionColor = UITheme.GetTierLight("Secret"),
+	Left = Colors.Ink,
+	Right = UITheme.GetTierOrb("Secret").Dark,
+	Emblem = function()
+		return UIKit.TierOrb("Secret", 50)
+	end,
+	Shake = true,
+}
+
 local REBIRTH_STYLE: BigStyle = {
 	Caption = "SERVER · REBIRTH",
 	CaptionColor = Colors.RebirthLabel,
@@ -314,7 +325,7 @@ local function onRareFusionAnnouncement(payload: any)
 	enqueue({
 		Text = text,
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
-		Big = if tier == "Mythic" then MYTHIC_STYLE else nil,
+		Big = if tier == "Secret" then SECRET_STYLE elseif tier == "Mythic" then MYTHIC_STYLE else nil,
 	})
 end
 

@@ -259,6 +259,7 @@ PlotLayout.Pedestal = {
 		Epic = 2.2,
 		Legendary = 2.6,
 		Mythic = 3.0,
+		Secret = 3.2, -- Mythic + 0.2
 	} :: { [string]: number },
 	OrbTransparency = 0.15,
 	InnerOrbScale = 0.65,

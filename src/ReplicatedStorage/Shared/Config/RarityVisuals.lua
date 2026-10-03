@@ -92,6 +92,20 @@ RarityVisuals.Tiers = {
 		ProximityBurst = true,
 		AnnounceServerWide = true,
 	},
+	-- Mythic's structure in mint. The orb itself is the one dark orb
+	-- (PedestalVisuals: VoidShell glass around a mint core); a slow sparkle.
+	Secret = {
+		GlowColor = Color3.fromRGB(61, 255, 208),
+		LightBrightness = 12,
+		LightRange = 32,
+		Particles = { Rate = 8, Speed = NumberRange.new(0.2, 0.5), SpreadAngle = Vector2.new(180, 180) },
+		RotatingRing = true,
+		Pulse = true,
+		Beam = true,
+		AmbientSoundId = "rbxasset://sounds/bell.wav", -- same asset gap as Mythic
+		ProximityBurst = true,
+		AnnounceServerWide = true,
+	},
 } :: { [string]: TierVisual }
 
 return RarityVisuals

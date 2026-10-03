@@ -439,6 +439,7 @@ export type OddsRow = {
 	FromTier: string,
 	ToTier: string,
 	Chance: number, -- 0..1
+	RebirthsNeeded: number?, -- shown as "(Rebirth n)" after the recipe
 }
 
 -- The odds board's content on the Front face of `board` (a real board part,
@@ -468,6 +469,7 @@ function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerS
 		left.Size = UDim2.fromScale(0.66, rowHeight * 0.9)
 		left.TextXAlignment = Enum.TextXAlignment.Left
 		left.Text = ("2 %s → %s"):format(row.FromTier, row.ToTier)
+			.. (if row.RebirthsNeeded then (" (Rebirth %d)"):format(row.RebirthsNeeded) else "")
 		textStroke(left, 1.5)
 
 		local right = scaledLabel(panel, "Chance" .. index, Fonts.Display, Colors.Text, y, rowHeight * 0.9)

@@ -118,7 +118,7 @@ local function fuseOnce(player: Player, itemA: InventoryItem, itemB: InventoryIt
 	return upgraded, newEntry, nil
 end
 
--- Server-wide brag for a Legendary/Mythic result: the moment everyone else
+-- Server-wide brag for a Legendary/Mythic/Secret result: the moment everyone else
 -- in the server sees and wants for themselves.
 local function announce(player: Player, item: InventoryItem)
 	local visual = RarityVisuals.Tiers[item.Tier]
@@ -183,10 +183,16 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		return
 	end
 
-	-- Mythic (top tier) can't be fused; the client never offers it, so a
+	-- Secret (top tier) can't be fused; the client never offers it, so a
 	-- request for it is a modified client.
 	if not FusionConfig.CanFuseTier(itemA.Tier) then
 		reject(player, "MaxTier", true)
+		return
+	end
+	-- Mythic -> Secret needs RebirthConfig.SecretFusionRebirths. The client
+	-- shows a lock instead, but its rebirth count could be a sync behind.
+	if not FusionConfig.CanFuseTierFor(itemA.Tier, PlayerDataService.GetRebirths(player)) then
+		reject(player, "NeedsRebirth")
 		return
 	end
 

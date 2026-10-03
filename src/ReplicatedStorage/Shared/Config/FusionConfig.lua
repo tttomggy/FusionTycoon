@@ -1,7 +1,9 @@
 --!strict
 local FusionConfig = {}
 
-FusionConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+local RebirthConfig = require(script.Parent.RebirthConfig)
+
+FusionConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" }
 
 --[[ Fusion -------------------------------------------------------------------
 	Fusing two items of the same tier tries to make ONE item of the next tier.
@@ -17,7 +19,8 @@ FusionConfig.SuccessChance = {
 	Rare = 0.50,
 	Epic = 0.35,
 	Legendary = 0.20,
-	-- Mythic is the top tier and can't be fused.
+	Mythic = 0.08, -- needs RebirthConfig.SecretFusionRebirths (CanFuseTierFor)
+	-- Secret is the top tier and can't be fused.
 } :: { [string]: number }
 
 -- The Fusion Machine always consumes exactly this many same-tier items per attempt.
@@ -55,15 +58,31 @@ function FusionConfig.CanFuseTier(tier: string): boolean
 	return FusionConfig.SuccessChance[tier] ~= nil and FusionConfig.GetNextTier(tier) ~= nil
 end
 
+-- Tiers whose fusion is gated behind a rebirth count: Mythic -> Secret.
+FusionConfig.RebirthGatedTiers = {
+	Mythic = RebirthConfig.SecretFusionRebirths,
+} :: { [string]: number }
+
+-- CanFuseTier, plus the rebirth gate. FusionService enforces it (rejecting
+-- with "NeedsRebirth"); the client shows a lock instead of the fuse prompt.
+function FusionConfig.CanFuseTierFor(tier: string, rebirths: number): boolean
+	if not FusionConfig.CanFuseTier(tier) then
+		return false
+	end
+	local needed = FusionConfig.RebirthGatedTiers[tier]
+	return needed == nil or rebirths >= needed
+end
+
 --[[ Gacha --------------------------------------------------------------------
 	Odds for a Gacha Pad pull. Must sum to 1.
 ]]
 FusionConfig.GachaRates = {
-	Common = 0.78,
+	Common = 0.77998,
 	Rare = 0.18,
 	Epic = 0.035,
 	Legendary = 0.0045,
 	Mythic = 0.0005,
+	Secret = 0.00002,
 } :: { [string]: number }
 
 do
@@ -75,7 +94,7 @@ do
 end
 
 -- Tiers whose odds rebirth luck multiplies; Common absorbs the difference.
-FusionConfig.LuckyTiers = { "Legendary", "Mythic" }
+FusionConfig.LuckyTiers = { "Legendary", "Mythic", "Secret" }
 
 -- The effective gacha odds at `luck` (RebirthConfig.GetLuck; 1 = base).
 -- Luck multiplies the LuckyTiers' rates and Common takes up the slack, so
@@ -120,6 +139,7 @@ FusionConfig.TierAccentColors = {
 	Epic = Color3.fromRGB(190, 60, 255),
 	Legendary = Color3.fromRGB(255, 190, 40),
 	Mythic = Color3.fromRGB(255, 60, 90),
+	Secret = Color3.fromRGB(61, 255, 208), -- mint #3DFFD0, same as UITheme.TierLight.Secret
 } :: { [string]: Color3 }
 
 -- Tiers dramatic enough to warrant the "big reveal" treatment (longer pause,
@@ -129,6 +149,7 @@ FusionConfig.MajorRevealTiers = {
 	Epic = true,
 	Legendary = true,
 	Mythic = true,
+	Secret = true,
 } :: { [string]: boolean }
 
 return FusionConfig

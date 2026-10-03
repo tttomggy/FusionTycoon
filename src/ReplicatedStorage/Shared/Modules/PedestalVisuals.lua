@@ -27,6 +27,8 @@ local ELEMENTS_FOLDER_NAME = "PedestalVisualElements"
 local RING_DIAMETER = 5
 local RING_HEIGHT_OFFSET_STUDS = 0.2
 
+local SECRET_SHELL_TRANSPARENCY = 0.35
+
 local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
 
@@ -56,14 +58,17 @@ local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, par
 	local group = Instance.new("Model")
 	group.Name = "OrbGroup"
 
+	-- Secret is the one dark orb, so it reads instantly: a VoidShell glass
+	-- shell around the mint core.
+	local isSecret = tier == "Secret"
 	local orb = PartKit.Part({
 		Name = "Orb",
 		Shape = Enum.PartType.Ball,
 		Size = Vector3.one * diameter,
 		CFrame = center,
-		Color = tierColor,
+		Color = if isSecret then UITheme.World.VoidShell else tierColor,
 		Material = Enum.Material.Glass,
-		Transparency = p.OrbTransparency,
+		Transparency = if isSecret then SECRET_SHELL_TRANSPARENCY else p.OrbTransparency,
 		Parent = group,
 	})
 	PartKit.MakeDecorative(orb)

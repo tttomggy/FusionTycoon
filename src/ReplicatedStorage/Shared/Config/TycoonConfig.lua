@@ -82,6 +82,7 @@ TycoonConfig.PedestalCashPerSecond = {
 	Epic = 50,
 	Legendary = 300,
 	Mythic = 3000,
+	Secret = 50000,
 } :: { [string]: number }
 
 function TycoonConfig.GetPedestalCashPerSecond(tier: string): number

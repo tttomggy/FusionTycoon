@@ -15,7 +15,10 @@ RebirthConfig.BaseRequirement = 30_000_000 -- run earnings for the 1st rebirth
 RebirthConfig.RequirementGrowth = 3.2 -- each rebirth needs 3.2x the last
 RebirthConfig.IncomePerRebirth = 0.5 -- income x(1 + 0.5 * rebirths)
 RebirthConfig.LuckPerRebirth = 0.05 -- luck x(1 + 0.05 * rebirths)
-RebirthConfig.Unlocks = {} :: { [number]: string } -- rebirth number -> unlock text (filled by Depth 1)
+RebirthConfig.SecretFusionRebirths = 1 -- Mythic -> Secret fusion unlocks at this many rebirths
+RebirthConfig.Unlocks = { -- rebirth number -> what it unlocks (shown in the Rebirth panel)
+	[1] = "Mythic fusion → Secret",
+} :: { [number]: string }
 
 -- Run earnings needed for the next rebirth after `rebirths` so far.
 function RebirthConfig.GetRequirement(rebirths: number): number
@@ -26,7 +29,8 @@ function RebirthConfig.GetIncomeMultiplier(rebirths: number): number
 	return 1 + RebirthConfig.IncomePerRebirth * math.max(0, rebirths)
 end
 
--- Multiplies the Legendary/Mythic gacha rates (FusionConfig.GetGachaRates).
+-- Multiplies the Legendary/Mythic/Secret gacha rates (FusionConfig.GetGachaRates)
+-- and every mutation chance (MutationConfig.Roll).
 function RebirthConfig.GetLuck(rebirths: number): number
 	return 1 + RebirthConfig.LuckPerRebirth * math.max(0, rebirths)
 end

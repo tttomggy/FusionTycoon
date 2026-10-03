@@ -288,7 +288,7 @@ local function showBigCard(info: BigCardInfo)
 	})
 
 	UIKit.PopIn(holder)
-	if tier == "Mythic" then
+	if tier == "Mythic" or tier == "Secret" then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
 	end
 end

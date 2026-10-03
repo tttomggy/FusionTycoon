@@ -66,6 +66,7 @@ UITheme.World = {
 	Belt = hex("#1B1834"), -- speed belt surface
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
+	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
 }
 
 export type GradientPair = { Top: Color3, Bottom: Color3 }
@@ -95,6 +96,7 @@ UITheme.TierLight = {
 	Epic = hex("#D27BFF"),
 	Legendary = hex("#FFBE28"),
 	Mythic = hex("#FF6C82"),
+	Secret = hex("#3DFFD0"),
 } :: { [string]: Color3 }
 
 export type OrbStops = { Light: Color3, Mid: Color3, Dark: Color3 }
@@ -105,6 +107,7 @@ UITheme.TierOrb = {
 	Epic = { Light = hex("#F0C8FF"), Mid = hex("#BE3CFF"), Dark = hex("#5A1080") },
 	Legendary = { Light = hex("#FFF2C2"), Mid = hex("#FFBE28"), Dark = hex("#8A5A00") },
 	Mythic = { Light = hex("#FFD6DD"), Mid = hex("#FF3C5A"), Dark = hex("#7A0A1E") },
+	Secret = { Light = hex("#D6FFF5"), Mid = hex("#1FE0B4"), Dark = hex("#06574A") },
 } :: { [string]: OrbStops }
 
 -- Tiers that get the soft glow ring behind their orb.
@@ -112,6 +115,7 @@ UITheme.GlowTiers = {
 	Epic = true,
 	Legendary = true,
 	Mythic = true,
+	Secret = true,
 } :: { [string]: boolean }
 
 function UITheme.GetTierLight(tier: string): Color3
