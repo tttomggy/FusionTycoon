@@ -40,6 +40,10 @@
 	    victim's plot gone, server shutdown, /wipe) is a fail: drop the carry
 	    and the flags; the item never left. PlayerDataService runs the
 	    OnRelease hook before any save on leave and on shutdown.
+	  * Fairness: the owner standing within OwnerBlockRadius of the pedestal
+	    guards it (grab rejected; pedestal attribute GuardedByOwner tells the
+	    client). The owner can't tag for TagGraceSeconds after a grab, and
+	    runs at OwnerChaseWalkSpeed while any of their items is carried.
 	  * The item can be in at most one carry (carriedItems), and a thief in
 	    at most one; server events run one at a time, so two grabs of the
 	    same pedestal in one frame resolve as one win, one reject.
@@ -196,6 +200,16 @@ local function getPedestal(plot: Model, index: number): BasePart?
 	local folder = plot:FindFirstChild("Pedestals")
 	local pedestal = folder and folder:FindFirstChild("Pedestal" .. index)
 	return if pedestal and pedestal:IsA("BasePart") then pedestal else nil
+end
+
+local function flatDistance(a: Vector3, b: Vector3): number
+	return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+end
+
+-- The owner is standing guard at this pedestal (within OwnerBlockRadius).
+local function isGuarded(owner: Player, pedestal: BasePart): boolean
+	local root = getRoot(owner)
+	return root ~= nil and flatDistance(root.Position, pedestal.Position) <= HeistConfig.OwnerBlockRadius
 end
 
 local function isInsidePlot(origin: CFrame, position: Vector3): boolean
@@ -374,9 +388,20 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 	local victim = Players:GetPlayerByUserId(carry.VictimUserId)
 	if victim then
 		PlayerDataService.SetItemCarried(victim, carry.ItemUid, false)
+		-- The chase boost lasts while any of their items is out.
+		local humanoid = getHumanoid(victim)
+		if humanoid and not PlayerDataService.HasCarriedItems(victim) then
+			humanoid.WalkSpeed = HeistConfig.NormalWalkSpeed
+		end
 	end
 	if thief then
 		PlayerDataService.SetCarrying(thief, false)
+		-- For every client's cosmetic ending (the catch: flash, CAUGHT!, the
+		-- orb flying home). Set before the Heist* attributes clear.
+		thief:SetAttribute("HeistOutcome", outcome)
+		local victimPlot = victim and TycoonService.GetPlotForPlayer(victim)
+		local pedestal = victimPlot and getPedestal(victimPlot, carry.PedestalIndex)
+		thief:SetAttribute("HeistReturnTo", if pedestal then pedestal.Position else nil)
 		clearThiefAttributes(thief)
 		local humanoid = getHumanoid(thief)
 		if humanoid then
@@ -556,6 +581,11 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		reject(thief, "TooFar")
 		return
 	end
+	-- The owner standing guard at it blocks the grab (readable defence).
+	if isGuarded(victim, pedestal) then
+		reject(thief, "Guarded")
+		return
+	end
 	-- 7. Not already being carried.
 	if state.carriedItems[uid] then
 		reject(thief, "AlreadyStolen")
@@ -592,6 +622,10 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		endCarry(thief.UserId, "Died")
 	end)
 	humanoid.WalkSpeed = HeistConfig.CarryWalkSpeed
+	local victimHumanoid = getHumanoid(victim)
+	if victimHumanoid then
+		victimHumanoid.WalkSpeed = HeistConfig.OwnerChaseWalkSpeed
+	end
 
 	thief:SetAttribute("HeistTier", info.Tier)
 	thief:SetAttribute("HeistMutation", info.Mutation)
@@ -610,6 +644,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		OtherName = victim.DisplayName,
 		OtherUserId = victim.UserId,
 		EndsAt = carry.EndsAt,
+		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + HeistConfig.TagGraceSeconds,
 	})
 	RemoteEvents.HeistStarted:FireClient(victim, {
 		Role = "Victim",
@@ -617,6 +652,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		OtherName = thief.DisplayName,
 		OtherUserId = thief.UserId,
 		EndsAt = carry.EndsAt,
+		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + HeistConfig.TagGraceSeconds,
 	})
 	if isFeedTier(info.Tier) then
 		RemoteEvents.HeistFeed:FireAllClients({
@@ -645,8 +681,10 @@ local function stepCarries()
 		end
 		local thiefRoot = getRoot(thief)
 		if thiefRoot then
+			-- No tag in the grace window: the thief gets to see the grab land.
+			local graceOver = os.clock() - carry.StartedAt >= HeistConfig.TagGraceSeconds
 			local victimRoot = getRoot(victim)
-			if victimRoot and (victimRoot.Position - thiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
+			if graceOver and victimRoot and (victimRoot.Position - thiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
 				endCarry(thiefUserId, "Saved")
 				continue
 			end
@@ -776,6 +814,18 @@ local function shieldTick()
 				end
 				onPadCheck(player, origin)
 				refreshPadLabel(player, plot)
+				-- GuardedByOwner: clients show the steal prompt as "Owner is guarding".
+				local pedestals = plot:FindFirstChild("Pedestals")
+				if pedestals then
+					for _, pedestal in pedestals:GetChildren() do
+						if pedestal:IsA("BasePart") then
+							local guarded = isGuarded(player, pedestal)
+							if pedestal:GetAttribute("GuardedByOwner") ~= guarded then
+								pedestal:SetAttribute("GuardedByOwner", guarded)
+							end
+						end
+					end
+				end
 				-- A protected lab needs no eject: nothing there can be stolen.
 				if not protected and HeistService.IsShielded(player) then
 					ejectIntruders(player, plot, origin)

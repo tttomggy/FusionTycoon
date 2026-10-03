@@ -15,6 +15,11 @@
 	    bar) and the goal arrow on their own gate.
 	  * The victim: a red "THIEF IN YOUR LAB!" banner with a live distance, a
 	    Danger arrow locked on the thief, and an alarm.
+	  * The first TagGraceSeconds of a carry: the thief's banner says RUN!,
+	    the owner's "Catch them in 2…1…" (no tag yet, server-side).
+	  * A catch (HeistOutcome = "Saved" on the thief) plays on every client:
+	    a white flash ring at the thief, CAUGHT! over their head, and the orb
+	    flying back to its pedestal (HeistReturnTo) on a Bezier arc.
 	  * Results: HEIST COMPLETE! / stolen cards (ResultController), toasts
 	    for the rest.
 	  * Shield fences: every plot's ForceField fence fades in and out from its
@@ -32,6 +37,7 @@ local Workspace = game:GetService("Workspace")
 
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
@@ -67,6 +73,7 @@ local FENCE_CHECK_SECONDS = 0.2
 
 -- Rejection reason -> toast. Unlisted reasons (exploit-only) stay silent.
 local REJECT_MESSAGES: { [string]: string } = {
+	Guarded = "The owner is guarding it!",
 	AlreadyCarrying = "You're already carrying something!",
 	Shielded = "Their shield is up",
 	LabCapped = "This lab has been robbed enough for now",
@@ -94,7 +101,7 @@ type Banner = { Holder: Frame, Title: TextLabel, Detail: TextLabel, Bar: Frame? 
 local screenGui: ScreenGui
 local banner: Banner? = nil
 -- The local player's active heist: role, item, other player, end time.
-type Active = { Role: string, Item: any, OtherName: string, OtherUserId: number, EndsAt: number }
+type Active = { Role: string, Item: any, OtherName: string, OtherUserId: number, EndsAt: number, GraceEndsAt: number }
 local active: Active? = nil
 
 -- Plot -> whether its fence is currently shown on this client.
@@ -223,12 +230,119 @@ local function buildVisual(player: Player)
 	visuals[player] = { Orb = group, Pill = pill, Connections = {} }
 end
 
+-- The catch, cosmetic only: a white flash ring at the thief, CAUGHT! over
+-- their head, and the orb flying home to its pedestal on a Bezier arc.
+local CATCH_FLY_SECONDS = 0.7
+local CATCH_ARC_HEIGHT = 12
+local CATCH_RING_SECONDS = 0.4
+local CATCH_POP_SECONDS = 1
+
+local function popCatch(player: Player, at: Vector3)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "CatchFlash"
+	anchor.WorldPosition = at
+	anchor.Parent = Workspace.Terrain
+	local ring = Instance.new("BillboardGui")
+	ring.Size = UDim2.fromOffset(40, 40)
+	ring.AlwaysOnTop = false
+	ring.LightInfluence = 0
+	ring.MaxDistance = PILL_MAX_DISTANCE
+	ring.Adornee = anchor
+	ring.Parent = anchor
+	local circle = Instance.new("Frame")
+	circle.AnchorPoint = Vector2.new(0.5, 0.5)
+	circle.Position = UDim2.fromScale(0.5, 0.5)
+	circle.Size = UDim2.fromScale(1, 1)
+	circle.BackgroundTransparency = 1
+	circle.Parent = ring
+	UIKit.Corner(circle, 999)
+	local stroke = UIKit.Stroke(circle, 6, Colors.White)
+	local info = TweenInfo.new(CATCH_RING_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(ring, info, { Size = UDim2.fromOffset(220, 220) }):Play()
+	TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+	task.delay(CATCH_RING_SECONDS, anchor.Destroy, anchor)
+
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	if head and head:IsA("BasePart") then
+		local pop = Instance.new("BillboardGui")
+		pop.Name = "CaughtPop"
+		pop.Size = UDim2.fromOffset(200, 50)
+		pop.StudsOffset = Vector3.new(0, 3, 0)
+		pop.AlwaysOnTop = false
+		pop.LightInfluence = 0
+		pop.MaxDistance = PILL_MAX_DISTANCE
+		pop.Adornee = head
+		pop.Parent = head
+		local text = UIKit.Label({
+			Name = "Text",
+			Text = "CAUGHT!",
+			Font = Fonts.Display,
+			TextSize = 36,
+			TextColor3 = Colors.Danger,
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			Stroke = UITheme.Stroke.Text,
+			Parent = pop,
+		})
+		local rise = TweenInfo.new(CATCH_POP_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		TweenService:Create(pop, rise, { StudsOffset = Vector3.new(0, 6, 0) }):Play()
+		TweenService:Create(text, rise, { TextTransparency = 1 }):Play()
+		task.delay(CATCH_POP_SECONDS, pop.Destroy, pop)
+	end
+end
+
+local function flyHome(group: Model, target: Vector3)
+	local orb = group.PrimaryPart
+	if not orb then
+		group:Destroy()
+		return
+	end
+	-- Off the head: anchor the orb (its WeldConstraints carry the shell).
+	for _, child in orb:GetChildren() do
+		if child:IsA("Weld") then
+			child:Destroy()
+		end
+	end
+	orb.Anchored = true
+	local p0 = orb.Position
+	local p2 = target
+	local p1 = (p0 + p2) / 2 + Vector3.new(0, CATCH_ARC_HEIGHT, 0)
+	local started = os.clock()
+	local connection: RBXScriptConnection
+	connection = RunService.RenderStepped:Connect(function()
+		local t = math.min((os.clock() - started) / CATCH_FLY_SECONDS, 1)
+		local a = p0:Lerp(p1, t)
+		local b = p1:Lerp(p2, t)
+		orb.CFrame = CFrame.new(a:Lerp(b, t))
+		if t >= 1 then
+			connection:Disconnect()
+			group:Destroy()
+		end
+	end)
+end
+
 local function refreshVisual(player: Player)
 	if player:GetAttribute("HeistTier") ~= nil then
 		buildVisual(player)
-	else
-		clearVisual(player)
+		return
 	end
+	local visual = visuals[player]
+	local returnTo = player:GetAttribute("HeistReturnTo")
+	if visual and player:GetAttribute("HeistOutcome") == "Saved" and typeof(returnTo) == "Vector3" then
+		visuals[player] = nil
+		for _, connection in visual.Connections do
+			connection:Disconnect()
+		end
+		local orb = visual.Orb.PrimaryPart
+		popCatch(player, if orb then orb.Position else returnTo)
+		-- HeistReturnTo is the pedestal column's centre; the orb floats at
+		-- OrbCenterY above its bottom.
+		local p = PlotLayout.Pedestal
+		flyHome(visual.Orb, returnTo + Vector3.new(0, p.OrbCenterY - p.ColumnSize.Y / 2, 0))
+		return
+	end
+	clearVisual(player)
 end
 
 local function watchPlayer(player: Player)
@@ -330,8 +444,10 @@ local function updateBanner()
 		return
 	end
 	local left = secondsLeft(current.EndsAt)
+	local graceLeft = current.GraceEndsAt - Workspace:GetServerTimeNow()
 	local itemName = UIKit.EscapeRichText(tostring(current.Item.Name))
 	if current.Role == "Thief" then
+		shown.Title.Text = if graceLeft > 0 then "RUN!" else "GET HOME!"
 		shown.Detail.Text = ("%s · %ds"):format(itemName, left)
 		if shown.Bar then
 			UIKit.SetProgress(shown.Bar, left / HeistConfig.CarrySeconds)
@@ -341,10 +457,14 @@ local function updateBanner()
 		local thiefRoot = thief and getRoot(thief)
 		local myRoot = getRoot(localPlayer)
 		local distance = if thiefRoot and myRoot then (thiefRoot.Position - myRoot.Position).Magnitude else nil
+		local status = if graceLeft > 0
+			then ("Catch them in %d…"):format(math.ceil(graceLeft))
+			elseif distance then ("%d studs away · %ds"):format(math.floor(distance + 0.5), left)
+			else nil
 		shown.Detail.Text = ("%s grabbed your %s · Touch them to get it back%s"):format(
 			UIKit.EscapeRichText(current.OtherName),
 			itemName,
-			if distance then UIKit.Colored(("\n%d studs away · %ds"):format(math.floor(distance + 0.5), left), Colors.Text) else ""
+			if status then UIKit.Colored("\n" .. status, Colors.Text) else ""
 		)
 	end
 end
@@ -378,6 +498,12 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
 		return
 	end
+	-- WorldLabelController's local Mode: a guarded pedestal is an instant
+	-- tap that only explains itself.
+	if prompt:GetAttribute("Mode") == "Guarded" then
+		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
+		return
+	end
 	RemoteEvents.RequestSteal:FireServer({ OwnerUserId = owner, PedestalIndex = index })
 end
 
@@ -392,6 +518,7 @@ local function onHeistStarted(payload: any)
 		OtherName = tostring(payload.OtherName),
 		OtherUserId = tonumber(payload.OtherUserId) or 0,
 		EndsAt = payload.EndsAt,
+		GraceEndsAt = tonumber(payload.GraceEndsAt) or 0,
 	}
 	active = started
 	buildBanner(isThief)

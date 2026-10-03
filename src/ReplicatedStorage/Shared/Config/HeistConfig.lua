@@ -28,6 +28,9 @@ HeistConfig.CarrySeconds = 45 -- time to get home
 HeistConfig.CarryWalkSpeed = 12
 HeistConfig.NormalWalkSpeed = 16 -- restored when a carry ends
 HeistConfig.TagDistance = 5 -- owner root within this of the thief's root saves the item
+HeistConfig.TagGraceSeconds = 2 -- no tag for the first seconds of a carry (the thief gets to see it happen)
+HeistConfig.OwnerBlockRadius = 6 -- owner root within this of the pedestal when the hold completes: guarded, no grab
+HeistConfig.OwnerChaseWalkSpeed = 18 -- the owner's speed while one of their items is being carried
 HeistConfig.CarryTickSeconds = 0.1 -- carry loop rate (~10 Hz)
 
 -- Cooldowns and protection
