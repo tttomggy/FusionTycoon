@@ -496,3 +496,29 @@ testable without luck.
 - [ ] **Floor keeps its colour.** `/give mythic_rift Rainbow` four times and
   display all four. The walkway between the pedestals still reads as the
   Floor colour, not pink-white; the orbs carry the glow.
+- [ ] **Fuse tabs fit.** At 1920 × 1080 all five tier tabs (Common …
+  Mythic) show in one row with the count under each name, and Mythic shows
+  🔒 before Rebirth 1. The same on a phone (iPhone 14 landscape). Nothing
+  in the panel is smaller than 12 px.
+- [ ] **Toasts never cover REBIRTH!.** `/cash 2e7` so REBIRTH! shows, then
+  upgrade a generator (**+$X/s**), find a new Index entry, and try an
+  unaffordable buy (**Need $X**). Every toast sits above REBIRTH!, and the
+  toasts sit at the same height with REBIRTH! hidden.
+- [ ] **Pull ×10 always shows.** At the Gacha Pad, **R · Pull ×10** shows
+  whenever **E · Pull** does: with cash, without cash (pressing it toasts
+  **Need $X for 10 pulls**), and while a pull card is up. Check on the
+  touch emulator too.
+- [ ] **Offline earnings.** Note your $/s, then `/offline 180`:
+  - [ ] The **WELCOME BACK!** card reads **You were away 3h 0m** and
+    **+$X**, where X = 0.25 × income × 10,800.
+  - [ ] **Your lab earned 25% while you were gone**, a green **COLLECT**
+    button, and no COLLECT ×2.
+  - [ ] COLLECT bursts coins and adds X once; pressing again or
+    re-syncing doesn't pay again.
+  - [ ] `/offline 300` reads **4h+** and pays 0.25 × income × 14,400.
+  - [ ] Close the card with ✕ instead: about 30 s later the cash jumps by
+    X on its own.
+  - [ ] `/offline 1` (under 2 min) shows no card.
+- [ ] **Rejoin doesn't pay twice** (with saving enabled): leave, wait 3+
+  minutes, rejoin. The card shows once; collect it, rejoin straight away,
+  and there's no second card.

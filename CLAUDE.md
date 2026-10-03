@@ -73,9 +73,28 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 - Saves: a failed DataStore load kicks the player in live games (never
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
+- **Offline earnings** (`OfflineConfig`): away time earns 25% of passive
+  income per second, for at most 4 h, and nothing under 2 min.
+  - `PlayerData.LastOnline` (`os.time()`) is written on every save. On load,
+    `PlayerDataService` computes the payout from the income the player left
+    with, moves `LastOnline` to now (and saves), and holds the payout as
+    session-only pending earnings. The snapshot carries `PendingOffline`
+    and `AwaySeconds`.
+  - `OfflineService` pays it once on `ClaimOffline` (the client never sends
+    an amount). If it's unclaimed, the first sync 30 s after load pays it,
+    and leaving pays it on PlayerRemoving, so it's never lost.
+  - Client: ResultController's welcome-back card (COLLECT; a hidden
+    COLLECT ×2 slot for the monetization pass).
 - Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
   `/rebirthready` (sets cash to the next rebirth's price),
-  `/rebirths <n>`, `/give <itemId> [mutation]`, `/wipe`.
+  `/rebirths <n>`, `/give <itemId> [mutation]`, `/offline <minutes>`
+  (pending offline earnings as if away that long, then re-sync: the only
+  way to test the welcome-back card, since Studio profiles never save),
+  `/wipe`.
+- **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
+  0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
+  `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
+  out pink-white; the orbs carry the glow, not the floor.
 - **No new `Highlight`s on world objects.** Roblox renders at most 31 per
   client, and 12 plots × 4 pedestals can reach 48 (outlines silently
   vanish). Pedestals mark "filled" with the cap lip glow instead.
@@ -91,6 +110,7 @@ src/ReplicatedStorage/Shared/
                  and speed belts, TycoonConfig, FusionConfig, RebirthConfig —
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
+                 OfflineConfig — offline earnings rate/cap,
                  GoalConfig — the ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
@@ -203,6 +223,7 @@ calls left in `Services/`.
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 | `WorldService` | `:Init()` | — | `--!strict` |
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `OfflineService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
