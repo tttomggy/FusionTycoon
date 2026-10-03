@@ -540,25 +540,33 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 
 - [ ] **Protected at Rebirth 0.** Before `/rebirths 1`: A's sign shows the
   teal **🛡 PROTECTED · NEW LAB** pill, B sees no Steal prompt on A's
-  pedestals, and A's HUD has no shield chip. After `/rebirths 1` (wait
-  ~5 s for the sign) the pill goes and the chip appears.
+  pedestals, A's HUD has no LOCK LAB or "?" button, and A's LOCK console
+  label reads **🛡 PROTECTED · NEW LAB** with the prompt off. After
+  `/rebirths 1` (wait ~5 s for the sign) the pill goes and the buttons
+  appear.
 - [ ] **Shield + eject.** On claim the shield is up 60 s: a pink ForceField
   fence round A's walls and a line across the gate, seen by both players.
-  A's chip reads **🛡 SHIELD · 42s**. B walking in is moved to the street in
-  front of A's gate. When it ends the fence fades and the chip reads
-  **SHIELD RECHARGING · 20s** (muted, counting down) while A's pad label
-  (owner-only) shows **READY IN 20s**; then the chip pulses amber **SHIELD
-  DOWN · step on YOURS**, the pad reads **SHIELD READY**, and A stepping onto the
-  YOURS pad raises it for 60 s.
-- [ ] **Standing on the pad doesn't re-raise.** A stands still on the YOURS
-  pad and runs `/shield 0`: the fence drops and stays down while A stands
-  there. Stepping off and back on raises it again (`/shield 0` lifts the
-  re-arm lock, so it works straight away).
-- [ ] **20 s re-arm.** Let A's shield time out (or `/shield 5`, wait 5 s).
-  For 20 s, stepping off and onto the pad does nothing and the pad counts
-  **READY IN …**; B can grab in that window. After 20 s, stepping
-  onto the pad raises it. The claim shield and the 120 s shield after a
-  loss go up regardless of the lock.
+  B walking in is moved to the street in front of A's gate.
+- [ ] **The YOURS pad does nothing now.** Walking over it, or standing on it
+  after `/shield 0`, never raises the shield.
+- [ ] **Console lock.** The LOCK console stands inside the gate, right of
+  the walkway, between the claim pad and the Gacha Pad, facing you as you
+  walk in. Ready: label **🔒 LOCK LAB / READY · 60s shield** (pink pill),
+  pink button, E prompt **Lock lab / 60s shield** within 8 studs (only A
+  sees label and prompt). Pressing it: the fence goes up, the pill turns
+  teal **LOCKED · 42s**, the button glows teal and the prompt is gone.
+- [ ] **HUD lock.** The HUD's **🔒 LOCK LAB** (under the cash card; beside
+  it on a phone) locks from anywhere inside A's walls. From the street it
+  toasts **Get back to your lab to lock it!**. Locked it reads **🛡 LOCKED ·
+  42s** (teal).
+- [ ] **Recharge countdown on both.** When the shield ends (or `/shield 5`
+  and wait), the console pill reads **RECHARGING · 20s** (muted, dim
+  button, prompt off) and the HUD button **RECHARGING · 20s** (muted);
+  tapping it toasts **Lock recharging · 12s**. B can grab in that window.
+  At 0 both return to ready. `/shield 0` skips the recharge. The claim
+  shield and the 120 s shield after a loss go up regardless.
+- [ ] **HUD button pulses for intruders.** A unlocked and LOCK ready: B walks
+  inside A's walls; A's LOCK LAB button pulses until B leaves or A locks.
 - [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
   pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
   name and its +$/s, 1.5 s).
@@ -605,8 +613,8 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   one of your items! Get it back first**.
 - [ ] **Thief hands full.** While carrying, B's pull, Pull ×10, generator
   upgrade, Multiplier Pad and rebirth all toast **Get home with that item
-  first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B
-  stepping on their YOURS pad doesn't raise B's shield.
+  first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B's
+  LOCK LAB toasts **Not while carrying!**.
 - [ ] **Victim /wipe mid-carry:** A's `/wipe` kicks A; B gets **The heist
   was called off** and nothing is added to B.
 - [ ] **Thief leaves mid-carry:** B leaves; the item is back on A's
@@ -632,9 +640,10 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   REBIRTH 1! card has **🫳 STEALING UNLOCKED: grab items off other labs'
   pedestals and run them home!** (the card is taller; LET'S GO below it).
   Later rebirth cards don't.
-- [ ] **New goals.** After "Rebirth for the first time": **Raise your shield
-  on the YOURS pad** ($10,000; the marker points at the claim pad, and only
-  stepping onto the pad counts, not the claim shield or `/shield`), then
+- [ ] **New goals.** After "Rebirth for the first time": **Lock your lab
+  with the LOCK button** ($10,000; the goal arrow points at the LOCK
+  console; the console or the HUD button counts, not the claim shield or
+  `/shield`), then
   **Steal an item from another lab** ($50,000; the marker points at the
   nearest grabbable enemy pedestal and moves as that changes). Delivering
   a steal completes it.
@@ -645,3 +654,28 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 - [ ] **One-time tip.** The first time (this session) a Rebirth 1+ player
   walks inside a lab with something to steal: **Hold E on their pedestal to
   steal it!**. Walking into another one doesn't repeat it.
+- [ ] **GUARDED chip.** A walks up to their pedestal: within 6 studs, B sees
+  a teal **🛡 GUARDED** pill over it (above the label), B's red hand marker
+  for it goes, and B's prompt reads **Owner is guarding**. A walks away and
+  it's gone.
+- [ ] **Guard ring.** While A is inside A's walls, each filled pedestal has
+  a faint teal floor ring (6 studs), seen by both; the one A guards is
+  stronger. A leaves the lab and the rings go. A Rebirth-0 lab shows none.
+- [ ] **HOW TO HEIST card.** A real first rebirth (`/rebirthready`, then
+  REBIRTH! at Rebirth 0; `/rebirths 1` skips the result card, so it won't
+  trigger): pressing LET'S GO on the REBIRTH 1! card opens HOW TO HEIST.
+  Four slides (GRAB 45s, GUARD, CATCH, LOCK 60s), ◀ ▶ and dots, GOT IT on
+  the last. It doesn't auto-open again (rejoin with saving on, or rebirth
+  again) until `/tips reset`. The round **?** button beside LOCK LAB always
+  opens it. On a phone it fits with the picture over the text.
+- [ ] **Each tip fires once** (then `/tips reset` to see them again):
+  - [ ] **intruder**: B walks into A's unlocked lab; A gets **Someone's in
+    your lab! Stand by your items or LOCK your lab!**.
+  - [ ] **guarded**: B stands at a pedestal A is guarding: **They're
+    guarding it. Wait for them to walk away.**
+  - [ ] **stealHowTo**: B's first walk into a robbable lab: **Hold E on
+    their pedestal to steal it!**
+  - [ ] **catch**: A's first time as a victim: the banner has a big **TOUCH
+    THEM!** line and the red arrow throbs; the next steal doesn't.
+  - [ ] **lockAfterLoss**: after A's first real loss card: **Tip: press LOCK
+    LAB when you leave your lab.**

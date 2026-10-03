@@ -92,6 +92,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   way to test the welcome-back card, since Studio profiles never save),
   `/shield <s>` (0 drops it), `/heistcd 0` (clears your thief cooldown),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
+  `/tips reset` (clears your seen one-time tips),
   `/wipe` (fails your active steals first).
 - **Heist** (`HeistService`, every number in `HeistConfig`): from Rebirth 1,
   items **on pedestals** can be stolen by another Rebirth 1+ player;
@@ -122,14 +123,24 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - **`PlayerDataService.OnRelease(callback)`** runs before a player's save
     on PlayerRemoving and for everyone before `saveAll` on BindToClose;
     HeistService fails that player's carries (either side) there.
-  - **Shield:** per player until a server time, published as the plot
-    attribute `ShieldUntil`. Raised 60 s on claim and when the owner steps
-    **onto** their YOURS pad while it's down (server region check,
-    edge-triggered: standing on it does nothing). After any shield ends the
-    pad is locked for `ShieldRearmSeconds` (20 s, plot attribute
-    `ShieldRearmAt`: the HUD's SHIELD RECHARGING chip; HeistService's
-    owner-only BillboardKit pad label reads READY IN 12s / SHIELD READY);
-    the claim and victim shields ignore the lock, `/shield 0` clears it. While up, a
+  - **Shield / LOCK:** per player until a server time, published as the
+    plot attribute `ShieldUntil`. Raised 60 s on claim, 120 s after a loss,
+    and 60 s when the owner **LOCKs on purpose**: the one entry point is
+    `HeistService.TryLock(player)`, rejected in order `Protected`,
+    `Carrying`, `AlreadyLocked`, `Recharging` (+ seconds) or `NotHome` (root
+    outside your walls); success pays `ShieldRaises` (first_shield). Two
+    ways in: the **LOCK console** (`LockKit`, `PlotLayout.LOCK_CONSOLE`,
+    built on claim; owner-only prompt "Lock lab" answered server-side via
+    ProximityPromptService, owner-only "🔒 LOCK LAB" label) and the HUD
+    **LOCK LAB** button (remote `RequestLock`, no payload); rejections toast
+    via `HeistEnded { Role = "Lock", Outcome = "Rejected" }`. The YOURS pad
+    is decorative. After any shield ends LOCK recharges for
+    `ShieldRearmSeconds` (20 s, plot attribute `ShieldRearmAt`); the claim
+    and victim shields ignore it, `/shield 0` clears it. Clients read
+    `ShieldUntil` / `ShieldRearmAt` / `Protected` through `ShieldState` for
+    the console (pill, pink/teal/dim button, prompt on only when Ready) and
+    the HUD button (pink / teal LOCKED · 42s / muted RECHARGING, pulsing
+    while ready and a non-owner is inside your walls). While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
@@ -137,16 +148,28 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - **Teaching flow:** Rebirth-0 viewers see a locked "🔒 Steal / Unlocks at
     Rebirth 1" teaser on stealable enemy pedestals; the Rebirth 1 card and
     `RebirthConfig.Unlocks[1]` announce stealing; goals `first_shield`
-    (pad raises, `ShieldRaises`) then `first_steal` (deliveries,
-    `TotalSteals`; marker target `NearestEnemyPedestal`); red hand markers
-    over grabbable enemy pedestals; a one-time "Hold E on their pedestal"
-    toast on the first visit to a robbable lab.
+    (LOCK, `ShieldRaises`, target `LockConsole`) then `first_steal`
+    (deliveries, `TotalSteals`; marker target `NearestEnemyPedestal`); red
+    hand markers over grabbable enemy pedestals. **GUARDED is visible:** a
+    teal "🛡 GUARDED" chip over every guarded pedestal (every viewer) and,
+    while an owner is home, a faint teal floor ring of `OwnerBlockRadius`
+    round each of their filled pedestals (client-only SurfaceGui faces, no
+    lights). **HOW TO HEIST** (`UI/HowToHeistPanel`): four slides (GRAB,
+    GUARD, CATCH, LOCK) built from UIKit pieces, auto-opened once per
+    account after the first-rebirth card, and from the HUD's "?" button.
+  - **One-time tips:** `PlayerData.Tips` (saved set), ids whitelisted in
+    `TipConfig` (`howToHeist`, `stealHowTo`, `intruder`, `guarded`,
+    `catch`, `lockAfterLoss`), marked with remote `MarkTipSeen { Id }`,
+    sent as `TipKeys` in the snapshot (`TycoonController.HasSeenTip` /
+    `MarkTipSeen`). Tips are big 4 s toasts (`ToastController.Show(text,
+    kind, { Big = true })`). `/tips reset` clears them.
   - Client: WorldLabelController sets each StealPrompt's local `Mode`
     (Hidden / Locked / Guarded / Steal; Locked and Guarded are no-hold taps
     that only toast, since Roblox hides disabled prompts); HeistController draws every carrier's orb (`PedestalVisuals.
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
-    plot's shield fence; HudController shows the shield chip.
+    plot's shield fence, drives your LOCK console and shows GUARDED;
+    HudController shows the LOCK LAB and "?" buttons.
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
@@ -325,6 +348,7 @@ in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
+`RequestLock` (C→S, no payload), `MarkTipSeen` (C→S `{ Id }`),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
@@ -371,6 +395,9 @@ checks that no footprints overlap and everything sits inside the walls.
   rings on flat surfaces are SurfaceGui faces (`BillboardKit.BuildPadFace`);
   Neon cylinders are only thin bands seen from the side (station/machine
   rims).
+- **LOCK console:** `PlotLayout.LOCK_CONSOLE` (10, 0, 27), inside the gate
+  right of the walkway, facing the gate; 3 × 3 footprint in the assertion
+  block; geometry in `PlotLayout.LockConsole`, prompt distance 8.
 - **Pedestal prompts:** the client handles DisplayPrompts through
   `ProximityPromptService` (PromptTriggered/PromptShown), never by looping a
   folder's children once; server containers are built complete and parented

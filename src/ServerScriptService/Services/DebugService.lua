@@ -63,6 +63,9 @@ local SHIELD_COMMAND = "/shield"
 local HEIST_COOLDOWN_COMMAND = "/heistcd"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
+-- "/tips reset" clears your seen one-time tips (TipConfig), so HOW TO HEIST
+-- and the heist tips can be re-tested.
+local TIPS_COMMAND = "/tips"
 -- "/offline 180" pretends you were away 180 minutes: sets the pending
 -- offline earnings and re-sends the snapshot, so the welcome-back card can
 -- be tested (Studio profiles never save, so a real absence can't be).
@@ -129,6 +132,12 @@ local function onPlayerChatted(player: Player, message: string)
 		stealableToggles[player.UserId] = stealable
 		HeistService.SetDebugStealable(player, stealable)
 		print(("DebugService: %s's lab is %s"):format(player.Name, if stealable then "stealable" else "protected again"))
+	elseif command == TIPS_COMMAND then
+		if argument == "reset" then
+			PlayerDataService.ResetTips(player)
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: cleared %s's one-time tips"):format(player.Name))
+		end
 	elseif command == OFFLINE_COMMAND then
 		local minutes = tonumber(argument) or 180
 		local awaySeconds = math.max(0, math.floor(minutes * 60))
@@ -180,7 +189,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /wipe")
 end
 
 function DebugService:Start()
