@@ -13,7 +13,7 @@
 
 	Lifecycle: :Init() connects its own remotes/players and starts its loops.
 	:Start() resolves FusionMachineService and WorldService and registers the
-	generator OnSync hook. PlayerDataService is a leaf
+	factory-line OnSync hook. PlayerDataService is a leaf
 	(requires no services), so its module-scope require can't form a cycle.
 ]]
 local Debris = game:GetService("Debris")
@@ -37,6 +37,7 @@ local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
+local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -81,6 +82,7 @@ local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
 local originByUserId: { [number]: CFrame } = {}
 local plotSignByUserId: { [number]: BillboardKit.SignSurface } = {}
+local collectorLabelByUserId: { [number]: BillboardKit.PadLabel } = {}
 
 local function syncTycoon(player: Player)
 	PlayerDataService.SyncTycoon(player)
@@ -529,11 +531,26 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 	end
 end
 
---[[ Generators ------------------------------------------------------------------------ ]]
+--[[ Factory line ---------------------------------------------------------------------- ]]
 
--- The five generators in the back-corner bays, built once on claim and
--- restyled from the player's generator levels on every sync.
-local function createGenerators(plot: Model, origin: CFrame)
+-- The belt, the collector (with its owner-only income label) and the five
+-- generators, built once on claim. The generators are restyled from the
+-- player's levels on every sync; the cash balls are client-side.
+local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
+	local collector = FactoryKit.Build(origin, plot)
+	local c = PlotLayout.Collector
+	collectorLabelByUserId[player.UserId] = BillboardKit.Pad(collector, {
+		Name = "CollectorLabel",
+		Title = "COLLECTOR",
+		TitleColor = UITheme.Colors.GoldLabel,
+		Pill = "+$0/s",
+		PillGradient = UITheme.Gradients.Gold,
+		PillTextColor = UITheme.Colors.GoldText,
+		PillTextStroke = false,
+		StudsOffset = Vector3.new(0, c.LabelOffsetY, 0),
+		MaxDistance = c.LabelMaxDistance,
+		OwnerOnly = true,
+	})
 	for _, generator in TycoonConfig.Generators do
 		GeneratorKit.Build(origin, generator.Id, plot)
 	end
@@ -542,11 +559,15 @@ end
 -- OnSync hook: runs before every snapshot, so the world matches what the
 -- client is about to be told. GeneratorKit.SetState skips unchanged ones.
 -- Must not call SyncTycoon.
-local function refreshGenerators(player: Player)
+local function refreshFactoryLine(player: Player)
 	local plot = plotByUserId[player.UserId]
 	local levels = PlayerDataService.GetGenerators(player)
 	if not plot or not levels or plot:GetAttribute("Claimed") ~= true then
 		return
+	end
+	local label = collectorLabelByUserId[player.UserId]
+	if label then
+		label.SetPill(("+%s/s"):format(NumberFormat.Money(PlayerDataService.GetPassiveCashPerSecond(player))))
 	end
 	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
 	for _, generator in TycoonConfig.Generators do
@@ -698,8 +719,8 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		createPedestals(plot, origin)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
-		createGenerators(plot, origin)
-		syncTycoon(player) -- also styles the generators (refreshGenerators)
+		createFactoryLine(plot, origin, player)
+		syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
 		refreshPlotSigns()
 	end)
 end
@@ -755,6 +776,7 @@ local function removePlotForPlayer(player: Player)
 	end
 	originByUserId[player.UserId] = nil
 	plotSignByUserId[player.UserId] = nil
+	collectorLabelByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
 		occupiedSlots[slotIndex] = nil
@@ -792,7 +814,7 @@ end
 function TycoonService:Start()
 	FusionMachineService = require(script.Parent.FusionMachineService)
 	WorldService = require(script.Parent.WorldService)
-	PlayerDataService.OnSync(refreshGenerators)
+	PlayerDataService.OnSync(refreshFactoryLine)
 end
 
 return TycoonService
