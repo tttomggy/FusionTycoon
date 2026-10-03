@@ -82,14 +82,10 @@ PlotLayout.Station = {
 	PadDiameter = 8,
 	PadHeight = 1,
 	PadTopY = 1,
-	RimDiameter = 8.4,
-	RimHeight = 0.6,
-	RimCenterBelowTop = 0.3,
-	GlowDiameter = 5,
-	GlowHeight = 0.05,
-	GlowTransparency = 0.55,
-	LightBrightness = 1.5,
-	LightRange = 10,
+	-- A thin Neon band on the pad's side only (never a flat Neon disc).
+	RimDiameter = 8.1, -- pad diameter + 0.1
+	RimHeight = 0.15,
+	RimCenterBelowTop = 0.35,
 	LabelOffsetY = 8,
 	PromptDistance = 7,
 
@@ -115,6 +111,28 @@ PlotLayout.Station = {
 	ArrowBobPeriod = 1.2,
 
 	GhostTransparency = 0.5,
+}
+
+--[[ Pad faces (stations + machine floor) -------------------------------------
+	An invisible square part just above a pad top carrying a SurfaceGui: an
+	accent ring, a faked radial glow (two stacked translucent circles) and an
+	optional word. Replaces the old flat Neon discs, which rendered as a fan
+	of triangles ("pizza slices") under bloom.
+]]
+PlotLayout.Face = {
+	Thickness = 0.05,
+	GapAbovePad = 0.02, -- face bottom above the pad top
+	PixelsPerStud = 50,
+	Brightness = 1.6,
+	RingStrokePx = 12,
+	GlowInset = 0.12, -- each side
+	GlowOuterTransparency = 0.92,
+	GlowCoreScale = 0.55,
+	GlowCoreTransparency = 0.75,
+	WordHeight = 0.38, -- of the face
+	WordStroke = 3,
+	LightBrightness = 1.2,
+	LightRange = 9,
 }
 
 --[[ Droppers + collector ------------------------------------------------------- ]]
@@ -165,9 +183,10 @@ PlotLayout.Pedestal = {
 PlotLayout.Machine = {
 	BaseDiameter = 18,
 	BaseHeight = 1.2,
-	RimDiameter = 18.6,
-	RimHeight = 0.4,
-	RimCenterBelowTop = 0.2,
+	RimDiameter = 18.1, -- base diameter + 0.1, a thin band on the side only
+	RimHeight = 0.15,
+	RimCenterBelowTop = 0.35,
+	FaceDiameter = 10,
 	PylonSize = v3(1, 9, 1),
 	PylonRadius = 6,
 	PylonAnglesDegrees = { 45, 135, 225, 315 },
@@ -177,9 +196,6 @@ PlotLayout.Machine = {
 	CoreDiameter = 4,
 	CoreY = 9.5,
 	RingSize = v3(0.6, 9, 9), -- Cylinder: X = thickness, Y/Z = diameter
-	FloorGlowDiameter = 6,
-	FloorGlowHeight = 0.05,
-	FloorGlowTransparency = 0.6,
 	PromptAnchorY = 3,
 	PromptDistance = 10,
 	FuseAllPromptOffsetPx = 72, -- screen offset stacking FuseAllPrompt under FusePrompt

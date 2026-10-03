@@ -383,7 +383,7 @@ end
 local function createDropper2Station(plot: Model, origin: CFrame, player: Player)
 	-- The slot shows a translucent ghost of the dropper until it's bought.
 	local ghost = DropperKit.Build(origin, PlotLayout.DROPPER2, "Ghost")
-	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen, "Ghost", { Ghost = ghost })
+	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen, "Ghost", { Ghost = ghost, Word = "BUY" })
 	local cost = TycoonConfig.Dropper2Cost
 	BillboardKit.Pad(pad, {
 		Name = "Dropper2Label",
@@ -442,7 +442,7 @@ local function getGachaRatesText(): string
 end
 
 local function createGachaStation(plot: Model, origin: CFrame, player: Player)
-	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule")
+	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule", { Word = "PULL" })
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "GachaLabel",
 		Title = "GACHA",
@@ -512,7 +512,7 @@ end
 --[[ Multiplier station --------------------------------------------------------------- ]]
 
 local function createMultiplierStation(plot: Model, origin: CFrame, player: Player)
-	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet, "Chevrons")
+	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet, "Chevrons", { Word = "BOOST" })
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "MultiplierLabel",
 		Title = "MULTIPLIER",
@@ -725,7 +725,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		return
 	end
 	-- ClaimButton becomes the claim station's Pad.
-	local pad = buildStation(plot, origin, "ClaimStation", PlotLayout.CLAIM_STATION, World.AccentGreen, "Arrow", { Pad = claimButton })
+	local pad = buildStation(plot, origin, "ClaimStation", PlotLayout.CLAIM_STATION, World.AccentGreen, "Arrow", { Pad = claimButton, Word = "CLAIM" })
 	pad.CanTouch = true
 
 	-- Owner-only: other players' clients disable it (WorldLabelController).
@@ -755,6 +755,10 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		local arrow = station and station:FindFirstChild("Hologram")
 		if arrow then
 			arrow:Destroy()
+		end
+		local face = station and station:FindFirstChild("Face")
+		if face and face:IsA("BasePart") then
+			BillboardKit.SetPadFace(face, UITheme.Colors.Disabled, "YOURS", true)
 		end
 
 		-- Saved state (Dropper 2, pedestals) is restored below.

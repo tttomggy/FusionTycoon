@@ -21,6 +21,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 
 local BillboardKit = {}
 
@@ -352,6 +353,111 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 			end
 		end,
 	}
+end
+
+--[[ Pad faces ------------------------------------------------------------------
+	A station pad's (or the machine floor's) top: an invisible square part
+	just above the pad carrying a SurfaceGui with an accent ring, a faked
+	radial glow and an optional word. Replaces the flat Neon discs, which
+	Roblox draws as a fan of triangles that catch the light unevenly.
+]]
+
+local function circle(parent: Instance, name: string, scale: number, color: Color3, transparency: number): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.AnchorPoint = Vector2.new(0.5, 0.5)
+	frame.Position = UDim2.fromScale(0.5, 0.5)
+	frame.Size = UDim2.fromScale(scale, scale)
+	frame.BackgroundColor3 = color
+	frame.BackgroundTransparency = transparency
+	frame.BorderSizePixel = 0
+	frame.Parent = parent
+	corner(frame, UDim.new(0.5, 0))
+	return frame
+end
+
+-- Builds the Face part on top of a pad and returns it. `top` is the pad
+-- top's centre (plot-aligned), so the word reads upright walking in from
+-- the gate (+Z); `word` nil = ring and glow only.
+function BillboardKit.BuildPadFace(parent: Instance, top: CFrame, diameter: number, accent: Color3, word: string?): BasePart
+	local f = PlotLayout.Face
+	local face = PartKit.Part({
+		Name = "Face",
+		Size = Vector3.new(diameter, f.Thickness, diameter),
+		CFrame = top * CFrame.new(0, f.GapAbovePad + f.Thickness / 2, 0),
+		Color = accent,
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+		Parent = parent,
+	})
+
+	local gui = newSurface(face, "PadFace", Enum.NormalId.Top, f.PixelsPerStud)
+	gui.Brightness = f.Brightness
+
+	local ring = circle(gui, "Ring", 1, accent, 1)
+	borderStroke(ring, f.RingStrokePx, accent).Name = "RingStroke"
+
+	-- UIGradient can't go radial: a faint outer circle plus a stronger
+	-- smaller core reads as a soft centre glow.
+	local glowScale = 1 - f.GlowInset * 2
+	circle(gui, "GlowOuter", glowScale, accent, f.GlowOuterTransparency)
+	circle(gui, "GlowCore", glowScale * f.GlowCoreScale, accent, f.GlowCoreTransparency)
+
+	if word then
+		local label = Instance.new("TextLabel")
+		label.Name = "Word"
+		label.BackgroundTransparency = 1
+		label.AnchorPoint = Vector2.new(0.5, 0.5)
+		label.Position = UDim2.fromScale(0.5, 0.5)
+		label.Size = UDim2.fromScale(0.8, f.WordHeight)
+		label.FontFace = Fonts.Display
+		label.TextScaled = true
+		label.TextColor3 = Colors.Text
+		label.Text = word
+		label.Parent = gui
+		textStroke(label, f.WordStroke)
+	end
+
+	local light = Instance.new("PointLight")
+	light.Name = "FaceLight"
+	light.Color = accent
+	light.Brightness = f.LightBrightness
+	light.Range = f.LightRange
+	light.Parent = face
+	return face
+end
+
+-- Recolours a pad face's ring and glow and optionally swaps its word; pass
+-- removeLight to drop its PointLight (the claim pad once claimed).
+function BillboardKit.SetPadFace(face: BasePart, color: Color3, word: string?, removeLight: boolean?)
+	local gui = face:FindFirstChild("PadFace")
+	if not gui then
+		return
+	end
+	local ring = gui:FindFirstChild("Ring")
+	local stroke = ring and ring:FindFirstChild("RingStroke")
+	if stroke and stroke:IsA("UIStroke") then
+		stroke.Color = color
+	end
+	for _, name in { "GlowOuter", "GlowCore" } do
+		local glow = gui:FindFirstChild(name)
+		if glow and glow:IsA("Frame") then
+			glow.BackgroundColor3 = color
+		end
+	end
+	local label = gui:FindFirstChild("Word")
+	if word and label and label:IsA("TextLabel") then
+		label.Text = word
+	end
+	if removeLight then
+		local light = face:FindFirstChild("FaceLight")
+		if light then
+			light:Destroy()
+		end
+	end
 end
 
 return BillboardKit

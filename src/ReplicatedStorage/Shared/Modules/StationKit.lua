@@ -8,9 +8,10 @@
 	  Pad       8-wide cylinder, Structure colour, top at y 1. Holds the
 	            ProximityPrompt and the label. (The claim station passes the
 	            template's ClaimButton in to become its Pad.)
-	  Rim       a slightly wider Neon accent cylinder just under the pad top -
-	            reads as a glowing ring.
-	  Glow      a translucent Neon disc on top, with a PointLight.
+	  Rim       a thin Neon accent band on the pad's side.
+	  Face      an invisible square just above the pad carrying a SurfaceGui
+	            ring, soft glow and word, plus the PointLight (no flat Neon
+	            discs: they render as a fan of triangles under bloom).
 	  Hologram  a floating accent shape above the pad (a Model tagged
 	            FT_Hover; WorldAnimationController animates it on clients).
 
@@ -21,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local StationKit = {}
 
@@ -155,6 +157,7 @@ end
 export type BuildOptions = {
 	Pad: BasePart?, -- reuse this part as the Pad (the claim station's ClaimButton)
 	Ghost: Model?, -- the model shown for the "Ghost" hologram
+	Word: string?, -- printed on the pad face ("PULL", "BOOST", "BUY", "CLAIM")
 }
 
 -- Builds a station at plot-local `localPos` (floor top y = 0) and returns
@@ -199,6 +202,7 @@ function StationKit.Build(
 	end
 	pad.Name = "Pad"
 
+	-- Thin Neon band on the pad's side only.
 	PartKit.Cylinder({
 		Name = "Rim",
 		Center = top * CFrame.new(0, -S.RimCenterBelowTop, 0),
@@ -210,21 +214,7 @@ function StationKit.Build(
 		Parent = model,
 	})
 
-	local glow = decorative(PartKit.Cylinder({
-		Name = "Glow",
-		Center = top * CFrame.new(0, S.GlowHeight / 2, 0),
-		Height = S.GlowHeight,
-		Diameter = S.GlowDiameter,
-		Color = accent,
-		Material = Enum.Material.Neon,
-		Transparency = S.GlowTransparency,
-		Parent = model,
-	}))
-	local light = Instance.new("PointLight")
-	light.Color = accent
-	light.Brightness = S.LightBrightness
-	light.Range = S.LightRange
-	light.Parent = glow
+	BillboardKit.BuildPadFace(model, top, S.PadDiameter, accent, options and options.Word)
 
 	local holo = Instance.new("Model")
 	holo.Name = "Hologram"

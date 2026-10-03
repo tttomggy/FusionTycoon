@@ -36,7 +36,8 @@ local M = PlotLayout.Machine
 local World = UITheme.World
 local ACCENT = World.AccentViolet
 
--- Lighting/particle tuning (not geometry).
+-- Lighting/particle tuning (not geometry). The Rim is a thin band on the
+-- base's side only; flat circles are SurfaceGui faces, never Neon.
 local CORE_LIGHT_RANGE = 28
 local CORE_LIGHT_BRIGHTNESS = 6
 local CORE_SPARKLE_RATE = 4
@@ -64,17 +65,8 @@ local function buildPlatform(machine: Model, base: CFrame)
 		CanQuery = false,
 		Parent = machine,
 	})
-	local glow = PartKit.Cylinder({
-		Name = "FloorGlow",
-		Center = base * CFrame.new(0, M.BaseHeight + M.FloorGlowHeight / 2, 0),
-		Height = M.FloorGlowHeight,
-		Diameter = M.FloorGlowDiameter,
-		Color = ACCENT,
-		Material = Enum.Material.Neon,
-		Transparency = M.FloorGlowTransparency,
-		Parent = machine,
-	})
-	PartKit.MakeDecorative(glow)
+	-- Ring + soft glow face on the platform top (no flat Neon disc).
+	BillboardKit.BuildPadFace(machine, base * CFrame.new(0, M.BaseHeight, 0), M.FaceDiameter, ACCENT, nil)
 end
 
 -- Four pylons at 45/135/225/315 degrees, each leaning toward the centre,
