@@ -857,7 +857,8 @@ local function onPlayerRemoving(player: Player)
 end
 
 -- A client asking for a fresh snapshot (it just had a request rejected and
--- its view may be stale). At most once per SYNC_REQUEST_COOLDOWN_SECONDS.
+-- its view may be stale): the inventory too, since InUse lives there. At
+-- most once per SYNC_REQUEST_COOLDOWN_SECONDS.
 local function onRequestSync(player: Player)
 	local now = os.clock()
 	local last = state.lastSyncRequest[player.UserId]
@@ -865,6 +866,7 @@ local function onRequestSync(player: Player)
 		return
 	end
 	state.lastSyncRequest[player.UserId] = now
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
 end
 

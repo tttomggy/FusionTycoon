@@ -149,7 +149,7 @@ local function pruneSelection()
 	local byUid = itemsByUid()
 	for index = #selected, 1, -1 do
 		local item = byUid[selected[index]]
-		if not item or item.InUse or item.Tier ~= selectedTier then
+		if not item or InventoryController.IsInUse(item) or item.Tier ~= selectedTier then
 			table.remove(selected, index)
 		end
 	end

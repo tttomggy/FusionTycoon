@@ -51,9 +51,16 @@ ItemService.Name = "ItemService"
 -- Every result carries the PedestalIndex the request named (when it had a
 -- valid one), so the client can clear that pedestal's pending flag even on
 -- a rejection - without it one rejection locked the pedestal for the session.
+-- Rejections that mean the client's inventory is stale (it offered an item
+-- that's displayed or gone): re-send it so the next try picks a free copy.
+local STALE_INVENTORY_REASONS = { ItemInUse = true, ItemNotOwned = true }
+
 local function reject(player: Player, reason: string, pedestalIndex: number?, isSuspicious: boolean?)
 	if isSuspicious then
 		warn(("ItemService: rejected place-item request from %s (%s)"):format(player.Name, reason))
+	end
+	if STALE_INVENTORY_REASONS[reason] and PlayerDataService.IsDataLoaded(player) then
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	end
 	RemoteEvents.PlaceItemResult:FireClient(player, { Success = false, Reason = reason, PedestalIndex = pedestalIndex })
 end
@@ -70,7 +77,11 @@ local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
 	return nil
 end
 
-local function syncTycoon(player: Player)
+-- Place and remove flip item.InUse, which lives in the inventory, not the
+-- tycoon snapshot: both go out, or the client keeps offering the displayed
+-- copy of a stack and every later place is rejected as ItemInUse.
+local function syncAll(player: Player)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
 end
 
@@ -121,7 +132,7 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 
 	PlayerDataService.SetItemInUse(player, uid, true)
 	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, uid)
-	syncTycoon(player)
+	syncAll(player)
 
 	PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
 	TycoonService.RefreshPedestalLabels(player)
@@ -184,7 +195,7 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 
 	PlayerDataService.SetItemInUse(player, uid, false)
 	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
-	syncTycoon(player)
+	syncAll(player)
 
 	PedestalVisuals.Clear(pedestal)
 	TycoonService.RefreshPedestalLabels(player)

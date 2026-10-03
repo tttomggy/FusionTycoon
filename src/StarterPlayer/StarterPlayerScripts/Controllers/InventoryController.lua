@@ -7,12 +7,42 @@ local InventoryController = {}
 
 -- Local cache of the server's authoritative inventory; never mutated optimistically.
 local inventory: { any } = {}
+-- Uids on a pedestal per the latest tycoon snapshot (TycoonController feeds
+-- it). IsInUse trusts either source, so a stale item.InUse can never offer
+-- a displayed copy.
+local displayedUids: { [string]: boolean } = {}
 
 local inventoryChanged = Instance.new("BindableEvent")
 InventoryController.InventoryChanged = inventoryChanged.Event
 
 function InventoryController.GetInventory(): { any }
 	return inventory
+end
+
+-- On a pedestal: the inventory's InUse flag OR the snapshot's PedestalDisplays.
+-- Every client check for "free" goes through this, never item.InUse alone.
+function InventoryController.IsInUse(item: any): boolean
+	return item.InUse == true or displayedUids[item.Uid] == true
+end
+
+-- Called by TycoonController with the snapshot's displayed Uids; fires
+-- InventoryChanged when the set changes so open pickers refresh.
+function InventoryController.SetDisplayedUids(uids: { [string]: boolean })
+	local changed = false
+	for uid in uids do
+		if not displayedUids[uid] then
+			changed = true
+		end
+	end
+	for uid in displayedUids do
+		if not uids[uid] then
+			changed = true
+		end
+	end
+	displayedUids = uids
+	if changed then
+		inventoryChanged:Fire(inventory)
+	end
 end
 
 function InventoryController.GetItemsByTier(tier: string): { any }
@@ -33,7 +63,7 @@ end
 function InventoryController.GetFusableItemsByTier(tier: string): { any }
 	local results = {}
 	for _, item in inventory do
-		if item.Tier == tier and not item.InUse then
+		if item.Tier == tier and not InventoryController.IsInUse(item) then
 			table.insert(results, item)
 		end
 	end
@@ -71,7 +101,7 @@ end
 function InventoryController.GetDisplayableItems(): { any }
 	local displayable = {}
 	for _, item in inventory do
-		if not item.InUse then
+		if not InventoryController.IsInUse(item) then
 			table.insert(displayable, item)
 		end
 	end

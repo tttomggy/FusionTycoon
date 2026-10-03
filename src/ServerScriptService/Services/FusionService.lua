@@ -80,9 +80,15 @@ local rng = Random.new()
 -- indicate a modified/exploited client rather than an ordinary race (e.g. two
 -- rapid clicks) - those get a server-side warn so they're visible in logs
 -- without telling the client anything it could use to probe further.
+-- Rejections that mean the client's inventory is stale: re-send it.
+local STALE_INVENTORY_REASONS = { ItemInUse = true, ItemNotOwned = true, TierMismatch = true }
+
 local function reject(player: Player, reason: string, isSuspicious: boolean?)
 	if isSuspicious then
 		warn(("FusionService: rejected fusion request from %s (%s)"):format(player.Name, reason))
+	end
+	if STALE_INVENTORY_REASONS[reason] and PlayerDataService.IsDataLoaded(player) then
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	end
 	RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = reason })
 end

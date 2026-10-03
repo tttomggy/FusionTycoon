@@ -386,7 +386,7 @@ local function buildBrowseEntries(): { any }
 			Name = def and def.Name or item.ItemId,
 			Tier = item.Tier,
 			Mutation = item.Mutation,
-			InUse = item.InUse == true,
+			InUse = InventoryController.IsInUse(item),
 		})
 	end
 	return entries

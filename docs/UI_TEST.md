@@ -522,3 +522,13 @@ testable without luck.
 - [ ] **Rejoin doesn't pay twice** (with saving enabled): leave, wait 3+
   minutes, rejoin. The card shows once; collect it, rejoin straight away,
   and there's no second card.
+- [ ] **Stacks of the same item fill every pedestal.** `/give mythic_rift
+  rainbow` five times.
+  - [ ] Display a copy on pedestals 1, 2, 3 and 4 in turn from the picker's
+    single stack card. Every place succeeds (none says **That item is
+    already on display**), and the card counts the displayed copies.
+  - [ ] Remove the one on pedestal 2, then put it back from the stack.
+  - [ ] With 3 displayed (2 free), open the Fuse panel on Mythic
+    (`/rebirths 1` first): it lists exactly the 2 free copies, AUTO-FILL
+    takes only those, and fusing them succeeds. The 3 on pedestals are
+    untouched.

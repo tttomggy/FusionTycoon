@@ -174,12 +174,15 @@ local function onSyncTycoon(snapshot: any)
 		else nil
 	-- Remote tables with numeric keys can arrive keyed by strings; normalise.
 	pedestalDisplays = {}
+	local displayedUids: { [string]: boolean } = {}
 	for key, uid in snapshot.PedestalDisplays or {} do
 		local index = tonumber(key)
 		if index then
 			pedestalDisplays[index] = uid
+			displayedUids[uid] = true
 		end
 	end
+	InventoryController.SetDisplayedUids(displayedUids)
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	hasSynced = true
