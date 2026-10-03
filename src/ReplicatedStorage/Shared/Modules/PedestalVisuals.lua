@@ -9,7 +9,6 @@
 -- one-off personal animation), so they need to be built by the server to
 -- replicate to every player, the same way TycoonService's pads/machine are.
 local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -19,15 +18,15 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 
 local PedestalVisuals = {}
 
 local ELEMENTS_FOLDER_NAME = "PedestalVisualElements"
 
-local RING_SIZE = Vector3.new(0.4, 5, 5) -- Cylinder shape: X = thickness, Y/Z = diameter
+local RING_DIAMETER = 5
 local RING_HEIGHT_OFFSET_STUDS = 0.2
-local RING_SPIN_RADIANS_PER_SECOND = math.rad(90)
 
 local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
@@ -45,31 +44,9 @@ local PROXIMITY_COOLDOWN_SECONDS = 6
 local PROXIMITY_BURST_COUNT = 40
 
 -- Continuous per-pedestal state that can't be cleaned up just by destroying
--- instances (a running Heartbeat connection, an active looped Tween). Keyed
--- by the pedestal part so Clear() only ever touches what it itself started.
-local activeSpins: { [BasePart]: RBXScriptConnection } = {}
+-- instances (an active looped Tween). Keyed by the part it runs on so
+-- Clear() only ever touches what it itself started.
 local activePulses: { [BasePart]: Tween } = {}
-
-local function stopSpin(ring: BasePart)
-	local connection = activeSpins[ring]
-	if connection then
-		connection:Disconnect()
-		activeSpins[ring] = nil
-	end
-end
-
-local function startSpin(ring: BasePart)
-	stopSpin(ring)
-	activeSpins[ring] = RunService.Heartbeat:Connect(function(deltaTime: number)
-		ring.CFrame *= CFrame.Angles(RING_SPIN_RADIANS_PER_SECOND * deltaTime, 0, 0)
-	end)
-	-- Safety net: if the ring is ever destroyed some other way (e.g. the
-	-- whole plot getting torn down) the Heartbeat connection above would
-	-- otherwise run forever against a dead instance.
-	ring.Destroying:Connect(function()
-		stopSpin(ring)
-	end)
-end
 
 local function stopPulse(pedestal: BasePart)
 	local tween = activePulses[pedestal]
@@ -170,11 +147,6 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 
 	local elements = pedestal:FindFirstChild(ELEMENTS_FOLDER_NAME)
 	if elements then
-		for _, descendant in elements:GetDescendants() do
-			if descendant:IsA("BasePart") then
-				stopSpin(descendant)
-			end
-		end
 		elements:Destroy()
 	end
 
@@ -255,23 +227,17 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 	end
 
 	if config.RotatingRing then
-		local ring = Instance.new("Part")
+		-- A glowing ring around the cap, drawn as a SurfaceGui face rather
+		-- than a flat Neon disc (which renders as a fan of triangles under
+		-- bloom). The orb already carries this pedestal's light.
+		local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+		local capTop = pedestal.CFrame * CFrame.new(0, baseSize.Y / 2 + RING_HEIGHT_OFFSET_STUDS, 0)
+		local ring = BillboardKit.BuildPadFace(elements, capTop, RING_DIAMETER, config.GlowColor, nil)
 		ring.Name = "Ring"
-		ring.Shape = Enum.PartType.Cylinder
-		ring.Size = RING_SIZE
-		ring.Anchored = true
-		ring.CanCollide = false
-		ring.Material = Enum.Material.Neon
-		ring.Color = config.GlowColor
-		ring.Transparency = 0.4
-		-- The cylinder's axis runs along local X; rotating 90 degrees around
-		-- Z lays it flat, like a ring around the pedestal's base.
-		-- At the cap, around the top of the column.
-		ring.CFrame = CFrame.new(pedestal.Position + Vector3.new(0, pedestal.Size.Y / 2 + RING_HEIGHT_OFFSET_STUDS, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
-		ring.Parent = elements
-
-		startSpin(ring)
+		local ringLight = ring:FindFirstChild("FaceLight")
+		if ringLight then
+			ringLight:Destroy()
+		end
 	end
 
 	-- The pulse breathes the orb (pulsing the column would push its cap

@@ -191,3 +191,35 @@ Then press Play:
   player's lab is built there and returns when they leave.
 - [ ] **Lighting.** Late-afternoon warm light with a soft violet haze. Only
   Neon parts bloom, and nothing looks washed out.
+
+## 9. Polish 1
+
+- [ ] **Pedestal prompt with 0 items.** `/wipe` → Play → claim, then walk
+  to an empty pedestal. **E · Display / Pedestal N** shows, and pressing it
+  opens the picker on its "Pull at the Gacha Pad" empty state. With items,
+  it opens the picker as usual. With an item on the pedestal, it reads
+  **Remove** and picks it up.
+- [ ] **Two players** (2-player local server): you can't see, and can't
+  trigger, the other player's pedestal prompts or EMPTY pills. You do see
+  their filled pedestal labels.
+- [ ] **Pads.** Each station pad shows a clean accent ring, a soft centre
+  glow and its word (PULL / BOOST / BUY / CLAIM) with no triangle slices,
+  readable walking in from the gate. If a word reads upside-down, the Face
+  needs a 180° yaw in `BillboardKit.BuildPadFace`. After claiming, the
+  claim pad goes grey and reads **YOURS**. The machine platform shows a
+  violet ring, and the station and machine rims are thin bands on the side.
+- [ ] **Less purple.** Pedestal caps are matte, with a thin glowing lip only
+  when filled. The collector is matte gold with two thin glowing edges.
+  Wall strips are thin. Grass reads as grass, and the floor isn't
+  black.
+- [ ] **EMPTY pill.** Empty pedestals show a small "⊕ EMPTY" pill about 5
+  studs up (owner only, hidden past about 20 studs). Filled labels sit
+  above the orb.
+- [ ] **Speed belts.** Standing on the green (south, −Z) belt with no input
+  carries you toward +X at about 28 studs/s, and walking with the flow is
+  about 44 studs/s. The blue belt goes −X. Ride each belt end to end: the
+  rollers at the ends don't trap you, and chevrons slide along both belts.
+- [ ] **Cash balls never ride a belt.** Belts don't collide with cash balls,
+  which stay on the plots anyway.
+- [ ] **Spawn.** You still spawn on the street in front of your gate, and
+  the spawn pad's edge doesn't snag you while riding the belt past it.

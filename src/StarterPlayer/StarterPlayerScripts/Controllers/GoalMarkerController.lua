@@ -22,6 +22,7 @@ local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local TycoonController = require(script.Parent.TycoonController)
 local HudController = require(script.Parent.HudController)
@@ -37,7 +38,6 @@ local BOB_PIXELS = 6
 local BOB_SECONDS = 1
 local HIDE_RADIUS = 8
 local RING_MARGIN = 2
-local RING_HEIGHT = 0.1
 local RING_PULSE_SECONDS = 1.2
 local RESOLVE_INTERVAL = 0.5
 
@@ -184,27 +184,29 @@ local function buildMarker(goalText: string)
 	distanceText = distance
 end
 
+-- A pulsing gold ring on the floor around the target: a SurfaceGui ring
+-- face (client-only part), not a flat Neon disc.
 local function buildRing(bottomCenter: Vector3, footprint: number)
-	local part = Instance.new("Part")
-	part.Name = "GoalRing"
-	part.Shape = Enum.PartType.Cylinder
-	part.Size = Vector3.new(RING_HEIGHT, footprint + RING_MARGIN, footprint + RING_MARGIN)
-	part.CFrame = CFrame.new(bottomCenter + Vector3.new(0, RING_HEIGHT / 2, 0)) * CFrame.Angles(0, 0, math.rad(90))
-	part.Material = Enum.Material.Neon
-	part.Color = UITheme.World.AccentGold
-	part.Transparency = 0.2
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Parent = Workspace -- created on the client: only this player sees it
-	TweenService:Create(
-		part,
-		TweenInfo.new(RING_PULSE_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Transparency = 0.7 }
-	):Play()
-	ring = part
+	local face = BillboardKit.BuildPadFace(
+		Workspace, -- created on the client: only this player sees it
+		CFrame.new(bottomCenter),
+		footprint + RING_MARGIN,
+		UITheme.World.AccentGold,
+		nil
+	)
+	face.Name = "GoalRing"
+	local gui = face:FindFirstChild("PadFace")
+	local ringFrame = gui and gui:FindFirstChild("Ring")
+	local stroke = ringFrame and ringFrame:FindFirstChild("RingStroke")
+	if stroke and stroke:IsA("UIStroke") then
+		stroke.Transparency = 0.2
+		TweenService:Create(
+			stroke,
+			TweenInfo.new(RING_PULSE_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Transparency = 0.7 }
+		):Play()
+	end
+	ring = face
 end
 
 local function showWorldMarker(target: Instance, goalText: string)

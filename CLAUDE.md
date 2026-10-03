@@ -49,8 +49,9 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 
 ```
 src/ReplicatedStorage/Shared/
-    Config/      shared config tables (PlotLayout, TycoonConfig, FusionConfig,
-                 GoalConfig — the ordered onboarding goals, …)
+    Config/      shared config tables (PlotLayout, StreetLayout — the street
+                 and speed belts, TycoonConfig, FusionConfig, GoalConfig — the
+                 ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -72,7 +73,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   (fusion/gacha result cards), AnnouncementController
                   (banners), WorldLabelController (hides owner-only labels),
                   WorldAnimationController (FT_Hover spin/bob, client-only),
-                  GoalMarkerController (points at the current goal)…
+                  GoalMarkerController (points at the current goal),
+                  BeltController (client-only belt chevrons)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
@@ -209,9 +211,11 @@ mutating (see `ItemService.onRequestPlaceItem`, `FusionService.onFusionRequest`)
 
 ### World layout (plot-local space and the slot grid)
 
-`Shared/Config/PlotLayout.lua` is the single source of truth for ALL world
+`Shared/Config/PlotLayout.lua` is the single source of truth for plot
 geometry: every position, offset and size on a plot, the station / dropper /
-pedestal / machine / gate dimensions, the slot grid and the street. No service
+pedestal / machine / gate dimensions and the slot grid.
+`Shared/Config/StreetLayout.lua` does the same for the street and its speed
+belts. No service
 may hard-code a second copy — that class of duplicated assumption caused most
 of this project's layout bugs. A require-time assertion block in PlotLayout
 checks that no footprints overlap and everything sits inside the walls.
@@ -226,9 +230,19 @@ checks that no footprints overlap and everything sits inside the walls.
   gates face the street at z = 0. `PlotLayout.GetSlotCFrame(i)`.
 - **Materials:** every solid part is SmoothPlastic, accents Neon (colours
   from `UITheme.World`); the ground's Grass is the one exception. No Basalt,
-  Slate, Metal or Plastic.
+  Slate, Metal or Plastic. **No flat Neon circles:** Roblox draws a cylinder
+  top as a fan of triangles that bloom unevenly ("pizza slices"). Glowing
+  rings on flat surfaces are SurfaceGui faces (`BillboardKit.BuildPadFace`);
+  Neon cylinders are only thin bands seen from the side (station/machine
+  rims).
+- **Pedestal prompts:** the client handles DisplayPrompts through
+  `ProximityPromptService` (PromptTriggered/PromptShown), never by looping a
+  folder's children once; server containers are built complete and parented
+  last.
 - **Prompts:** stations 7, pedestals 6, machine 10; all
-  `RequiresLineOfSight = false`, `Exclusivity = OnePerButton`.
+  `RequiresLineOfSight = false`, `Exclusivity = OnePerButton`. Owner-only
+  prompts carry `OwnerOnly = true` and are disabled on other clients by
+  WorldLabelController.
 - **Hover animation:** tag a Part or Model `FT_Hover`
   (`PartKit.SetHover`); clients animate it. The server never tweens these.
 
