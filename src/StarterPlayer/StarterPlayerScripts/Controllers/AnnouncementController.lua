@@ -507,6 +507,23 @@ function AnnouncementController.ShowEventHype(text: string)
 	})
 end
 
+-- An admin's broadcast (already filtered on the server): the big banner
+-- in the Heist red, "SERVER · ADMIN".
+function AnnouncementController.ShowAdminBroadcast(text: string)
+	enqueue({
+		Text = "📣 " .. UIKit.EscapeRichText(text),
+		AccentColor = Colors.Danger,
+		Big = {
+			Caption = "SERVER · ADMIN",
+			CaptionColor = Colors.MythicBannerLabel,
+			Left = UITheme.Gradients.Heist.Bottom,
+			Right = Colors.Panel,
+			Emblem = rainbowEmblem,
+			Shake = false,
+		},
+	})
+end
+
 function AnnouncementController.Init()
 	screenGui = UIKit.Screen("Announcements", 100)
 	FusionController.FusionResolved:Connect(onFusionResolved)

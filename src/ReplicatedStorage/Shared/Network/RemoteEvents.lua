@@ -34,6 +34,10 @@ local REMOTE_EVENT_NAMES = {
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }
 	"HeistEnded", -- server -> thief and victim: a carry ended; { Role, Outcome = "Delivered"|"Saved"|"Timeout"|"Left"|"Died", Item, OtherName }
 	"HeistFeed", -- server -> all clients: Legendary+ heist banner; { Kind = "Grab"|"Stole"|"Caught", Thief, Victim, Tier, Mutation?, ItemName, ItemId }
+	"AdminOpen", -- server -> one admin: open the Admin panel (sent only after AdminService re-checked AdminConfig; non-admins never get it)
+	"AdminAction", -- client -> server: an Admin panel action; { Action, Args, Scope = "Server"|"All" } (AdminService validates the sender and every arg)
+	"AdminResult", -- server -> one admin: outcome of an AdminAction; { Ok, Text }
+	"AdminBroadcast", -- server -> all clients: a filtered admin banner; { Text }
 }
 
 local function getOrCreateFolder(): Folder

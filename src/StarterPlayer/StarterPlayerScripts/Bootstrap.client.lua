@@ -16,6 +16,7 @@ local GeneratorController = require(Controllers.GeneratorController)
 local FactoryController = require(Controllers.FactoryController)
 local HeistController = require(Controllers.HeistController)
 local EventController = require(Controllers.EventController)
+local AdminController = require(Controllers.AdminController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -31,6 +32,7 @@ BeltController.Init()
 GeneratorController.Init()
 HeistController.Init()
 EventController.Init()
+AdminController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.
