@@ -29,14 +29,25 @@ factory line along the left wall or in the UPGRADES panel; both fire
 Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 (success = next tier, fail = 1 item of the same tier back) → display the best
 4 items on pedestals for passive income → Multiplier Pad multiplies ALL income
-→ Rebirth (Portal, back-right corner).
+→ Rebirth (Portal, back-right corner) → hunt Secrets, mutations and the Index.
 
 Rebirth (`RebirthService`, numbers in `RebirthConfig`) needs this run's
 passive earnings (`RunEarnings`) ≥ the requirement. It resets cash,
 generators (Basic back to LV 1), the Multiplier Pad and the gacha price; it
 keeps every item, the pedestals, goals and the rebirth count, and gives
 income ×(1 + 0.5 n) and luck ×(1 + 0.05 n) (luck raises Legendary/Mythic
-gacha odds via `FusionConfig.GetGachaRates`).
+gacha odds via `FusionConfig.GetGachaRates`, and every mutation chance).
+
+Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
+at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
+successful fusion can roll a **mutation** (`MutationConfig`: Golden ×2,
+Diamond ×5, Rainbow ×12 income). Fusion rules: a success keeps the *lower*
+of the two inputs' mutations, then may roll a better one; a fail keeps the
+better input untouched (same Uid) and removes only the other; Fuse All
+never touches mutated items. The **Index** (`IndexConfig`, 68 entries =
+item × variant) pays +1% income per entry and +5% per full tier page, and
+survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
+(the same functions the rolls use).
 
 - All economy numbers live in `TycoonConfig.lua` (costs, pedestal income,
   multiplier levels, gacha price curve) and `FusionConfig.lua` (fusion success
@@ -50,8 +61,9 @@ gacha odds via `FusionConfig.GetGachaRates`).
   It takes one `IncomeInputs` table, built only by
   `PlayerDataService.GetIncomeInputs` (server) and
   `TycoonController.GetIncomeInputs` (client).
-- Every income display uses `TycoonConfig.GetIncomeMultiplier`;
-  `GetCashMultiplierValue` is the pad only.
+- Every income display uses `TycoonConfig.GetIncomeMultiplier` (pad ×
+  rebirth × Index); `GetCashMultiplierValue` is the pad only. An item's
+  $/s is `TycoonConfig.GetItemCashPerSecond(tier, mutation)`.
 - Every service syncs the client with `PlayerDataService.SyncTycoon(player)`.
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
@@ -61,7 +73,10 @@ gacha odds via `FusionConfig.GetGachaRates`).
   never saved. PedestalDisplays are stored with string keys on disk.
 - Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
   `/rebirthready` (sets this run's earnings to the requirement),
-  `/rebirths <n>`, `/wipe`.
+  `/rebirths <n>`, `/give <itemId> [mutation]`, `/wipe`.
+- **No new `Highlight`s on world objects.** Roblox renders at most 31 per
+  client, and 12 plots × 4 pedestals can reach 48 (outlines silently
+  vanish). Pedestals mark "filled" with the cap lip glow instead.
 - Runtime `Size` animation on world parts goes through `PartKit.Pulse` /
   `TweenSize` (a stored `BaseSize`, never the live size): reading the live
   size compounded the generator upgrade bump until it poked through walls.
@@ -72,8 +87,9 @@ gacha odds via `FusionConfig.GetGachaRates`).
 src/ReplicatedStorage/Shared/
     Config/      shared config tables (PlotLayout, StreetLayout — the street
                  and speed belts, TycoonConfig, FusionConfig, RebirthConfig —
-                 rebirth requirement/income/luck, GoalConfig — the ordered
-                 onboarding goals, …)
+                 rebirth requirement/income/luck, MutationConfig — Golden/
+                 Diamond/Rainbow, IndexConfig — the collection book,
+                 GoalConfig — the ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -105,8 +121,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   on every nearby factory line, collector pops)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
-                  Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI,
-                  RebirthPanel
+                  Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
+                  ItemPickerUI, RebirthPanel, IndexPanel
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)

@@ -396,3 +396,69 @@ otherwise.
   - [ ] Player 2 does **not** see Player 1's portal label or its Rebirth
     prompt.
   - [ ] Player 2 does see Player 1's portal itself.
+
+## 13. Depth (Secret tier, mutations, Index, Pull ×10)
+
+Studio shortcut: `/give <itemId> [mutation]`, for example
+`/give legendary_core golden` or `/give secret_horizon`. It makes all of this
+testable without luck.
+
+- [ ] **Pull ×10.** `/cash 1e9`, then stand on the gacha pad.
+  - [ ] A second prompt, **R · Pull ×10**, sits under the E prompt without
+    overlapping it.
+  - [ ] Its object text shows a cost. Pressing it charges exactly that
+    amount (watch the cash card).
+  - [ ] Ten cards pop in quickly. The best one has a gold outline, and if
+    it's Epic+ or Diamond/Rainbow, the big **BEST OF 10** card follows.
+  - [ ] The pad price rises by ten pulls.
+  - [ ] With too little cash: a red **Need $X for 10 pulls** toast, and
+    nothing is charged.
+- [ ] **Golden on a pedestal.** `/give legendary_core golden`, then display
+  it.
+  - [ ] The orb keeps its Legendary colour inside a gold glass shell, with
+    gold sparkles.
+  - [ ] The label reads **GOLDEN · LEGENDARY** in gold, with the name
+    **Golden Star Core**.
+  - [ ] Its $/s, and the HUD income contribution, are ×2 a normal Star
+    Core's.
+  - [ ] `/give legendary_core rainbow`: the shell cycles through the rainbow
+    on the client, and the label's top line is rainbow-tinted.
+- [ ] **Fusion keeps mutations safe.** `/give epic_flare golden` plus
+  `/give epic_prism`, then fuse that pair at the machine (normal items pair
+  first, so have no other Epics).
+  - [ ] On success the Legendary is normal, or rarely a fresh mutation.
+  - [ ] On a fail you keep the **Golden** Epic (same item), and only the
+    normal one is gone.
+- [ ] **Fuse All leaves mutated items alone.** Own 20+ Commons, one of
+  them Golden (`/give common_spark golden`). Fuse All. The Golden Common is
+  still there afterwards.
+- [ ] **Mythic → Secret gate.** `/give mythic_rift` twice.
+  - [ ] At 0 rebirths, the machine prompt reads **🔒 Locked / Rebirth 1 to
+    fuse Mythics**, and pressing it only toasts that.
+  - [ ] The odds board lists **2 Mythic → Secret (Rebirth 1) 8%**.
+  - [ ] After `/rebirths 1` the prompt becomes **Fuse 2x Mythic → Secret
+    (8% chance)**.
+  - [ ] A Secret result shows the dark orb (VoidShell glass, mint core)
+    and the **SERVER · SECRET** banner.
+- [ ] **Index.** Press **INDEX** (the teal button; the three bottom buttons
+  fit at 844 × 390).
+  - [ ] The header pill shows the bonus, and the count line reads **n / 68
+    found · +1% each · +5% per full tier page**.
+  - [ ] The tabs show per-tier counts (Secret x/8).
+  - [ ] Pull or `/give` something new: the toast **NEW IN INDEX · Golden
+    Star Core · +1%** shows, and the cell fills.
+  - [ ] Completing a page toasts **+5% · <Tier> page complete!**.
+  - [ ] The HUD income rises by exactly the Index bonus (×1.01 per entry).
+- [ ] **Odds after a rebirth.**
+  - [ ] The gacha pad lists all six tiers and a mutation line.
+  - [ ] After `/rebirths 2` (or a real rebirth) it reads **Common 77.9 ·
+    Rare 18 · Epic 3.5 · Legendary 0.50 · Mythic 0.055 · Secret 0.0022%**
+    / **Golden 4.4% · Diamond 0.88% · Rainbow 0.11%**.
+  - [ ] The machine board's mutation line scales too.
+- [ ] **Rejoin** with saving enabled: mutated items keep their mutation and
+  the Index keeps every entry. An old save gets Index credit for what it
+  already owns.
+- [ ] **Two players:**
+  - [ ] Player 2 sees Player 1's mutation shells and the
+    **SERVER · RAINBOW** / **SERVER · SECRET** banners.
+  - [ ] Player 2 does not see Player 1's owner-only labels or prompts.

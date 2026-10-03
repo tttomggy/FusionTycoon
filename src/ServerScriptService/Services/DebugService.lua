@@ -10,6 +10,9 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -44,6 +47,9 @@ local WIPE_COMMAND = "/wipe"
 local REBIRTH_READY_COMMAND = "/rebirthready"
 -- "/rebirths 3" sets the rebirth count.
 local REBIRTHS_COMMAND = "/rebirths"
+-- "/give legendary_core golden" adds an item (optionally mutated) without
+-- needing the luck: mutations, Secrets and the Index are testable.
+local GIVE_COMMAND = "/give"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -73,6 +79,23 @@ local function onPlayerChatted(player: Player, message: string)
 			PlayerDataService.SyncTycoon(player)
 			print(("DebugService: %s's rebirths set to %d"):format(player.Name, math.floor(count)))
 		end
+	elseif command == GIVE_COMMAND then
+		local itemId, rawMutation = argument:match("^(%S+)%s*(%S*)$")
+		local def = itemId and ItemConfig.GetItemById(itemId)
+		if not def then
+			warn(("DebugService: /give: unknown item id %q"):format(tostring(itemId)))
+			return
+		end
+		-- Chat is lowercased above; mutations are "Golden", "Diamond", "Rainbow".
+		local mutation = if rawMutation ~= "" then rawMutation:sub(1, 1):upper() .. rawMutation:sub(2) else nil
+		if mutation and not MutationConfig.IsValid(mutation) then
+			warn(("DebugService: /give: unknown mutation %q"):format(rawMutation))
+			return
+		end
+		PlayerDataService.AddItem(player, def.Id, def.Tier, mutation)
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: gave %s a %s"):format(player.Name, MutationConfig.GetDisplayName(def.Name, mutation)))
 	elseif command == WIPE_COMMAND then
 		local data = PlayerDataService.GetData(player)
 		if data then
@@ -86,6 +109,7 @@ local function onPlayerChatted(player: Player, message: string)
 			data.TotalFusions = 0
 			data.Rebirths = 0
 			data.RunEarnings = 0
+			data.Index = {}
 		end
 		player:Kick("Profile wiped (Studio debug). Press Play again.")
 	end
@@ -110,7 +134,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /wipe")
 end
 
 function DebugService:Start()
