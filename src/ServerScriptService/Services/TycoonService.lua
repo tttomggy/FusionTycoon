@@ -12,7 +12,8 @@
 	file must not hard-code geometry.
 
 	Lifecycle: :Init() connects its own remotes/players and starts its loops.
-	:Start() resolves FusionMachineService and WorldService. PlayerDataService is a leaf
+	:Start() resolves FusionMachineService and WorldService and registers the
+	generator OnSync hook. PlayerDataService is a leaf
 	(requires no services), so its module-scope require can't form a cycle.
 ]]
 local Debris = game:GetService("Debris")
@@ -37,6 +38,7 @@ local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local DropperKit = require(ReplicatedStorage.Shared.Modules.DropperKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
+local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -665,6 +667,33 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 	end
 end
 
+--[[ Generators ------------------------------------------------------------------------ ]]
+
+-- The five generators in the back-corner bays, built once on claim and
+-- restyled from the player's generator levels on every sync.
+local function createGenerators(plot: Model, origin: CFrame)
+	for _, generator in TycoonConfig.Generators do
+		GeneratorKit.Build(origin, generator.Id, plot)
+	end
+end
+
+-- OnSync hook: runs before every snapshot, so the world matches what the
+-- client is about to be told. GeneratorKit.SetState skips unchanged ones.
+-- Must not call SyncTycoon.
+local function refreshGenerators(player: Player)
+	local plot = plotByUserId[player.UserId]
+	local levels = PlayerDataService.GetGenerators(player)
+	if not plot or not levels or plot:GetAttribute("Claimed") ~= true then
+		return
+	end
+	for _, generator in TycoonConfig.Generators do
+		local model = plot:FindFirstChild(GeneratorKit.GetModelName(generator.Id))
+		if model and model:IsA("Model") then
+			GeneratorKit.SetState(model, levels[generator.Id] or 0, TycoonConfig.IsUnlocked(generator, levels))
+		end
+	end
+end
+
 --[[ Public ---------------------------------------------------------------------------- ]]
 
 -- `player`'s plot Model, or nil. Lets ItemService resolve pedestals without
@@ -815,7 +844,8 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		createPedestals(plot, origin)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
-		syncTycoon(player)
+		createGenerators(plot, origin)
+		syncTycoon(player) -- also styles the generators (refreshGenerators)
 		refreshPlotSigns()
 	end)
 end
@@ -916,6 +946,7 @@ end
 function TycoonService:Start()
 	FusionMachineService = require(script.Parent.FusionMachineService)
 	WorldService = require(script.Parent.WorldService)
+	PlayerDataService.OnSync(refreshGenerators)
 end
 
 return TycoonService

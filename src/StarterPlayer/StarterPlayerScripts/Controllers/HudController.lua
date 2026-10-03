@@ -520,7 +520,7 @@ end
 
 --[[ Cash pops ------------------------------------------------------------- ]]
 
-type CashPop = { Amount: number, Label: TextLabel, Gui: BillboardGui }
+type CashPop = { Amount: number, Label: TextLabel }
 local alivePops: { CashPop } = {}
 
 local function removePop(pop: CashPop)
@@ -528,6 +528,50 @@ local function removePop(pop: CashPop)
 	if index then
 		table.remove(alivePops, index)
 	end
+end
+
+-- Floats `text` up from `position` and fades it over CASH_POP_LIFETIME.
+-- Returns the label so a caller can fold more into it while it's alive.
+-- Shared by the dropper pops here and GeneratorController's income pops.
+function HudController.FloatPop(position: Vector3, text: string, color: Color3): TextLabel
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "CashPopAnchor"
+	anchor.WorldPosition = position
+	anchor.Parent = Workspace.Terrain
+
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "CashPop"
+	gui.Adornee = anchor
+	gui.Size = UDim2.fromOffset(160, 40)
+	gui.LightInfluence = 0
+	gui.AlwaysOnTop = true
+	gui.ResetOnSpawn = false
+	gui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+	local label = UIKit.Label({
+		Text = text,
+		Font = Fonts.Display,
+		TextSize = 26,
+		TextColor3 = color,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		Parent = gui,
+	})
+
+	local info = TweenInfo.new(CASH_POP_LIFETIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, CASH_POP_RISE_STUDS, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+	end
+
+	task.delay(CASH_POP_LIFETIME, function()
+		gui:Destroy()
+		anchor:Destroy()
+	end)
+	return label
 end
 
 local function onCashCollected(payload: any)
@@ -543,47 +587,10 @@ local function onCashCollected(payload: any)
 		return
 	end
 
-	local anchor = Instance.new("Attachment")
-	anchor.Name = "CashPopAnchor"
-	anchor.WorldPosition = payload.Position
-	anchor.Parent = Workspace.Terrain
-
-	local gui = Instance.new("BillboardGui")
-	gui.Name = "CashPop"
-	gui.Adornee = anchor
-	gui.Size = UDim2.fromOffset(160, 40)
-	gui.LightInfluence = 0
-	gui.AlwaysOnTop = true
-	gui.ResetOnSpawn = false
-	gui.Parent = localPlayer:WaitForChild("PlayerGui")
-
-	local label = UIKit.Label({
-		Text = "+" .. NumberFormat.Money(payload.Amount),
-		Font = Fonts.Display,
-		TextSize = 26,
-		TextColor3 = Colors.Cash,
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Stroke = UITheme.Stroke.Text,
-		Parent = gui,
-	})
-
-	local pop: CashPop = { Amount = payload.Amount, Label = label, Gui = gui }
+	local label = HudController.FloatPop(payload.Position, "+" .. NumberFormat.Money(payload.Amount), Colors.Cash)
+	local pop: CashPop = { Amount = payload.Amount, Label = label }
 	table.insert(alivePops, pop)
-
-	local info = TweenInfo.new(CASH_POP_LIFETIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, CASH_POP_RISE_STUDS, 0) }):Play()
-	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
-	local stroke = label:FindFirstChildOfClass("UIStroke")
-	if stroke then
-		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
-	end
-
-	task.delay(CASH_POP_LIFETIME, function()
-		removePop(pop)
-		gui:Destroy()
-		anchor:Destroy()
-	end)
+	task.delay(CASH_POP_LIFETIME, removePop, pop)
 end
 
 --[[ Layout ---------------------------------------------------------------- ]]

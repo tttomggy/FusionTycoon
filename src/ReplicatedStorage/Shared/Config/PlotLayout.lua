@@ -68,9 +68,47 @@ PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES = 30
 PlotLayout.SIGN_POST_X = 9 -- posts at (+-9, +32)
 PlotLayout.SIGN_Z = 32
 
--- Reserved for a later feature: nothing may be built here.
+-- The two back-corner bays holding the five generators.
 PlotLayout.GENERATOR_BAYS = { v3(-24, 0, -24), v3(24, 0, -24) }
-PlotLayout.GENERATOR_BAY_SIZE = 10 -- reserved square footprint (not in the spec; chosen for the overlap check)
+PlotLayout.GENERATOR_BAY_SIZE = 10
+
+export type GeneratorSpot = {
+	Position: Vector3, -- plot-local centre
+	Footprint: number, -- square body width
+	Height: number, -- body height
+	Bay: number, -- index into GENERATOR_BAYS
+}
+
+-- Keyed by TycoonConfig generator Id. Every generator faces +Z.
+PlotLayout.GENERATORS = {
+	basic_generator = { Position = v3(-27.5, 0, -24), Footprint = 3, Height = 3, Bay = 1 },
+	ember_forge = { Position = v3(-24, 0, -24), Footprint = 3, Height = 4, Bay = 1 },
+	flare_reactor = { Position = v3(-20.5, 0, -24), Footprint = 3, Height = 5, Bay = 1 },
+	core_engine = { Position = v3(21, 0, -24), Footprint = 4, Height = 6, Bay = 2 },
+	singularity_core = { Position = v3(26.5, 0, -24), Footprint = 5, Height = 8, Bay = 2 },
+} :: { [string]: GeneratorSpot }
+
+PlotLayout.Generator = {
+	BandHeight = 0.3,
+	BandAt = 0.4, -- fraction of body height
+	BandInflate = 0.2, -- band is (footprint + this) wide
+	CoreScale = 0.55, -- core diameter / footprint
+	CoreInnerScale = 0.65,
+	CoreTransparency = 0.15,
+	CoreSpinDegPerSec = 30,
+	CoreBob = 0.15,
+	CoreBobPeriod = 2,
+	NeonFromLevel = 10, -- band turns Neon at this level
+	MaxLightRange = 8,
+	MaxLightBrightness = 1.5,
+	GhostLockedTransparency = 0.6,
+	GhostBuyTransparency = 0.5,
+	ScreenPixelsPerStud = 40,
+	LabelAboveCore = 1.5, -- owner label, studs above the core's top
+	LabelMaxDistance = 30,
+	PromptDistance = 7,
+	PopRadius = 60, -- income pops only within this many studs of the camera
+}
 
 function PlotLayout.GetPedestalPosition(index: number): Vector3
 	return v3(PlotLayout.PEDESTAL_XS[index], 0, PlotLayout.PEDESTAL_Z)
@@ -322,9 +360,17 @@ local function checkLayout()
 		local cap = PlotLayout.Pedestal.CapSize
 		table.insert(footprints, boxFootprint("Pedestal" .. index, PlotLayout.GetPedestalPosition(index), cap.X, cap.Z))
 	end
-	for index, bay in PlotLayout.GENERATOR_BAYS do
-		local size = PlotLayout.GENERATOR_BAY_SIZE
-		table.insert(footprints, boxFootprint("GeneratorBay" .. index, bay, size, size))
+	for id, spot in PlotLayout.GENERATORS do
+		table.insert(footprints, boxFootprint("Generator_" .. id, spot.Position, spot.Footprint, spot.Footprint))
+		-- Each generator must sit inside its bay.
+		local bay = PlotLayout.GENERATOR_BAYS[spot.Bay]
+		local half = PlotLayout.GENERATOR_BAY_SIZE / 2
+		assert(bay, ("PlotLayout: Generator_%s names a missing bay"):format(id))
+		assert(
+			math.abs(spot.Position.X - bay.X) + spot.Footprint / 2 <= half
+				and math.abs(spot.Position.Z - bay.Z) + spot.Footprint / 2 <= half,
+			("PlotLayout: Generator_%s sits outside its bay"):format(id)
+		)
 	end
 
 	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS

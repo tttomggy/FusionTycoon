@@ -37,6 +37,7 @@ BillboardKit.OWNER_ONLY_ATTRIBUTE = "OwnerOnly"
 local PAD_LABEL_STUDS = Vector2.new(9, 3.4)
 local PEDESTAL_LABEL_STUDS = Vector2.new(6.5, 2.6)
 local EMPTY_PILL_STUDS = Vector2.new(3.6, 1.1)
+local GENERATOR_LABEL_STUDS = Vector2.new(4.4, 1.7)
 local MAX_TEXT_SIZE = 64
 
 --[[ Primitives ------------------------------------------------------------- ]]
@@ -295,6 +296,32 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 	end
 	filledGui.Enabled = info ~= nil
 	emptyGui.Enabled = info == nil
+end
+
+--[[ Generator label ----------------------------------------------------------- ]]
+
+export type GeneratorLabel = {
+	Gui: BillboardGui,
+	Set: (title: string, detail: string, detailColor: Color3) -> (),
+}
+
+-- A small owner-only panel over a generator: a Display title ("LOCKED",
+-- "BUY") over a Body detail line (the requirement, or the price in Cash).
+function BillboardKit.GeneratorLabel(parent: Instance, offset: Vector3, maxDistance: number): GeneratorLabel
+	local gui = newBillboard(parent, "GeneratorLabel", GENERATOR_LABEL_STUDS, offset, maxDistance)
+	gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	local panel = pedestalPanel(gui, 0.1, Colors.Ink)
+	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.Text, 0.08, 0.46)
+	textStroke(title, 2)
+	local detail = scaledLabel(panel, "Detail", Fonts.Body, Colors.Muted, 0.56, 0.34)
+	return {
+		Gui = gui,
+		Set = function(titleText: string, detailText: string, detailColor: Color3)
+			title.Text = titleText
+			detail.Text = detailText
+			detail.TextColor3 = detailColor
+		end,
+	}
 end
 
 --[[ Surfaces ------------------------------------------------------------------ ]]

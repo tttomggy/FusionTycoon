@@ -30,6 +30,10 @@ local ROW_HEIGHT = 84
 local ROW_GAP = 10
 local FOOTER_HEIGHT = 56
 local BUTTON_SIZE = Vector2.new(132, 52)
+local INTRO_HEIGHT = 36 -- the "Generators earn every second" line above the tabs
+local INTRO_INCOME_WIDTH = 96
+local TABS_TOP = INTRO_HEIGHT + 8
+local LIST_TOP = TABS_TOP + 46
 local LOCKED_OPACITY = 0.92
 local FAR_LOCKED_OPACITY = 0.7
 
@@ -50,6 +54,7 @@ type Row = {
 local modal: UIKit.Modal
 local cashLabel: TextLabel
 local footerPill: TextLabel
+local introIncomeLabel: TextLabel
 local rows: { [string]: Row } = {}
 
 local function tierColor(tier: string): Color3
@@ -158,9 +163,12 @@ local function refresh()
 
 	cashLabel.Text = NumberFormat.Money(cash)
 	footerPill.Text = NumberFormat.Multiplier(multiplier)
+	local generatorIncome = 0
 	for _, generator in TycoonConfig.Generators do
 		refreshRow(generator, cash, levels, multiplier)
+		generatorIncome += TycoonConfig.GetGeneratorCashPerSecond(generator, levels[generator.Id] or 0) * multiplier
 	end
+	introIncomeLabel.Text = ("%s/s"):format(NumberFormat.Money(generatorIncome))
 end
 
 --[[ Build -------------------------------------------------------------------- ]]
@@ -348,10 +356,40 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 	rows[generator.Id] = row
 end
 
+-- One line under the title saying what generators do, with their total
+-- income (multiplier included) on the right.
+local function buildIntro(parent: Instance)
+	UIKit.Label({
+		Name = "Intro",
+		Text = "Generators earn every second, even while you're away. Find them in the back corners of your lab.",
+		Font = Fonts.Body,
+		TextSize = 13,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		Size = UDim2.new(1, -(INTRO_INCOME_WIDTH + 8), 0, INTRO_HEIGHT),
+		ZIndex = 5,
+		Parent = parent,
+	})
+	introIncomeLabel = UIKit.Label({
+		Name = "GeneratorIncome",
+		Font = Fonts.Display,
+		TextSize = 18,
+		TextColor3 = Colors.Cash,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, INTRO_INCOME_WIDTH, 0, INTRO_HEIGHT),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = 5,
+		Stroke = UITheme.Stroke.Text,
+		Parent = parent,
+	})
+end
+
 local function buildTabs(parent: Instance)
 	local tabs = Instance.new("Frame")
 	tabs.Name = "Tabs"
 	tabs.BackgroundTransparency = 1
+	tabs.Position = UDim2.fromOffset(0, TABS_TOP)
 	tabs.Size = UDim2.new(1, 0, 0, 34)
 	tabs.ZIndex = 5
 	tabs.Parent = parent
@@ -469,12 +507,13 @@ local function build()
 	})
 	local content = modal.Content
 
+	buildIntro(content)
 	buildTabs(content)
 
 	local list = Instance.new("ScrollingFrame")
 	list.Name = "List"
-	list.Position = UDim2.fromOffset(0, 46)
-	list.Size = UDim2.new(1, 0, 1, -(46 + FOOTER_HEIGHT + UITheme.SmallShadowOffset + 12))
+	list.Position = UDim2.fromOffset(0, LIST_TOP)
+	list.Size = UDim2.new(1, 0, 1, -(LIST_TOP + FOOTER_HEIGHT + UITheme.SmallShadowOffset + 12))
 	list.BackgroundTransparency = 1
 	list.BorderSizePixel = 0
 	list.ScrollBarThickness = 6
