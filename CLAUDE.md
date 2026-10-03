@@ -42,12 +42,14 @@ gacha odds via `FusionConfig.GetGachaRates`, and every mutation chance).
 
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
 at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
-successful fusion can roll a **mutation** (`MutationConfig`: Golden ×2,
-Diamond ×5, Rainbow ×12 income). Fusion rules: a success keeps the *lowest*
+successful fusion can roll a **mutation** (`MutationConfig`, ranked by
+multiplier: Golden ×2, Charged ×3, Diamond ×5, Void ×8, Rainbow ×12,
+Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal
+chance, `MutationConfig.IsEventOnly`). Fusion rules: a success keeps the *lowest*
 mutation among all inputs (so every input must share it), then may roll a
 better one; a fail keeps the best input untouched (same Uid) and removes
-the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 68 entries =
-item × variant) pays +1% income per entry and +5% per full tier page, and
+the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 119 entries =
+17 items × 7 variants, built from `MutationConfig.Order`) pays +1% income per entry and +5% per full tier page, and
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
@@ -93,7 +95,64 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/shield <s>` (0 drops it), `/heistcd 0` (clears your thief cooldown),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips),
+  `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
+  MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
+  `/eventclock <offsetMinutes>` (shifts the event clock to walk the
+  schedule; clients read the same offset),
   `/wipe` (fails your active steals first).
+- **Events** (`EventService`, every number in `EventConfig`): lab weather
+  on a shared UTC clock. **The schedule is deterministic from the UTC slot
+  time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
+  seeds `Random.new(slotStart)`, so every server and client computes the
+  same lineup with no messaging. hh:00 Night 10 min (30% Void Moon);
+  hh:15/:30/:45 one weather by weight (Golden Rain 40 / Power Surge 35 /
+  Meteor Shower 20 / Rainbow Storm 5). An override (`/event`, admin) replaces
+  the scheduled event until it ends, then the clock resumes.
+  - EventService publishes workspace attributes `EventId`, `EventEndsAt`
+    (server time), `EventStrength` (+ `EventClockOffset`, `AdminLuck`,
+    `AdminLuckUntil`, `NextAdminAbuse`). Clients and leaf services read
+    them through `Shared/Modules/EventState`; the effect formulas are pure
+    functions in EventConfig, so a roll and its display always agree.
+  - **Effect hooks** (no globals): `EventService.GetMutationOddsMultiplier
+    (mutation, source)`, `GetFusionSuccessBonus()`,
+    `GetGeneratorMultiplier()`, `GetFusionEventMutation()`. Wired as a
+    multipliers table into `MutationConfig.Roll` / `GetChance` (shared
+    config never requires EventService), a bonus into
+    `FusionConfig.GetFusionChance`, and `IncomeInputs.EventGeneratorMultiplier`
+    (generator income only). `FusionConfig.FormatOdds(luck, event)` shows the
+    boosted numbers; every event change re-syncs players so labels refresh.
+  - Strength ×1–×3 (admin) is clamped: coin ≤ 15 s of income, generators
+    ≤ ×3, mutation odds ≤ ×15.
+  - `tools/econ_sim.py <seeds> <hours> --events` runs the clock and compares
+    with the same seeds without it. **Open:** at the spec numbers events speed
+    Rebirth 1–3 by ~20–26% (target ≤ 15%). Coins aren't the lever (coin
+    value 0 still gives ~20%); it's the sum of every event, Void Moon the
+    biggest single part (~8 points). Re-tune together, then re-run.
+  - Rewards are server-side (EventService): Golden Rain coins (owner-only,
+    touch + distance check, 5 s of income), Power Surge lightning (25% of a
+    plain displayed item turns Charged, carried items skipped; inventory,
+    Index, pedestal visuals/labels, SyncInventory), Meteor Shower craters on
+    the street (`StreetLayout.MeteorBounds`; first finished hold wins a core:
+    Epic 60 / Legendary 30 / Mythic 9 / Secret 1, 15% Celestial). Void Moon:
+    fusion +10 points, 10% Void replacing the normal fusion roll.
+  - Visuals are client-side (`EventController`): start banner (3-2-1),
+    sound, end toast, sky from a captured Lighting baseline restored exactly
+    (never raise a light: Night just darkens), band flicker through
+    `LocalTransparencyModifier`, EventFx cues (lightning, meteors, coin
+    pops), the top-centre HUD chip + schedule card, and the two street
+    Event Boards (`StreetLayout.EventBoard`, built by WorldService).
+- **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
+  `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
+  owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
+  the client never builds it otherwise. Every `AdminAction` is re-checked
+  (non-admins get a SUSPICIOUS warn) and every arg whitelisted. Start event,
+  end event, gift everyone (EventReward "🎁 ADMIN GIFT"), luck ×3 for 10
+  min, broadcast (≤ 80 chars, `TextService:FilterStringAsync` broadcast
+  string, dropped if filtering fails), set next Admin Abuse (DataStore
+  `GlobalEvents` key `NextAdminAbuse`, UTC, read on start and every 5 min).
+  "All servers" publishes `{ Action, Args, SenderUserId }` on
+  MessagingService topic **`FT_Admin`**; every receiver re-checks the sender
+  and re-validates. Every action is logged with `warn`.
 - **Heist** (`HeistService`, every number in `HeistConfig`): from Rebirth 1,
   items **on pedestals** can be stolen by another Rebirth 1+ player;
   inventory items never are. Hold E 1.5 s on an enemy pedestal's
@@ -190,6 +249,8 @@ src/ReplicatedStorage/Shared/
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
+                 EventConfig — the event clock and effects, AdminConfig —
+                 admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
@@ -207,8 +268,9 @@ src/ServerScriptService/
     ServiceManager.lua     loading + Init/Start lifecycle
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
-                           WorldService builds ground, street and FREE LAB
-                           placeholders)
+                           WorldService builds ground, street, Event Boards
+                           and FREE LAB placeholders; EventService runs the
+                           event clock; AdminService runs Admin Abuse)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
@@ -222,12 +284,15 @@ src/StarterPlayer/StarterPlayerScripts/
                   BeltController (client-only belt chevrons),
                   GeneratorController (world Buy/Upgrade prompts, upgrade
                   toast + bump), FactoryController (client-only cash balls
-                  on every nearby factory line, collector pops)…
+                  on every nearby factory line, collector pops),
+                  EventController (event banners, sky, FX, HUD chip, Event
+                  Boards), AdminController (admin panel + broadcasts)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
-                  orb fusion chamber + picker, opened by the machine prompt)
+                  orb fusion chamber + picker, opened by the machine prompt),
+                  AdminPanel (built only on the server's AdminOpen)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -296,10 +361,10 @@ calls left in `Services/`.
 | Service | Lifecycle | Cross-service refs | Mode |
 | --- | --- | --- | --- |
 | `PlayerDataService` | `:Init()` | — (leaf) | `--!strict` |
-| `FusionService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `FusionService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 | `ItemService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LightingService` | `:Init()` | — | `--!strict` |
-| `DebugService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `DebugService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `EventService` | `--!strict` |
 | `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
@@ -307,6 +372,8 @@ calls left in `Services/`.
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `OfflineService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `EventService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `AdminService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker

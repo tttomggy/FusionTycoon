@@ -679,3 +679,74 @@ Test → Clients and Servers, **2 players** (A and B). Both run
     THEM!** line and the red arrow throbs; the next steal doesn't.
   - [ ] **lockAfterLoss**: after A's first real loss card: **Tip: press LOCK
     LAB when you leave your lab.**
+
+## 17. Events (lab weather + Admin Abuse)
+
+Plots are built once per session: restart Play after layout changes. Studio
+profiles never save, so the Next Admin Abuse DataStore write needs a
+published place with API access (otherwise it toasts "DataStore save
+failed").
+
+- [ ] **Each `/event <id>`** (GoldenRain, PowerSurge, MeteorShower,
+  RainbowStorm, Night, VoidMoon): the start banner counts **3 · 2 · 1** with
+  a ping, then shows the icon, name and one line on the event's gradient;
+  the HUD chip turns that gradient with a live timer
+  ("⚡ POWER SURGE · 4:58"); the sky changes (gold tint + gold sparkles /
+  storm tint + denser haze + generator bands flicker / dusk to midnight /
+  midnight + purple tint + purple moon / slow rainbow tint + sparkles).
+- [ ] **Exact restore.** Note Lighting.ClockTime (17.2), the
+  ColorCorrection TintColor/Brightness and Atmosphere Density/Color before
+  an event; `/event off` (or let it run out): a toast "<icon> <NAME> is
+  over", the sky tweens back and every value matches the noted ones. The
+  generator bands are solid again.
+- [ ] **Golden Rain coins.** Gold coins (edge-on, spinning, bobbing) appear
+  in your lab on open floor, never inside a station or pedestal, one every
+  4 s, max 30, each gone after 20 s. Touching one pays **5 s of your
+  income** (cash jumps by income × 5) with a green "+$X" pop. A second
+  player can't pick up yours.
+- [ ] **Lightning Charge.** `/event PowerSurge`, display a plain item: every
+  20 s a white-blue bolt hits a displayed item somewhere with a flash and a
+  low rumble. When yours turns Charged: the toast "⚡ Your <item> got
+  CHARGED!", the pedestal orb gets 3 cyan satellites with a trail, the
+  label and inventory show Charged, the Index gains the Charged cell.
+  Legendary+ shows the server feed line. An item being carried in a heist
+  is never hit.
+- [ ] **Meteor race (2 players).** `/event MeteorShower`: glowing rocks fall
+  onto the street (never a belt, never a plot); each leaves a dark crater
+  with orange crack strips and a glowing core. Both players hold **Grab
+  Meteor Core** (2 s): only the first to finish gets the ☄ METEOR CORE
+  card (Epic+ item, sometimes Celestial); the other gets **Too slow!**. A
+  Rebirth 0 player can grab. Unclaimed craters vanish after 60 s.
+- [ ] **Void Moon.** `/event VoidMoon`, open the Fuse panel: the success
+  chance reads 10 points higher (2 Commons 55% → 65%), and the machine's
+  odds board cells rise by the same. Some successes come out Void.
+- [ ] **Rainbow Storm odds.** `/event RainbowStorm`: the gacha pad and odds
+  board mutation lines show ×5 numbers (Golden 4% → 20%); the big SERVER ·
+  EVENT rainbow banner plays once.
+- [ ] **Index.** The Index shows 7 variant columns (Normal + Golden,
+  Charged, Diamond, Void, Rainbow, Celestial); unfound Charged / Void /
+  Celestial cells show a 🕐. It fits on a phone (the page scrolls).
+- [ ] **`/eventclock`.** `/eventclock 0`, then step `/eventclock 15`, `30`,
+  `45`, `60`: hh:00 is always Night or Void Moon, the others a weather; the
+  HUD chip, the schedule card and both street Event Boards agree at every
+  step. Between events the chip is muted: "NEXT · ☄ METEOR SHOWER in 8:40".
+- [ ] **Schedule card + boards.** Tapping the chip opens NOW / NEXT / THEN
+  with timers and the Admin Abuse line; tapping again closes it. The two
+  Event Boards past the street ends show the same, ticking every second,
+  and block no belt or gate.
+- [ ] **`/admin`.** In Play Solo (your own account = the owner) `/admin`
+  opens ADMIN ABUSE: start each event at ×1/×2/×3 for 5/10/15 min (the
+  banner blurb says "ADMIN x3"), END EVENT, gift everyone (each player gets
+  the 🎁 ADMIN GIFT card), LUCK ×3 (odds displays rise for 10 min),
+  broadcast (≤ 80 chars, the counter stops at 80; everyone sees the
+  SERVER · ADMIN banner, filtered), set next Admin Abuse (the chip card and
+  boards count down to it in your local time). Every action prints a warn
+  with who and what.
+- [ ] **Non-admin.** In a 2-player local server (ids −1/−2, never admins)
+  `/admin` does nothing for either player, and firing AdminAction from the
+  command bar prints **SUSPICIOUS AdminAction** on the server and changes
+  nothing.
+- [ ] **All servers.** An ALL SERVERS action can only be fully tested in a
+  live game with 2 servers: the second server applies it too and logs
+  "FT_Admin from <id>". In Studio it toasts that it applied on this server
+  only if MessagingService isn't available.
