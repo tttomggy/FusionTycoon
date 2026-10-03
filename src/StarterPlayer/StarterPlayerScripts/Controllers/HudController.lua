@@ -17,6 +17,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
@@ -26,6 +27,7 @@ local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
+local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
@@ -55,7 +57,8 @@ local LAYOUT = {
 		ButtonTextSize = 13,
 	},
 }
-local CASH_CARD_SIZE = Vector2.new(236, 96)
+local CASH_CARD_SIZE = Vector2.new(260, 96)
+local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
 
@@ -68,6 +71,7 @@ local displayedCash = 0
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
 local multiplierPill: TextLabel
+local rebirthPill: TextLabel
 
 local goalHolder: Frame
 local goalBody: Frame
@@ -288,21 +292,63 @@ local function buildCashCard(): Frame
 		TextSize = 16,
 		RichText = true,
 		Position = UDim2.fromOffset(0, 46),
-		Size = UDim2.new(1, -60, 0, 24),
+		Size = UDim2.new(1, -PILL_ROW_WIDTH, 0, 24),
 		ZIndex = z,
 		Parent = body,
 	})
 
+	-- Right-aligned pill row: the rebirth pill (hidden at 0 rebirths) then
+	-- the Multiplier Pad pill.
+	local pills = Instance.new("Frame")
+	pills.Name = "Pills"
+	pills.BackgroundTransparency = 1
+	pills.AnchorPoint = Vector2.new(1, 0)
+	pills.Position = UDim2.new(1, 0, 0, 46)
+	pills.Size = UDim2.fromOffset(PILL_ROW_WIDTH, 24)
+	pills.ZIndex = z
+	pills.Parent = body
+	local pillLayout = Instance.new("UIListLayout")
+	pillLayout.FillDirection = Enum.FillDirection.Horizontal
+	pillLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	pillLayout.Padding = UDim.new(0, 6)
+	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	pillLayout.Parent = pills
+
+	rebirthPill = UIKit.Pill({
+		Name = "Rebirth",
+		Parent = pills,
+		Text = "",
+		Gradient = UITheme.Gradients.Orange,
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		Height = 24,
+		LayoutOrder = 1,
+		ZIndex = z,
+		TextStroke = 1.5,
+	})
+	local rebirthFill = rebirthPill.Parent :: Frame
+	rebirthFill.Visible = false
+	-- The pill is small; this clear button gives it a >= 44 px hit area.
+	local hit = Instance.new("TextButton")
+	hit.Name = "Hit"
+	hit.Text = ""
+	hit.BackgroundTransparency = 1
+	hit.AnchorPoint = Vector2.new(0.5, 0.5)
+	hit.Position = UDim2.fromScale(0.5, 0.5)
+	hit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
+	hit.ZIndex = z + 2
+	hit.Parent = rebirthFill
+	hit.Activated:Connect(RebirthPanel.Open)
+
 	multiplierPill = UIKit.Pill({
 		Name = "Multiplier",
-		Parent = body,
+		Parent = pills,
 		Text = "x1",
 		Color = Colors.VioletPill,
 		Font = Fonts.BodyHeavy,
 		TextSize = 13,
 		Height = 24,
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, 0, 0, 46),
+		LayoutOrder = 2,
 		ZIndex = z,
 	})
 
@@ -574,6 +620,10 @@ local function refreshAll()
 	multiplierPill.Text = NumberFormat.Multiplier(
 		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 	)
+	local rebirths = TycoonController.GetRebirths()
+	local rebirthFill = rebirthPill.Parent :: Frame
+	rebirthFill.Visible = rebirths > 0
+	rebirthPill.Text = ("⟳ %d · %s"):format(rebirths, NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)))
 	refreshBadge()
 	refreshGoal()
 	UpgradesPanel.Refresh()
@@ -586,6 +636,7 @@ function HudController.Init()
 	cashHolder = buildCashCard()
 	buildButtonRow()
 	UpgradesPanel.Init(screenGui)
+	RebirthPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)

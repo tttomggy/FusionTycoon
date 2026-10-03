@@ -4,6 +4,8 @@
 	Top-of-screen banners for one-off moments:
 	  * server-wide RareFusionAnnouncement (someone fused/displayed a
 	    Legendary or Mythic) - Mythic gets the bigger "SERVER · MYTHIC" variant
+	  * server-wide RebirthAnnouncement - the same big kit as "SERVER · REBIRTH",
+	    shown to everyone including the player who rebirthed
 	  * your own events: multiplier upgrades, completed goals, and Rare-tier
 	    fusion successes (Epic+ get ResultController's big card instead)
 
@@ -46,11 +48,63 @@ local SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- How often a hold re-checks for a newer instant banner preempting it.
 local HOLD_POLL_SECONDS = 0.1
 
+-- The bigger server-wide banner: caption, left->right gradient, an emblem.
+type BigStyle = {
+	Caption: string,
+	CaptionColor: Color3,
+	Left: Color3,
+	Right: Color3,
+	Emblem: () -> GuiObject,
+	Shake: boolean,
+}
+
 type Announcement = {
 	Text: string, -- RichText
 	AccentColor: Color3,
-	Mythic: boolean?, -- the bigger server-wide variant
+	Big: BigStyle?, -- the bigger server-wide variant
 	Instant: boolean?,
+}
+
+local MYTHIC_STYLE: BigStyle = {
+	Caption = "SERVER · MYTHIC",
+	CaptionColor = Colors.MythicBannerLabel,
+	Left = Colors.MythicBannerLeft,
+	Right = Colors.Panel,
+	Emblem = function()
+		return UIKit.TierOrb("Mythic", 50)
+	end,
+	Shake = true,
+}
+
+-- A rebirth "⟳" disc in the Orange gradient.
+local function rebirthEmblem(): GuiObject
+	local disc = Instance.new("Frame")
+	disc.Name = "RebirthEmblem"
+	disc.Size = UDim2.fromOffset(50, 50)
+	disc.BackgroundColor3 = Colors.White
+	UIKit.Corner(disc, 999)
+	UIKit.Stroke(disc, 3)
+	UIKit.PairGradient(disc, UITheme.Gradients.Orange)
+	UIKit.Label({
+		Name = "Glyph",
+		Text = "⟳",
+		Font = Fonts.Display,
+		TextSize = 30,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		Parent = disc,
+	})
+	return disc
+end
+
+local REBIRTH_STYLE: BigStyle = {
+	Caption = "SERVER · REBIRTH",
+	CaptionColor = Colors.RebirthLabel,
+	Left = Colors.RebirthBannerLeft,
+	Right = Colors.Rebirth,
+	Emblem = rebirthEmblem,
+	Shake = false,
 }
 
 local queue: { Announcement } = {}
@@ -69,8 +123,9 @@ local function hiddenPosition(height: number): UDim2
 end
 
 local function buildBanner(announcement: Announcement): Frame
-	local height = if announcement.Mythic then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
-	local gradient = if announcement.Mythic
+	local big = announcement.Big
+	local height = if big then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
+	local gradient = if big
 		then nil
 		else { { 0, Colors.Panel2 }, { 1, Colors.Panel } }
 
@@ -84,10 +139,10 @@ local function buildBanner(announcement: Announcement): Frame
 		Radius = 18,
 		ZIndex = 2,
 	})
-	if announcement.Mythic then
-		-- Horizontal: deep red on the left fading to Panel on the right.
+	if big then
+		-- Horizontal: the style's dark colour on the left fading right.
 		body.BackgroundColor3 = Colors.White
-		UIKit.Gradient(body, { { 0, Colors.MythicBannerLeft }, { 1, Colors.Panel } }, 0)
+		UIKit.Gradient(body, { { 0, big.Left }, { 1, big.Right } }, 0)
 	end
 	local z = body.ZIndex + 1
 
@@ -101,19 +156,19 @@ local function buildBanner(announcement: Announcement): Frame
 	bar.Parent = body
 	UIKit.Corner(bar, 5)
 
-	if announcement.Mythic then
-		local orb = UIKit.TierOrb("Mythic", 50)
-		orb.AnchorPoint = Vector2.new(0, 0.5)
-		orb.Position = UDim2.new(0, 32, 0.5, 0)
-		orb.ZIndex = z
-		orb.Parent = body
+	if big then
+		local emblem = big.Emblem()
+		emblem.AnchorPoint = Vector2.new(0, 0.5)
+		emblem.Position = UDim2.new(0, 32, 0.5, 0)
+		emblem.ZIndex = z
+		emblem.Parent = body
 
 		UIKit.Label({
 			Name = "Caption",
-			Text = "SERVER · MYTHIC",
+			Text = big.Caption,
 			Font = Fonts.BodyHeavy,
 			TextSize = 12,
-			TextColor3 = Colors.MythicBannerLabel,
+			TextColor3 = big.CaptionColor,
 			Position = UDim2.fromOffset(96, 14),
 			Size = UDim2.new(1, -112, 0, 16),
 			ZIndex = z,
@@ -163,7 +218,8 @@ local function processQueue()
 		while #queue > 0 do
 			local announcement = table.remove(queue, 1) :: Announcement
 			local myGeneration = displayGeneration
-			local height = if announcement.Mythic then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
+			local big = announcement.Big
+			local height = if big then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
 
 			-- A preempted banner is swapped out in place, no slide-out.
 			if currentBanner then
@@ -174,7 +230,7 @@ local function processQueue()
 
 			local sound = Instance.new("Sound")
 			sound.SoundId = SOUND_ID
-			sound.Volume = if announcement.Mythic then 1 else 0.7
+			sound.Volume = if big then 1 else 0.7
 			sound.Parent = banner
 			sound:Play()
 			Debris:AddItem(sound, 3)
@@ -184,11 +240,11 @@ local function processQueue()
 				TweenInfo.new(SLIDE_IN_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
 				{ Position = UDim2.new(0.5, 0, 0, VISIBLE_Y) }
 			):Play()
-			if announcement.Mythic then
+			if big and big.Shake then
 				RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE_STUDS, MYTHIC_SHAKE_DURATION_SECONDS)
 			end
 
-			local holdSeconds = SLIDE_IN_SECONDS + (if announcement.Mythic then MYTHIC_HOLD_SECONDS else HOLD_SECONDS)
+			local holdSeconds = SLIDE_IN_SECONDS + (if big then MYTHIC_HOLD_SECONDS else HOLD_SECONDS)
 			local elapsed = 0
 			while elapsed < holdSeconds and displayGeneration == myGeneration do
 				local step = math.min(HOLD_POLL_SECONDS, holdSeconds - elapsed)
@@ -258,7 +314,21 @@ local function onRareFusionAnnouncement(payload: any)
 	enqueue({
 		Text = text,
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
-		Mythic = tier == "Mythic",
+		Big = if tier == "Mythic" then MYTHIC_STYLE else nil,
+	})
+end
+
+local function onRebirthAnnouncement(payload: any)
+	if typeof(payload) ~= "table" or typeof(payload.Name) ~= "string" or typeof(payload.Rebirths) ~= "number" then
+		return
+	end
+	enqueue({
+		Text = ("%s reached %s!"):format(
+			UIKit.EscapeRichText(payload.Name),
+			UIKit.Colored(("Rebirth %d"):format(payload.Rebirths), Colors.RebirthLabel)
+		),
+		AccentColor = Colors.Rebirth,
+		Big = REBIRTH_STYLE,
 	})
 end
 
@@ -317,6 +387,7 @@ function AnnouncementController.Init()
 	RemoteEvents.MultiplierUpgraded.OnClientEvent:Connect(onMultiplierUpgraded)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(onGoalCompleted)
+	RemoteEvents.RebirthAnnouncement.OnClientEvent:Connect(onRebirthAnnouncement)
 end
 
 return AnnouncementController

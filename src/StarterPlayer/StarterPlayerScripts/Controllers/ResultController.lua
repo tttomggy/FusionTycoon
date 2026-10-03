@@ -11,6 +11,9 @@
 	  * Small pull card (bottom) - Common/Rare gacha pulls; each new pull
 	    replaces the previous card.
 
+	  * Rebirth card (centre) - "REBIRTH 3!" with "Income x2.5 · Luck +15%"
+	    on a successful RebirthResult (RebirthPanel plays the flash).
+
 	Rare fusion successes keep the top banner (AnnouncementController).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -19,6 +22,7 @@ local RunService = game:GetService("RunService")
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -286,6 +290,100 @@ local function showBigCard(info: BigCardInfo)
 	UIKit.PopIn(holder)
 	if tier == "Mythic" then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
+	end
+end
+
+--[[ Rebirth card -------------------------------------------------------------------- ]]
+
+local REBIRTH_CARD_SIZE = Vector2.new(360, 270)
+
+local function showRebirthCard(rebirths: number)
+	if bigHolder then
+		if sunburstConnection then
+			sunburstConnection:Disconnect()
+			sunburstConnection = nil
+		end
+		(bigHolder :: Frame):Destroy()
+		bigHolder = nil
+	end
+
+	local body, holder = UIKit.Panel({
+		Name = "RebirthResult",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(REBIRTH_CARD_SIZE.X, REBIRTH_CARD_SIZE.Y),
+		Gradient = {
+			{ 0, Colors.Panel },
+			{ 0.5, UITheme.TowardInk(Colors.Rebirth, 0.5) },
+			{ 1, Colors.Panel },
+		},
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	bigHolder = holder
+	buildSunburst(body)
+	local z = body.ZIndex + 3
+
+	UIKit.Label({
+		Name = "Caption",
+		Text = "A NEW RUN BEGINS",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = Colors.RebirthLabel,
+		Position = UDim2.fromOffset(0, 24),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Title",
+		Text = ("REBIRTH %d!"):format(rebirths),
+		Font = Fonts.Display,
+		TextSize = 54,
+		TextColor3 = Colors.Rebirth,
+		Position = UDim2.fromOffset(0, 50),
+		Size = UDim2.new(1, 0, 0, 64),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = 4,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Detail",
+		Text = ("Income %s · Luck +%d%%"):format(
+			NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)),
+			math.floor((RebirthConfig.GetLuck(rebirths) - 1) * 100 + 0.5)
+		),
+		Font = Fonts.Display,
+		TextSize = 22,
+		Position = UDim2.fromOffset(12, 128),
+		Size = UDim2.new(1, -24, 0, 30),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Button({
+		Name = "Nice",
+		Parent = body,
+		Style = "Orange",
+		Text = "LET'S GO",
+		TextSize = 20,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 186),
+		Size = UDim2.fromOffset(180, 52),
+		ZIndex = z,
+		OnClick = closeBigCard,
+	})
+	UIKit.PopIn(holder)
+end
+
+local function onRebirthResult(result: any)
+	if typeof(result) == "table" and result.Success == true and typeof(result.Rebirths) == "number" then
+		showRebirthCard(result.Rebirths)
 	end
 end
 
@@ -760,6 +858,7 @@ function ResultController.Init()
 	FusionController.FusionResolved:Connect(onFusionResolved)
 	FusionController.FuseAllResolved:Connect(onFuseAllResolved)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
+	RemoteEvents.RebirthResult.OnClientEvent:Connect(onRebirthResult)
 end
 
 return ResultController
