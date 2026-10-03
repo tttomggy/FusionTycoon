@@ -35,15 +35,39 @@ UITheme.Colors = {
 	GoldLabel = hex("#FFD566"), -- "PULLED", GACHA title
 	VioletLight = hex("#C9A9FF"), -- "purple pad", MULTIPLIER title, odds title
 	VioletPill = hex("#6A3FE0"), -- multiplier pill fill
-	DropperTitle = hex("#7CF2A8"), -- DROPPER 2 title
 	PlotSignDetail = hex("#EDE3FF"), -- plot sign second line
 	InventoryTop = hex("#1F3C78"), -- Inventory header gradient top (Blue tint)
 	CardBottom = hex("#2A2140"), -- Inventory card gradient bottom
 	ResultMid = hex("#2A1550"), -- big result card gradient mid
+	FuseAllTop = hex("#3A1F6E"), -- Fuse All summary card gradient top
+	WelcomeTop = hex("#1B5A3A"), -- welcome-back (offline earnings) card gradient top
 	MythicBannerLeft = hex("#6E0F24"), -- server Mythic banner gradient left
 	MythicBannerLabel = hex("#FF8FA0"), -- "SERVER · MYTHIC"
+	Rebirth = hex("#FF8A3D"), -- REBIRTH titles, HUD rebirth pill, banner right
+	RebirthLabel = hex("#FFD9B8"), -- "SERVER · REBIRTH", rebirth captions
+	RebirthBannerLeft = hex("#7A2A00"), -- server rebirth banner gradient left
 	White = hex("#FFFFFF"),
 	Black = hex("#000000"),
+}
+
+-- 3D world colours (parts, not GUIs). Every solid part is SmoothPlastic and
+-- every accent Neon; the ground's Grass material is the one exception.
+UITheme.World = {
+	Grass = hex("#5E9C63"), -- ground
+	Street = hex("#34305E"), -- street
+	Floor = hex("#3A3668"), -- plot floor
+	Walkway = hex("#4A4580"), -- walkway inlay
+	Structure = hex("#221E42"), -- walls, pads, pedestal columns, generator bodies, belt-side parts, machine platform
+	StructureLight = hex("#2D2856"), -- pylons, posts, locked/unclaimed trim
+	AccentViolet = hex("#8B5CFF"), -- wall strips, machine rim, multiplier
+	AccentGreen = hex("#3BEB7E"), -- claim
+	AccentGold = hex("#FFBE28"), -- gacha, collector
+	Unclaimed = hex("#3A3560"), -- wall strip before claiming
+	AccentBlue = hex("#4FB3FF"), -- west belt rail + chevrons
+	Belt = hex("#1B1834"), -- speed belt surface
+	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
+	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
+	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
 }
 
 export type GradientPair = { Top: Color3, Bottom: Color3 }
@@ -55,8 +79,13 @@ UITheme.Gradients = {
 	Violet = { Top = hex("#A47BFF"), Bottom = hex("#6A3FE0") }, -- fusion, multiplier
 	Red = { Top = hex("#FF7A8E"), Bottom = hex("#E0304E") }, -- close (X), error toasts
 	Gold = { Top = hex("#FFD566"), Bottom = hex("#F0A100") }, -- gacha, goal bar
+	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
+	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 } :: { [string]: GradientPair }
+
+-- The Rebirth Portal's swirl: a UIGradient through these three stops.
+UITheme.RebirthPortal = { hex("#FF8A3D"), hex("#FFD566"), hex("#FF4F7A") }
 
 --[[ Tiers ------------------------------------------------------------------
 	The saturated tier colours themselves stay FusionConfig.TierAccentColors.
@@ -69,6 +98,7 @@ UITheme.TierLight = {
 	Epic = hex("#D27BFF"),
 	Legendary = hex("#FFBE28"),
 	Mythic = hex("#FF6C82"),
+	Secret = hex("#3DFFD0"),
 } :: { [string]: Color3 }
 
 export type OrbStops = { Light: Color3, Mid: Color3, Dark: Color3 }
@@ -79,6 +109,7 @@ UITheme.TierOrb = {
 	Epic = { Light = hex("#F0C8FF"), Mid = hex("#BE3CFF"), Dark = hex("#5A1080") },
 	Legendary = { Light = hex("#FFF2C2"), Mid = hex("#FFBE28"), Dark = hex("#8A5A00") },
 	Mythic = { Light = hex("#FFD6DD"), Mid = hex("#FF3C5A"), Dark = hex("#7A0A1E") },
+	Secret = { Light = hex("#D6FFF5"), Mid = hex("#1FE0B4"), Dark = hex("#06574A") },
 } :: { [string]: OrbStops }
 
 -- Tiers that get the soft glow ring behind their orb.
@@ -86,7 +117,39 @@ UITheme.GlowTiers = {
 	Epic = true,
 	Legendary = true,
 	Mythic = true,
+	Secret = true,
 } :: { [string]: boolean }
+
+--[[ Mutations ------------------------------------------------------------- ]]
+
+UITheme.Mutation = {
+	Golden = hex("#FFD23F"),
+	Diamond = hex("#BFF4FF"),
+	RainbowStops = { hex("#FF5470"), hex("#FFBE28"), hex("#4CF08A"), hex("#4FB3FF"), hex("#A47BFF") },
+}
+
+-- A mutation's solid colour (Rainbow's first stop; nil for normal items).
+function UITheme.GetMutationColor(mutation: string?): Color3?
+	if mutation == "Golden" then
+		return UITheme.Mutation.Golden
+	elseif mutation == "Diamond" then
+		return UITheme.Mutation.Diamond
+	elseif mutation == "Rainbow" then
+		return UITheme.Mutation.RainbowStops[1]
+	end
+	return nil
+end
+
+-- The five Rainbow stops as an evenly spaced ColorSequence (UIGradient,
+-- particles).
+function UITheme.GetRainbowSequence(): ColorSequence
+	local stops = UITheme.Mutation.RainbowStops
+	local keypoints = {}
+	for index, color in stops do
+		table.insert(keypoints, ColorSequenceKeypoint.new((index - 1) / (#stops - 1), color))
+	end
+	return ColorSequence.new(keypoints)
+end
 
 function UITheme.GetTierLight(tier: string): Color3
 	return UITheme.TierLight[tier] or UITheme.Colors.Text
@@ -136,6 +199,12 @@ UITheme.Stroke = {
 
 UITheme.ShadowOffset = 5
 UITheme.SmallShadowOffset = 4
+-- Baseline (px above the screen bottom, before the phone UIScale) for
+-- toasts and the bottom result cards. It clears the HUD's bottom button row
+-- AND the REBIRTH! button's slot above it (HudController: 22 margin + 5
+-- shadow + 64 button + 14 gap + 56 button, +4% pulse), whether or not
+-- REBIRTH! is showing, so toasts never jump when it appears.
+UITheme.BottomStackOffset = 176
 UITheme.MinTapSize = 44
 
 -- Viewport height under which the phone layout + 0.8 UIScale apply.
@@ -149,6 +218,7 @@ UITheme.PhoneScale = 0.8
 UITheme.Icons = {
 	Upgrades = "",
 	Items = "rbxassetid://18469524765",
+	Index = "",
 	Close = "",
 	Lock = "",
 	Sunburst = "",

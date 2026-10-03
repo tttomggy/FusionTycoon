@@ -7,6 +7,7 @@ ItemConfig.Tiers = {
 	Epic = 3,
 	Legendary = 4,
 	Mythic = 5,
+	Secret = 6,
 }
 
 export type ItemDef = {
@@ -41,6 +42,9 @@ ItemConfig.Items = {
 	{ Id = "mythic_singularity", Name = "Singularity", Tier = "Mythic" },
 	{ Id = "mythic_rift", Name = "Rift Engine", Tier = "Mythic" },
 	{ Id = "mythic_genesis", Name = "Genesis Stone", Tier = "Mythic" },
+	-- Secret (gacha 0.002%, or fuse 2 Mythics at 8% after Rebirth 1)
+	{ Id = "secret_horizon", Name = "Event Horizon", Tier = "Secret" },
+	{ Id = "secret_prism", Name = "Eternity Prism", Tier = "Secret" },
 } :: { ItemDef }
 
 function ItemConfig.GetItemById(id: string): ItemDef?

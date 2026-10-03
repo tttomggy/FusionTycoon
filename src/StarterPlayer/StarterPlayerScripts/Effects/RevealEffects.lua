@@ -10,6 +10,7 @@ local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -98,14 +99,13 @@ end
 function RevealEffects.PlayChargeUp(handles: EffectHandles, durationSeconds: number?)
 	local duration = durationSeconds or DEFAULT_CHARGE_DURATION_SECONDS
 	local core = handles.Core
-	local originalSize = core.Size
-
-	local chargeTween = TweenService:Create(
+	-- Against the core's stored base size (PartKit), so a charge-up that
+	-- starts while another is still running can't compound its growth.
+	local chargeTween = PartKit.TweenSize(
 		core,
-		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-		{ Size = originalSize * CHARGE_CORE_GROWTH }
+		CHARGE_CORE_GROWTH,
+		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 	)
-	chargeTween:Play()
 
 	if handles.Ring then
 		-- TweenService slerps a CFrame along the shortest rotational path, so
@@ -128,7 +128,11 @@ function RevealEffects.PlayChargeUp(handles: EffectHandles, durationSeconds: num
 	end
 
 	chargeTween.Completed:Wait()
-	core.Size = originalSize
+	-- TweenSize restores the base size itself; unless a newer charge-up has
+	-- taken over, make sure it's back now.
+	if chargeTween.PlaybackState == Enum.PlaybackState.Completed then
+		core.Size = PartKit.GetBaseSize(core)
+	end
 end
 
 -- Flash/burst "pop" moment, weighted by tier: Common/Rare get a quick,

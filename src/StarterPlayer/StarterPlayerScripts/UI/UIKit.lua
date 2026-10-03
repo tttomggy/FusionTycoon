@@ -15,14 +15,19 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local UIKit = {}
 
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
+
+local MUTATION_RING_GAP = 2 -- px of Ink between the orb and its mutation ring
+local MUTATION_RING_WIDTH = 3
 
 local PRESS_DOWN_INFO = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local PRESS_UP_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
@@ -502,17 +507,140 @@ function UIKit.Pill(props: PillProps): TextLabel
 		BackgroundTransparency = 0,
 		Stroke = props.TextStroke,
 	})
-	if props.Gradient then
-		pill.BackgroundColor3 = Colors.White
-		UIKit.PairGradient(pill, props.Gradient)
-	else
-		pill.BackgroundColor3 = props.Color or Colors.Panel2
-	end
-	UIKit.Corner(pill, 999)
-	UIKit.Stroke(pill, props.StrokeThickness or 2)
 	UIKit.Padding(pill, 0, 10, 0, 10)
-	pill.Parent = props.Parent
+
+	if not props.Gradient then
+		pill.BackgroundColor3 = props.Color or Colors.Panel2
+		UIKit.Corner(pill, 999)
+		UIKit.Stroke(pill, props.StrokeThickness or 2)
+		pill.Parent = props.Parent
+		return pill
+	end
+
+	-- A UIGradient on the label would tint its text too, so the gradient,
+	-- corner and stroke go on an auto-sized Frame and the (clear) label sits
+	-- inside it. The Frame takes the layout props; the label is returned so
+	-- callers can still set .Text.
+	local fill = Instance.new("Frame")
+	fill.Name = pill.Name
+	fill.BackgroundColor3 = Colors.White
+	fill.AutomaticSize = Enum.AutomaticSize.X
+	fill.Size = pill.Size
+	fill.Position = pill.Position
+	fill.AnchorPoint = pill.AnchorPoint
+	fill.LayoutOrder = pill.LayoutOrder
+	fill.ZIndex = pill.ZIndex
+	UIKit.Corner(fill, 999)
+	UIKit.Stroke(fill, props.StrokeThickness or 2)
+	UIKit.PairGradient(fill, props.Gradient)
+
+	pill.Name = "Text"
+	pill.BackgroundTransparency = 1
+	pill.Position = UDim2.new()
+	pill.AnchorPoint = Vector2.zero
+	pill.LayoutOrder = 0
+	pill.ZIndex = fill.ZIndex + 1
+	pill.Parent = fill
+	fill.Parent = props.Parent
 	return pill
+end
+
+--[[ Mutation marks ------------------------------------------------------------
+	They must read on every tier: a gold mark on a gold Legendary card used to
+	vanish. So marks sit on Ink (a pill with an outline, an Ink gap round the
+	orb) and say the word. Rainbow marks use the rainbow gradient, slowly
+	rotated on the client.
+]]
+local RAINBOW_SPIN_DEG_PER_SEC = 45
+-- Weak keys: destroyed cards drop out by themselves.
+local spinningGradients: { [UIGradient]: boolean } = setmetatable({}, { __mode = "k" }) :: any
+local spinConnection: RBXScriptConnection? = nil
+
+local function spinRainbow(gradient: UIGradient)
+	spinningGradients[gradient] = true
+	if not spinConnection then
+		spinConnection = RunService.RenderStepped:Connect(function(dt: number)
+			for g in spinningGradients do
+				if g.Parent then
+					g.Rotation = (g.Rotation + RAINBOW_SPIN_DEG_PER_SEC * dt) % 360
+				end
+			end
+		end)
+	end
+end
+
+local function rainbowGradient(parent: Instance, spin: boolean): UIGradient
+	local gradient = Instance.new("UIGradient")
+	gradient.Name = "RainbowGradient"
+	gradient.Color = UITheme.GetRainbowSequence()
+	gradient.Parent = parent
+	if spin then
+		spinRainbow(gradient)
+	end
+	return gradient
+end
+
+-- The mutation tag: an Ink pill with a 2 px outline and the word in the
+-- mutation colour - "GOLDEN ×2", "DIAMOND ×5", "RAINBOW ×12". Rainbow is
+-- white text under the rainbow gradient with a gradient outline. Returns
+-- nil for a normal item.
+function UIKit.MutationPill(props: {
+	Parent: Instance?,
+	Mutation: string?,
+	Position: UDim2?,
+	AnchorPoint: Vector2?,
+	ZIndex: number?,
+	TextSize: number?,
+	Height: number?,
+	Label: string?, -- default "GOLDEN ×2"
+}): GuiObject?
+	local mutation = props.Mutation
+	local color = UITheme.GetMutationColor(mutation)
+	if not mutation or not color then
+		return nil
+	end
+	local rainbow = mutation == "Rainbow"
+	local pill = UIKit.Pill({
+		Name = "Mutation",
+		Parent = props.Parent,
+		Text = props.Label or ("%s ×%d"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation)),
+		Color = Colors.Ink,
+		TextColor3 = if rainbow then Colors.White else color,
+		Font = Fonts.Display,
+		TextSize = props.TextSize or 12,
+		Height = props.Height or 20,
+		StrokeThickness = 2,
+		Position = props.Position,
+		AnchorPoint = props.AnchorPoint,
+		ZIndex = props.ZIndex,
+	})
+	local outline = pill:FindFirstChildOfClass("UIStroke")
+	if outline then
+		outline.Color = if rainbow then Colors.White else color
+		if rainbow then
+			rainbowGradient(outline, true)
+		end
+	end
+	if rainbow then
+		-- Intended tinting: white text under the rainbow.
+		rainbowGradient(pill, false)
+	end
+	return pill
+end
+
+-- A 3 px outline in the mutation colour round a card body (its existing
+-- UIStroke). Rainbow gets a slowly rotating gradient. No-op for normal.
+function UIKit.MutationCardStroke(body: GuiObject, mutation: string?)
+	local color = UITheme.GetMutationColor(mutation)
+	if not mutation or not color then
+		return
+	end
+	local stroke = body:FindFirstChildOfClass("UIStroke") or UIKit.Stroke(body, 3)
+	stroke.Thickness = 3
+	stroke.Color = if mutation == "Rainbow" then Colors.White else color
+	if mutation == "Rainbow" then
+		rainbowGradient(stroke, true)
+	end
 end
 
 -- Red count badge pinned to the top-right corner of `parent`. Idempotent:
@@ -550,12 +678,38 @@ end
 -- A circle with a light-centre -> tier -> dark-edge gradient and the ink
 -- outline. Epic and above also get a soft glow circle behind it. Returns the
 -- holder (size x size); position/parent that.
-function UIKit.TierOrb(tier: string, size: number, transparency: number?): Frame
+-- `mutation` adds a ring: a 2 px Ink gap, then a 3 px ring in the mutation
+-- colour (Rainbow: the rotating gradient). The Ink gap is what keeps
+-- gold-on-gold readable.
+function UIKit.TierOrb(tier: string, size: number, transparency: number?, mutation: string?): Frame
 	local alpha = transparency or 0
 	local holder = Instance.new("Frame")
 	holder.Name = "TierOrb"
 	holder.BackgroundTransparency = 1
 	holder.Size = UDim2.fromOffset(size, size)
+
+	local ringColor = UITheme.GetMutationColor(mutation)
+	if mutation and ringColor then
+		-- Ink disc just larger than the orb (and its 3 px Ink stroke): the gap.
+		local gapPx = UITheme.Stroke.Default + MUTATION_RING_GAP
+		local gap = Instance.new("Frame")
+		gap.Name = "MutationGap"
+		gap.AnchorPoint = Vector2.new(0.5, 0.5)
+		gap.Position = UDim2.fromScale(0.5, 0.5)
+		gap.Size = UDim2.new(1, gapPx * 2, 1, gapPx * 2)
+		gap.BackgroundColor3 = Colors.Ink
+		gap.BackgroundTransparency = alpha
+		gap.BorderSizePixel = 0
+		gap.ZIndex = 2
+		gap.Parent = holder
+		UIKit.Corner(gap, 999)
+		local ring = UIKit.Stroke(gap, MUTATION_RING_WIDTH, if mutation == "Rainbow" then Colors.White else ringColor)
+		ring.Name = "MutationRing"
+		ring.Transparency = alpha
+		if mutation == "Rainbow" then
+			rainbowGradient(ring, true)
+		end
+	end
 
 	if UITheme.GlowTiers[tier] then
 		local glow = Instance.new("Frame")
@@ -576,7 +730,7 @@ function UIKit.TierOrb(tier: string, size: number, transparency: number?): Frame
 	orb.BackgroundColor3 = Colors.White
 	orb.BackgroundTransparency = alpha
 	orb.BorderSizePixel = 0
-	orb.ZIndex = 2
+	orb.ZIndex = 3
 	orb.Parent = holder
 	UIKit.Corner(orb, 999)
 	local stops = UITheme.GetTierOrb(tier)
@@ -584,11 +738,20 @@ function UIKit.TierOrb(tier: string, size: number, transparency: number?): Frame
 	local stroke = UIKit.Stroke(orb, 3)
 	stroke.Transparency = alpha
 
-	-- Keep children (glow/orb) at the holder's ZIndex band when re-parented.
+	-- Keep children at the holder's ZIndex band when re-parented: glow at
+	-- the bottom, then the mutation gap/ring, then the orb.
+	local function layer(child: Instance): number
+		if child.Name == "Orb" then
+			return 2
+		elseif child.Name == "MutationGap" then
+			return 1
+		end
+		return 0
+	end
 	holder:GetPropertyChangedSignal("ZIndex"):Connect(function()
 		for _, child in holder:GetChildren() do
 			if child:IsA("GuiObject") then
-				child.ZIndex = holder.ZIndex + (if child.Name == "Orb" then 1 else 0)
+				child.ZIndex = holder.ZIndex + layer(child)
 			end
 		end
 	end)

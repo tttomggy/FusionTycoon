@@ -36,9 +36,9 @@ type PlayerData = {
 	PedestalDisplays: { [number]: string? },
 	CashMultiplierLevel: number,
 	GachaPulls: number,
-	HasDropper2: boolean,
 	GoalIndex: number,
 	TotalFusions: number,
+	Rebirths: number,
 }
 
 -- (done, current, target)
@@ -98,11 +98,12 @@ local EVALUATORS: { [string]: Evaluator } = {
 		local plot = TycoonService.GetPlotForPlayer(player)
 		return yesNo(plot ~= nil and plot:GetAttribute("Claimed") == true)
 	end,
-	buy_dropper2 = function(_player, data)
-		return yesNo(data.HasDropper2)
+	upgrade_basic = function(_player, data)
+		return yesNo(generatorLevel(data, "basic_generator") >= 2)
 	end,
-	buy_basic_generator = function(_player, data)
-		return yesNo(generatorLevel(data, "basic_generator") >= 1)
+	basic_lv5 = function(_player, data)
+		local level = generatorLevel(data, "basic_generator")
+		return level >= 5, math.min(level, 5), 5
 	end,
 	gacha_pull = function(_player, data)
 		return yesNo(data.GachaPulls >= 1)
@@ -123,10 +124,14 @@ local EVALUATORS: { [string]: Evaluator } = {
 		return done, if done then 5 else generatorLevel(data, "basic_generator"), 5
 	end,
 	own_legendary = ownTierGoal("Legendary", "Epic", 2),
-	multiplier_x3 = function(_player, data)
-		return data.CashMultiplierLevel >= 4, data.CashMultiplierLevel, 4
+	multiplier_x2 = function(_player, data)
+		-- Pad LV 4 = x2.
+		return data.CashMultiplierLevel >= 4, math.min(data.CashMultiplierLevel, 4), 4
 	end,
 	own_mythic = ownTierGoal("Mythic", "Legendary", 2),
+	first_rebirth = function(_player, data)
+		return yesNo(data.Rebirths >= 1)
+	end,
 }
 
 --[[ Check ---------------------------------------------------------------- ]]

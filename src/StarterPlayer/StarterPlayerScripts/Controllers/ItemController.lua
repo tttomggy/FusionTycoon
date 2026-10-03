@@ -1,5 +1,6 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local Workspace = game:GetService("Workspace")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -9,83 +10,67 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
+local ToastController = require(script.Parent.ToastController)
 
 local ItemController = {}
 
--- Pedestals aren't built until the plot owner claims their plot (see
--- TycoonService.createPedestals, called from the ClaimButton handler), which
--- can easily take longer than 5 seconds after spawning - a plain
--- `parent:WaitForChild(name)` would print Roblox's "Infinite yield possible"
--- warning the moment that threshold passes, even though nothing is actually
--- wrong. Waiting on ChildAdded in a loop blocks for the same reason but
--- without that warning, since only WaitForChild carries the 5-second heuristic.
-local function waitForNamedChild(parent: Instance, name: string): Instance
-	local existing = parent:FindFirstChild(name)
-	if existing then
-		return existing
+-- Guards per-pedestal so a pending placement on one doesn't block another.
+-- Value = the os.clock() it was set; a flag older than PENDING_TIMEOUT is
+-- treated as cleared, so a lost reply can never lock a pedestal for good.
+local pendingPedestals: { [number]: number } = {}
+local PENDING_TIMEOUT_SECONDS = 5
+
+local function isPending(pedestalIndex: number): boolean
+	local since = pendingPedestals[pedestalIndex]
+	if since and os.clock() - since < PENDING_TIMEOUT_SECONDS then
+		return true
 	end
-	while true do
-		local child = parent.ChildAdded:Wait()
-		if child.Name == name then
-			return child
-		end
-	end
+	pendingPedestals[pedestalIndex] = nil
+	return false
 end
 
--- Guards per-pedestal so a pending placement on one doesn't block another.
-local pendingPedestals: { [number]: boolean } = {}
--- True once this player's Pedestals folder exists (their plot is claimed).
+local function setPending(pedestalIndex: number)
+	pendingPedestals[pedestalIndex] = os.clock()
+end
+
+-- Short, never-blank toast text for every rejection reason.
+local REJECTION_TOASTS: { [string]: string } = {
+	PedestalOccupied = "That pedestal is already in use",
+	PedestalEmpty = "Nothing on that pedestal",
+	ItemInUse = "That item is already on display",
+	ItemNotOwned = "You don't have that item anymore",
+	NoPlot = "Your lab isn't ready yet, try again",
+	DataNotLoaded = "Your lab isn't ready yet, try again",
+}
+local FALLBACK_REJECTION_TOAST = "Couldn't do that, try again"
+-- True once this player's plot is claimed (its pedestals then exist).
 local pedestalsReady = false
 
 local placementResolved = Instance.new("BindableEvent")
 -- Fires once the server has validated a place-item attempt.
 ItemController.PlacementResolved = placementResolved.Event
 
-local function hasDisplayableItem(): boolean
-	return #InventoryController.GetDisplayableItems() > 0
-end
-
--- An occupied pedestal always belongs to the local player (pedestals are
--- per-plot/per-owner), so the same prompt just switches to a pickup action
--- instead of being disabled once something's displayed.
-local function updatePromptState(pedestal: BasePart, pedestalIndex: number)
-	local prompt = pedestal:FindFirstChild("DisplayPrompt") :: ProximityPrompt?
-	if not prompt then
-		return
-	end
-
-	if TycoonController.GetPedestalDisplay(pedestalIndex) then
-		prompt.Enabled = true
-		prompt.ActionText = "Remove"
-		prompt.ObjectText = ("Pedestal %d"):format(pedestalIndex)
-		return
-	end
-
-	prompt.Enabled = hasDisplayableItem()
-	prompt.ActionText = "Display"
-	prompt.ObjectText = ("Pedestal %d"):format(pedestalIndex)
-end
-
 local function requestPlaceItem(pedestalIndex: number, uid: string)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
 		return
 	end
 
-	pendingPedestals[pedestalIndex] = true
+	setPending(pedestalIndex)
 	RemoteEvents.RequestPlaceItem:FireServer(uid, pedestalIndex)
 end
 
--- Opens the shared ItemPickerUI over the player's current undisplayed items,
+-- Opens the shared ItemPickerUI over the player's items (with none, it shows
+-- its "Pull at the Gacha Pad" empty state - a prompt never does nothing),
 -- so they choose which one lands on this specific pedestal instead of the
 -- game auto-selecting for them. Server-side validation in ItemService is
 -- unchanged - it already checks ownership/InUse/pedestal-empty for whichever
 -- Uid the client sends, so this only changes which Uid gets picked, not the
 -- trust boundary.
 local function openItemPicker(pedestalIndex: number)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
@@ -102,7 +87,8 @@ local function openItemPicker(pedestalIndex: number)
 			ItemId = item.ItemId,
 			Name = itemConfigEntry and itemConfigEntry.Name or item.ItemId,
 			Tier = item.Tier,
-			InUse = item.InUse == true,
+			Mutation = item.Mutation,
+			InUse = InventoryController.IsInUse(item),
 		})
 	end
 
@@ -119,7 +105,7 @@ function ItemController.PlaceOnFirstEmpty(uid: string): boolean
 		return false
 	end
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
-		if not TycoonController.GetPedestalDisplay(index) and not pendingPedestals[index] then
+		if not TycoonController.GetPedestalDisplay(index) and not isPending(index) then
 			requestPlaceItem(index, uid)
 			return true
 		end
@@ -128,14 +114,14 @@ function ItemController.PlaceOnFirstEmpty(uid: string): boolean
 end
 
 local function requestRemoveItem(pedestalIndex: number)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if not TycoonController.GetPedestalDisplay(pedestalIndex) then
 		return
 	end
 
-	pendingPedestals[pedestalIndex] = true
+	setPending(pedestalIndex)
 	RemoteEvents.RequestRemoveItem:FireServer(pedestalIndex)
 end
 
@@ -151,10 +137,32 @@ local function onPedestalTriggered(pedestalIndex: number)
 end
 
 local function onPlaceItemResult(result: any)
-	if result.PedestalIndex then
+	if typeof(result) ~= "table" then
+		return
+	end
+	if typeof(result.PedestalIndex) == "number" then
 		pendingPedestals[result.PedestalIndex] = nil
 	end
+	if not result.Success then
+		local reason = if typeof(result.Reason) == "string" then result.Reason else ""
+		ToastController.Show(REJECTION_TOASTS[reason] or FALLBACK_REJECTION_TOAST, "Error")
+		-- Our view of the pedestals may be stale; ask for a fresh snapshot.
+		RemoteEvents.RequestSync:FireServer()
+	end
 	placementResolved:Fire(result)
+end
+
+local DISPLAY_PROMPT_NAME = "DisplayPrompt"
+
+-- The pedestal index for a DisplayPrompt inside the local player's own plot,
+-- or nil for any other prompt.
+local function getOwnPedestalIndex(prompt: ProximityPrompt, plot: Instance): number?
+	if prompt.Name ~= DISPLAY_PROMPT_NAME or not prompt:IsDescendantOf(plot) then
+		return nil
+	end
+	local pedestal = prompt.Parent
+	local index = pedestal and pedestal:GetAttribute("PedestalIndex")
+	return if typeof(index) == "number" then index else nil
 end
 
 function ItemController.Init()
@@ -163,37 +171,34 @@ function ItemController.Init()
 	local localPlayer = Players.LocalPlayer
 	local plotsFolder = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
 	local plot = plotsFolder:WaitForChild(PlotNaming.GetPlotName(localPlayer.UserId))
-	local pedestalsFolder = waitForNamedChild(plot, "Pedestals") :: Folder
-	pedestalsReady = true
 
-	for _, pedestal in pedestalsFolder:GetChildren() do
-		if pedestal:IsA("BasePart") then
-			local pedestalIndex = pedestal:GetAttribute("PedestalIndex")
-			if typeof(pedestalIndex) == "number" then
-				local prompt = pedestal:WaitForChild("DisplayPrompt") :: ProximityPrompt
-				prompt.Triggered:Connect(function(triggeringPlayer: Player)
-					if triggeringPlayer == localPlayer then
-						onPedestalTriggered(pedestalIndex)
-					end
-				end)
-				updatePromptState(pedestal, pedestalIndex)
-			end
-		end
+	-- Pedestals exist once the plot is claimed.
+	local function refreshReady()
+		pedestalsReady = plot:GetAttribute("Claimed") == true
 	end
+	plot:GetAttributeChangedSignal("Claimed"):Connect(refreshReady)
+	refreshReady()
 
-	local function updateAllPrompts()
-		for _, pedestal in pedestalsFolder:GetChildren() do
-			if pedestal:IsA("BasePart") then
-				local pedestalIndex = pedestal:GetAttribute("PedestalIndex")
-				if typeof(pedestalIndex) == "number" then
-					updatePromptState(pedestal, pedestalIndex)
-				end
-			end
+	-- One service-wide handler instead of wiring each prompt as it's found:
+	-- nothing can be missed however the pedestals replicate.
+	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, triggeringPlayer: Player)
+		if triggeringPlayer ~= localPlayer then
+			return
 		end
-	end
+		local index = getOwnPedestalIndex(prompt, plot)
+		if index then
+			onPedestalTriggered(index)
+		end
+	end)
 
-	InventoryController.InventoryChanged:Connect(updateAllPrompts)
-	TycoonController.TycoonChanged:Connect(updateAllPrompts)
+	-- Label the prompt for what pressing it will do, as it appears.
+	ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt)
+		local index = getOwnPedestalIndex(prompt, plot)
+		if index then
+			prompt.ActionText = if TycoonController.GetPedestalDisplay(index) then "Remove" else "Display"
+			prompt.ObjectText = ("Pedestal %d"):format(index)
+		end
+	end)
 end
 
 return ItemController

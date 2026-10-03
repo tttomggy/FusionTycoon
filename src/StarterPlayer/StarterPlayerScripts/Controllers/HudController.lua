@@ -5,7 +5,7 @@
 	  * Goal tracker (top-left, under the Roblox top bar)
 	  * Cash card: coin + counting-up cash, income/s and the multiplier pill
 	  * Bottom buttons: UPGRADES (with an affordable-count badge) and ITEMS
-	  * Cash pops: "+$24" floating up from the Collector on every pickup
+	  * FloatPop: the "+$X" world pop FactoryController shows at the collector
 
 	Nothing is placed in the top-left 170x60 px, which belongs to the Roblox
 	top bar.
@@ -17,9 +17,9 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
-local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -27,6 +27,9 @@ local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
+local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
+local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
+local FusePanel = require(script.Parent.Parent.UI.FusePanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
@@ -56,13 +59,13 @@ local LAYOUT = {
 		ButtonTextSize = 13,
 	},
 }
-local CASH_CARD_SIZE = Vector2.new(236, 96)
+local CASH_CARD_SIZE = Vector2.new(260, 96)
+local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
 
 local CASH_POP_LIFETIME = 0.8
-local CASH_POP_RISE_STUDS = 4
-local CASH_POP_MAX_ALIVE = 6
+local CASH_POP_RISE_STUDS = 3
 
 local screenGui: ScreenGui
 local displayedCash = 0
@@ -70,6 +73,7 @@ local displayedCash = 0
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
 local multiplierPill: TextLabel
+local rebirthPill: TextLabel
 
 local goalHolder: Frame
 local goalBody: Frame
@@ -81,42 +85,15 @@ local goalCountLabel: TextLabel
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
 local upgradesHolder: Frame? = nil
+local rebirthReadyHolder: Frame
+local buttonsByName: { [string]: TextButton } = {}
+-- Buttons the goal marker wants highlighted; reapplied after a rebuild.
+local highlighted: { [string]: boolean? } = {}
 
 --[[ Income ---------------------------------------------------------------- ]]
 
-local function isPlotClaimed(): boolean
-	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
-	local plot = folder and folder:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
-	return plot ~= nil and plot:GetAttribute("Claimed") == true
-end
-
-local function getDisplayedTiers(): { string }
-	local byUid: { [string]: any } = {}
-	for _, item in InventoryController.GetInventory() do
-		byUid[item.Uid] = item
-	end
-	local tiers = {}
-	for _, uid in TycoonController.GetPedestalDisplays() do
-		local item = byUid[uid]
-		if item then
-			table.insert(tiers, item.Tier)
-		end
-	end
-	return tiers
-end
-
 local function getIncomePerSecond(): number
-	local multiplierLevel = TycoonController.GetCashMultiplierLevel()
-	local passive = TycoonConfig.GetPassiveCashPerSecond(
-		TycoonController.GetGeneratorLevels(),
-		getDisplayedTiers(),
-		multiplierLevel
-	)
-	if isPlotClaimed() then
-		local droppers = if TycoonController.HasDropper2() then 2 else 1
-		passive += TycoonConfig.GetDropperCashPerSecond(droppers, multiplierLevel)
-	end
-	return passive
+	return TycoonConfig.GetPassiveCashPerSecond(TycoonController.GetIncomeInputs())
 end
 
 -- Generators that are unlocked, not maxed, and affordable right now.
@@ -318,21 +295,63 @@ local function buildCashCard(): Frame
 		TextSize = 16,
 		RichText = true,
 		Position = UDim2.fromOffset(0, 46),
-		Size = UDim2.new(1, -60, 0, 24),
+		Size = UDim2.new(1, -PILL_ROW_WIDTH, 0, 24),
 		ZIndex = z,
 		Parent = body,
 	})
 
+	-- Right-aligned pill row: the rebirth pill (hidden at 0 rebirths) then
+	-- the Multiplier Pad pill.
+	local pills = Instance.new("Frame")
+	pills.Name = "Pills"
+	pills.BackgroundTransparency = 1
+	pills.AnchorPoint = Vector2.new(1, 0)
+	pills.Position = UDim2.new(1, 0, 0, 46)
+	pills.Size = UDim2.fromOffset(PILL_ROW_WIDTH, 24)
+	pills.ZIndex = z
+	pills.Parent = body
+	local pillLayout = Instance.new("UIListLayout")
+	pillLayout.FillDirection = Enum.FillDirection.Horizontal
+	pillLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	pillLayout.Padding = UDim.new(0, 6)
+	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	pillLayout.Parent = pills
+
+	rebirthPill = UIKit.Pill({
+		Name = "Rebirth",
+		Parent = pills,
+		Text = "",
+		Gradient = UITheme.Gradients.Orange,
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		Height = 24,
+		LayoutOrder = 1,
+		ZIndex = z,
+		TextStroke = 1.5,
+	})
+	local rebirthFill = rebirthPill.Parent :: Frame
+	rebirthFill.Visible = false
+	-- The pill is small; this clear button gives it a >= 44 px hit area.
+	local hit = Instance.new("TextButton")
+	hit.Name = "Hit"
+	hit.Text = ""
+	hit.BackgroundTransparency = 1
+	hit.AnchorPoint = Vector2.new(0.5, 0.5)
+	hit.Position = UDim2.fromScale(0.5, 0.5)
+	hit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
+	hit.ZIndex = z + 2
+	hit.Parent = rebirthFill
+	hit.Activated:Connect(RebirthPanel.Open)
+
 	multiplierPill = UIKit.Pill({
 		Name = "Multiplier",
-		Parent = body,
+		Parent = pills,
 		Text = "x1",
 		Color = Colors.VioletPill,
 		Font = Fonts.BodyHeavy,
 		TextSize = 13,
 		Height = 24,
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, 0, 0, 46),
+		LayoutOrder = 2,
 		ZIndex = z,
 	})
 
@@ -366,7 +385,8 @@ local function buildBrowseEntries(): { any }
 			ItemId = item.ItemId,
 			Name = def and def.Name or item.ItemId,
 			Tier = item.Tier,
-			InUse = item.InUse == true,
+			Mutation = item.Mutation,
+			InUse = InventoryController.IsInUse(item),
 		})
 	end
 	return entries
@@ -381,6 +401,49 @@ local function refreshBadge()
 	if upgradesButton then
 		UIKit.Badge(upgradesButton, countAffordableUpgrades())
 	end
+end
+
+local GOAL_HIGHLIGHT_NAME = "GoalHighlight"
+
+local function applyHighlight(name: string)
+	local button = buttonsByName[name]
+	if not button then
+		return
+	end
+	local existing = button:FindFirstChild(GOAL_HIGHLIGHT_NAME)
+	if not highlighted[name] then
+		if existing then
+			existing:Destroy()
+		end
+		return
+	end
+	if existing then
+		return
+	end
+	-- A separate overlay, because the button's own UIStroke is its ink border.
+	local overlay = Instance.new("Frame")
+	overlay.Name = GOAL_HIGHLIGHT_NAME
+	overlay.BackgroundTransparency = 1
+	overlay.Size = UDim2.fromScale(1, 1)
+	overlay.ZIndex = button.ZIndex + 6
+	overlay.Parent = button
+	local corner = button:FindFirstChildOfClass("UICorner")
+	if corner then
+		UIKit.Corner(overlay, corner.CornerRadius.Offset)
+	end
+	local stroke = UIKit.Stroke(overlay, 4, UITheme.Gradients.Gold.Top)
+	TweenService:Create(
+		stroke,
+		TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Transparency = 0.7 }
+	):Play()
+end
+
+-- Pulsing 4 px gold outline on a HUD button ("Upgrades" or "Items") while
+-- the current goal points at it.
+function HudController.SetButtonHighlight(name: string, on: boolean)
+	highlighted[name] = if on then true else nil
+	applyHighlight(name)
 end
 
 local function buildButtons(isPhone: boolean)
@@ -409,11 +472,12 @@ local function buildButtons(isPhone: boolean)
 	})
 	upgradesButton = upgrades
 	upgradesHolder = holder
+	buttonsByName.Upgrades = upgrades
 	local pulseScale = Instance.new("UIScale")
 	pulseScale.Name = "PulseScale"
 	pulseScale.Parent = holder
 
-	UIKit.Button({
+	buttonsByName.Items = UIKit.Button({
 		Name = "ItemsButton",
 		Parent = buttonRow,
 		Style = "Blue",
@@ -426,7 +490,23 @@ local function buildButtons(isPhone: boolean)
 		OnClick = HudController.OpenInventory,
 	})
 
+	buttonsByName.Index = UIKit.Button({
+		Name = "IndexButton",
+		Parent = buttonRow,
+		Style = "Teal",
+		Text = "INDEX",
+		Icon = UITheme.Icons.Index,
+		IconStacked = isPhone,
+		Size = size,
+		TextSize = layout.ButtonTextSize,
+		LayoutOrder = 3,
+		OnClick = IndexPanel.Toggle,
+	})
+
 	refreshBadge()
+	for name in highlighted do
+		applyHighlight(name)
+	end
 end
 
 local function buildButtonRow()
@@ -447,6 +527,46 @@ local function buildButtonRow()
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
 	layout.Parent = buttonRow
+end
+
+--[[ REBIRTH! button -----------------------------------------------------------
+	Centred above the bottom button row while the player can afford the next
+	rebirth; pulses so it's hard to miss, and opens the Rebirth panel.
+]]
+local REBIRTH_READY_SIZE = { Desktop = Vector2.new(220, 56), Phone = Vector2.new(170, 48) }
+local REBIRTH_READY_GAP = 14 -- above the button row's top
+
+local function buildRebirthReadyButton()
+	local _, holder = UIKit.Button({
+		Name = "RebirthReady",
+		Parent = screenGui,
+		Style = "Orange",
+		Text = "REBIRTH!",
+		TextSize = 24,
+		AnchorPoint = Vector2.new(0.5, 1),
+		Size = UDim2.fromOffset(REBIRTH_READY_SIZE.Desktop.X, REBIRTH_READY_SIZE.Desktop.Y),
+		OnClick = RebirthPanel.Open,
+	})
+	rebirthReadyHolder = holder
+	holder.Visible = false
+	local scale = Instance.new("UIScale")
+	scale.Name = "PulseScale"
+	scale.Parent = holder
+	TweenService:Create(
+		scale,
+		TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Scale = 1.08 }
+	):Play()
+end
+
+local function layoutRebirthReady(isPhone: boolean)
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	local size = if isPhone then REBIRTH_READY_SIZE.Phone else REBIRTH_READY_SIZE.Desktop
+	local bottom = BOTTOM_MARGIN + UITheme.ShadowOffset + layout.ButtonSize.Y + REBIRTH_READY_GAP
+	rebirthReadyHolder.Size = UDim2.fromOffset(size.X, size.Y)
+	rebirthReadyHolder.Position = UDim2.new(0.5, 0, 1, -bottom)
+	-- Toasts and bottom cards sit on UITheme.BottomStackOffset, above this slot.
+	assert(bottom + size.Y * 1.08 <= UITheme.BottomStackOffset, "BottomStackOffset must clear REBIRTH!")
 end
 
 -- Gentle pulse on UPGRADES while something is affordable, so new players notice it.
@@ -470,32 +590,13 @@ end
 
 --[[ Cash pops ------------------------------------------------------------- ]]
 
-type CashPop = { Amount: number, Label: TextLabel, Gui: BillboardGui }
-local alivePops: { CashPop } = {}
-
-local function removePop(pop: CashPop)
-	local index = table.find(alivePops, pop)
-	if index then
-		table.remove(alivePops, index)
-	end
-end
-
-local function onCashCollected(payload: any)
-	if typeof(payload) ~= "table" or typeof(payload.Amount) ~= "number" or typeof(payload.Position) ~= "Vector3" then
-		return
-	end
-
-	-- Throttle: past the cap, fold the amount into the newest pop instead.
-	if #alivePops >= CASH_POP_MAX_ALIVE then
-		local newest = alivePops[#alivePops]
-		newest.Amount += payload.Amount
-		newest.Label.Text = "+" .. NumberFormat.Money(newest.Amount)
-		return
-	end
-
+-- Floats `text` up from `position` and fades it over CASH_POP_LIFETIME.
+-- Returns the label so a caller can fold more into it while it's alive.
+-- FactoryController's collector pops use it.
+function HudController.FloatPop(position: Vector3, text: string, color: Color3): TextLabel
 	local anchor = Instance.new("Attachment")
 	anchor.Name = "CashPopAnchor"
-	anchor.WorldPosition = payload.Position
+	anchor.WorldPosition = position
 	anchor.Parent = Workspace.Terrain
 
 	local gui = Instance.new("BillboardGui")
@@ -508,18 +609,15 @@ local function onCashCollected(payload: any)
 	gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
 	local label = UIKit.Label({
-		Text = "+" .. NumberFormat.Money(payload.Amount),
+		Text = text,
 		Font = Fonts.Display,
 		TextSize = 26,
-		TextColor3 = Colors.Cash,
+		TextColor3 = color,
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Stroke = UITheme.Stroke.Text,
 		Parent = gui,
 	})
-
-	local pop: CashPop = { Amount = payload.Amount, Label = label, Gui = gui }
-	table.insert(alivePops, pop)
 
 	local info = TweenInfo.new(CASH_POP_LIFETIME, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, CASH_POP_RISE_STUDS, 0) }):Play()
@@ -530,10 +628,10 @@ local function onCashCollected(payload: any)
 	end
 
 	task.delay(CASH_POP_LIFETIME, function()
-		removePop(pop)
 		gui:Destroy()
 		anchor:Destroy()
 	end)
+	return label
 end
 
 --[[ Layout ---------------------------------------------------------------- ]]
@@ -548,6 +646,7 @@ local function applyLayout(isPhone: boolean)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
 	buildButtons(isPhone)
+	layoutRebirthReady(isPhone)
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
@@ -575,9 +674,15 @@ local function refreshAll()
 		NumberFormat.Money(getIncomePerSecond()),
 		UIKit.Colored("/s", Colors.Muted)
 	)
+	-- The Multiplier Pad's own value; rebirth has its own pill beside it.
 	multiplierPill.Text = NumberFormat.Multiplier(
 		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 	)
+	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
+	local rebirths = TycoonController.GetRebirths()
+	local rebirthFill = rebirthPill.Parent :: Frame
+	rebirthFill.Visible = rebirths > 0
+	rebirthPill.Text = ("⟳ %d · %s"):format(rebirths, NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)))
 	refreshBadge()
 	refreshGoal()
 	UpgradesPanel.Refresh()
@@ -589,7 +694,11 @@ function HudController.Init()
 	buildGoalTracker()
 	cashHolder = buildCashCard()
 	buildButtonRow()
+	buildRebirthReadyButton()
 	UpgradesPanel.Init(screenGui)
+	RebirthPanel.Init()
+	IndexPanel.Init()
+	FusePanel.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)
@@ -599,7 +708,6 @@ function HudController.Init()
 
 	TycoonController.TycoonChanged:Connect(refreshAll)
 	InventoryController.InventoryChanged:Connect(refreshAll)
-	RemoteEvents.CashCollected.OnClientEvent:Connect(onCashCollected)
 	-- Arrives just before the snapshot that carries the next goal, so the
 	-- flash plays on the finished goal and the swap follows.
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(function()

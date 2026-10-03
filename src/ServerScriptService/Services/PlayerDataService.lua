@@ -20,6 +20,9 @@ local RunService = game:GetService("RunService")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
+local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -29,6 +32,8 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
+	-- MutationConfig name ("Golden", "Diamond", "Rainbow"); nil = normal.
+	Mutation: string?,
 }
 
 export type PlayerData = {
@@ -44,13 +49,29 @@ export type PlayerData = {
 	PedestalDisplays: { [number]: string? },
 	-- How many Gacha pulls this player has made; drives the pull price.
 	GachaPulls: number,
-	-- Dropper2 is a one-time purchase and now survives rejoining.
+	-- Legacy (the droppers are gone): still loaded and saved so old saves
+	-- round-trip unchanged, but nothing reads it.
 	HasDropper2: boolean,
 	-- 1-based index into GoalConfig.Goals of the goal currently being
 	-- worked on; past the end means every goal is done.
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
+	-- How many times the player has rebirthed (RebirthConfig).
+	Rebirths: number,
+	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
+	-- through rebirths; see IndexConfig.
+	Index: { [string]: boolean },
+	-- os.time() when this profile was last saved (every autosave and on
+	-- leaving) or loaded. nil on old saves: no offline payout the first time.
+	LastOnline: number?,
+}
+
+-- Offline earnings waiting to be collected (session only, never saved).
+export type PendingOffline = {
+	Amount: number,
+	AwaySeconds: number,
+	Since: number, -- os.clock() when it was computed (auto-claim timer)
 }
 
 -- Server-computed progress toward the current goal, sent with the snapshot.
@@ -65,11 +86,21 @@ export type TycoonSnapshot = {
 	Cash: number,
 	Generators: { [string]: number },
 	CashMultiplierLevel: number,
-	PedestalDisplays: { [number]: string? },
+	-- String keys ("1".."4") on the wire, like on disk: a RemoteEvent drops
+	-- entries after a gap in a sparse numeric table ({[1]=a, [3]=b, [4]=c}),
+	-- which made the client think occupied pedestals were empty.
+	PedestalDisplays: { [string]: string },
 	GachaPulls: number,
-	HasDropper2: boolean,
 	GoalIndex: number,
 	GoalProgress: GoalProgress?,
+	Rebirths: number,
+	-- Found Index keys as a dense list (the client builds the set and
+	-- computes the Index multiplier).
+	IndexKeys: { string },
+	-- Offline earnings not yet collected (0 = none) and the away time they
+	-- cover, for the welcome-back card.
+	PendingOffline: number,
+	AwaySeconds: number,
 }
 
 type State = {
@@ -81,8 +112,12 @@ type State = {
 	noSave: { [number]: boolean },
 	-- Session-only: GoalService's latest progress readout per UserId.
 	goalProgress: { [number]: GoalProgress? },
+	-- Session-only: offline earnings computed on load, until claimed.
+	pendingOffline: { [number]: PendingOffline },
 	-- Called synchronously at the start of every SyncTycoon (see OnSync).
 	syncHooks: { (Player) -> () },
+	-- os.clock() of each player's last honoured RequestSync.
+	lastSyncRequest: { [number]: number },
 	connections: { RBXScriptConnection },
 }
 
@@ -93,6 +128,7 @@ local SAVE_RETRY_ATTEMPTS = 3
 local LOAD_RETRY_ATTEMPTS = 3
 local LOAD_RETRY_DELAY_SECONDS = 2
 local AUTOSAVE_INTERVAL_SECONDS = 120
+local SYNC_REQUEST_COOLDOWN_SECONDS = 2
 
 local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 
@@ -106,6 +142,8 @@ local DEFAULT_DATA: PlayerData = {
 	HasDropper2 = false,
 	GoalIndex = 1,
 	TotalFusions = 0,
+	Rebirths = 0,
+	Index = {},
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -114,7 +152,9 @@ local state: State = {
 	sessionCache = {},
 	noSave = {},
 	goalProgress = {},
+	pendingOffline = {},
 	syncHooks = {},
+	lastSyncRequest = {},
 	connections = {},
 }
 
@@ -197,6 +237,19 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.TotalFusions) == "number" then
 		data.TotalFusions = raw.TotalFusions
 	end
+	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
+		data.Rebirths = math.floor(raw.Rebirths)
+	end
+	if typeof(raw.LastOnline) == "number" then
+		data.LastOnline = raw.LastOnline
+	end
+	if typeof(raw.Index) == "table" then
+		for key, found in raw.Index do
+			if found == true and IndexConfig.IsValidKey(key) then
+				data.Index[key] = true
+			end
+		end
+	end
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
 	-- happened mid-change) would be stuck forever: unfusable and undisplayable.
@@ -208,6 +261,13 @@ local function reconcile(raw: any): PlayerData
 	end
 	for _, item in data.Inventory do
 		item.InUse = displayed[item.Uid] == true
+		-- Old saves have no mutation; an unknown one (renamed/removed) is
+		-- dropped rather than left to break lookups.
+		if item.Mutation ~= nil and not MutationConfig.IsValid(item.Mutation) then
+			item.Mutation = nil
+		end
+		-- Backfill: everything already owned counts as found.
+		data.Index[IndexConfig.GetKey(item.ItemId, item.Mutation)] = true
 	end
 	return data
 end
@@ -270,6 +330,7 @@ local function saveData(userId: number, data: PlayerData?): boolean
 	if not data or state.noSave[userId] then
 		return false
 	end
+	data.LastOnline = os.time()
 
 	local toSave = deepCopy(data) :: any
 	toSave.PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays)
@@ -289,6 +350,16 @@ local function saveData(userId: number, data: PlayerData?): boolean
 	until success or attempt >= SAVE_RETRY_ATTEMPTS
 
 	return success
+end
+
+-- Saves `player`'s data now, on its own thread (never yields the caller).
+-- RebirthService calls it so a rebirth can't be lost to a crash.
+function PlayerDataService.SaveNow(player: Player)
+	local userId = player.UserId
+	local data = state.sessionCache[userId]
+	if data then
+		task.spawn(saveData, userId, data)
+	end
 end
 
 local function saveAll()
@@ -320,6 +391,15 @@ local function updateLeaderstatsCash(player: Player)
 	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
 	if cashValue and cashValue:IsA("IntValue") then
 		cashValue.Value = math.floor(PlayerDataService.GetCash(player))
+	end
+end
+
+local function updateLeaderstatsRebirths(player: Player)
+	local data = state.sessionCache[player.UserId]
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local rebirthsValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	if data and rebirthsValue and rebirthsValue:IsA("IntValue") then
+		rebirthsValue.Value = data.Rebirths
 	end
 end
 
@@ -430,10 +510,16 @@ function PlayerDataService.RemoveItemsByUid(player: Player, uids: { string }): (
 	return true, removedEntries
 end
 
-function PlayerDataService.AddItem(player: Player, itemId: string, tier: string): InventoryItem?
+-- Adds an item and marks its Index entry. Returns (entry, isNewIndexEntry).
+function PlayerDataService.AddItem(
+	player: Player,
+	itemId: string,
+	tier: string,
+	mutation: string?
+): (InventoryItem?, boolean)
 	local data = state.sessionCache[player.UserId]
 	if not data then
-		return nil
+		return nil, false
 	end
 
 	local entry: InventoryItem = {
@@ -441,9 +527,18 @@ function PlayerDataService.AddItem(player: Player, itemId: string, tier: string)
 		ItemId = itemId,
 		Tier = tier,
 		InUse = false,
+		Mutation = if MutationConfig.IsValid(mutation) then mutation else nil,
 	}
 	table.insert(data.Inventory, entry)
-	return entry
+	local key = IndexConfig.GetKey(itemId, entry.Mutation)
+	local isNew = not data.Index[key]
+	data.Index[key] = true
+	return entry, isNew
+end
+
+function PlayerDataService.GetIndex(player: Player): { [string]: boolean }
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Index else {}
 end
 
 -- Marks/unmarks an inventory item as "in use" (e.g. currently displayed on a
@@ -482,7 +577,7 @@ function PlayerDataService.SetPedestalDisplay(player: Player, pedestalIndex: num
 	data.PedestalDisplays[pedestalIndex] = uid
 end
 
---[[ Public API: gacha / dropper2 ----------------------------------------- ]]
+--[[ Public API: gacha ---------------------------------------------------- ]]
 
 function PlayerDataService.GetGachaPulls(player: Player): number
 	local data = state.sessionCache[player.UserId]
@@ -496,16 +591,41 @@ function PlayerDataService.IncrementGachaPulls(player: Player)
 	end
 end
 
-function PlayerDataService.HasDropper2(player: Player): boolean
+--[[ Public API: rebirth -------------------------------------------------- ]]
+
+function PlayerDataService.GetRebirths(player: Player): number
 	local data = state.sessionCache[player.UserId]
-	return if data then data.HasDropper2 else false
+	return if data then data.Rebirths else 0
 end
 
-function PlayerDataService.SetHasDropper2(player: Player, owned: boolean)
+-- Studio debug (/rebirths <n>).
+function PlayerDataService.SetRebirths(player: Player, rebirths: number)
 	local data = state.sessionCache[player.UserId]
 	if data then
-		data.HasDropper2 = owned
+		data.Rebirths = math.max(0, math.floor(rebirths))
+		updateLeaderstatsRebirths(player)
 	end
+end
+
+-- Applies a rebirth in one go, with no yields: RebirthService validates
+-- first (cash >= RebirthConfig.GetCost), then calls this. Resets the run:
+-- cash to 0 (which pays the price), generators to Basic at
+-- `startingBasicLevel`, the Multiplier Pad and the gacha price; adds a
+-- rebirth. Inventory, pedestals, goals and everything else stay.
+-- Returns the new rebirth count.
+function PlayerDataService.ApplyRebirth(player: Player, startingBasicLevel: number): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	data.Cash = 0
+	data.Generators = { basic_generator = startingBasicLevel }
+	data.CashMultiplierLevel = 0
+	data.GachaPulls = 0
+	data.Rebirths += 1
+	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
+	return data.Rebirths
 end
 
 --[[ Public API: goals ---------------------------------------------------- ]]
@@ -543,43 +663,116 @@ end
 --[[ Public API: income + sync -------------------------------------------- ]]
 
 -- Tiers of the items currently on this player's pedestals.
-function PlayerDataService.GetDisplayedTiers(player: Player): { string }
-	local tiers = {}
+-- Tier and mutation of every item on the player's pedestals.
+function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
+	local items = {}
 	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
 		if uid then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
-				table.insert(tiers, item.Tier)
+				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 			end
 		end
 	end
-	return tiers
+	return items
 end
 
--- Generators + pedestals, multiplier applied. Droppers are paid on collection.
-function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
+-- The one place the server builds TycoonConfig.IncomeInputs. nil until the
+-- player's data has loaded.
+function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeInputs?
 	local data = state.sessionCache[player.UserId]
 	if not data then
-		return 0
+		return nil
 	end
-	return TycoonConfig.GetPassiveCashPerSecond(
-		data.Generators,
-		PlayerDataService.GetDisplayedTiers(player),
-		data.CashMultiplierLevel
-	)
+	return {
+		GeneratorLevels = data.Generators,
+		PedestalItems = PlayerDataService.GetDisplayedItems(player),
+		CashMultiplierLevel = data.CashMultiplierLevel,
+		Rebirths = data.Rebirths,
+		IndexMultiplier = IndexConfig.GetMultiplier(data.Index),
+	}
+end
+
+-- Pad x rebirth: the multiplier every per-generator/per-item number shows.
+function PlayerDataService.GetIncomeMultiplier(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	return if inputs then TycoonConfig.GetIncomeMultiplier(inputs) else 1
+end
+
+-- Generators + pedestals, multiplier applied: all of a player's income.
+function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	return if inputs then TycoonConfig.GetPassiveCashPerSecond(inputs) else 0
+end
+
+local function indexKeys(index: { [string]: boolean }): { string }
+	local keys = {}
+	for key in index do
+		table.insert(keys, key)
+	end
+	return keys
 end
 
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
+	local pending = state.pendingOffline[player.UserId]
 	return {
 		Cash = PlayerDataService.GetCash(player),
 		Generators = PlayerDataService.GetGenerators(player) or {},
 		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
+		PedestalDisplays = pedestalDisplaysToDisk(PlayerDataService.GetPedestalDisplays(player)),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
-		HasDropper2 = PlayerDataService.HasDropper2(player),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),
 		GoalProgress = state.goalProgress[player.UserId],
+		Rebirths = PlayerDataService.GetRebirths(player),
+		IndexKeys = indexKeys(PlayerDataService.GetIndex(player)),
+		PendingOffline = if pending then pending.Amount else 0,
+		AwaySeconds = if pending then pending.AwaySeconds else 0,
 	}
+end
+
+--[[ Public API: offline earnings ------------------------------------------ ]]
+
+-- Uncollected offline earnings, or nil.
+function PlayerDataService.GetPendingOffline(player: Player): PendingOffline?
+	return state.pendingOffline[player.UserId]
+end
+
+-- Replaces the pending offline earnings (0 clears them). /offline uses it.
+function PlayerDataService.SetPendingOffline(player: Player, amount: number, awaySeconds: number)
+	if amount > 0 then
+		state.pendingOffline[player.UserId] = { Amount = amount, AwaySeconds = awaySeconds, Since = os.clock() }
+	else
+		state.pendingOffline[player.UserId] = nil
+	end
+end
+
+-- Clears the pending offline earnings and returns the amount (0 if none).
+-- The caller pays it; taking and paying happen with no yield between them.
+function PlayerDataService.TakePendingOffline(player: Player): number
+	local pending = state.pendingOffline[player.UserId]
+	state.pendingOffline[player.UserId] = nil
+	return if pending then pending.Amount else 0
+end
+
+-- On load: what the lab earned while away, at the income the player left
+-- with. LastOnline moves to now straight away (and is saved), so a rejoin
+-- can't claim the same time twice.
+local function computeOfflineEarnings(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	local lastOnline = data.LastOnline
+	data.LastOnline = os.time()
+	if not lastOnline then
+		return
+	end
+	local away = math.max(0, os.time() - lastOnline)
+	local amount = OfflineConfig.Compute(PlayerDataService.GetPassiveCashPerSecond(player), away)
+	PlayerDataService.SetPendingOffline(player, amount, away)
+	if amount > 0 then
+		PlayerDataService.SaveNow(player)
+	end
 end
 
 -- Registers `callback(player)` to run synchronously at the start of every
@@ -612,6 +805,12 @@ local function createLeaderstats(player: Player)
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
 
+	-- Created before Cash so it's the first leaderboard column.
+	local rebirthsValue = Instance.new("IntValue")
+	rebirthsValue.Name = "Rebirths"
+	rebirthsValue.Value = 0
+	rebirthsValue.Parent = leaderstats
+
 	local cashValue = Instance.new("IntValue")
 	cashValue.Name = "Cash"
 	cashValue.Value = 0
@@ -622,7 +821,7 @@ end
 
 local dataLoaded = Instance.new("BindableEvent")
 -- Fires (player) once a player's data is in the session cache. TycoonService
--- waits on this before restoring saved pedestals/Dropper2 on claim.
+-- waits on this before restoring saved pedestals on claim.
 PlayerDataService.DataLoaded = dataLoaded.Event
 
 local function onPlayerAdded(player: Player)
@@ -631,6 +830,8 @@ local function onPlayerAdded(player: Player)
 	end
 	createLeaderstats(player)
 	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
+	computeOfflineEarnings(player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
@@ -640,12 +841,33 @@ end
 local function onPlayerRemoving(player: Player)
 	local userId = player.UserId
 	local data = state.sessionCache[userId]
+	-- Left before collecting (or before the auto-claim): pay it, never lose it.
+	local pending = state.pendingOffline[userId]
+	if data and pending then
+		data.Cash += pending.Amount
+	end
+	state.pendingOffline[userId] = nil
 	state.sessionCache[userId] = nil
 	if data then
 		saveData(userId, data)
 	end
 	state.noSave[userId] = nil
 	state.goalProgress[userId] = nil
+	state.lastSyncRequest[userId] = nil
+end
+
+-- A client asking for a fresh snapshot (it just had a request rejected and
+-- its view may be stale): the inventory too, since InUse lives there. At
+-- most once per SYNC_REQUEST_COOLDOWN_SECONDS.
+local function onRequestSync(player: Player)
+	local now = os.clock()
+	local last = state.lastSyncRequest[player.UserId]
+	if last and now - last < SYNC_REQUEST_COOLDOWN_SECONDS then
+		return
+	end
+	state.lastSyncRequest[player.UserId] = now
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	PlayerDataService.SyncTycoon(player)
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]
@@ -653,6 +875,7 @@ end
 function PlayerDataService:Init()
 	table.insert(state.connections, Players.PlayerAdded:Connect(onPlayerAdded))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
+	table.insert(state.connections, RemoteEvents.RequestSync.OnServerEvent:Connect(onRequestSync))
 
 	-- Covers anyone who joined before this service finished initialising.
 	for _, player in Players:GetPlayers() do

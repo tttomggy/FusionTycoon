@@ -7,11 +7,13 @@ local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
+local TycoonController = require(script.Parent.TycoonController)
 
 local FusionController = {}
 
 local MACHINE_NAME = "FusionMachine"
 local CHARGE_DURATION_SECONDS = 2.2
+local FUSE_ALL_CHARGE_SECONDS = 3
 
 -- Guards against double-firing while a request is in flight; the server is
 -- still the final authority (it has its own cooldown check independently).
@@ -22,6 +24,13 @@ local isRequestPending = false
 -- can never leave a dangling listener.
 local pendingResult: any = nil
 
+-- Set only by onFuseAllResult; RequestFuseAll waits on it the same way.
+local pendingFuseAllResult: any = nil
+
+local fuseAllResolved = Instance.new("BindableEvent")
+-- Fires (summary) once a Fuse All has resolved and its charge-up finished.
+FusionController.FuseAllResolved = fuseAllResolved.Event
+
 local fusionResolved = Instance.new("BindableEvent")
 -- Fires only once the server has validated the attempt AND the reveal effect
 -- (if any) has finished playing. UI code should hook this, never react at
@@ -31,44 +40,44 @@ FusionController.FusionResolved = fusionResolved.Event
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil
+-- The prompts live here (platform centre), not on the Core up in the air.
+local promptAnchor: BasePart? = nil
 
--- Offers the LOWEST tier you have a spare pair of (not counting items on
--- pedestals). Fusing is a climb now (2x Common -> Rare, ...), so working up
--- from the bottom is what you want, and Mythic can't be fused at all.
-local function getNextFusableTier(): string?
-	for _, tier in FusionConfig.TierOrder do
-		if FusionConfig.CanFuseTier(tier)
-			and #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.ItemsRequiredPerFusion
-		then
-			return tier
+-- The last fusion asked for, so the fail card's AGAIN can repeat it.
+local lastTier: string? = nil
+local lastCount = 0
+
+-- Up to `count` (default MaxFusionInputs) unmutated, not-displayed items
+-- of `tier`, as Uids: what AUTO-FILL and AGAIN put in. Never mutated ones.
+function FusionController.GetAutoFill(tier: string, count: number?): { string }
+	local wanted = count or FusionConfig.MaxFusionInputs
+	local uids = {}
+	for _, item in InventoryController.GetFuseAllItemsByTier(tier) do
+		if #uids >= wanted then
+			break
 		end
+		table.insert(uids, item.Uid)
 	end
-	return nil
-end
-
-local function updatePromptState()
-	if not prompt then
-		return
-	end
-	local tier = if isRequestPending then nil else getNextFusableTier()
-	prompt.Enabled = tier ~= nil
-	if tier then
-		local nextTier = FusionConfig.GetNextTier(tier) :: string
-		local chance = FusionConfig.SuccessChance[tier] or 0
-		prompt.ActionText = ("Fuse 2x %s"):format(tier)
-		prompt.ObjectText = ("→ %s  (%d%% chance)"):format(nextTier, math.floor(chance * 100 + 0.5))
-	end
+	return uids
 end
 
 function FusionController.IsRequestPending(): boolean
 	return isRequestPending
 end
 
--- True while another fuse would be accepted right now: nothing in flight,
--- a spare pair exists, and the local character is within the machine
--- prompt's reach. Drives the fail card's AGAIN button.
+-- True while the last fusion could be repeated right now: nothing in
+-- flight, enough unmutated items of that tier for the same count, and the
+-- local character within the machine prompt's reach. Drives the fail
+-- card's AGAIN button.
 function FusionController.CanRequestFusion(): boolean
-	if isRequestPending or not core or not prompt or getNextFusableTier() == nil then
+	local tier = lastTier
+	if isRequestPending or not core or not prompt or not tier then
+		return false
+	end
+	if not FusionConfig.CanFuseTierFor(tier, TycoonController.GetRebirths()) then
+		return false
+	end
+	if #FusionController.GetAutoFill(tier, lastCount) < lastCount then
 		return false
 	end
 	local character = Players.LocalPlayer.Character
@@ -77,30 +86,41 @@ function FusionController.CanRequestFusion(): boolean
 		return false
 	end
 	local reach = (prompt :: ProximityPrompt).MaxActivationDistance
-	return (root.Position - (core :: BasePart).Position).Magnitude <= reach
+	local anchor = promptAnchor or core :: BasePart
+	return (root.Position - anchor.Position).Magnitude <= reach
 end
 
--- Fire-and-forget: does not return until the full request/animation cycle
--- resolves, so run it in task.spawn if the caller needs to keep going.
-local function requestFusion()
+-- Fuses `uids` (2-6 same-tier items; the server validates everything),
+-- or with no argument repeats the last fusion's tier and count with
+-- unmutated items (AGAIN). Plays the machine's charge-up and reveal, then
+-- fires FusionResolved. Yields for the whole cycle; call it with task.spawn.
+local function requestFusion(uids: { string }?)
 	if isRequestPending then
 		return
 	end
-
-	local tier = getNextFusableTier()
-	if not tier then
+	local inputs = uids
+	if not inputs then
+		local tier = lastTier
+		if not tier or lastCount < FusionConfig.MinFusionInputs then
+			return
+		end
+		inputs = FusionController.GetAutoFill(tier, lastCount)
+	end
+	local chosen = inputs :: { string }
+	if #chosen < FusionConfig.MinFusionInputs or #chosen > FusionConfig.MaxFusionInputs then
 		return
 	end
-
-	local items = InventoryController.GetFusableItemsByTier(tier)
-	if #items < FusionConfig.ItemsRequiredPerFusion then
-		return
+	local first = nil
+	for _, item in InventoryController.GetInventory() do
+		if item.Uid == chosen[1] then
+			first = item
+		end
 	end
+	lastTier = if first then first.Tier else lastTier
+	lastCount = #chosen
 
 	isRequestPending = true
 	pendingResult = nil
-	updatePromptState()
-	local uidA, uidB = items[1].Uid, items[2].Uid
 
 	-- The client only ever plays this generic shell - it has no idea what
 	-- the outcome will be, and never will until FusionResult arrives below.
@@ -110,7 +130,7 @@ local function requestFusion()
 	end)
 
 	local startTime = os.clock()
-	RemoteEvents.RequestFusion:FireServer(uidA, uidB)
+	RemoteEvents.RequestFusion:FireServer({ Uids = chosen })
 
 	repeat
 		task.wait()
@@ -131,18 +151,48 @@ local function requestFusion()
 		RevealEffects.PlayReveal(handles, {
 			AccentColor = FusionConfig.TierAccentColors[resultTier] or Color3.new(1, 1, 1),
 			-- A failed roll never gets the big treatment, even on a high tier.
-			IsMajor = result.Upgraded == true and FusionConfig.MajorRevealTiers[resultTier] == true,
+			IsMajor = result.Upgraded == true and FusionConfig.IsMajorReveal(resultTier, result.NewItem.Mutation),
 		})
 	end
 
 	isRequestPending = false
-	updatePromptState()
 	fusionResolved:Fire(result)
 end
 
--- Public entry point (the machine prompt and the fail card's AGAIN button).
--- Yields for the whole charge/reveal cycle; call it with task.spawn.
+-- Public entry point (the Fuse panel's FUSE and the fail card's AGAIN).
 FusionController.RequestFusion = requestFusion
+
+-- Fuse every Common/Rare/Epic pair in one go: plays the charge-up for 3 s,
+-- then fires FuseAllResolved with the server's summary. Yields; call it
+-- with task.spawn.
+function FusionController.RequestFuseAll()
+	if isRequestPending or not core then
+		return
+	end
+	isRequestPending = true
+	pendingFuseAllResult = nil
+
+	local handles = { Core = core :: BasePart, Ring = ring }
+	task.spawn(function()
+		RevealEffects.PlayChargeUp(handles, FUSE_ALL_CHARGE_SECONDS)
+	end)
+
+	local startTime = os.clock()
+	RemoteEvents.RequestFuseAll:FireServer()
+	repeat
+		task.wait()
+	until pendingFuseAllResult ~= nil
+	local result = pendingFuseAllResult
+	pendingFuseAllResult = nil
+
+	local elapsed = os.clock() - startTime
+	if elapsed < FUSE_ALL_CHARGE_SECONDS then
+		task.wait(FUSE_ALL_CHARGE_SECONDS - elapsed)
+	end
+
+	isRequestPending = false
+	fuseAllResolved:Fire(result)
+end
 
 local function onFusionResult(payload: any)
 	pendingResult = payload
@@ -150,6 +200,9 @@ end
 
 function FusionController.Init()
 	RemoteEvents.FusionResult.OnClientEvent:Connect(onFusionResult)
+	RemoteEvents.FuseAllResult.OnClientEvent:Connect(function(payload: any)
+		pendingFuseAllResult = if typeof(payload) == "table" then payload else { Count = 0 }
+	end)
 
 	-- Each plot has its own machine now; only ours is ever enabled for us.
 	local plotsFolder = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
@@ -157,21 +210,11 @@ function FusionController.Init()
 	local machine = plot:WaitForChild(MACHINE_NAME) :: Model
 	core = machine:WaitForChild("Core") :: BasePart
 	ring = machine:FindFirstChild("Ring") :: BasePart?
-	prompt = (core :: BasePart):WaitForChild("FusePrompt") :: ProximityPrompt
-
-	-- Same fix as AnnouncementController: a line starting with "(" right
-	-- after a statement is ambiguous in Lua (could read as continuing the
-	-- previous line's expression as a function call), so this goes through a
-	-- local variable instead of an inline `(x :: T).Field` cast.
-	local fusePrompt = prompt :: ProximityPrompt
-	fusePrompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if triggeringPlayer == Players.LocalPlayer then
-			task.spawn(requestFusion)
-		end
-	end)
-
-	InventoryController.InventoryChanged:Connect(updatePromptState)
-	updatePromptState()
+	local anchor = machine:WaitForChild("PromptAnchor") :: BasePart
+	promptAnchor = anchor
+	prompt = anchor:WaitForChild("FusePrompt") :: ProximityPrompt
+	-- The prompt itself opens the Fuse panel (FusePanel, through
+	-- ProximityPromptService); this controller only runs the requests.
 end
 
 return FusionController

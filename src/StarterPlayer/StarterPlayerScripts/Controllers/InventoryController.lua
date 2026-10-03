@@ -1,17 +1,48 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local InventoryController = {}
 
 -- Local cache of the server's authoritative inventory; never mutated optimistically.
 local inventory: { any } = {}
+-- Uids on a pedestal per the latest tycoon snapshot (TycoonController feeds
+-- it). IsInUse trusts either source, so a stale item.InUse can never offer
+-- a displayed copy.
+local displayedUids: { [string]: boolean } = {}
 
 local inventoryChanged = Instance.new("BindableEvent")
 InventoryController.InventoryChanged = inventoryChanged.Event
 
 function InventoryController.GetInventory(): { any }
 	return inventory
+end
+
+-- On a pedestal: the inventory's InUse flag OR the snapshot's PedestalDisplays.
+-- Every client check for "free" goes through this, never item.InUse alone.
+function InventoryController.IsInUse(item: any): boolean
+	return item.InUse == true or displayedUids[item.Uid] == true
+end
+
+-- Called by TycoonController with the snapshot's displayed Uids; fires
+-- InventoryChanged when the set changes so open pickers refresh.
+function InventoryController.SetDisplayedUids(uids: { [string]: boolean })
+	local changed = false
+	for uid in uids do
+		if not displayedUids[uid] then
+			changed = true
+		end
+	end
+	for uid in displayedUids do
+		if not uids[uid] then
+			changed = true
+		end
+	end
+	displayedUids = uids
+	if changed then
+		inventoryChanged:Fire(inventory)
+	end
 end
 
 function InventoryController.GetItemsByTier(tier: string): { any }
@@ -27,10 +58,27 @@ end
 -- Items of `tier` that can go into the Fusion Machine: anything not on a
 -- pedestal. Counting displayed items here used to make the machine offer a
 -- pair that included a displayed item, which the server then rejected.
+-- Sorted normal first, then by mutation rank, so the machine pairs plain
+-- items before it touches a mutated one.
 function InventoryController.GetFusableItemsByTier(tier: string): { any }
 	local results = {}
 	for _, item in inventory do
-		if item.Tier == tier and not item.InUse then
+		if item.Tier == tier and not InventoryController.IsInUse(item) then
+			table.insert(results, item)
+		end
+	end
+	table.sort(results, function(a, b)
+		return MutationConfig.GetRank(a.Mutation) < MutationConfig.GetRank(b.Mutation)
+	end)
+	return results
+end
+
+-- Fusable items Fuse All may use: unmutated only (mutated items are never
+-- auto-fused).
+function InventoryController.GetFuseAllItemsByTier(tier: string): { any }
+	local results = {}
+	for _, item in InventoryController.GetFusableItemsByTier(tier) do
+		if item.Mutation == nil then
 			table.insert(results, item)
 		end
 	end
@@ -53,7 +101,7 @@ end
 function InventoryController.GetDisplayableItems(): { any }
 	local displayable = {}
 	for _, item in inventory do
-		if not item.InUse then
+		if not InventoryController.IsInUse(item) then
 			table.insert(displayable, item)
 		end
 	end
