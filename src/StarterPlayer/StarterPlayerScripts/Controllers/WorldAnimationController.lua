@@ -16,6 +16,12 @@
 	CFrame is captured when it's first seen; only targets within
 	ANIMATE_RADIUS of the camera are animated.
 
+	Mutation satellites (Models tagged FT_Orbit, inside a pedestal's
+	OrbGroup) orbit the orb: Count balls, Radius studs out, one lap per
+	Period seconds, tilted Tilt degrees. All of them move with one
+	BulkMoveTo per frame, after the hover step, skipping any beyond
+	ORBIT_RADIUS of the camera.
+
 	Rainbow mutation shells (tagged FT_Rainbow) cycle their Color around the
 	hue wheel every RAINBOW_CYCLE_SECONDS.
 
@@ -35,6 +41,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local WorldAnimationController = {}
 
 local ANIMATE_RADIUS = 150
+local ORBIT_RADIUS = 120
 local RAINBOW_CYCLE_SECONDS = 3
 local RAINBOW_SATURATION = 0.55
 local RAINBOW_VALUE = 1
@@ -57,6 +64,11 @@ type Swirl = {
 
 local swirls: { [Instance]: Swirl } = {}
 local rainbows: { [BasePart]: boolean } = {}
+
+type Orbit = { Model: Model, Balls: { BasePart } }
+local orbits: { [Instance]: Orbit } = {}
+local orbitParts: { BasePart } = {}
+local orbitCFrames: { CFrame } = {}
 
 local function getPivot(target: Instance): CFrame?
 	if target:IsA("BasePart") then
@@ -130,6 +142,49 @@ local function trackSwirl(sheet: Instance)
 	swirls[sheet] = swirl
 end
 
+local function trackOrbit(model: Instance)
+	if orbits[model] or not model:IsA("Model") then
+		return
+	end
+	local balls: { BasePart } = {}
+	for _, child in model:GetChildren() do
+		if child:IsA("BasePart") then
+			table.insert(balls, child)
+		end
+	end
+	table.sort(balls, function(a, b)
+		return a.Name < b.Name
+	end)
+	orbits[model] = { Model = model, Balls = balls }
+end
+
+-- Runs after the hover step, so the satellites circle wherever the orb
+-- has bobbed to this frame.
+local function stepOrbits(cameraPosition: Vector3, now: number)
+	table.clear(orbitParts)
+	table.clear(orbitCFrames)
+	for model, orbit in orbits do
+		local group = model.Parent
+		local center = group and group:IsA("Model") and group.PrimaryPart
+		if center and (center.Position - cameraPosition).Magnitude <= ORBIT_RADIUS then
+			local count = math.max((model:GetAttribute("Count") :: number?) or #orbit.Balls, 1)
+			local radius = (model:GetAttribute("Radius") :: number?) or 1
+			local period = math.max((model:GetAttribute("Period") :: number?) or 2, 0.1)
+			local tilt = CFrame.Angles(math.rad((model:GetAttribute("Tilt") :: number?) or 0), 0, 0)
+			local base = (now / period) * math.pi * 2
+			local origin = CFrame.new(center.Position) * tilt
+			for index, ball in orbit.Balls do
+				local angle = base + (index - 1) * (math.pi * 2 / count)
+				table.insert(orbitParts, ball)
+				table.insert(orbitCFrames, origin * CFrame.new(math.cos(angle) * radius, 0, math.sin(angle) * radius))
+			end
+		end
+	end
+	if #orbitParts > 0 then
+		Workspace:BulkMoveTo(orbitParts, orbitCFrames, Enum.BulkMoveMode.FireCFrameChanged)
+	end
+end
+
 local function stepRainbows(cameraPosition: Vector3, now: number)
 	local color = Color3.fromHSV((now / RAINBOW_CYCLE_SECONDS) % 1, RAINBOW_SATURATION, RAINBOW_VALUE)
 	for part in rainbows do
@@ -180,6 +235,7 @@ local function step(dt: number)
 			end
 		end
 	end
+	stepOrbits(cameraPosition, now)
 end
 
 function WorldAnimationController.Init()
@@ -198,6 +254,17 @@ function WorldAnimationController.Init()
 	CollectionService:GetInstanceAddedSignal(PortalKit.SWIRL_TAG):Connect(function(sheet)
 		task.defer(trackSwirl, sheet)
 	end)
+	for _, model in CollectionService:GetTagged(PartKit.ORBIT_TAG) do
+		task.defer(trackOrbit, model)
+	end
+	CollectionService:GetInstanceAddedSignal(PartKit.ORBIT_TAG):Connect(function(model)
+		-- The satellites replicate with the model; give them a frame.
+		task.defer(trackOrbit, model)
+	end)
+	CollectionService:GetInstanceRemovedSignal(PartKit.ORBIT_TAG):Connect(function(model)
+		orbits[model] = nil
+	end)
+
 	local function trackRainbow(part: Instance)
 		if part:IsA("BasePart") then
 			rainbows[part] = true

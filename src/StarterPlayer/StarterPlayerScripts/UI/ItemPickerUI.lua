@@ -161,7 +161,7 @@ local function refreshFooter()
 		return
 	end
 
-	local orb = UIKit.TierOrb(card.Tier, 44)
+	local orb = UIKit.TierOrb(card.Tier, 44, nil, card.Mutation)
 	orb.ZIndex = footerOrbSlot.ZIndex
 	orb.Parent = footerOrbSlot
 	footerName.Text = card.Name
@@ -242,8 +242,9 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 	})
 	-- UIGridLayout sizes the holder; the body already fills it.
 	local z = body.ZIndex + 1
+	UIKit.MutationCardStroke(body, card.Mutation)
 
-	local orb = UIKit.TierOrb(card.Tier, 74)
+	local orb = UIKit.TierOrb(card.Tier, 74, nil, card.Mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 16)
 	orb.ZIndex = z

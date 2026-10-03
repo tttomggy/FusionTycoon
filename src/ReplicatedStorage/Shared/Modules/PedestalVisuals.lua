@@ -60,6 +60,68 @@ local PROXIMITY_BURST_COUNT = 40
 -- higher tiers) around a Neon core, with a light. Its centre sits
 -- PlotLayout.Pedestal.OrbCenterY above the pedestal's bottom. The group is
 -- tagged FT_Hover, so clients spin and bob it. Returns the glass Orb part.
+-- Satellites per mutation: how many, seconds per lap, and whether they
+-- leave a short trail. Rainbow's take one RainbowStops hue each.
+type SatelliteSpec = { Count: number, Period: number, Trail: boolean }
+local MUTATION_SATELLITES: { [string]: SatelliteSpec } = {
+	Golden = { Count = 2, Period = 2.4, Trail = false },
+	Diamond = { Count = 4, Period = 1.8, Trail = true },
+	Rainbow = { Count = 6, Period = 1.5, Trail = true },
+}
+
+-- Neon balls the client orbits round the orb (FT_Orbit). Built here so
+-- every player sees them; positions are set every frame on clients.
+local function buildSatellites(group: Model, center: CFrame, diameter: number, mutation: string)
+	local spec = MUTATION_SATELLITES[mutation]
+	local color = UITheme.GetMutationColor(mutation)
+	if not spec or not color then
+		return
+	end
+	local p = PlotLayout.Pedestal
+	local satellites = Instance.new("Model")
+	satellites.Name = "Satellites"
+	local stops = UITheme.Mutation.RainbowStops
+	for index = 1, spec.Count do
+		local hue = if mutation == "Rainbow" then stops[(index - 1) % #stops + 1] else color
+		local ball = PartKit.Part({
+			Name = "Satellite" .. index,
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * p.SatelliteDiameter,
+			CFrame = center,
+			Color = hue,
+			Material = Enum.Material.Neon,
+			CastShadow = false,
+			Parent = satellites,
+		})
+		PartKit.MakeDecorative(ball)
+		if spec.Trail then
+			local top = Instance.new("Attachment")
+			top.Name = "TrailTop"
+			top.Position = Vector3.new(0, p.SatelliteDiameter / 2, 0)
+			top.Parent = ball
+			local bottom = Instance.new("Attachment")
+			bottom.Name = "TrailBottom"
+			bottom.Position = Vector3.new(0, -p.SatelliteDiameter / 2, 0)
+			bottom.Parent = ball
+			local trail = Instance.new("Trail")
+			trail.Attachment0 = top
+			trail.Attachment1 = bottom
+			trail.Lifetime = p.SatelliteTrailLifetime
+			trail.Color = ColorSequence.new(hue)
+			trail.LightEmission = 1
+			trail.Transparency = NumberSequence.new(0.2, 1)
+			trail.FaceCamera = true
+			trail.Parent = ball
+		end
+	end
+	satellites:SetAttribute("Count", spec.Count)
+	satellites:SetAttribute("Radius", diameter / 2 + p.SatelliteRadiusExtra)
+	satellites:SetAttribute("Period", spec.Period)
+	satellites:SetAttribute("Tilt", p.SatelliteTiltDegrees)
+	satellites:AddTag(PartKit.ORBIT_TAG)
+	satellites.Parent = group
+end
+
 local function buildShell(group: Model, center: CFrame, diameter: number, mutation: string)
 	local color = UITheme.GetMutationColor(mutation)
 	if not color then
@@ -139,6 +201,7 @@ local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, par
 
 	if mutation then
 		buildShell(group, center, diameter, mutation)
+		buildSatellites(group, center, diameter, mutation)
 	end
 
 	group.PrimaryPart = orb

@@ -264,6 +264,11 @@ PlotLayout.Pedestal = {
 	} :: { [string]: number },
 	OrbTransparency = 0.15,
 	InnerOrbScale = 0.65,
+	-- Mutation satellites orbiting the orb (WorldAnimationController, FT_Orbit).
+	SatelliteDiameter = 0.35,
+	SatelliteRadiusExtra = 0.7, -- orbit radius = orb radius + this
+	SatelliteTiltDegrees = 20,
+	SatelliteTrailLifetime = 0.25,
 	OrbLightRangeBase = 6,
 	OrbLightRangePerRank = 1.5,
 	OrbLightBrightness = 2,

@@ -217,7 +217,7 @@ local function refreshChamber()
 		end
 		local item = items[index]
 		if item then
-			local orb = UIKit.TierOrb(item.Tier, hex.Slot - 8)
+			local orb = UIKit.TierOrb(item.Tier, hex.Slot - 10, nil, item.Mutation)
 			orb.Name = "Orb"
 			orb.AnchorPoint = Vector2.new(0.5, 0.5)
 			orb.Position = UDim2.fromScale(0.5, 0.5)
@@ -307,8 +307,9 @@ local function buildCard(item: any, order: number)
 		NoShadow = true,
 		ZIndex = grid.ZIndex + 1,
 	})
+	UIKit.MutationCardStroke(body, item.Mutation)
 	local z = body.ZIndex + 1
-	local orb = UIKit.TierOrb(item.Tier, 44)
+	local orb = UIKit.TierOrb(item.Tier, 44, nil, item.Mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 8)
 	orb.ZIndex = z

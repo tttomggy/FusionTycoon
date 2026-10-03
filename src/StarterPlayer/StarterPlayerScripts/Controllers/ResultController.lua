@@ -219,7 +219,8 @@ local function showBigCard(info: BigCardInfo)
 		Parent = body,
 	})
 
-	local orb = UIKit.TierOrb(tier, 132)
+	UIKit.MutationCardStroke(body, info.Item.Mutation)
+	local orb = UIKit.TierOrb(tier, 132, nil, info.Item.Mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 116)
 	orb.ZIndex = z
@@ -227,12 +228,6 @@ local function showBigCard(info: BigCardInfo)
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = info.Item.Mutation,
-		Label = if info.Item.Mutation
-			then ("%s ×%d"):format(
-				(info.Item.Mutation :: string):upper(),
-				MutationConfig.GetMultiplier(info.Item.Mutation)
-			)
-			else nil,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 228),
 		TextSize = 14,
@@ -355,7 +350,10 @@ local function buildMiniCard(parent: Instance, item: any, order: number, isBest:
 		ShadowOffset = UITheme.SmallShadowOffset,
 		ZIndex = z,
 	})
-	local orb = UIKit.TierOrb(item.Tier, 44)
+	if not isBest then
+		UIKit.MutationCardStroke(body, item.Mutation)
+	end
+	local orb = UIKit.TierOrb(item.Tier, 44, nil, item.Mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 10)
 	orb.ZIndex = z + 1
@@ -761,7 +759,7 @@ local function showFuseAllCard(result: any)
 			LayoutOrder = 5,
 			ZIndex = z,
 		})
-		local orb = UIKit.TierOrb(best.Tier, 38)
+		local orb = UIKit.TierOrb(best.Tier, 38, nil, best.Mutation)
 		orb.AnchorPoint = Vector2.new(0, 0.5)
 		orb.Position = UDim2.new(0, 12, 0.5, 0)
 		orb.ZIndex = row.ZIndex + 1
@@ -898,7 +896,7 @@ local function showFailCard(item: any, lostCount: number)
 	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
 	local z = body.ZIndex + 1
 
-	local orb = UIKit.TierOrb(tier, 56, 0.15)
+	local orb = UIKit.TierOrb(tier, 56, 0.15, item.Mutation)
 	orb.AnchorPoint = Vector2.new(0, 0.5)
 	orb.Position = UDim2.new(0, 16, 0.5, 0)
 	orb.ZIndex = z
@@ -983,17 +981,18 @@ local function showPullCard(item: any)
 		Parent = body,
 	})
 
-	local orb = UIKit.TierOrb(tier, 40)
+	UIKit.MutationCardStroke(body, item.Mutation)
+	local orb = UIKit.TierOrb(tier, 40, nil, item.Mutation)
 	orb.AnchorPoint = Vector2.new(0, 0.5)
 	orb.Position = UDim2.new(0, 78, 0.5, 0)
 	orb.ZIndex = z
 	orb.Parent = body
-	-- Mutation tag on the orb's top-right.
+	-- Mutation tag under the orb, on the card's bottom edge.
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = item.Mutation,
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.fromOffset(112, 4),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0, 98, 1, -4),
 		TextSize = 11,
 		Height = 18,
 		ZIndex = z + 1,

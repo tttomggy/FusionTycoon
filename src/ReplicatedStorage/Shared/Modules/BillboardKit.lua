@@ -22,6 +22,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local BillboardKit = {}
 
@@ -327,7 +328,7 @@ end
 
 export type PedestalInfo = {
 	Tier: string,
-	Mutation: string?, -- shows as "GOLDEN · MYTHIC" in the mutation colour
+	Mutation: string?, -- shows as an Ink "GOLDEN ×2" chip on the label's top edge
 	ItemName: string,
 	Rate: number, -- per second, owner's multiplier included
 }
@@ -366,6 +367,23 @@ local function buildFilledLabel(pedestal: BasePart): BillboardGui
 	local name = scaledLabel(panel, "ItemName", Fonts.Display, Colors.Text, 0.28, 0.4)
 	textStroke(name, 2)
 	scaledLabel(panel, "Rate", Fonts.Body, Colors.Cash, 0.7, 0.24)
+
+	-- Mutation chip: an Ink badge on the panel's top edge ("GOLDEN ×2" in
+	-- the mutation colour), so the label reads on any tier. Hidden unless
+	-- the item is mutated.
+	local chip = Instance.new("Frame")
+	chip.Name = "MutationChip"
+	chip.AnchorPoint = Vector2.new(0.5, 0.5)
+	chip.Position = UDim2.fromScale(0.5, 0.04)
+	chip.Size = UDim2.fromScale(0.56, 0.26)
+	chip.BackgroundColor3 = Colors.Ink
+	chip.Visible = false
+	chip.ZIndex = 3
+	chip.Parent = gui
+	corner(chip, UDim.new(0.5, 0))
+	borderStroke(chip, 2).Name = "Outline"
+	local chipText = scaledLabel(chip, "Text", Fonts.Display, Colors.Text, 0.1, 0.8)
+	chipText.ZIndex = 4
 	return gui
 end
 
@@ -414,6 +432,49 @@ local function buildEmptyLabel(pedestal: BasePart): BillboardGui
 	return gui
 end
 
+-- Shows or hides the filled label's mutation chip. Rainbow is white text
+-- and outline under the rainbow gradient (intended tinting).
+local function setMutationChip(gui: BillboardGui, mutation: string?)
+	local chip = gui:FindFirstChild("MutationChip") :: Frame?
+	if not chip then
+		return
+	end
+	-- Pedestal labels refresh on every sync; only rebuild on a change.
+	if chip:GetAttribute("Mutation") == (mutation or "") then
+		return
+	end
+	chip:SetAttribute("Mutation", mutation or "")
+	local text = chip:FindFirstChild("Text") :: TextLabel
+	local outline = chip:FindFirstChild("Outline") :: UIStroke
+	local color = UITheme.GetMutationColor(mutation)
+	local tinted: { Instance } = { text, outline }
+	for _, target in tinted do
+		local tint = target:FindFirstChild("RainbowTint")
+		if tint then
+			tint:Destroy()
+		end
+	end
+	if not mutation or not color then
+		chip.Visible = false
+		return
+	end
+	chip.Visible = true
+	text.Text = ("%s ×%d"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation))
+	if mutation == "Rainbow" then
+		text.TextColor3 = Colors.White
+		outline.Color = Colors.White
+		for _, target in tinted do
+			local gradient = Instance.new("UIGradient")
+			gradient.Name = "RainbowTint"
+			gradient.Color = UITheme.GetRainbowSequence()
+			gradient.Parent = target
+		end
+	else
+		text.TextColor3 = color
+		outline.Color = color
+	end
+end
+
 -- Shows the filled label (everyone) for `info`, or the owner-only empty
 -- label when `info` is nil. Creates both on first use.
 function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
@@ -433,32 +494,9 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 		local tierLabel = panel:FindFirstChild("Tier") :: TextLabel
 		local nameLabel = panel:FindFirstChild("ItemName") :: TextLabel
 		local rateLabel = panel:FindFirstChild("Rate") :: TextLabel
-		local mutationColor = UITheme.GetMutationColor(info.Mutation)
-		local tint = tierLabel:FindFirstChild("RainbowTint")
-		if info.Mutation and mutationColor then
-			tierLabel.Text = ("%s · %s"):format(info.Mutation:upper(), info.Tier:upper())
-			if info.Mutation == "Rainbow" then
-				-- Intended tinting: white text under a rainbow UIGradient.
-				tierLabel.TextColor3 = Colors.White
-				if not tint then
-					local gradient = Instance.new("UIGradient")
-					gradient.Name = "RainbowTint"
-					gradient.Color = UITheme.GetRainbowSequence()
-					gradient.Parent = tierLabel
-				end
-			else
-				tierLabel.TextColor3 = mutationColor
-				if tint then
-					tint:Destroy()
-				end
-			end
-		else
-			tierLabel.Text = info.Tier:upper()
-			tierLabel.TextColor3 = UITheme.GetTierLight(info.Tier)
-			if tint then
-				tint:Destroy()
-			end
-		end
+		tierLabel.Text = info.Tier:upper()
+		tierLabel.TextColor3 = UITheme.GetTierLight(info.Tier)
+		setMutationChip(filledGui, info.Mutation)
 		nameLabel.Text = info.ItemName
 		rateLabel.Text = ("+%s/s"):format(NumberFormat.Money(info.Rate))
 	end

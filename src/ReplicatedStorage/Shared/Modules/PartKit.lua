@@ -95,6 +95,11 @@ end
 -- (WorldAnimationController); the attributes below drive the motion.
 PartKit.HOVER_TAG = "FT_Hover"
 
+-- Models with this tag hold satellites the client orbits round their
+-- parent group's PrimaryPart (WorldAnimationController). Attributes: Count,
+-- Radius, Period (seconds per lap), Tilt (degrees).
+PartKit.ORBIT_TAG = "FT_Orbit"
+
 -- Parts with this tag cycle their Color around the hue wheel on clients
 -- (WorldAnimationController): Rainbow mutation shells.
 PartKit.RAINBOW_TAG = "FT_Rainbow"
