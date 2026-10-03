@@ -118,7 +118,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     HeistService fails that player's carries (either side) there.
   - **Shield:** per player until a server time, published as the plot
     attribute `ShieldUntil`. Raised 60 s on claim and when the owner steps
-    on their YOURS pad while it's down (server region check). While up, a
+    **onto** their YOURS pad while it's down (server region check,
+    edge-triggered: standing on it does nothing). After any shield ends the
+    pad is locked for `ShieldRearmSeconds` (20 s, plot attribute
+    `ShieldRearmAt`: the pad label and the HUD's SHIELD RECHARGING chip);
+    the claim and victim shields ignore the lock, `/shield 0` clears it. While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,

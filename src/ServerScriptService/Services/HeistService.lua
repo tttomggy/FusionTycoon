@@ -9,8 +9,14 @@
 	    published as the plot attribute ShieldUntil so every client renders
 	    the fence without a remote.
 	  * Raised for ClaimShieldSeconds on claim, ShieldSeconds when the owner
-	    stands on their YOURS pad (the claimed claim station) while it's
+	    steps ONTO their YOURS pad (the claimed claim station) while it's
 	    down, and VictimShieldSeconds after losing an item.
+	  * The pad is edge-triggered (off it last tick, on it this tick):
+	    standing on it does nothing, so an AFK owner can't hold a shield up.
+	  * After any shield ends (timeout or a drop) the pad is locked for
+	    ShieldRearmSeconds: the thieves' window. Published as the plot
+	    attribute ShieldRearmAt (server time) for the pad label and HUD chip.
+	    The claim and victim shields ignore the lock; /shield 0 clears it.
 	  * While up, a loop every EjectTickSeconds moves any non-owner whose
 	    root is inside the plot's walls to the street in front of its gate.
 
@@ -92,8 +98,10 @@ type State = {
 	recentLosses: { [number]: { number } },
 	-- Plots seen claimed (the claim shield is raised once, on the change).
 	claimSeen: { [number]: boolean },
-	-- os.clock() of each owner's last shield-pad activation.
-	lastPadAt: { [number]: number },
+	-- Server time each player's pad may raise the shield again (re-arm).
+	rearmAt: { [number]: number },
+	-- Whether each owner's root was on their pad last tick (edge trigger).
+	onPad: { [number]: boolean },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
 	-- Active carries by thief UserId, and the Uid -> thief index that keeps
@@ -112,7 +120,8 @@ local state: State = {
 	cooldownUntil = {},
 	recentLosses = {},
 	claimSeen = {},
-	lastPadAt = {},
+	rearmAt = {},
+	onPad = {},
 	debugStealable = {},
 	carries = {},
 	carriedItems = {},
@@ -223,14 +232,29 @@ end
 
 --[[ Public API: shield and protection ------------------------------------ ]]
 
--- Raises `player`'s shield for `seconds` from now (0 drops it).
-function HeistService.RaiseShield(player: Player, seconds: number)
-	local untilTime = if seconds > 0 then serverNow() + seconds else 0
-	state.shieldUntil[player.UserId] = untilTime
+local function publishShield(player: Player)
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if plot then
-		plot:SetAttribute("ShieldUntil", untilTime)
+		plot:SetAttribute("ShieldUntil", state.shieldUntil[player.UserId] or 0)
+		plot:SetAttribute("ShieldRearmAt", state.rearmAt[player.UserId] or 0)
 	end
+end
+
+-- Raises `player`'s shield for `seconds` from now (0 drops it). Either way
+-- the pad's re-arm lock runs from the moment this shield ends. Callers that
+-- aren't the pad (claim, victim, /shield) aren't subject to the lock.
+function HeistService.RaiseShield(player: Player, seconds: number)
+	local now = serverNow()
+	local untilTime = if seconds > 0 then now + seconds else 0
+	state.shieldUntil[player.UserId] = untilTime
+	state.rearmAt[player.UserId] = (if seconds > 0 then untilTime else now) + HeistConfig.ShieldRearmSeconds
+	publishShield(player)
+end
+
+-- Studio /shield 0: also lifts the pad's re-arm lock.
+function HeistService.ClearRearm(player: Player)
+	state.rearmAt[player.UserId] = nil
+	publishShield(player)
 end
 
 function HeistService.IsShielded(player: Player): boolean
@@ -631,26 +655,32 @@ end
 
 --[[ Shield loop: claim shield, shield pad, protection, eject --------------- ]]
 
+-- Edge-triggered: only stepping ONTO the pad (off last tick, on now)
+-- raises the shield, and only once the re-arm lock has run out.
 local function onPadCheck(player: Player, origin: CFrame)
 	local root = getRoot(player)
-	if not root or HeistService.IsShielded(player) or HeistService.IsProtected(player) then
+	local inside = false
+	if root then
+		local offset = origin:PointToObjectSpace(root.Position) - PlotLayout.CLAIM_STATION
+		local radius = PlotLayout.Station.PadDiameter / 2
+		inside = Vector3.new(offset.X, 0, offset.Z).Magnitude <= radius
+			and math.abs(offset.Y) <= PlotLayout.Station.LabelOffsetY
+	end
+	local wasInside = state.onPad[player.UserId] == true
+	state.onPad[player.UserId] = inside
+	if not inside or wasInside then
+		return
+	end
+	if HeistService.IsShielded(player) or HeistService.IsProtected(player) then
 		return
 	end
 	-- The shield pad is off-limits while carrying a stolen item.
 	if state.carries[player.UserId] then
 		return
 	end
-	local offset = origin:PointToObjectSpace(root.Position) - PlotLayout.CLAIM_STATION
-	local radius = PlotLayout.Station.PadDiameter / 2
-	if Vector3.new(offset.X, 0, offset.Z).Magnitude > radius or math.abs(offset.Y) > PlotLayout.Station.LabelOffsetY then
+	if (state.rearmAt[player.UserId] or 0) > serverNow() then
 		return
 	end
-	local now = os.clock()
-	local last = state.lastPadAt[player.UserId]
-	if last and now - last < HeistConfig.ShieldPadDebounceSeconds then
-		return
-	end
-	state.lastPadAt[player.UserId] = now
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
 end
 
@@ -700,7 +730,8 @@ local function onPlayerRemoving(player: Player)
 	state.cooldownUntil[userId] = nil
 	state.recentLosses[userId] = nil
 	state.claimSeen[userId] = nil
-	state.lastPadAt[userId] = nil
+	state.rearmAt[userId] = nil
+	state.onPad[userId] = nil
 	state.debugStealable[userId] = nil
 end
 

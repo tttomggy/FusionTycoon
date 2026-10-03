@@ -545,9 +545,20 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 - [ ] **Shield + eject.** On claim the shield is up 60 s: a pink ForceField
   fence round A's walls and a line across the gate, seen by both players.
   A's chip reads **🛡 SHIELD · 42s**. B walking in is moved to the street in
-  front of A's gate. When it ends the fence fades, the chip turns amber
-  and pulses (**SHIELD DOWN · step on YOURS**), and A stepping on the YOURS
-  pad raises it again for 60 s. `/shield 0` drops it at once.
+  front of A's gate. When it ends the fence fades and the chip reads
+  **SHIELD RECHARGING · 20s** (amber, counting down) while A's pad shows
+  **SHIELD READY IN 20s**; then the chip pulses **SHIELD DOWN · step on
+  YOURS**, the pad reads **STEP ON FOR SHIELD**, and A stepping onto the
+  YOURS pad raises it for 60 s.
+- [ ] **Standing on the pad doesn't re-raise.** A stands still on the YOURS
+  pad and runs `/shield 0`: the fence drops and stays down while A stands
+  there. Stepping off and back on raises it again (`/shield 0` lifts the
+  re-arm lock, so it works straight away).
+- [ ] **20 s re-arm.** Let A's shield time out (or `/shield 5`, wait 5 s).
+  For 20 s, stepping off and onto the pad does nothing and the pad counts
+  **SHIELD READY IN …**; B can grab in that window. After 20 s, stepping
+  onto the pad raises it. The claim shield and the 120 s shield after a
+  loss go up regardless of the lock.
 - [ ] **Steal and deliver.** Shield down: B holds E on A's pedestal
   (**Steal**, the item's name, 1.5 s).
   - [ ] B: the orb over B's head (Golden shell and 2 satellites), a red

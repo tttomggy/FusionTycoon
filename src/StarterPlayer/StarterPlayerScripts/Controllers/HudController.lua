@@ -638,8 +638,9 @@ end
 
 --[[ Shield chip -----------------------------------------------------------
 	Under the cash card (beside it on a phone): teal "🛡 SHIELD · 42s" while
-	your lab's shield is up, a pulsing amber "SHIELD DOWN · step on YOURS"
-	while it's down. Hidden under HeistConfig.MinRebirths (the plot sign
+	your lab's shield is up, amber "SHIELD RECHARGING · 12s" while the pad's
+	re-arm lock runs (ShieldRearmAt), then a pulsing amber "SHIELD DOWN ·
+	step on YOURS" once the pad can raise it again. Hidden under HeistConfig.MinRebirths (the plot sign
 	says PROTECTED instead) and before you claim. Reads the plot's
 	ShieldUntil attribute (HeistService), no remote.
 ]]
@@ -691,12 +692,19 @@ local function refreshShieldChip()
 		setShieldPulse(false)
 		return
 	end
+	local now = Workspace:GetServerTimeNow()
 	local shieldUntil = plot:GetAttribute("ShieldUntil")
-	local left = if typeof(shieldUntil) == "number" then shieldUntil - Workspace:GetServerTimeNow() else 0
+	local rearmAt = plot:GetAttribute("ShieldRearmAt")
+	local left = if typeof(shieldUntil) == "number" then shieldUntil - now else 0
+	local rearmLeft = if typeof(rearmAt) == "number" then rearmAt - now else 0
 	shieldChip.Visible = true
 	if left > 0 then
 		shieldChip.Text = ("🛡 SHIELD · %ds"):format(math.ceil(left))
 		shieldChip.BackgroundColor3 = Colors.ShieldTeal
+		setShieldPulse(false)
+	elseif rearmLeft > 0 then
+		shieldChip.Text = ("SHIELD RECHARGING · %ds"):format(math.ceil(rearmLeft))
+		shieldChip.BackgroundColor3 = Colors.ShieldAmber
 		setShieldPulse(false)
 	else
 		shieldChip.Text = "SHIELD DOWN · step on YOURS"

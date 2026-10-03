@@ -116,6 +116,10 @@ local function onPlayerChatted(player: Player, message: string)
 	elseif command == SHIELD_COMMAND then
 		local seconds = tonumber(argument) or HeistConfig.ShieldSeconds
 		HeistService.RaiseShield(player, math.max(0, seconds))
+		if seconds <= 0 then
+			-- /shield 0 also lifts the pad's 20 s re-arm lock, for testing.
+			HeistService.ClearRearm(player)
+		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
 	elseif command == HEIST_COOLDOWN_COMMAND then
 		HeistService.ClearCooldown(player)
