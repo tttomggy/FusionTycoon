@@ -104,6 +104,61 @@ function PlotKit.BuildWalls(origin: CFrame, parent: Instance, claimed: boolean):
 	return walls
 end
 
+-- Parts of the lab shield carry this attribute; clients show and hide them
+-- from the plot's ShieldUntil (HeistController), so they start invisible.
+PlotKit.SHIELD_PART_ATTRIBUTE = "ShieldPart"
+
+-- The lab shield, built hidden: ForceField panels just outside all four
+-- walls (the front split around the gate) and a thin Neon line across the
+-- gate gap. ForceField is the one material allowed outside SmoothPlastic /
+-- Neon (CLAUDE.md). Nothing collides: HeistService's eject loop keeps
+-- intruders out.
+function PlotKit.BuildShieldFence(origin: CFrame, parent: Instance): Folder
+	local f = PlotLayout.ShieldFence
+	local fence = Instance.new("Folder")
+	fence.Name = "ShieldFence"
+
+	local half = PlotLayout.PLOT_HALF
+	local gate = PlotLayout.GATE_HALF_WIDTH
+	local centerLine = half + f.OutsetFromWall + f.Thickness / 2
+	local outerEdge = half + f.OutsetFromWall + f.Thickness
+	local frontLength = outerEdge - gate
+	local panels = {
+		{ Name = "ShieldBack", Center = Vector3.new(0, 0, -centerLine), Size = Vector3.new(outerEdge * 2, f.Height, f.Thickness) },
+		{ Name = "ShieldLeft", Center = Vector3.new(-centerLine, 0, 0), Size = Vector3.new(f.Thickness, f.Height, outerEdge * 2) },
+		{ Name = "ShieldRight", Center = Vector3.new(centerLine, 0, 0), Size = Vector3.new(f.Thickness, f.Height, outerEdge * 2) },
+		{ Name = "ShieldFrontLeft", Center = Vector3.new(-(gate + frontLength / 2), 0, centerLine), Size = Vector3.new(frontLength, f.Height, f.Thickness) },
+		{ Name = "ShieldFrontRight", Center = Vector3.new(gate + frontLength / 2, 0, centerLine), Size = Vector3.new(frontLength, f.Height, f.Thickness) },
+	}
+	for _, panel in panels do
+		local part = PartKit.Part({
+			Name = panel.Name,
+			Size = panel.Size,
+			CFrame = PartKit.At(origin, panel.Center, f.Height / 2),
+			Color = World.Shield,
+			Material = Enum.Material.ForceField,
+			Transparency = 1,
+			Parent = fence,
+		})
+		PartKit.MakeDecorative(part)
+		part:SetAttribute(PlotKit.SHIELD_PART_ATTRIBUTE, true)
+	end
+	local line = PartKit.Part({
+		Name = "ShieldGateLine",
+		Size = Vector3.new(gate * 2, f.GateLineThickness, f.GateLineThickness),
+		CFrame = PartKit.At(origin, Vector3.new(0, 0, half - PlotLayout.WALL_THICKNESS / 2), f.GateLineY),
+		Color = World.Shield,
+		Material = Enum.Material.Neon,
+		Transparency = 1,
+		Parent = fence,
+	})
+	PartKit.MakeDecorative(line)
+	line:SetAttribute(PlotKit.SHIELD_PART_ATTRIBUTE, true)
+
+	fence.Parent = parent
+	return fence
+end
+
 -- Violet once claimed, Unclaimed before.
 function PlotKit.SetWallStripsClaimed(plot: Instance, claimed: boolean)
 	local walls = plot:FindFirstChild("Walls")

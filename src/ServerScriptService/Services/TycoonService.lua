@@ -261,6 +261,7 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 	PlotKit.BuildWalkway(origin, plot)
 	PlotKit.BuildWalls(origin, plot, false)
 	PlotKit.BuildGateRamp(origin, plot)
+	PlotKit.BuildShieldFence(origin, plot)
 
 	-- Spawn on the street in front of the gate; RespawnLocation picks it.
 	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)

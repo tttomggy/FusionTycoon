@@ -20,6 +20,8 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -634,6 +636,75 @@ function HudController.FloatPop(position: Vector3, text: string, color: Color3):
 	return label
 end
 
+--[[ Shield chip -----------------------------------------------------------
+	Under the cash card (beside it on a phone): teal "🛡 SHIELD · 42s" while
+	your lab's shield is up, a pulsing amber "SHIELD DOWN · step on YOURS"
+	while it's down. Hidden under HeistConfig.MinRebirths (the plot sign
+	says PROTECTED instead) and before you claim. Reads the plot's
+	ShieldUntil attribute (HeistService), no remote.
+]]
+local SHIELD_CHIP_HEIGHT = 30
+local SHIELD_CHIP_GAP = 8
+local SHIELD_CHIP_REFRESH_SECONDS = 0.25
+
+local shieldChip: TextLabel
+local shieldChipScale: UIScale
+local shieldPulse: Tween? = nil
+
+local function buildShieldChip()
+	shieldChip = UIKit.Pill({
+		Name = "ShieldChip",
+		Parent = screenGui,
+		Text = "",
+		Color = Colors.ShieldTeal,
+		Font = Fonts.Display,
+		TextSize = 14,
+		Height = SHIELD_CHIP_HEIGHT,
+		TextStroke = 1.5,
+	})
+	shieldChip.Visible = false
+	shieldChipScale = Instance.new("UIScale")
+	shieldChipScale.Parent = shieldChip
+end
+
+local function setShieldPulse(on: boolean)
+	if on and not shieldPulse then
+		local tween = TweenService:Create(
+			shieldChipScale,
+			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = 1.06 }
+		)
+		tween:Play()
+		shieldPulse = tween
+	elseif not on and shieldPulse then
+		shieldPulse:Cancel()
+		shieldPulse = nil
+		shieldChipScale.Scale = 1
+	end
+end
+
+local function refreshShieldChip()
+	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	local plot = folder and folder:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
+	if not plot or plot:GetAttribute("Claimed") ~= true or TycoonController.GetRebirths() < HeistConfig.MinRebirths then
+		shieldChip.Visible = false
+		setShieldPulse(false)
+		return
+	end
+	local shieldUntil = plot:GetAttribute("ShieldUntil")
+	local left = if typeof(shieldUntil) == "number" then shieldUntil - Workspace:GetServerTimeNow() else 0
+	shieldChip.Visible = true
+	if left > 0 then
+		shieldChip.Text = ("🛡 SHIELD · %ds"):format(math.ceil(left))
+		shieldChip.BackgroundColor3 = Colors.ShieldTeal
+		setShieldPulse(false)
+	else
+		shieldChip.Text = "SHIELD DOWN · step on YOURS"
+		shieldChip.BackgroundColor3 = Colors.ShieldAmber
+		setShieldPulse(true)
+	end
+end
+
 --[[ Layout ---------------------------------------------------------------- ]]
 
 local cashHolder: Frame
@@ -641,6 +712,11 @@ local cashHolder: Frame
 local function applyLayout(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
+	-- Under the cash card on desktop; beside it on a phone (the goal
+	-- tracker sits under it there).
+	shieldChip.Position = if isPhone
+		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + SHIELD_CHIP_GAP, 0)
+		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + SHIELD_CHIP_GAP)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -695,6 +771,7 @@ function HudController.Init()
 	cashHolder = buildCashCard()
 	buildButtonRow()
 	buildRebirthReadyButton()
+	buildShieldChip()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
@@ -705,6 +782,12 @@ function HudController.Init()
 
 	RunService.RenderStepped:Connect(onRenderStep)
 	task.spawn(runUpgradesPulse)
+	task.spawn(function()
+		while true do
+			refreshShieldChip()
+			task.wait(SHIELD_CHIP_REFRESH_SECONDS)
+		end
+	end)
 
 	TycoonController.TycoonChanged:Connect(refreshAll)
 	InventoryController.InventoryChanged:Connect(refreshAll)

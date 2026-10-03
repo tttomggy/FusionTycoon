@@ -28,7 +28,7 @@ local REMOTE_EVENT_NAMES = {
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt (server time) }
 	"HeistEnded", -- server -> thief and victim: a carry ended; { Role, Outcome = "Delivered"|"Saved"|"Timeout"|"Left"|"Died", Item, OtherName }
-	"HeistFeed", -- server -> all clients: Legendary+ heist banner; { Kind = "Stole"|"Caught", Thief, Victim, Tier, Mutation?, ItemName }
+	"HeistFeed", -- server -> all clients: Legendary+ heist banner; { Kind = "Grab"|"Stole"|"Caught", Thief, Victim, Tier, Mutation?, ItemName, ItemId }
 }
 
 local function getOrCreateFolder(): Folder

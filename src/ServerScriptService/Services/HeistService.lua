@@ -402,6 +402,7 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 			Tier = carry.Item.Tier,
 			Mutation = carry.Item.Mutation,
 			ItemName = carry.Item.Name,
+			ItemId = carry.Item.ItemId,
 		})
 	end
 end
@@ -592,6 +593,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 			Tier = info.Tier,
 			Mutation = info.Mutation,
 			ItemName = info.Name,
+			ItemId = info.ItemId,
 		})
 	end
 end
