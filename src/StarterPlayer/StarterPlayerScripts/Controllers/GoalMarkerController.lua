@@ -10,7 +10,9 @@
 	    Hidden while you're within HIDE_RADIUS of it.
 	  * UI target ("ui:Upgrades"): a pulsing gold outline on that HUD button.
 
-	Updates on every goal change and goes away after the last goal.
+	Updates on every goal change and goes away after the last goal. A world
+	target that still can't be found TARGET_WARN_SECONDS after the plot is
+	claimed warns once (a renamed part or a stale GoalConfig entry).
 ]]
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -40,6 +42,7 @@ local HIDE_RADIUS = 8
 local RING_MARGIN = 2
 local RING_PULSE_SECONDS = 1.2
 local RESOLVE_INTERVAL = 0.5
+local TARGET_WARN_SECONDS = 10
 
 local localPlayer = Players.LocalPlayer
 
@@ -52,6 +55,11 @@ local markerAnchor: Attachment? = nil
 local distanceText: TextLabel? = nil
 local ring: BasePart? = nil
 local targetPosition: Vector3? = nil
+
+-- os.clock() a target name was first missed on a claimed plot; names that
+-- already warned.
+local missingSince: { [string]: number } = {}
+local warnedTargets: { [string]: boolean } = {}
 
 --[[ Target resolution ---------------------------------------------------------- ]]
 
@@ -240,6 +248,24 @@ end
 
 --[[ Goal changes -------------------------------------------------------------------- ]]
 
+-- Warns once for a world target that never turns up. Only counts while the
+-- plot is claimed (stations and generators are built on claim), and skips
+-- "FirstEmptyPedestal", which is legitimately missing when all are full.
+local function checkTargetExists(name: string, target: Instance?)
+	local plot = getPlot()
+	if target or name == "FirstEmptyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
+		missingSince[name] = nil
+		return
+	end
+	local since = missingSince[name]
+	if not since then
+		missingSince[name] = os.clock()
+	elseif not warnedTargets[name] and os.clock() - since >= TARGET_WARN_SECONDS then
+		warnedTargets[name] = true
+		warn(("GoalMarkerController: goal target %q not found in your plot; check GoalConfig"):format(name))
+	end
+end
+
 local function setUiTarget(name: string?)
 	if currentUiButton and currentUiButton ~= name then
 		HudController.SetButtonHighlight(currentUiButton, false)
@@ -270,6 +296,7 @@ local function refresh()
 	setUiTarget(nil)
 
 	local target = resolveTarget(targetName)
+	checkTargetExists(targetName, target)
 	if target ~= currentTarget or index ~= currentGoalIndex then
 		currentGoalIndex = index
 		if target then

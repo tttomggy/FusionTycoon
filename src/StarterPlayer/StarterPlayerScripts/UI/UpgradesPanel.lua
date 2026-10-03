@@ -361,7 +361,7 @@ end
 local function buildIntro(parent: Instance)
 	UIKit.Label({
 		Name = "Intro",
-		Text = "Generators earn every second, even while you're away. Find them in the back corners of your lab.",
+		Text = "Generators earn every second. They're the machines along the left wall of your lab.",
 		Font = Fonts.Body,
 		TextSize = 13,
 		TextColor3 = Colors.Muted,
