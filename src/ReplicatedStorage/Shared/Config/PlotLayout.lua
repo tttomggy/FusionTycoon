@@ -100,6 +100,21 @@ PlotLayout.FactoryBelt = {
 	Speed = 10, -- studs/s the balls ride at (the belt itself doesn't move players)
 }
 
+-- The client-side cash balls (FactoryController).
+PlotLayout.FactoryBall = {
+	Diameter = {
+		Common = 0.9,
+		Rare = 1.05,
+		Epic = 1.2,
+		Legendary = 1.4,
+		Mythic = 1.6,
+	} :: { [string]: number },
+	LightTiers = { Legendary = true, Mythic = true } :: { [string]: boolean },
+	LightRange = 4,
+	LightBrightness = 1,
+	ArcRise = 1, -- studs above the straight spout-to-belt line, mid-arc
+}
+
 PlotLayout.Collector = {
 	Position = v3(-21, 0, -24),
 	Size = v3(6, 0.4, 6), -- top at y 0.4
