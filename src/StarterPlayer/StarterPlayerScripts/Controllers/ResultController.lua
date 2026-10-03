@@ -58,8 +58,7 @@ local function itemName(item: any): string
 end
 
 local function earnRate(tier: string): number
-	return TycoonConfig.GetPedestalCashPerSecond(tier)
-		* TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	return TycoonConfig.GetPedestalCashPerSecond(tier) * TycoonController.GetIncomeMultiplier()
 end
 
 --[[ Big result card -------------------------------------------------------------- ]]

@@ -53,7 +53,7 @@ local function getModel(id: string): Model?
 end
 
 local function getMultiplier(): number
-	return TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	return TycoonController.GetIncomeMultiplier()
 end
 
 -- The Core's outer ball (where it is right now, mid-bob).

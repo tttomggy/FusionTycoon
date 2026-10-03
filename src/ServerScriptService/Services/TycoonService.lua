@@ -407,18 +407,21 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 	local prompt = newPrompt(pad, "UpgradePrompt", "Upgrade", "Cash Multiplier", PlotLayout.Station.PromptDistance)
 
 	local function refreshLabel()
+		-- The pad's own value (not x rebirth): "x2.25 · LV 5/15", "x5 MAX".
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
+		local maxLevel = TycoonConfig.GetCashMultiplierMaxLevel()
 		local current = TycoonConfig.GetCashMultiplierValue(level)
-		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
+		if level >= maxLevel then
 			padLabel.SetPill(("%s MAX"):format(NumberFormat.Multiplier(current)))
 			padLabel.SetDetail(nil)
 			prompt.Enabled = false
 			return
 		end
+		prompt.Enabled = true
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		local nextValue = TycoonConfig.GetCashMultiplierValue(level + 1)
-		padLabel.SetPill(("%s → %s"):format(NumberFormat.Multiplier(current), NumberFormat.Multiplier(nextValue)))
-		padLabel.SetDetail(("%s · press E"):format(NumberFormat.Money(cost)))
+		padLabel.SetPill(("%s · LV %d/%d"):format(NumberFormat.Multiplier(current), level, maxLevel))
+		padLabel.SetDetail(("→ %s · %s · press E"):format(NumberFormat.Multiplier(nextValue), NumberFormat.Money(cost)))
 	end
 	refreshLabel()
 
@@ -569,11 +572,11 @@ local function refreshFactoryLine(player: Player)
 	-- own share on the client. Same formula as the payout, minus pedestals.
 	local label = collectorLabelByUserId[player.UserId]
 	if label then
-		local generatorIncome =
-			TycoonConfig.GetPassiveCashPerSecond(levels, {}, PlayerDataService.GetCashMultiplierLevel(player))
+		local inputs = PlayerDataService.GetIncomeInputs(player)
+		local generatorIncome = if inputs then TycoonConfig.GetGeneratorIncome(inputs) else 0
 		label.SetPill(("+%s/s"):format(NumberFormat.Money(generatorIncome)))
 	end
-	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
+	local multiplier = PlayerDataService.GetIncomeMultiplier(player)
 	for _, generator in TycoonConfig.Generators do
 		local model = plot:FindFirstChild(GeneratorKit.GetModelName(generator.Id))
 		if model and model:IsA("Model") then
@@ -602,7 +605,7 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 		return
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
-	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
+	local multiplier = PlayerDataService.GetIncomeMultiplier(player)
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
 		local pedestal = folder:FindFirstChild("Pedestal" .. index)
 		if pedestal and pedestal:IsA("BasePart") then

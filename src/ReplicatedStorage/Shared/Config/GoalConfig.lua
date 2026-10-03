@@ -35,7 +35,7 @@ GoalConfig.Goals = {
 	{ Id = "own_epic", Text = "Fuse 2 Rare items into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine" },
 	{ Id = "unlock_ember_forge", Text = "Unlock the Ember Forge", Reward = 5000, Unit = "Basic LV", Target = "Generator_ember_forge" },
 	{ Id = "own_legendary", Text = "Own a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine" },
-	{ Id = "multiplier_x3", Text = "Reach a x3 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation" },
+	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation" },
 	{ Id = "own_mythic", Text = "Own a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine" },
 } :: { GoalDef }
 

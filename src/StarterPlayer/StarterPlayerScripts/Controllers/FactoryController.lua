@@ -215,7 +215,7 @@ end
 -- Drops the next ball for each owned generator whose interval has come up.
 local function spawnDue(state: PlotState, now: number)
 	local multiplier = if state.IsOwn
-		then TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+		then TycoonController.GetIncomeMultiplier()
 		else 0
 	for _, generator in TycoonConfig.Generators do
 		local spot = PlotLayout.GENERATORS[generator.Id]
@@ -324,7 +324,7 @@ local function popPedestals(dt: number, cameraPosition: Vector3)
 	for _, item in InventoryController.GetInventory() do
 		byUid[item.Uid] = item
 	end
-	local multiplier = TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	local multiplier = TycoonController.GetIncomeMultiplier()
 	for index, uid in TycoonController.GetPedestalDisplays() do
 		local item = byUid[uid]
 		local pedestal = folder:FindFirstChild("Pedestal" .. index)

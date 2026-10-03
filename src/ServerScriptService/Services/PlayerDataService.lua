@@ -551,17 +551,31 @@ function PlayerDataService.GetDisplayedTiers(player: Player): { string }
 	return tiers
 end
 
--- Generators + pedestals, multiplier applied: all of a player's income.
-function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
+-- The one place the server builds TycoonConfig.IncomeInputs. nil until the
+-- player's data has loaded.
+function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeInputs?
 	local data = state.sessionCache[player.UserId]
 	if not data then
-		return 0
+		return nil
 	end
-	return TycoonConfig.GetPassiveCashPerSecond(
-		data.Generators,
-		PlayerDataService.GetDisplayedTiers(player),
-		data.CashMultiplierLevel
-	)
+	return {
+		GeneratorLevels = data.Generators,
+		PedestalTiers = PlayerDataService.GetDisplayedTiers(player),
+		CashMultiplierLevel = data.CashMultiplierLevel,
+		Rebirths = 0, -- Rebirth data lands with RebirthService
+	}
+end
+
+-- Pad x rebirth: the multiplier every per-generator/per-item number shows.
+function PlayerDataService.GetIncomeMultiplier(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	return if inputs then TycoonConfig.GetIncomeMultiplier(inputs) else 1
+end
+
+-- Generators + pedestals, multiplier applied: all of a player's income.
+function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	return if inputs then TycoonConfig.GetPassiveCashPerSecond(inputs) else 0
 end
 
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot

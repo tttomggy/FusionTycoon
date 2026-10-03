@@ -83,7 +83,7 @@ local function tierRank(tier: string): number
 end
 
 local function getMultiplier(): number
-	return TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	return TycoonController.GetIncomeMultiplier()
 end
 
 local function earnRate(tier: string): number

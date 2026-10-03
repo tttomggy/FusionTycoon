@@ -61,8 +61,17 @@ local function tierColor(tier: string): Color3
 	return FusionConfig.TierAccentColors[tier] or Colors.Text
 end
 
+-- Pad x rebirth: what every generator row's numbers are multiplied by.
 local function getMultiplier(): number
-	return TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+	return TycoonController.GetIncomeMultiplier()
+end
+
+-- The Multiplier Pad row (footer): the pad alone, "x2.25 · LV 5/15".
+local function getPadText(): string
+	local level = TycoonController.GetCashMultiplierLevel()
+	local maxLevel = TycoonConfig.GetCashMultiplierMaxLevel()
+	local value = NumberFormat.Multiplier(TycoonConfig.GetCashMultiplierValue(level))
+	return if level >= maxLevel then ("%s MAX"):format(value) else ("%s · LV %d/%d"):format(value, level, maxLevel)
 end
 
 -- "unlocked" | "locked" (next in the chain) | "far" (two or more steps away)
@@ -162,12 +171,11 @@ local function refresh()
 	local multiplier = getMultiplier()
 
 	cashLabel.Text = NumberFormat.Money(cash)
-	footerPill.Text = NumberFormat.Multiplier(multiplier)
-	local generatorIncome = 0
+	footerPill.Text = getPadText()
 	for _, generator in TycoonConfig.Generators do
 		refreshRow(generator, cash, levels, multiplier)
-		generatorIncome += TycoonConfig.GetGeneratorCashPerSecond(generator, levels[generator.Id] or 0) * multiplier
 	end
+	local generatorIncome = TycoonConfig.GetGeneratorIncome(TycoonController.GetIncomeInputs())
 	introIncomeLabel.Text = ("%s/s"):format(NumberFormat.Money(generatorIncome))
 end
 
@@ -490,7 +498,7 @@ local function buildFooter(parent: Instance)
 		TextSize = 13,
 		TextColor3 = Colors.Muted,
 		TextWrapped = true,
-		Size = UDim2.new(1, -70, 1, 0),
+		Size = UDim2.new(1, -150, 1, 0),
 		LayoutOrder = 2,
 		ZIndex = body.ZIndex + 1,
 		Parent = body,

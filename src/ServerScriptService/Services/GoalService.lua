@@ -123,8 +123,9 @@ local EVALUATORS: { [string]: Evaluator } = {
 		return done, if done then 5 else generatorLevel(data, "basic_generator"), 5
 	end,
 	own_legendary = ownTierGoal("Legendary", "Epic", 2),
-	multiplier_x3 = function(_player, data)
-		return data.CashMultiplierLevel >= 4, data.CashMultiplierLevel, 4
+	multiplier_x2 = function(_player, data)
+		-- Pad LV 4 = x2.
+		return data.CashMultiplierLevel >= 4, math.min(data.CashMultiplierLevel, 4), 4
 	end,
 	own_mythic = ownTierGoal("Mythic", "Legendary", 2),
 }

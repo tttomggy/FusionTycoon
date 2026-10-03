@@ -1,6 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
 
@@ -70,6 +72,37 @@ end
 -- Uid of the item displayed on `pedestalIndex`, or nil if it's empty.
 function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 	return pedestalDisplays[pedestalIndex]
+end
+
+-- Tiers of the items on this player's pedestals (from the inventory cache).
+function TycoonController.GetDisplayedTiers(): { string }
+	local byUid: { [string]: any } = {}
+	for _, item in InventoryController.GetInventory() do
+		byUid[item.Uid] = item
+	end
+	local tiers = {}
+	for _, uid in pedestalDisplays do
+		local item = byUid[uid]
+		if item then
+			table.insert(tiers, item.Tier)
+		end
+	end
+	return tiers
+end
+
+-- The one place the client builds TycoonConfig.IncomeInputs.
+function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
+	return {
+		GeneratorLevels = generatorLevels,
+		PedestalTiers = TycoonController.GetDisplayedTiers(),
+		CashMultiplierLevel = cashMultiplierLevel,
+		Rebirths = 0, -- Rebirth data lands with RebirthService
+	}
+end
+
+-- Pad x rebirth: the multiplier every per-generator/per-item number shows.
+function TycoonController.GetIncomeMultiplier(): number
+	return TycoonConfig.GetIncomeMultiplier(TycoonController.GetIncomeInputs())
 end
 
 -- Called by UI when the player clicks the upgrade button for `generatorId`.

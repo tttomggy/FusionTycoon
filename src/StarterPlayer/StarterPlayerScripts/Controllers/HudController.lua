@@ -85,27 +85,8 @@ local highlighted: { [string]: boolean? } = {}
 
 --[[ Income ---------------------------------------------------------------- ]]
 
-local function getDisplayedTiers(): { string }
-	local byUid: { [string]: any } = {}
-	for _, item in InventoryController.GetInventory() do
-		byUid[item.Uid] = item
-	end
-	local tiers = {}
-	for _, uid in TycoonController.GetPedestalDisplays() do
-		local item = byUid[uid]
-		if item then
-			table.insert(tiers, item.Tier)
-		end
-	end
-	return tiers
-end
-
 local function getIncomePerSecond(): number
-	return TycoonConfig.GetPassiveCashPerSecond(
-		TycoonController.GetGeneratorLevels(),
-		getDisplayedTiers(),
-		TycoonController.GetCashMultiplierLevel()
-	)
+	return TycoonConfig.GetPassiveCashPerSecond(TycoonController.GetIncomeInputs())
 end
 
 -- Generators that are unlocked, not maxed, and affordable right now.
@@ -589,6 +570,7 @@ local function refreshAll()
 		NumberFormat.Money(getIncomePerSecond()),
 		UIKit.Colored("/s", Colors.Muted)
 	)
+	-- The Multiplier Pad's own value; rebirth has its own pill beside it.
 	multiplierPill.Text = NumberFormat.Multiplier(
 		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
 	)
