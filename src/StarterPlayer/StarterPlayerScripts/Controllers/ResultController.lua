@@ -11,6 +11,9 @@
 	  * Small pull card (bottom) - Common/Rare gacha pulls; each new pull
 	    replaces the previous card.
 
+	  * Pull x10 grid (centre) - all ten pulls popping in 0.06 s apart; the
+	    best one (by GetItemCashPerSecond) is outlined and, if it qualifies,
+	    also gets the big card.
 	  * Rebirth card (centre) - "REBIRTH 3!" with "Income x2.5 · Luck +15%"
 	    on a successful RebirthResult (RebirthPanel plays the flash).
 
@@ -308,6 +311,204 @@ local function showBigCard(info: BigCardInfo)
 	UIKit.PopIn(holder)
 	if tier == "Mythic" or tier == "Secret" then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
+	end
+end
+
+--[[ Pull x10 grid -------------------------------------------------------------------- ]]
+
+local MULTI_COLUMNS = 5
+local MULTI_CELL = Vector2.new(100, 112)
+local MULTI_GAP = 10
+local MULTI_POP_STAGGER = 0.06
+
+local multiHolder: Frame? = nil
+
+local function closeMultiCard()
+	local holder = multiHolder
+	multiHolder = nil
+	if holder then
+		local tween = UIKit.PopOut(holder)
+		tween.Completed:Once(function()
+			holder:Destroy()
+		end)
+	end
+end
+
+local function pullRank(tier: string): number
+	return ItemConfig.Tiers[tier] or 0
+end
+
+local function itemValue(item: any): number
+	return TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
+end
+
+local function buildMiniCard(parent: Instance, item: any, order: number, isBest: boolean, z: number): Frame
+	local tierColor = FusionConfig.TierAccentColors[item.Tier] or Colors.Text
+	local body, holder = UIKit.Panel({
+		Name = "Pull" .. order,
+		Parent = parent,
+		LayoutOrder = order,
+		Gradient = { { 0, UITheme.TowardInk(tierColor, 0.6) }, { 1, Colors.CardBottom } },
+		Radius = UITheme.Radius.Row,
+		StrokeColor = if isBest then UITheme.Gradients.Gold.Top else nil,
+		StrokeThickness = if isBest then 4 else nil,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = z,
+	})
+	local orb = UIKit.TierOrb(item.Tier, 44)
+	orb.AnchorPoint = Vector2.new(0.5, 0)
+	orb.Position = UDim2.new(0.5, 0, 0, 10)
+	orb.ZIndex = z + 1
+	orb.Parent = body
+	UIKit.MutationPill({
+		Parent = body,
+		Mutation = item.Mutation,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -4, 0, 4),
+		TextSize = 10,
+		Height = 16,
+		ZIndex = z + 2,
+	})
+	UIKit.Label({
+		Name = "ItemName",
+		Text = itemName(item),
+		Font = Fonts.Display,
+		TextSize = 12,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(4, 58),
+		Size = UDim2.new(1, -8, 0, 30),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z + 1,
+		Stroke = 1.5,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Tier",
+		Text = item.Tier:upper(),
+		Font = Fonts.BodyHeavy,
+		TextSize = 10,
+		TextColor3 = UITheme.GetTierLight(item.Tier),
+		Position = UDim2.fromOffset(4, 90),
+		Size = UDim2.new(1, -8, 0, 14),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z + 1,
+		Parent = body,
+	})
+	holder.Visible = false
+	return holder
+end
+
+local function showMultiCard(items: { any })
+	if multiHolder then
+		(multiHolder :: Frame):Destroy()
+		multiHolder = nil
+	end
+	-- Best by what it earns, then tier.
+	local best = items[1]
+	for _, item in items do
+		local better = itemValue(item) > itemValue(best)
+			or (itemValue(item) == itemValue(best) and pullRank(item.Tier) > pullRank(best.Tier))
+		if better then
+			best = item
+		end
+	end
+
+	local rows = math.ceil(#items / MULTI_COLUMNS)
+	local width = MULTI_COLUMNS * MULTI_CELL.X + (MULTI_COLUMNS - 1) * MULTI_GAP + 32
+	local height = 56 + rows * MULTI_CELL.Y + (rows - 1) * MULTI_GAP + 80
+	local body, holder = UIKit.Panel({
+		Name = "MultiPull",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(width, height),
+		Color = Colors.Panel,
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 1, -- under the big card the best pull may also get
+	})
+	multiHolder = holder
+	local z = body.ZIndex + 1
+
+	UIKit.Label({
+		Name = "Title",
+		Text = ("%d PULLS"):format(#items),
+		Font = Fonts.Display,
+		TextSize = 30,
+		TextColor3 = Colors.GoldLabel,
+		Position = UDim2.fromOffset(0, 12),
+		Size = UDim2.new(1, 0, 0, 34),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+
+	local grid = Instance.new("Frame")
+	grid.Name = "Grid"
+	grid.BackgroundTransparency = 1
+	grid.Position = UDim2.fromOffset(16, 56)
+	grid.Size = UDim2.new(1, -32, 0, rows * MULTI_CELL.Y + (rows - 1) * MULTI_GAP)
+	grid.ZIndex = z
+	grid.Parent = body
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.fromOffset(MULTI_CELL.X, MULTI_CELL.Y)
+	layout.CellPadding = UDim2.fromOffset(MULTI_GAP, MULTI_GAP)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = grid
+
+	local cards = {}
+	for order, item in items do
+		table.insert(cards, buildMiniCard(grid, item, order, item == best, z + 1))
+	end
+
+	UIKit.Button({
+		Name = "Nice",
+		Parent = body,
+		Style = "Gold",
+		Text = "NICE",
+		TextSize = 20,
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -16),
+		Size = UDim2.fromOffset(160, 52),
+		ZIndex = z,
+		OnClick = closeMultiCard,
+	})
+
+	UIKit.PopIn(holder)
+	task.spawn(function()
+		for _, card in cards do
+			if multiHolder ~= holder then
+				return
+			end
+			card.Visible = true
+			UIKit.PopIn(card)
+			task.wait(MULTI_POP_STAGGER)
+		end
+		-- The best pull also gets the big card (and its reveal) if it
+		-- qualifies on its own.
+		if multiHolder == holder and ResultController.ShowsBigCardFor(best.Tier, best.Mutation) then
+			showBigCard({
+				Caption = "BEST OF 10",
+				Item = best,
+				Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(best))),
+			})
+		end
+	end)
+end
+
+local function onGachaMultiPullResult(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	if payload.Success ~= true then
+		if payload.Reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
+			ToastController.Show(("Need %s for 10 pulls"):format(NumberFormat.Money(payload.Cost)), "Error")
+		end
+		return
+	end
+	if typeof(payload.Items) == "table" and #payload.Items > 0 then
+		showMultiCard(payload.Items)
 	end
 end
 
@@ -888,6 +1089,7 @@ function ResultController.Init()
 	FusionController.FuseAllResolved:Connect(onFuseAllResolved)
 	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
 	RemoteEvents.RebirthResult.OnClientEvent:Connect(onRebirthResult)
+	RemoteEvents.GachaMultiPullResult.OnClientEvent:Connect(onGachaMultiPullResult)
 end
 
 return ResultController

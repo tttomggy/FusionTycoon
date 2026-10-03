@@ -66,7 +66,7 @@ local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: B
 
 --[[ Tuning (not geometry) ---------------------------------------------------- ]]
 
-local GACHA_RATE_TIERS_SHOWN = 3
+local MULTI_PULL_COUNT = 10
 local PLOT_SIGN_REFRESH_SECONDS = 5
 local STATION_DEBOUNCE_SECONDS = 1
 local BURST_COUNT = 30
@@ -325,32 +325,15 @@ end
 
 local gachaRng = Random.new()
 
--- "Common 78% · Rare 18% · Epic 3.5%", from FusionConfig.GetGachaRates at
--- the player's rebirth luck.
-local function formatPercent(rate: number): string
-	local percent = rate * 100
-	if math.abs(percent - math.floor(percent + 0.5)) < 1e-6 then
-		return ("%d%%"):format(math.floor(percent + 0.5))
-	end
-	return (("%.1f"):format(percent):gsub("%.0$", "")) .. "%"
-end
-
 local function getLuck(player: Player): number
 	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
 end
 
-local function getGachaRatesText(luck: number): string
-	local rates = FusionConfig.GetGachaRates(luck)
-	local tiers = table.clone(FusionConfig.TierOrder)
-	table.sort(tiers, function(a, b)
-		return (rates[a] or 0) > (rates[b] or 0)
-	end)
-	local parts = {}
-	for index = 1, math.min(GACHA_RATE_TIERS_SHOWN, #tiers) do
-		local tier = tiers[index]
-		table.insert(parts, ("%s %s"):format(tier, formatPercent(rates[tier] or 0)))
-	end
-	return table.concat(parts, " · ")
+-- The pad's odds disclosure at the player's luck (FusionConfig.FormatOdds,
+-- the same numbers the rolls use): all six tiers, then the pull mutations.
+local function getOddsText(luck: number): string
+	local odds = FusionConfig.FormatOdds(luck)
+	return odds.Gacha .. "\n" .. odds.PullMutations
 end
 
 -- A Secret or a Rainbow pull is a server-wide moment (SERVER · SECRET /
@@ -371,6 +354,62 @@ local function announcePull(player: Player, item: PlayerDataService.InventoryIte
 	})
 end
 
+type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
+
+-- Rolls `count` pulls (tier, then mutation, then item) at `luck` WITHOUT
+-- touching cash or the inventory, so a config gap can never charge for
+-- nothing. nil if any roll has no item to give.
+local function rollPulls(count: number, luck: number): { PulledItem }?
+	local pulls: { PulledItem } = {}
+	for _ = 1, count do
+		local tier = FusionConfig.RollGachaTier(gachaRng, luck)
+		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull")
+		local def = ItemConfig.PickRandomOfTier(tier, gachaRng)
+		if not def then
+			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(tier))
+			return nil
+		end
+		table.insert(pulls, { Def = def, Mutation = mutation })
+	end
+	return pulls
+end
+
+-- Adds already-paid-for pulls: each item, its Index entry and the pull
+-- count. Returns (items, newIndexItems, tiersCompleted).
+local function grantPulls(
+	player: Player,
+	pulls: { PulledItem }
+): ({ PlayerDataService.InventoryItem }, { PlayerDataService.InventoryItem }, { string })
+	local items, newIndexItems, tiersCompleted = {}, {}, {}
+	for _, pull in pulls do
+		PlayerDataService.IncrementGachaPulls(player)
+		local entry, isNew = PlayerDataService.AddItem(player, pull.Def.Id, pull.Def.Tier, pull.Mutation)
+		if entry then
+			table.insert(items, entry)
+			if isNew then
+				table.insert(newIndexItems, entry)
+				if
+					IndexConfig.IsTierComplete(PlayerDataService.GetIndex(player), entry.Tier)
+					and not table.find(tiersCompleted, entry.Tier)
+				then
+					table.insert(tiersCompleted, entry.Tier)
+				end
+			end
+		end
+	end
+	return items, newIndexItems, tiersCompleted
+end
+
+local function bestTier(items: { PlayerDataService.InventoryItem }): string
+	local best = FusionConfig.TierOrder[1]
+	for _, item in items do
+		if (ItemConfig.Tiers[item.Tier] or 0) > (ItemConfig.Tiers[best] or 0) then
+			best = item.Tier
+		end
+	end
+	return best
+end
+
 local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule", { Word = "PULL" })
 	local padLabel = BillboardKit.Pad(pad, {
@@ -381,38 +420,54 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		PillGradient = UITheme.Gradients.Gold,
 		PillTextColor = UITheme.Colors.GoldText,
 		PillTextStroke = false,
-		Detail = getGachaRatesText(getLuck(player)),
+		Detail = getOddsText(getLuck(player)),
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
+		TallDetail = true,
 	})
 	-- E-to-pull, never Touched: walking across the pad must not spend cash.
 	local prompt = newPrompt(pad, "PullPrompt", "Pull", "Gacha Pad", PlotLayout.Station.PromptDistance)
+	-- R / ButtonY: ten pulls at once, offset so it doesn't cover the E prompt.
+	local multiPrompt = newPrompt(pad, "Pull10Prompt", ("Pull ×%d"):format(MULTI_PULL_COUNT), "", PlotLayout.Station.PromptDistance)
+	multiPrompt.KeyboardKeyCode = Enum.KeyCode.R
+	multiPrompt.GamepadKeyCode = Enum.KeyCode.ButtonY
+	multiPrompt.UIOffset = Vector2.new(0, PlotLayout.Station.MultiPromptOffsetPx)
 
+	-- Runs on every sync too (addStationRefresh): price, odds at the
+	-- player's luck (so a rebirth updates them), and the x10 cost.
 	local function refreshLabel()
-		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		local pulls = PlayerDataService.GetGachaPulls(player)
+		local cost = TycoonConfig.GetGachaPullCost(pulls)
 		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
-		padLabel.SetDetail(getGachaRatesText(getLuck(player)))
+		padLabel.SetDetail(getOddsText(getLuck(player)))
 		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
+		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
 	end
 	refreshLabel()
 	addStationRefresh(player, refreshLabel)
 
+	local function celebrate(tier: string)
+		burst(pad, FusionConfig.TierAccentColors[tier] or World.AccentGold, BURST_COUNT)
+		if explosionEffectTemplate and FusionConfig.MajorRevealTiers[tier] then
+			ImportedEffects.Play(explosionEffectTemplate, pad.CFrame, plot, {
+				Scale = GACHA_MAJOR_EXPLOSION_SCALE,
+				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
+			})
+		end
+		playSound(pad, STATION_SOUND_ID, 0.8)
+	end
+
+	-- Shared by the single pull and Pull x10.
 	local debounce = false
+
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
-
-		-- Roll first: a config gap can then never charge for nothing.
-		local luck = getLuck(player)
-		local resultTier = FusionConfig.RollGachaTier(gachaRng, luck)
-		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull")
-		local rewardItem = ItemConfig.PickRandomOfTier(resultTier, gachaRng)
-		if not rewardItem then
-			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
+		local rolled = rollPulls(1, getLuck(player))
+		if not rolled then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
 			return
 		end
-
 		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
 		if not PlayerDataService.SpendCash(player, cost) then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
@@ -420,30 +475,56 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		debounce = true
-		PlayerDataService.IncrementGachaPulls(player)
-		local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
+		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
+		local newEntry = items[1]
 		-- After AddItem, so the snapshot's Index (and income) include it.
 		syncTycoon(player)
 		refreshLabel()
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
-
-		burst(pad, FusionConfig.TierAccentColors[resultTier] or World.AccentGold, BURST_COUNT)
-		if explosionEffectTemplate and FusionConfig.MajorRevealTiers[resultTier] then
-			ImportedEffects.Play(explosionEffectTemplate, pad.CFrame, plot, {
-				Scale = GACHA_MAJOR_EXPLOSION_SCALE,
-				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
-			})
-		end
-		playSound(pad, STATION_SOUND_ID, 0.8)
-
-		local tierComplete = isNewIndex and IndexConfig.IsTierComplete(PlayerDataService.GetIndex(player), rewardItem.Tier)
+		celebrate(rolled[1].Def.Tier)
 		RemoteEvents.GachaPullResult:FireClient(player, {
 			Success = true,
 			NewItem = newEntry,
-			NewIndex = isNewIndex,
-			IndexTierComplete = if tierComplete then rewardItem.Tier else nil,
+			NewIndex = #newIndexItems > 0,
+			IndexTierComplete = tiersCompleted[1],
 		})
 		announcePull(player, newEntry)
+
+		task.wait(STATION_DEBOUNCE_SECONDS)
+		debounce = false
+	end)
+
+	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if debounce or triggeringPlayer.UserId ~= player.UserId then
+			return
+		end
+		-- Roll all of them before charging anything.
+		local rolled = rollPulls(MULTI_PULL_COUNT, getLuck(player))
+		if not rolled then
+			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
+			return
+		end
+		local cost = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), MULTI_PULL_COUNT)
+		if not PlayerDataService.SpendCash(player, cost) then
+			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
+			return
+		end
+
+		debounce = true
+		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
+		syncTycoon(player) -- once, for all ten
+		refreshLabel()
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+		celebrate(bestTier(items))
+		RemoteEvents.GachaMultiPullResult:FireClient(player, {
+			Success = true,
+			Items = items,
+			NewIndexItems = newIndexItems,
+			IndexTiersCompleted = tiersCompleted,
+		})
+		for _, item in items do
+			announcePull(player, item)
+		end
 
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
@@ -683,8 +764,16 @@ local function refreshFactoryLine(player: Player)
 			refresh()
 		end
 	end
-	-- Pedestal rates include the income multiplier (pad x rebirth).
+	-- Pedestal rates include the income multiplier (pad x rebirth x Index).
 	TycoonService.RefreshPedestalLabels(player)
+	-- The odds board's fusion mutation line scales with the owner's luck.
+	local board = plot:FindFirstChild("OddsBoard")
+	local boardPart = board and board:FindFirstChild("Board")
+	local surface = boardPart and boardPart:FindFirstChild("OddsSurface")
+	if surface and surface:IsA("SurfaceGui") then
+		local odds = FusionConfig.FormatOdds(getLuck(player))
+		BillboardKit.SetOddsMutations(surface, "Mutations · " .. odds.FusionMutations)
+	end
 	refreshRebirthPortal(player)
 	local label = collectorLabelByUserId[player.UserId]
 	if label then

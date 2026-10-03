@@ -41,6 +41,15 @@ function TycoonConfig.GetGachaPullCost(pullsSoFar: number): number
 	return math.floor(TycoonConfig.GachaBasePullCost * TycoonConfig.GachaPullCostGrowth ^ math.max(0, pullsSoFar))
 end
 
+-- Pull xN: the sum of the next `count` single-pull prices (no discount).
+function TycoonConfig.GetGachaMultiPullCost(pullsSoFar: number, count: number): number
+	local total = 0
+	for offset = 0, count - 1 do
+		total += TycoonConfig.GetGachaPullCost(pullsSoFar + offset)
+	end
+	return total
+end
+
 -- Multiplier Pad: 15 levels, +0.25 each, and the last level jumps to x5.
 -- A long climb, not a quick max: it multiplies ALL income, so a cheap max
 -- trivialised the generators. Written out literally (no formula). Saves

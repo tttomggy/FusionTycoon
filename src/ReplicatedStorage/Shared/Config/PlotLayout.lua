@@ -198,6 +198,7 @@ PlotLayout.Station = {
 	RimCenterBelowTop = 0.35,
 	LabelOffsetY = 8,
 	PromptDistance = 7,
+	MultiPromptOffsetPx = 72, -- screen offset stacking the gacha's Pull x10 prompt under Pull
 
 	CapsuleDiameter = 2.6,
 	CapsuleY = 4.5,

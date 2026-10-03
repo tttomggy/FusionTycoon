@@ -362,6 +362,11 @@ function IndexPanel.Init()
 	-- Fusions toast after the machine's reveal, so they never spoil it.
 	FusionController.FusionResolved:Connect(onSingleResult)
 	FusionController.FuseAllResolved:Connect(IndexPanel.ToastBatch)
+	RemoteEvents.GachaMultiPullResult.OnClientEvent:Connect(function(result: any)
+		if typeof(result) == "table" and result.Success == true then
+			IndexPanel.ToastBatch(result)
+		end
+	end)
 end
 
 return IndexPanel

@@ -153,6 +153,80 @@ FusionConfig.MajorRevealTiers = {
 	Secret = true,
 } :: { [string]: boolean }
 
+--[[ Odds disclosure ------------------------------------------------------------
+	ONE formatter for every odds display (the gacha pad label, the Fusion
+	Machine board), built from the same functions the rolls use, so a paid
+	luck boost can never show different numbers from what's rolled.
+]]
+
+-- A percentage with at least 2 significant figures and never "0":
+-- 77.9, 18, 3.5, 0.50, 0.055, 0.0022.
+function FusionConfig.FormatPercent(percent: number): string
+	if percent >= 10 then
+		local text = ("%.1f"):format(percent)
+		return (text:gsub("%.0$", ""))
+	end
+	if percent <= 0 then
+		return "0"
+	end
+	local decimals = math.max(0, 1 - math.floor(math.log10(percent)))
+	-- Nudge so a value sitting on a rounding edge (0.495) rounds half up.
+	return ("%." .. decimals .. "f"):format(percent * (1 + 1e-9))
+end
+
+export type FusionOddsRow = {
+	FromTier: string,
+	ToTier: string,
+	Chance: number, -- 0..1
+	ChanceText: string, -- "8%"
+	RebirthsNeeded: number?,
+}
+
+export type Odds = {
+	Gacha: string, -- "Common 77.9 · Rare 18 · ... · Secret 0.0022%"
+	PullMutations: string, -- "Golden 4.4% · Diamond 0.88% · Rainbow 0.11%"
+	Fusion: { FusionOddsRow },
+	FusionMutations: string, -- "Golden 2.2% · Diamond 0.44% · Rainbow 0.055%"
+}
+
+local function mutationLine(source: MutationConfig.MutationSource, luck: number): string
+	local parts = {}
+	for _, mutation in MutationConfig.Order do
+		local chance = MutationConfig.GetChance(mutation, source, luck)
+		table.insert(parts, ("%s %s%%"):format(mutation, FusionConfig.FormatPercent(chance * 100)))
+	end
+	return table.concat(parts, " · ")
+end
+
+-- Every odds line at `luck` (RebirthConfig.GetLuck).
+function FusionConfig.FormatOdds(luck: number): Odds
+	local rates = FusionConfig.GetGachaRates(luck)
+	local gacha = {}
+	for _, tier in FusionConfig.TierOrder do
+		table.insert(gacha, ("%s %s"):format(tier, FusionConfig.FormatPercent((rates[tier] or 0) * 100)))
+	end
+	local fusion: { FusionOddsRow } = {}
+	for _, tier in FusionConfig.TierOrder do
+		local nextTier = FusionConfig.GetNextTier(tier)
+		local chance = FusionConfig.SuccessChance[tier]
+		if nextTier and chance then
+			table.insert(fusion, {
+				FromTier = tier,
+				ToTier = nextTier,
+				Chance = chance,
+				ChanceText = FusionConfig.FormatPercent(chance * 100) .. "%",
+				RebirthsNeeded = FusionConfig.RebirthGatedTiers[tier],
+			})
+		end
+	end
+	return {
+		Gacha = table.concat(gacha, " · ") .. "%",
+		PullMutations = mutationLine("Pull", luck),
+		Fusion = fusion,
+		FusionMutations = mutationLine("Fusion", luck),
+	}
+end
+
 -- Diamond and Rainbow mutations get the major reveal whatever the tier.
 FusionConfig.MajorRevealMutationRank = 2
 

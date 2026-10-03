@@ -35,6 +35,7 @@ BillboardKit.OWNER_ONLY_ATTRIBUTE = "OwnerOnly"
 
 -- Billboard sizes in studs.
 local PAD_LABEL_STUDS = Vector2.new(9, 3.4)
+local PAD_LABEL_TALL_STUDS = Vector2.new(11, 5)
 local PEDESTAL_LABEL_STUDS = Vector2.new(6.5, 2.6)
 local EMPTY_PILL_STUDS = Vector2.new(3.6, 1.1)
 local GENERATOR_LABEL_STUDS = Vector2.new(4.4, 1.7)
@@ -121,6 +122,9 @@ export type PadProps = {
 	StudsOffset: Vector3?,
 	MaxDistance: number?,
 	OwnerOnly: boolean?,
+	-- A taller label whose detail area wraps two lines (the gacha pad's
+	-- odds disclosure).
+	TallDetail: boolean?,
 }
 
 export type PadLabel = {
@@ -132,10 +136,11 @@ export type PadLabel = {
 -- Title (Display, coloured, ink stroke), a gradient price pill (Display,
 -- ink stroke) and an optional detail line (Body). 9 x 3.4 studs.
 function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
+	local tall = props.TallDetail == true
 	local gui = newBillboard(
 		parent,
 		props.Name or "PadLabel",
-		PAD_LABEL_STUDS,
+		if tall then PAD_LABEL_TALL_STUDS else PAD_LABEL_STUDS,
 		props.StudsOffset or Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 		props.MaxDistance or BillboardKit.PAD_MAX_DISTANCE
 	)
@@ -143,15 +148,21 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 		gui:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 	end
 
-	local title = scaledLabel(gui, "Title", Fonts.Display, props.TitleColor, 0, 0.4)
+	-- Fractions of the label height: title, pill, detail.
+	local titleH, pillY, pillH, detailY, detailH = 0.4, 0.42, 0.34, 0.8, 0.2
+	if tall then
+		titleH, pillY, pillH, detailY, detailH = 0.27, 0.29, 0.23, 0.56, 0.44
+	end
+
+	local title = scaledLabel(gui, "Title", Fonts.Display, props.TitleColor, 0, titleH)
 	title.Text = props.Title
 	textStroke(title, 2.5)
 
 	local pill = Instance.new("Frame")
 	pill.Name = "Pill"
 	pill.AnchorPoint = Vector2.new(0.5, 0)
-	pill.Position = UDim2.fromScale(0.5, 0.42)
-	pill.Size = UDim2.fromScale(0.62, 0.34)
+	pill.Position = UDim2.fromScale(0.5, pillY)
+	pill.Size = UDim2.fromScale(0.62, pillH)
 	pill.BackgroundColor3 = Colors.White
 	pill.Parent = gui
 	gradient(pill, props.PillGradient.Top, props.PillGradient.Bottom)
@@ -163,7 +174,8 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 	end
 	pillText.Text = props.Pill
 
-	local detail = scaledLabel(gui, "Detail", Fonts.Body, Colors.Text, 0.8, 0.2)
+	local detail = scaledLabel(gui, "Detail", Fonts.Body, Colors.Text, detailY, detailH)
+	detail.TextWrapped = tall
 	textStroke(detail, 1.5)
 
 	local function setDetail(text: string?)
@@ -464,13 +476,16 @@ export type OddsRow = {
 	FromTier: string,
 	ToTier: string,
 	Chance: number, -- 0..1
+	ChanceText: string, -- FusionConfig.FormatOdds' text ("8%")
 	RebirthsNeeded: number?, -- shown as "(Rebirth n)" after the recipe
 }
 
 -- The odds board's content on the Front face of `board` (a real board part,
 -- not a billboard): title, one row per recipe coloured by the tier it fuses
 -- into, and the fail rule.
-function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerStud: number): SurfaceGui
+-- `mutations` is the fusion mutation line under the rows; update it later
+-- (luck changes) with SetOddsMutations.
+function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, mutations: string, pixelsPerStud: number): SurfaceGui
 	local gui = newSurface(board, "OddsSurface", Enum.NormalId.Front, pixelsPerStud)
 
 	local panel = Instance.new("Frame")
@@ -480,8 +495,8 @@ function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerS
 	panel.Parent = gui
 	borderStroke(panel, 6)
 
-	local titleHeight, footerHeight = 0.2, 0.12
-	local rowHeight = (1 - titleHeight - footerHeight - 0.08) / math.max(#rows, 1)
+	local titleHeight, footerHeight = 0.18, 0.09
+	local rowHeight = (1 - titleHeight - footerHeight * 2 - 0.08) / math.max(#rows, 1)
 
 	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.03, titleHeight)
 	title.Text = "FUSE 2 → TIER UP"
@@ -501,13 +516,24 @@ function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, pixelsPerS
 		right.Position = UDim2.fromScale(0.72, y)
 		right.Size = UDim2.fromScale(0.22, rowHeight * 0.9)
 		right.TextXAlignment = Enum.TextXAlignment.Right
-		right.Text = ("%d%%"):format(math.floor(row.Chance * 100 + 0.5))
+		right.Text = row.ChanceText
 		textStroke(right, 1.5)
 	end
 
-	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight - 0.03, footerHeight)
-	footer.Text = "Fail = keep 1 of the 2"
+	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight * 2 - 0.04, footerHeight)
+	footer.Text = "Fail = keep the better of the 2"
+	local mutationText = scaledLabel(panel, "Mutations", Fonts.Body, Colors.GoldLabel, 1 - footerHeight - 0.03, footerHeight)
+	mutationText.Text = mutations
 	return gui
+end
+
+-- Updates the board's fusion mutation line (it scales with luck).
+function BillboardKit.SetOddsMutations(gui: SurfaceGui, text: string)
+	local panel = gui:FindFirstChild("Panel")
+	local label = panel and panel:FindFirstChild("Mutations")
+	if label and label:IsA("TextLabel") then
+		label.Text = text
+	end
 end
 
 export type SignSurface = {

@@ -220,20 +220,11 @@ local function buildOddsBoard(originCFrame: CFrame, parent: Instance)
 		Parent = board,
 	})
 
-	local rows = {}
-	for _, tier in FusionConfig.TierOrder do
-		local nextTier = FusionConfig.GetNextTier(tier)
-		local chance = FusionConfig.SuccessChance[tier]
-		if nextTier and chance then
-			table.insert(rows, {
-				FromTier = tier,
-				ToTier = nextTier,
-				Chance = chance,
-				RebirthsNeeded = FusionConfig.RebirthGatedTiers[tier],
-			})
-		end
-	end
-	BillboardKit.OddsSurface(boardPart, rows, M.SurfacePixelsPerStud)
+	-- The same formatter as the gacha pad (FusionConfig.FormatOdds). Base
+	-- luck here; TycoonService refreshes the mutation line at the owner's
+	-- luck on every sync.
+	local odds = FusionConfig.FormatOdds(1)
+	BillboardKit.OddsSurface(boardPart, odds.Fusion, "Mutations · " .. odds.FusionMutations, M.SurfacePixelsPerStud)
 
 	board.Parent = parent
 end
