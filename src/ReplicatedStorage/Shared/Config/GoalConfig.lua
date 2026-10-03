@@ -25,8 +25,8 @@ export type GoalDef = {
 
 GoalConfig.Goals = {
 	{ Id = "claim_base", Text = "Claim your base", Reward = 50, Target = "ClaimStation" },
-	{ Id = "buy_dropper2", Text = "Buy Dropper 2", Reward = 60, Target = "Dropper2Station" },
-	{ Id = "buy_basic_generator", Text = "Buy a Basic Generator", Reward = 100, Target = "Generator_basic_generator" },
+	{ Id = "upgrade_basic", Text = "Upgrade your Basic Generator", Reward = 60, Target = "Generator_basic_generator" },
+	{ Id = "basic_lv5", Text = "Get Basic Generator to LV 5", Reward = 100, Unit = "Basic LV", Target = "Generator_basic_generator" },
 	{ Id = "gacha_pull", Text = "Pull from the Gacha Pad", Reward = 150, Target = "GachaStation" },
 	{ Id = "display_item", Text = "Put an item on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
 	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine" },

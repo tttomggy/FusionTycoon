@@ -23,8 +23,9 @@ analyze` for that.
 
 ## Game loop & economy (read before balancing)
 
-Claim plot → Dropper1 (+Dropper2) → buy Generators (in the back-corner bays
-or the UPGRADES panel; both fire `RequestUpgrade`) →
+Claim plot (Basic Generator starts at LV 1) → upgrade Generators (on the
+factory line along the left wall or in the UPGRADES panel; both fire
+`RequestUpgrade`) →
 Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 (success = next tier, fail = 1 item of the same tier back) → display the best
 4 items on pedestals for passive income → Multiplier Pad multiplies ALL income.
@@ -33,9 +34,11 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
   multiplier levels, gacha price curve) and `FusionConfig.lua` (fusion success
   odds, gacha drop rates). They were tuned with a greedy-player simulation
   of a brand-new save; the target milestones are in TycoonConfig's header.
-  Re-simulate after changing them instead of eyeballing.
+  Re-run `tools/econ_sim.py` after changing any economy number; keep its
+  tunables in sync with TycoonConfig/FusionConfig.
 - Passive income has ONE formula: `TycoonConfig.GetPassiveCashPerSecond`,
-  used by the server payout tick and the client HUD.
+  used by the server payout tick and the client HUD. It is all income: the
+  factory line's cash balls are a client-side picture of it and never pay.
 - Every service syncs the client with `PlayerDataService.SyncTycoon(player)`.
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,

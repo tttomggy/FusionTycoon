@@ -19,7 +19,6 @@ local Workspace = game:GetService("Workspace")
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
-local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -87,12 +86,6 @@ local highlighted: { [string]: boolean? } = {}
 
 --[[ Income ---------------------------------------------------------------- ]]
 
-local function isPlotClaimed(): boolean
-	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
-	local plot = folder and folder:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
-	return plot ~= nil and plot:GetAttribute("Claimed") == true
-end
-
 local function getDisplayedTiers(): { string }
 	local byUid: { [string]: any } = {}
 	for _, item in InventoryController.GetInventory() do
@@ -109,17 +102,11 @@ local function getDisplayedTiers(): { string }
 end
 
 local function getIncomePerSecond(): number
-	local multiplierLevel = TycoonController.GetCashMultiplierLevel()
-	local passive = TycoonConfig.GetPassiveCashPerSecond(
+	return TycoonConfig.GetPassiveCashPerSecond(
 		TycoonController.GetGeneratorLevels(),
 		getDisplayedTiers(),
-		multiplierLevel
+		TycoonController.GetCashMultiplierLevel()
 	)
-	if isPlotClaimed() then
-		local droppers = if TycoonController.HasDropper2() then 2 else 1
-		passive += TycoonConfig.GetDropperCashPerSecond(droppers, multiplierLevel)
-	end
-	return passive
 end
 
 -- Generators that are unlocked, not maxed, and affordable right now.

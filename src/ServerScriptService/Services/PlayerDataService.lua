@@ -44,7 +44,8 @@ export type PlayerData = {
 	PedestalDisplays: { [number]: string? },
 	-- How many Gacha pulls this player has made; drives the pull price.
 	GachaPulls: number,
-	-- Dropper2 is a one-time purchase and now survives rejoining.
+	-- Legacy (the droppers are gone): still loaded and saved so old saves
+	-- round-trip unchanged, but nothing reads it.
 	HasDropper2: boolean,
 	-- 1-based index into GoalConfig.Goals of the goal currently being
 	-- worked on; past the end means every goal is done.
@@ -70,7 +71,6 @@ export type TycoonSnapshot = {
 	-- which made the client think occupied pedestals were empty.
 	PedestalDisplays: { [string]: string },
 	GachaPulls: number,
-	HasDropper2: boolean,
 	GoalIndex: number,
 	GoalProgress: GoalProgress?,
 }
@@ -503,18 +503,6 @@ function PlayerDataService.IncrementGachaPulls(player: Player)
 	end
 end
 
-function PlayerDataService.HasDropper2(player: Player): boolean
-	local data = state.sessionCache[player.UserId]
-	return if data then data.HasDropper2 else false
-end
-
-function PlayerDataService.SetHasDropper2(player: Player, owned: boolean)
-	local data = state.sessionCache[player.UserId]
-	if data then
-		data.HasDropper2 = owned
-	end
-end
-
 --[[ Public API: goals ---------------------------------------------------- ]]
 
 function PlayerDataService.GetGoalIndex(player: Player): number
@@ -563,7 +551,7 @@ function PlayerDataService.GetDisplayedTiers(player: Player): { string }
 	return tiers
 end
 
--- Generators + pedestals, multiplier applied. Droppers are paid on collection.
+-- Generators + pedestals, multiplier applied: all of a player's income.
 function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	if not data then
@@ -583,7 +571,6 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
 		PedestalDisplays = pedestalDisplaysToDisk(PlayerDataService.GetPedestalDisplays(player)),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
-		HasDropper2 = PlayerDataService.HasDropper2(player),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),
 		GoalProgress = state.goalProgress[player.UserId],
 	}

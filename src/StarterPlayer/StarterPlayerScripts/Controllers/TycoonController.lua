@@ -10,7 +10,6 @@ local generatorLevels: { [string]: number } = {}
 local pedestalDisplays: { [number]: string } = {}
 local cashMultiplierLevel = 0
 local gachaPulls = 0
-local hasDropper2 = false
 local goalIndex: number? = nil
 local goalProgress: { Current: number, Target: number }? = nil
 local hasSynced = false
@@ -47,10 +46,6 @@ end
 
 function TycoonController.GetGachaPulls(): number
 	return gachaPulls
-end
-
-function TycoonController.HasDropper2(): boolean
-	return hasDropper2
 end
 
 -- Index into GoalConfig.Goals of the current goal (nil before the first
@@ -94,7 +89,6 @@ local function onSyncTycoon(snapshot: any)
 	generatorLevels = snapshot.Generators or {}
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
-	hasDropper2 = snapshot.HasDropper2 == true
 	goalIndex = if typeof(snapshot.GoalIndex) == "number" then snapshot.GoalIndex else nil
 	local progress = snapshot.GoalProgress
 	goalProgress = if typeof(progress) == "table"

@@ -65,11 +65,8 @@ local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: B
 
 local GACHA_RATE_TIERS_SHOWN = 3
 local PLOT_SIGN_REFRESH_SECONDS = 5
-local CASH_DROP_DEBRIS_LIFETIME_SECONDS = 30
-local CASH_DROP_SPEED_STUDS_PER_SECOND = 6
 local STATION_DEBOUNCE_SECONDS = 1
 local BURST_COUNT = 30
-local DROPPER_POP_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local STATION_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
 local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
@@ -303,135 +300,6 @@ local function buildStation(
 	local station = StationKit.Build(origin, localPos, accent, hologram, plot, options)
 	station.Name = name
 	return station:FindFirstChild("Pad") :: BasePart
-end
-
---[[ Droppers + collector ------------------------------------------------------------- ]]
-
-local function awardCash(player: Player, amount: number)
-	if not PlayerDataService.IsDataLoaded(player) then
-		return
-	end
-	PlayerDataService.AddCash(player, amount)
-	syncTycoon(player)
-end
-
-local function spawnCashPart(plot: Model, origin: CFrame, dropper: Model, player: Player)
-	local spawnAt = DropperKit.GetBallSpawn(dropper)
-	if not spawnAt then
-		return
-	end
-	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
-	playSound(dropper.PrimaryPart or plot, DROPPER_POP_SOUND_ID, 0.35)
-
-	local cashPart = PartKit.Part({
-		Name = "CashDrop",
-		Shape = Enum.PartType.Ball,
-		Size = Vector3.one * PlotLayout.Dropper.BallDiameter,
-		CFrame = spawnAt,
-		Color = World.AccentGreen,
-		Material = Enum.Material.Neon,
-		Parent = plot,
-	})
-	cashPart.Anchored = false
-	cashPart.CollisionGroup = CASH_COLLISION_GROUP
-	cashPart:SetAttribute("CashValue", TycoonConfig.DropperCashValue * multiplier)
-	-- Out of the spout toward the collector (plot +X).
-	cashPart.AssemblyLinearVelocity = origin.RightVector * CASH_DROP_SPEED_STUDS_PER_SECOND
-	Debris:AddItem(cashPart, CASH_DROP_DEBRIS_LIFETIME_SECONDS)
-end
-
-local function startDropperLoop(plot: Model, origin: CFrame, player: Player, dropper: Model)
-	task.spawn(function()
-		while plot.Parent and dropper.Parent do
-			task.wait(TycoonConfig.DropperIntervalSeconds)
-			if not plot.Parent or not dropper.Parent then
-				break
-			end
-			spawnCashPart(plot, origin, dropper, player)
-		end
-	end)
-end
-
--- One gold strip both droppers' balls roll onto.
-local function createCollector(plot: Model, origin: CFrame, player: Player)
-	local size = PlotLayout.COLLECTOR_SIZE
-	local collector = PartKit.Part({
-		Name = "Collector",
-		Size = size,
-		CFrame = PartKit.At(origin, PlotLayout.COLLECTOR, PlotLayout.COLLECTOR_TOP_Y - size.Y / 2),
-		Color = World.AccentGold,
-		Parent = plot,
-	})
-	collector.CollisionGroup = PLOT_ENVIRONMENT_COLLISION_GROUP
-
-	-- Matte strip; the glow is two thin Neon edges along its long sides.
-	local edge = PlotLayout.COLLECTOR_EDGE_SIZE
-	for _, side in { -1, 1 } do
-		local strip = PartKit.Part({
-			Name = "CollectorEdge",
-			Size = edge,
-			CFrame = collector.CFrame * CFrame.new(side * (size.X / 2 - edge.X / 2), size.Y / 2 + edge.Y / 2, 0),
-			Color = World.AccentGold,
-			Material = Enum.Material.Neon,
-			Parent = collector,
-		})
-		PartKit.MakeDecorative(strip)
-	end
-
-	collector.Touched:Connect(function(hit: BasePart)
-		if hit.Parent == nil or hit:GetAttribute("Collected") then
-			return
-		end
-		local value = hit:GetAttribute("CashValue")
-		if not value then
-			return
-		end
-		hit:SetAttribute("Collected", true)
-		local popPosition = Vector3.new(hit.Position.X, collector.Position.Y + size.Y / 2 + PlotLayout.CASH_POP_HEIGHT, hit.Position.Z)
-		hit:Destroy()
-		awardCash(player, value)
-		RemoteEvents.CashCollected:FireClient(player, { Amount = value, Position = popPosition })
-	end)
-end
-
-local function spawnDropper2(plot: Model, origin: CFrame, player: Player)
-	local dropper = DropperKit.Build(origin, PlotLayout.DROPPER2, "Dropper2", plot)
-	startDropperLoop(plot, origin, player, dropper)
-end
-
-local function createDropper2Station(plot: Model, origin: CFrame, player: Player)
-	-- The slot shows a translucent ghost of the dropper until it's bought.
-	local ghost = DropperKit.Build(origin, PlotLayout.DROPPER2, "Ghost")
-	local pad = buildStation(plot, origin, "Dropper2Station", PlotLayout.DROPPER2, World.AccentGreen, "Ghost", { Ghost = ghost, Word = "BUY" })
-	local cost = TycoonConfig.Dropper2Cost
-	BillboardKit.Pad(pad, {
-		Name = "Dropper2Label",
-		Title = "DROPPER 2",
-		TitleColor = UITheme.Colors.DropperTitle,
-		Pill = NumberFormat.Money(cost),
-		PillGradient = UITheme.Gradients.Green,
-		Detail = "Doubles your drops",
-		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
-	})
-	local prompt = newPrompt(pad, "BuyPrompt", ("Buy (%s)"):format(NumberFormat.Money(cost)), "Dropper 2", PlotLayout.Station.PromptDistance)
-
-	local purchased = false
-	prompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if purchased or triggeringPlayer.UserId ~= player.UserId then
-			return
-		end
-		if not PlayerDataService.SpendCash(player, cost) then
-			return
-		end
-		purchased = true
-		PlayerDataService.SetHasDropper2(player, true)
-		syncTycoon(player)
-		local station = pad.Parent
-		if station then
-			station:Destroy()
-		end
-		spawnDropper2(plot, origin, player)
-	end)
 end
 
 --[[ Gacha station ------------------------------------------------------------------ ]]
@@ -761,9 +629,7 @@ local function refreshPlotSigns()
 			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
 				sign.Set("FREE LAB", "Step on the green pad")
 			else
-				local droppers = if PlayerDataService.HasDropper2(player) then 2 else 1
 				local income = PlayerDataService.GetPassiveCashPerSecond(player)
-					+ TycoonConfig.GetDropperCashPerSecond(droppers, PlayerDataService.GetCashMultiplierLevel(player))
 				sign.Set(
 					("%s'S LAB"):format(player.DisplayName:upper()),
 					("%s/s · best: %s"):format(NumberFormat.Money(income), getBestTier(player) or "none")
@@ -818,7 +684,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 			BillboardKit.SetPadFace(face, UITheme.Colors.Disabled, "YOURS", true)
 		end
 
-		-- Saved state (Dropper 2, pedestals) is restored below.
+		-- Saved state (pedestals) is restored below.
 		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
 			task.wait(0.25)
 		end
@@ -826,19 +692,12 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 			return
 		end
 
-		local dropper1 = plot:FindFirstChild("Dropper1")
-		if not dropper1 or not dropper1:IsA("Model") then
-			warn(("TycoonService: Dropper1 missing in %s's plot"):format(player.Name))
-			return
+		-- New saves (and old ones) start with the Basic Generator running.
+		local levels = PlayerDataService.GetGenerators(player) or {}
+		if (levels.basic_generator or 0) < TycoonConfig.StartingBasicGeneratorLevel then
+			PlayerDataService.SetGeneratorLevel(player, "basic_generator", TycoonConfig.StartingBasicGeneratorLevel)
 		end
 
-		createCollector(plot, origin, player)
-		startDropperLoop(plot, origin, player, dropper1)
-		if PlayerDataService.HasDropper2(player) then
-			spawnDropper2(plot, origin, player)
-		else
-			createDropper2Station(plot, origin, player)
-		end
 		createMultiplierStation(plot, origin, player)
 		createGachaStation(plot, origin, player)
 		createPedestals(plot, origin)

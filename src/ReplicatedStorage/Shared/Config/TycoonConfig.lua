@@ -2,27 +2,27 @@
 local TycoonConfig = {}
 
 --[[ Economy -----------------------------------------------------------------
-	Every number in this file was tuned with a greedy-player simulation of a
-	brand-new save (droppers -> generators -> gacha -> fuse -> pedestals ->
-	multiplier). Median milestones it produces:
+	Every number in this file was tuned with the greedy-player simulation in
+	tools/econ_sim.py, run on a brand-new save (generators -> gacha -> fuse ->
+	pedestals -> multiplier; new saves start with Basic Generator at LV 1).
+	Median milestones it produces:
 
-	    Dropper 2 ............ ~40s      first Gacha pull ...... ~1.5 min
-	    first Epic ........... ~4 min    first Legendary ....... ~8 min
-	    first Mythic ......... ~30 min   Singularity Core ...... ~1h45
-	    Multiplier maxed ..... ~4h       4 Mythics displayed ... long-tail chase
+	    first Gacha pull ..... ~1:10     first Epic ............ ~3.5 min
+	    first Legendary ...... ~7 min    first Mythic .......... ~30 min
+	    Singularity Core ..... ~1h43     Multiplier maxed ...... ~3h53
+	    4 Mythics displayed .. long-tail chase
 
-	The old numbers were calibrated against ~1.3M cash/hour, but a real player
-	only earned ~$100/min (generators had no buy UI), so the first Gacha pull
-	took 2.5 HOURS. If you rebalance, re-run the sim rather than eyeballing it.
+	Income is generators + pedestals only (the factory line's cash balls are
+	a client-side picture of it). If you rebalance, change the sim's
+	tunables to match and re-run it rather than eyeballing.
 ]]
 
 -- Passive income (generators + pedestals) is paid out on this tick.
 TycoonConfig.PassiveIncomeIntervalSeconds = 1
 
--- Physical cash balls spawned by Dropper1/Dropper2. Scaled by the multiplier.
-TycoonConfig.DropperCashValue = 4
-TycoonConfig.DropperIntervalSeconds = 2
-TycoonConfig.Dropper2Cost = 60
+-- A claimed plot's Basic Generator never sits below this level, so a new
+-- player's factory line is running from the start.
+TycoonConfig.StartingBasicGeneratorLevel = 1
 
 -- Gacha Pad: the only way to get a brand-new item. The price rises a little
 -- with every pull (GachaPullCostGrowth ^ pulls) so pulling stays a real choice
@@ -93,7 +93,7 @@ TycoonConfig.Generators = {
 		Id = "basic_generator",
 		Name = "Basic Generator",
 		Tier = "Common",
-		BaseCashPerSecond = 1,
+		BaseCashPerSecond = 2,
 		BaseUpgradeCost = 25,
 		UpgradeCostGrowth = 1.15,
 		MaxLevel = 25,
@@ -191,8 +191,8 @@ function TycoonConfig.IsUnlocked(generator: GeneratorDef, generatorLevels: { [st
 end
 
 -- Single source of truth for passive income, used by the server's payout tick
--- AND the client HUD's "+$X/s" readout so the two can never disagree.
--- Dropper balls are not included here; they're paid when collected.
+-- AND the client HUD's "+$X/s" readout so the two can never disagree. This
+-- is ALL income: the factory line's balls only picture it.
 function TycoonConfig.GetPassiveCashPerSecond(
 	generatorLevels: { [string]: number },
 	pedestalTiers: { string },
@@ -209,14 +209,6 @@ function TycoonConfig.GetPassiveCashPerSecond(
 		total += TycoonConfig.GetPedestalCashPerSecond(tier)
 	end
 	return total * TycoonConfig.GetCashMultiplierValue(cashMultiplierLevel)
-end
-
--- Average dropper income per second, for the HUD estimate.
-function TycoonConfig.GetDropperCashPerSecond(dropperCount: number, cashMultiplierLevel: number): number
-	return dropperCount
-		* TycoonConfig.DropperCashValue
-		/ TycoonConfig.DropperIntervalSeconds
-		* TycoonConfig.GetCashMultiplierValue(cashMultiplierLevel)
 end
 
 return TycoonConfig
