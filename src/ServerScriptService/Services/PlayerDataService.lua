@@ -65,7 +65,10 @@ export type TycoonSnapshot = {
 	Cash: number,
 	Generators: { [string]: number },
 	CashMultiplierLevel: number,
-	PedestalDisplays: { [number]: string? },
+	-- String keys ("1".."4") on the wire, like on disk: a RemoteEvent drops
+	-- entries after a gap in a sparse numeric table ({[1]=a, [3]=b, [4]=c}),
+	-- which made the client think occupied pedestals were empty.
+	PedestalDisplays: { [string]: string },
 	GachaPulls: number,
 	HasDropper2: boolean,
 	GoalIndex: number,
@@ -83,6 +86,8 @@ type State = {
 	goalProgress: { [number]: GoalProgress? },
 	-- Called synchronously at the start of every SyncTycoon (see OnSync).
 	syncHooks: { (Player) -> () },
+	-- os.clock() of each player's last honoured RequestSync.
+	lastSyncRequest: { [number]: number },
 	connections: { RBXScriptConnection },
 }
 
@@ -93,6 +98,7 @@ local SAVE_RETRY_ATTEMPTS = 3
 local LOAD_RETRY_ATTEMPTS = 3
 local LOAD_RETRY_DELAY_SECONDS = 2
 local AUTOSAVE_INTERVAL_SECONDS = 120
+local SYNC_REQUEST_COOLDOWN_SECONDS = 2
 
 local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 
@@ -115,6 +121,7 @@ local state: State = {
 	noSave = {},
 	goalProgress = {},
 	syncHooks = {},
+	lastSyncRequest = {},
 	connections = {},
 }
 
@@ -574,7 +581,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		Cash = PlayerDataService.GetCash(player),
 		Generators = PlayerDataService.GetGenerators(player) or {},
 		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
+		PedestalDisplays = pedestalDisplaysToDisk(PlayerDataService.GetPedestalDisplays(player)),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
 		HasDropper2 = PlayerDataService.HasDropper2(player),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),
@@ -646,6 +653,19 @@ local function onPlayerRemoving(player: Player)
 	end
 	state.noSave[userId] = nil
 	state.goalProgress[userId] = nil
+	state.lastSyncRequest[userId] = nil
+end
+
+-- A client asking for a fresh snapshot (it just had a request rejected and
+-- its view may be stale). At most once per SYNC_REQUEST_COOLDOWN_SECONDS.
+local function onRequestSync(player: Player)
+	local now = os.clock()
+	local last = state.lastSyncRequest[player.UserId]
+	if last and now - last < SYNC_REQUEST_COOLDOWN_SECONDS then
+		return
+	end
+	state.lastSyncRequest[player.UserId] = now
+	PlayerDataService.SyncTycoon(player)
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]
@@ -653,6 +673,7 @@ end
 function PlayerDataService:Init()
 	table.insert(state.connections, Players.PlayerAdded:Connect(onPlayerAdded))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
+	table.insert(state.connections, RemoteEvents.RequestSync.OnServerEvent:Connect(onRequestSync))
 
 	-- Covers anyone who joined before this service finished initialising.
 	for _, player in Players:GetPlayers() do

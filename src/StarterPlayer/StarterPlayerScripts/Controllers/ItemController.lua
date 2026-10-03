@@ -10,11 +10,39 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
+local ToastController = require(script.Parent.ToastController)
 
 local ItemController = {}
 
 -- Guards per-pedestal so a pending placement on one doesn't block another.
-local pendingPedestals: { [number]: boolean } = {}
+-- Value = the os.clock() it was set; a flag older than PENDING_TIMEOUT is
+-- treated as cleared, so a lost reply can never lock a pedestal for good.
+local pendingPedestals: { [number]: number } = {}
+local PENDING_TIMEOUT_SECONDS = 5
+
+local function isPending(pedestalIndex: number): boolean
+	local since = pendingPedestals[pedestalIndex]
+	if since and os.clock() - since < PENDING_TIMEOUT_SECONDS then
+		return true
+	end
+	pendingPedestals[pedestalIndex] = nil
+	return false
+end
+
+local function setPending(pedestalIndex: number)
+	pendingPedestals[pedestalIndex] = os.clock()
+end
+
+-- Short, never-blank toast text for every rejection reason.
+local REJECTION_TOASTS: { [string]: string } = {
+	PedestalOccupied = "That pedestal is already in use",
+	PedestalEmpty = "Nothing on that pedestal",
+	ItemInUse = "That item is already on display",
+	ItemNotOwned = "You don't have that item anymore",
+	NoPlot = "Your lab isn't ready yet, try again",
+	DataNotLoaded = "Your lab isn't ready yet, try again",
+}
+local FALLBACK_REJECTION_TOAST = "Couldn't do that, try again"
 -- True once this player's plot is claimed (its pedestals then exist).
 local pedestalsReady = false
 
@@ -23,14 +51,14 @@ local placementResolved = Instance.new("BindableEvent")
 ItemController.PlacementResolved = placementResolved.Event
 
 local function requestPlaceItem(pedestalIndex: number, uid: string)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
 		return
 	end
 
-	pendingPedestals[pedestalIndex] = true
+	setPending(pedestalIndex)
 	RemoteEvents.RequestPlaceItem:FireServer(uid, pedestalIndex)
 end
 
@@ -42,7 +70,7 @@ end
 -- Uid the client sends, so this only changes which Uid gets picked, not the
 -- trust boundary.
 local function openItemPicker(pedestalIndex: number)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
@@ -76,7 +104,7 @@ function ItemController.PlaceOnFirstEmpty(uid: string): boolean
 		return false
 	end
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
-		if not TycoonController.GetPedestalDisplay(index) and not pendingPedestals[index] then
+		if not TycoonController.GetPedestalDisplay(index) and not isPending(index) then
 			requestPlaceItem(index, uid)
 			return true
 		end
@@ -85,14 +113,14 @@ function ItemController.PlaceOnFirstEmpty(uid: string): boolean
 end
 
 local function requestRemoveItem(pedestalIndex: number)
-	if pendingPedestals[pedestalIndex] then
+	if isPending(pedestalIndex) then
 		return
 	end
 	if not TycoonController.GetPedestalDisplay(pedestalIndex) then
 		return
 	end
 
-	pendingPedestals[pedestalIndex] = true
+	setPending(pedestalIndex)
 	RemoteEvents.RequestRemoveItem:FireServer(pedestalIndex)
 end
 
@@ -108,8 +136,17 @@ local function onPedestalTriggered(pedestalIndex: number)
 end
 
 local function onPlaceItemResult(result: any)
-	if result.PedestalIndex then
+	if typeof(result) ~= "table" then
+		return
+	end
+	if typeof(result.PedestalIndex) == "number" then
 		pendingPedestals[result.PedestalIndex] = nil
+	end
+	if not result.Success then
+		local reason = if typeof(result.Reason) == "string" then result.Reason else ""
+		ToastController.Show(REJECTION_TOASTS[reason] or FALLBACK_REJECTION_TOAST, "Error")
+		-- Our view of the pedestals may be stale; ask for a fresh snapshot.
+		RemoteEvents.RequestSync:FireServer()
 	end
 	placementResolved:Fire(result)
 end

@@ -19,6 +19,7 @@ local REMOTE_EVENT_NAMES = {
 	"CashCollected", -- server -> client (owner only): a cash drop hit the Collector; {Amount, Position} for the floating "+$X" pop
 	"GoalCompleted", -- server -> client: the player's current goal was met and paid; {Index, Reward}
 	"RequestFuseAll", -- client -> server: fuse every Common/Rare/Epic pair (cascading) in one go
+	"RequestSync", -- client -> server: ask for a fresh SyncTycoon after a rejection (rate-limited to 1 per 2 s)
 	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
 }
 

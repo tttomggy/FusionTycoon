@@ -48,11 +48,14 @@ local ItemService = {}
 
 ItemService.Name = "ItemService"
 
-local function reject(player: Player, reason: string, isSuspicious: boolean?)
+-- Every result carries the PedestalIndex the request named (when it had a
+-- valid one), so the client can clear that pedestal's pending flag even on
+-- a rejection - without it one rejection locked the pedestal for the session.
+local function reject(player: Player, reason: string, pedestalIndex: number?, isSuspicious: boolean?)
 	if isSuspicious then
 		warn(("ItemService: rejected place-item request from %s (%s)"):format(player.Name, reason))
 	end
-	RemoteEvents.PlaceItemResult:FireClient(player, { Success = false, Reason = reason })
+	RemoteEvents.PlaceItemResult:FireClient(player, { Success = false, Reason = reason, PedestalIndex = pedestalIndex })
 end
 
 local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
@@ -73,14 +76,14 @@ end
 
 local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIndex: unknown)
 	if typeof(rawUid) ~= "string" or typeof(rawPedestalIndex) ~= "number" then
-		reject(player, "InvalidArguments", true)
+		reject(player, "InvalidArguments", nil, true)
 		return
 	end
 	local uid = rawUid :: string
 	local pedestalIndex = math.floor(rawPedestalIndex :: number)
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		reject(player, "DataNotLoaded")
+		reject(player, "DataNotLoaded", pedestalIndex)
 		return
 	end
 
@@ -89,30 +92,30 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	-- player can never target another player's pedestal.
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if not plot then
-		reject(player, "NoPlot")
+		reject(player, "NoPlot", pedestalIndex)
 		return
 	end
 
 	local pedestal = getPedestalPart(plot, pedestalIndex)
 	if not pedestal then
-		reject(player, "InvalidPedestal", true)
+		reject(player, "InvalidPedestal", pedestalIndex, true)
 		return
 	end
 
 	local item = PlayerDataService.GetItemByUid(player, uid)
 	if not item then
-		reject(player, "ItemNotOwned", true)
+		reject(player, "ItemNotOwned", pedestalIndex, true)
 		return
 	end
 
 	if item.InUse then
-		reject(player, "ItemInUse", true)
+		reject(player, "ItemInUse", pedestalIndex, true)
 		return
 	end
 
 	local pedestalDisplays = PlayerDataService.GetPedestalDisplays(player)
 	if pedestalDisplays[pedestalIndex] then
-		reject(player, "PedestalOccupied")
+		reject(player, "PedestalOccupied", pedestalIndex)
 		return
 	end
 
@@ -147,13 +150,13 @@ end
 
 local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	if typeof(rawPedestalIndex) ~= "number" then
-		reject(player, "InvalidArguments", true)
+		reject(player, "InvalidArguments", nil, true)
 		return
 	end
 	local pedestalIndex = math.floor(rawPedestalIndex :: number)
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		reject(player, "DataNotLoaded")
+		reject(player, "DataNotLoaded", pedestalIndex)
 		return
 	end
 
@@ -161,20 +164,20 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	-- resolved from the requesting player's own server-tracked plot.
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if not plot then
-		reject(player, "NoPlot")
+		reject(player, "NoPlot", pedestalIndex)
 		return
 	end
 
 	local pedestal = getPedestalPart(plot, pedestalIndex)
 	if not pedestal then
-		reject(player, "InvalidPedestal", true)
+		reject(player, "InvalidPedestal", pedestalIndex, true)
 		return
 	end
 
 	local pedestalDisplays = PlayerDataService.GetPedestalDisplays(player)
 	local uid = pedestalDisplays[pedestalIndex]
 	if not uid then
-		reject(player, "PedestalEmpty")
+		reject(player, "PedestalEmpty", pedestalIndex)
 		return
 	end
 
