@@ -12,8 +12,10 @@
 	  Diamond    2     5         0.8%         0.4%
 	  Rainbow    3     12        0.1%         0.05%
 
-	Every chance is x luck (RebirthConfig.GetLuck). Mirrored in
-	tools/econ_sim.py (MUTATIONS); change both together.
+	Every chance is x luck (RebirthConfig.GetLuck) x an optional per-mutation
+	event multiplier (EventState.GetMutationMultipliers; this config never
+	requires an event module). Mirrored in tools/econ_sim.py (MUTATIONS);
+	change both together.
 ]]
 local MutationConfig = {}
 
@@ -50,23 +52,27 @@ function MutationConfig.GetRank(mutation: string?): number
 	return if def then def.Rank else 0
 end
 
--- The chance of `mutation` from `source` at `luck`.
-function MutationConfig.GetChance(mutation: string, source: MutationSource, luck: number): number
+-- Event odds multipliers by mutation (EventState.GetMutationMultipliers);
+-- a missing entry is x1.
+export type OddsMultipliers = { [string]: number }
+
+-- The chance of `mutation` from `source` at `luck` (x its event multiplier).
+function MutationConfig.GetChance(mutation: string, source: MutationSource, luck: number, multipliers: OddsMultipliers?): number
 	local def = MutationConfig.Mutations[mutation]
 	if not def then
 		return 0
 	end
-	return (if source == "Pull" then def.PullChance else def.FusionChance) * math.max(luck, 0)
+	local event = if multipliers then multipliers[mutation] or 1 else 1
+	return (if source == "Pull" then def.PullChance else def.FusionChance) * math.max(luck, 0) * event
 end
 
--- One roll against the cumulative chances, rarest first: Rainbow, then
--- Diamond, then Golden. nil = no mutation.
-function MutationConfig.Roll(rng: Random, luck: number, source: MutationSource): string?
+-- One roll against the cumulative chances, rarest first. nil = no mutation.
+function MutationConfig.Roll(rng: Random, luck: number, source: MutationSource, multipliers: OddsMultipliers?): string?
 	local roll = rng:NextNumber()
 	local cumulative = 0
 	for index = #MutationConfig.Order, 1, -1 do
 		local mutation = MutationConfig.Order[index]
-		cumulative += MutationConfig.GetChance(mutation, source, luck)
+		cumulative += MutationConfig.GetChance(mutation, source, luck, multipliers)
 		if roll < cumulative then
 			return mutation
 		end

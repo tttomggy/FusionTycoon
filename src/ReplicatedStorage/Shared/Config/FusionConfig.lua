@@ -29,9 +29,15 @@ FusionConfig.SuccessChanceByCount = {
 
 -- Chance that `count` items of `tier` fuse into the next tier; 0 if that
 -- tier or count can't be fused.
-function FusionConfig.GetFusionChance(tier: string, count: number): number
+-- `bonus`: an event's success bonus (EventState.GetFusionSuccessBonus,
+-- Void Moon +0.10), added on top and capped at 100%.
+function FusionConfig.GetFusionChance(tier: string, count: number, bonus: number?): number
 	local byCount = FusionConfig.SuccessChanceByCount[tier]
-	return if byCount then byCount[count] or 0 else 0
+	local base = if byCount then byCount[count] or 0 else 0
+	if base <= 0 then
+		return 0
+	end
+	return math.min(1, base + (bonus or 0))
 end
 
 -- Fuse All only fuses pairs (count 2, unmutated) up to this tier (Common,
@@ -197,17 +203,29 @@ export type Odds = {
 	FusionMutations: string, -- "Golden 2.2% · Diamond 0.44% · Rainbow 0.055%"
 }
 
-local function mutationLine(source: MutationConfig.MutationSource, luck: number): string
+local function mutationLine(source: MutationConfig.MutationSource, luck: number, multipliers: MutationConfig.OddsMultipliers?): string
 	local parts = {}
 	for _, mutation in MutationConfig.Order do
-		local chance = MutationConfig.GetChance(mutation, source, luck)
-		table.insert(parts, ("%s %s%%"):format(mutation, FusionConfig.FormatPercent(chance * 100)))
+		local chance = MutationConfig.GetChance(mutation, source, luck, multipliers)
+		-- Event-only mutations (no normal chance) aren't listed here.
+		if chance > 0 then
+			table.insert(parts, ("%s %s%%"):format(mutation, FusionConfig.FormatPercent(chance * 100)))
+		end
 	end
 	return table.concat(parts, " · ")
 end
 
--- Every odds line at `luck` (RebirthConfig.GetLuck).
-function FusionConfig.FormatOdds(luck: number): Odds
+-- The live event's effect on the odds (EventState): per-source mutation
+-- multipliers and the fusion success bonus. nil = no event.
+export type OddsEvent = {
+	PullMultipliers: MutationConfig.OddsMultipliers?,
+	FusionMultipliers: MutationConfig.OddsMultipliers?,
+	FusionBonus: number?,
+}
+
+-- Every odds line at `luck` (RebirthConfig.GetLuck), with the live event's
+-- boosts when given: the same functions the rolls use.
+function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
 	local rates = FusionConfig.GetGachaRates(luck)
 	local gacha = {}
 	for _, tier in FusionConfig.TierOrder do
@@ -219,7 +237,8 @@ function FusionConfig.FormatOdds(luck: number): Odds
 		if nextTier and FusionConfig.CanFuseTier(tier) then
 			local texts = {}
 			for count = FusionConfig.MinFusionInputs, FusionConfig.MaxFusionInputs do
-				table.insert(texts, FusionConfig.FormatPercent(FusionConfig.GetFusionChance(tier, count) * 100) .. "%")
+				local chance = FusionConfig.GetFusionChance(tier, count, event and event.FusionBonus)
+				table.insert(texts, FusionConfig.FormatPercent(chance * 100) .. "%")
 			end
 			table.insert(fusion, {
 				FromTier = tier,
@@ -231,9 +250,9 @@ function FusionConfig.FormatOdds(luck: number): Odds
 	end
 	return {
 		Gacha = table.concat(gacha, " · ") .. "%",
-		PullMutations = mutationLine("Pull", luck),
+		PullMutations = mutationLine("Pull", luck, event and event.PullMultipliers),
 		Fusion = fusion,
-		FusionMutations = mutationLine("Fusion", luck),
+		FusionMutations = mutationLine("Fusion", luck, event and event.FusionMultipliers),
 	}
 end
 

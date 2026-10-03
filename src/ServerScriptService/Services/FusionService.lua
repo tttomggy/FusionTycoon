@@ -27,10 +27,12 @@ local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+type EventServiceModule = typeof(require(script.Parent.EventService))
 
 type State = {
 	-- Ephemeral, session-only cooldown tracking; not persisted with player data.
@@ -61,6 +63,7 @@ local state: State = {
 -- services with no yield in between, so this is assigned before any remote
 -- handler connected in Init can actually be resumed.
 local PlayerDataService: PlayerDataServiceModule
+local EventService: EventServiceModule
 
 local FusionService = {}
 
@@ -117,7 +120,8 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 	local count = #items
 	local consumedTier = items[1].Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
-	local chance = FusionConfig.GetFusionChance(consumedTier, count)
+	-- Void Moon adds a success bonus (EventService hook; capped at 100%).
+	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus())
 	if not nextTier or chance <= 0 then
 		return nil, "MaxTier"
 	end
@@ -165,8 +169,21 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 		base = MutationConfig.Worse(base, item.Mutation)
 		table.insert(uids, item.Uid)
 	end
-	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
-	local mutation = MutationConfig.Better(base, MutationConfig.Roll(rng, luck, "Fusion"))
+	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
+	-- An event mutation (Void Moon: Void) replaces the normal fusion roll
+	-- when it hits; otherwise the normal roll at the event's odds.
+	local rolled: string?
+	local eventMutation, eventChance = EventService.GetFusionEventMutation()
+	if eventMutation and rng:NextNumber() < eventChance then
+		rolled = eventMutation
+	else
+		local multipliers: { [string]: number } = {}
+		for _, name in MutationConfig.Order do
+			multipliers[name] = EventService.GetMutationOddsMultiplier(name, "Fusion")
+		end
+		rolled = MutationConfig.Roll(rng, luck, "Fusion", multipliers)
+	end
+	local mutation = MutationConfig.Better(base, rolled)
 
 	if not PlayerDataService.RemoveItemsByUid(player, uids) then
 		return nil, "ItemNotOwned"
@@ -445,6 +462,7 @@ end
 
 function FusionService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
+	EventService = require(script.Parent.EventService)
 end
 
 return FusionService

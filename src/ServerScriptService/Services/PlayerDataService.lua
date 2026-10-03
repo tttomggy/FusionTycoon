@@ -24,6 +24,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -763,6 +764,7 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 		CashMultiplierLevel = data.CashMultiplierLevel,
 		Rebirths = data.Rebirths,
 		IndexMultiplier = IndexConfig.GetMultiplier(data.Index),
+		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
 	}
 end
 

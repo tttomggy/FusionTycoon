@@ -4,6 +4,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -157,6 +158,7 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		CashMultiplierLevel = cashMultiplierLevel,
 		Rebirths = rebirths,
 		IndexMultiplier = indexMultiplier,
+		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
 	}
 end
 

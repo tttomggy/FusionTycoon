@@ -29,6 +29,7 @@ local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
@@ -332,14 +333,15 @@ end
 
 local gachaRng = Random.new()
 
+-- Rebirth luck x the admin luck boost (EventState; stacks).
 local function getLuck(player: Player): number
-	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
+	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
 end
 
 -- The pad's odds disclosure at the player's luck (FusionConfig.FormatOdds,
 -- the same numbers the rolls use): all six tiers, then the pull mutations.
 local function getOddsText(luck: number): string
-	local odds = FusionConfig.FormatOdds(luck)
+	local odds = FusionConfig.FormatOdds(luck, EventState.GetOddsEvent())
 	return odds.Gacha .. "\n" .. odds.PullMutations
 end
 
@@ -368,9 +370,11 @@ type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
 -- nothing. nil if any roll has no item to give.
 local function rollPulls(count: number, luck: number): { PulledItem }?
 	local pulls: { PulledItem } = {}
+	-- The live event's mutation odds (Golden Rain, Rainbow Storm).
+	local pullMultipliers = EventState.GetMutationMultipliers("Pull")
 	for _ = 1, count do
 		local tier = FusionConfig.RollGachaTier(gachaRng, luck)
-		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull")
+		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull", pullMultipliers)
 		local def = ItemConfig.PickRandomOfTier(tier, gachaRng)
 		if not def then
 			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(tier))
@@ -843,7 +847,7 @@ local function refreshFactoryLine(player: Player)
 	local boardPart = board and board:FindFirstChild("Board")
 	local surface = boardPart and boardPart:FindFirstChild("OddsSurface")
 	if surface and surface:IsA("SurfaceGui") then
-		local odds = FusionConfig.FormatOdds(getLuck(player))
+		local odds = FusionConfig.FormatOdds(getLuck(player), EventState.GetOddsEvent())
 		BillboardKit.SetOddsMutations(surface, "Mutations · " .. odds.FusionMutations)
 	end
 	refreshRebirthPortal(player)

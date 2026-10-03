@@ -14,6 +14,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
@@ -21,6 +22,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
+type EventServiceModule = typeof(require(script.Parent.EventService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -36,6 +38,7 @@ local state: State = {
 -- call sites below read exactly as before.
 local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
+local EventService: EventServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -63,6 +66,11 @@ local SHIELD_COMMAND = "/shield"
 local HEIST_COOLDOWN_COMMAND = "/heistcd"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
+-- "/event powersurge 3" forces an event for 3 min (default its normal
+-- length); "/event off" ends what's on. "/eventclock 15" shifts the event
+-- clock 15 min ahead so the schedule can be walked through.
+local EVENT_COMMAND = "/event"
+local EVENT_CLOCK_COMMAND = "/eventclock"
 -- "/tips reset" clears your seen one-time tips (TipConfig), so HOW TO HEIST
 -- and the heist tips can be re-tested.
 local TIPS_COMMAND = "/tips"
@@ -132,6 +140,32 @@ local function onPlayerChatted(player: Player, message: string)
 		stealableToggles[player.UserId] = stealable
 		HeistService.SetDebugStealable(player, stealable)
 		print(("DebugService: %s's lab is %s"):format(player.Name, if stealable then "stealable" else "protected again"))
+	elseif command == EVENT_COMMAND then
+		local name, rawMinutes = argument:match("^(%S+)%s*(%S*)$")
+		if name == "off" then
+			EventService.EndEvent()
+			print("DebugService: event ended")
+			return
+		end
+		-- Chat is lowercased; match the id case-insensitively.
+		local id: string? = nil
+		for _, candidate in EventConfig.Order do
+			if candidate:lower() == name then
+				id = candidate
+			end
+		end
+		if not id then
+			warn(("DebugService: /event: unknown event %q (try %s)"):format(tostring(name), table.concat(EventConfig.Order, ", ")))
+			return
+		end
+		local minutes = tonumber(rawMinutes)
+		local seconds = if minutes then minutes * 60 else EventConfig.Durations[id]
+		EventService.ForceEvent(id, seconds)
+		print(("DebugService: forced %s for %d s"):format(id, seconds))
+	elseif command == EVENT_CLOCK_COMMAND then
+		local minutes = tonumber(argument) or 0
+		EventService.SetClockOffset(minutes)
+		print(("DebugService: event clock offset %d min"):format(minutes))
 	elseif command == TIPS_COMMAND then
 		if argument == "reset" then
 			PlayerDataService.ResetTips(player)
@@ -189,12 +223,13 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /wipe")
 end
 
 function DebugService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	HeistService = require(script.Parent.HeistService)
+	EventService = require(script.Parent.EventService)
 end
 
 return DebugService

@@ -236,6 +236,9 @@ export type IncomeInputs = {
 	CashMultiplierLevel: number,
 	Rebirths: number,
 	IndexMultiplier: number, -- IndexConfig.GetMultiplier(found entries)
+	-- The live event's generator boost (EventState.GetGeneratorMultiplier;
+	-- Power Surge). Generators only, never pedestals. nil = 1.
+	EventGeneratorMultiplier: number?,
 }
 
 -- "The multiplier" for every per-generator or per-item number the game
@@ -264,7 +267,7 @@ end
 -- is ALL income: the factory line's balls only picture it.
 -- (generators + pedestals) x pad x rebirth x Index.
 function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
-	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels)
+	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels) * (inputs.EventGeneratorMultiplier or 1)
 	for _, item in inputs.PedestalItems do
 		total += TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
 	end
@@ -274,7 +277,9 @@ end
 -- The generators' share of GetPassiveCashPerSecond (what the factory balls
 -- add up to): the collector label and the Upgrades panel total.
 function TycoonConfig.GetGeneratorIncome(inputs: IncomeInputs): number
-	return baseGeneratorCashPerSecond(inputs.GeneratorLevels) * TycoonConfig.GetIncomeMultiplier(inputs)
+	return baseGeneratorCashPerSecond(inputs.GeneratorLevels)
+		* (inputs.EventGeneratorMultiplier or 1)
+		* TycoonConfig.GetIncomeMultiplier(inputs)
 end
 
 return TycoonConfig

@@ -32,6 +32,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local Controllers = script.Parent.Parent.Controllers
 local InventoryController = require(Controllers.InventoryController)
 local TycoonController = require(Controllers.TycoonController)
@@ -236,7 +237,9 @@ local function refreshChamber()
 		end
 	end
 
-	local chance = FusionConfig.GetFusionChance(selectedTier, math.max(count, FusionConfig.MinFusionInputs))
+	-- With the live event's success bonus (Void Moon), like the server's roll.
+	local bonus = EventState.GetFusionSuccessBonus()
+	local chance = FusionConfig.GetFusionChance(selectedTier, math.max(count, FusionConfig.MinFusionInputs), bonus)
 	if count >= FusionConfig.MinFusionInputs then
 		chanceLabel.Text = percent(chance)
 		chanceLabel.TextColor3 = chanceColor(chance)
@@ -260,7 +263,7 @@ local function refreshChamber()
 		-- Equal-width cells (the grid layout sizes them), so five always fit.
 		local chip = UIKit.Label({
 			Name = "Chip" .. chipCount,
-			Text = ("%d · %s"):format(chipCount, percent(FusionConfig.GetFusionChance(selectedTier, chipCount))),
+			Text = ("%d · %s"):format(chipCount, percent(FusionConfig.GetFusionChance(selectedTier, chipCount, bonus))),
 			Font = Fonts.BodyHeavy,
 			TextSize = 14,
 			TextColor3 = if current then Colors.Text else Colors.Muted,
