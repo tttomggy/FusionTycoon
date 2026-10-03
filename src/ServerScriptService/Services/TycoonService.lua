@@ -874,6 +874,9 @@ local function refreshPlotSigns()
 		local player = Players:GetPlayerByUserId(userId)
 		local plot = plotByUserId[userId]
 		if player and plot then
+			-- HeistService keeps the plot's Protected attribute (owner under
+			-- HeistConfig.MinRebirths): the sign says so with a teal pill.
+			sign.SetPill(if plot:GetAttribute("Protected") == true then "🛡 PROTECTED · NEW LAB" else nil)
 			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
 				sign.Set("FREE LAB", "Step on the green pad")
 			else

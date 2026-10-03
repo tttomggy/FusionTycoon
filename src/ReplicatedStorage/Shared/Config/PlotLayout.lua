@@ -47,6 +47,31 @@ PlotLayout.SPAWN_POSITION = v3(0, 0, 40) -- on the street in front of the gate
 PlotLayout.SPAWN_SIZE = v3(6, 1, 6)
 PlotLayout.SPAWN_CHARACTER_CLEARANCE = 3 -- above the spawn top when moving a character there
 
+-- Inside the walls (the inner wall faces), in plot-local space. The heist
+-- uses it for delivery (thief home) and the shield's eject; Y is a generous
+-- band so a jump still counts but someone on a roof doesn't.
+PlotLayout.INSIDE_MIN_Y = -2
+PlotLayout.INSIDE_MAX_Y = 30
+
+function PlotLayout.IsInsidePlot(localPos: Vector3): boolean
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
+	return math.abs(localPos.X) <= inner
+		and math.abs(localPos.Z) <= inner
+		and localPos.Y >= PlotLayout.INSIDE_MIN_Y
+		and localPos.Y <= PlotLayout.INSIDE_MAX_Y
+end
+
+-- The lab shield: ForceField panels just outside all four walls (the front
+-- one split around the gate) plus a thin Neon line across the gate gap.
+-- Non-colliding: the eject loop does the keeping-out.
+PlotLayout.ShieldFence = {
+	Height = 10,
+	Thickness = 0.2,
+	OutsetFromWall = 0.4, -- gap between the wall's outer face and the panel
+	GateLineThickness = 0.3,
+	GateLineY = 0.5,
+}
+
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
 PlotLayout.CLAIM_STATION = v3(0, 0, 24)

@@ -634,6 +634,8 @@ end
 
 export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
+	-- A teal pill between title and detail ("🛡 PROTECTED · NEW LAB"); nil hides it.
+	SetPill: (text: string?) -> (),
 }
 
 -- The plot sign's content on BOTH the Front and Back faces of `board`: the
@@ -641,6 +643,7 @@ export type SignSurface = {
 function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignSurface
 	local titles: { TextLabel } = {}
 	local details: { TextLabel } = {}
+	local pills: { TextLabel } = {}
 	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
 		local gui = newSurface(board, "Sign" .. face.Name, face, pixelsPerStud)
 		local panel = Instance.new("Frame")
@@ -653,8 +656,18 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 		local title = scaledLabel(panel, "Title", Fonts.Display, Colors.Text, 0.08, 0.52)
 		textStroke(title, 4)
 		local detail = scaledLabel(panel, "Detail", Fonts.Body, Colors.PlotSignDetail, 0.64, 0.26)
+		local pill = scaledLabel(panel, "Pill", Fonts.Display, Colors.Text, 0.46, 0.2)
+		pill.AnchorPoint = Vector2.new(0.5, 0)
+		pill.Position = UDim2.fromScale(0.5, 0.46)
+		pill.Size = UDim2.fromScale(0.62, 0.2)
+		pill.BackgroundTransparency = 0
+		pill.BackgroundColor3 = Colors.ShieldTeal
+		pill.Visible = false
+		corner(pill, UDim.new(0.5, 0))
+		textStroke(pill, 2)
 		table.insert(titles, title)
 		table.insert(details, detail)
+		table.insert(pills, pill)
 	end
 	return {
 		Set = function(titleText: string, detailText: string)
@@ -663,6 +676,22 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 			end
 			for _, detail in details do
 				detail.Text = detailText
+			end
+		end,
+		-- With the pill showing, the title moves up and the detail down to make room.
+		SetPill = function(text: string?)
+			local shown = text ~= nil
+			for _, pill in pills do
+				pill.Text = text or ""
+				pill.Visible = shown
+			end
+			for _, title in titles do
+				title.Position = UDim2.fromScale(title.Position.X.Scale, if shown then 0.03 else 0.08)
+				title.Size = UDim2.fromScale(title.Size.X.Scale, if shown then 0.42 else 0.52)
+			end
+			for _, detail in details do
+				detail.Position = UDim2.fromScale(detail.Position.X.Scale, if shown then 0.7 else 0.64)
+				detail.Size = UDim2.fromScale(detail.Size.X.Scale, if shown then 0.24 else 0.26)
 			end
 		end,
 	}
