@@ -23,9 +23,9 @@ local Colors = UITheme.Colors
 local TOAST_HEIGHT = 44
 local HOLD_SECONDS = 2
 local MAX_VISIBLE = 2
--- Sits above the bottom buttons (22 margin + 64 button + 5 shadow) with room
--- to spare. Raised while a bottom result card (fail / pull row) is showing.
-local BASE_BOTTOM_OFFSET = 104
+-- Sits above the bottom buttons and the REBIRTH! slot (UITheme). Raised
+-- while a bottom result card (fail / pull row) is showing.
+local BASE_BOTTOM_OFFSET = UITheme.BottomStackOffset
 
 local stack: Frame? = nil
 local visible: { Frame } = {}

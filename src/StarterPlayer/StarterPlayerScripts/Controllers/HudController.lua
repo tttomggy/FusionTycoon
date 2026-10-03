@@ -565,6 +565,8 @@ local function layoutRebirthReady(isPhone: boolean)
 	local bottom = BOTTOM_MARGIN + UITheme.ShadowOffset + layout.ButtonSize.Y + REBIRTH_READY_GAP
 	rebirthReadyHolder.Size = UDim2.fromOffset(size.X, size.Y)
 	rebirthReadyHolder.Position = UDim2.new(0.5, 0, 1, -bottom)
+	-- Toasts and bottom cards sit on UITheme.BottomStackOffset, above this slot.
+	assert(bottom + size.Y * 1.08 <= UITheme.BottomStackOffset, "BottomStackOffset must clear REBIRTH!")
 end
 
 -- Gentle pulse on UPGRADES while something is affordable, so new players notice it.

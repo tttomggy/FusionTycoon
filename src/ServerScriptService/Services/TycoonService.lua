@@ -430,6 +430,11 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	multiPrompt.KeyboardKeyCode = Enum.KeyCode.R
 	multiPrompt.GamepadKeyCode = Enum.KeyCode.ButtonY
 	multiPrompt.UIOffset = Vector2.new(0, PlotLayout.Station.MultiPromptOffsetPx)
+	-- AlwaysShow: it must show whenever Pull does. Under OnePerButton it was
+	-- grouped with the E prompts (touch has one "button" for every prompt),
+	-- so the nearer Pull could hide it. Nothing disables it: an unaffordable
+	-- x10 still shows and the server answers "Need $X for 10 pulls".
+	multiPrompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
 
 	-- Runs on every sync too (addStationRefresh): price, odds at the
 	-- player's luck (so a rebirth updates them), and the x10 cost.

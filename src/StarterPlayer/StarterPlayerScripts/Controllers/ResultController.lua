@@ -48,7 +48,7 @@ local SUNBURST_RAYS = 12
 local SUNBURST_DEGREES_PER_SECOND = 20
 local SUNBURST_RAY_LENGTH = 720
 
-local BOTTOM_CARD_OFFSET = 104 -- above the HUD buttons, same baseline as toasts
+local BOTTOM_CARD_OFFSET = UITheme.BottomStackOffset -- above the HUD buttons and REBIRTH!, same baseline as toasts
 local FAIL_CARD_SIZE = Vector2.new(470, 92)
 local PULL_CARD_SIZE = Vector2.new(440, 74)
 local BOTTOM_CARD_SECONDS = 3

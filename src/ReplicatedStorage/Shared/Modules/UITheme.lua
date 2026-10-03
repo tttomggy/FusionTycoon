@@ -198,6 +198,12 @@ UITheme.Stroke = {
 
 UITheme.ShadowOffset = 5
 UITheme.SmallShadowOffset = 4
+-- Baseline (px above the screen bottom, before the phone UIScale) for
+-- toasts and the bottom result cards. It clears the HUD's bottom button row
+-- AND the REBIRTH! button's slot above it (HudController: 22 margin + 5
+-- shadow + 64 button + 14 gap + 56 button, +4% pulse), whether or not
+-- REBIRTH! is showing, so toasts never jump when it appears.
+UITheme.BottomStackOffset = 176
 UITheme.MinTapSize = 44
 
 -- Viewport height under which the phone layout + 0.8 UIScale apply.
