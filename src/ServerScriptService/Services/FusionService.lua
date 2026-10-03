@@ -24,6 +24,7 @@ local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
@@ -97,18 +98,18 @@ type InventoryItem = { Uid: string, ItemId: string, Tier: string, InUse: boolean
 --   fail:    the input with the higher mutation rank (the first on a tie)
 --            stays untouched, same Uid; only the other goes. A fail never
 --            loses a mutation.
--- Returns (upgraded, resultEntry, consumedUids), or (false, nil, nil,
--- reason) if nothing changed.
+-- Returns (upgraded, resultEntry, consumedUids, isNewIndexEntry), or
+-- (false, nil, nil, false, reason) if nothing changed.
 local function fuseOnce(
 	player: Player,
 	itemA: InventoryItem,
 	itemB: InventoryItem
-): (boolean, InventoryItem?, { string }?, string?)
+): (boolean, InventoryItem?, { string }?, boolean, string?)
 	local consumedTier = itemA.Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
 	local successChance = FusionConfig.SuccessChance[consumedTier]
 	if not nextTier or not successChance then
-		return false, nil, nil, "MaxTier"
+		return false, nil, nil, false, "MaxTier"
 	end
 
 	local upgraded = rng:NextNumber() < successChance
@@ -119,10 +120,10 @@ local function fuseOnce(
 		end
 		local removed = PlayerDataService.RemoveItemsByUid(player, { lose.Uid })
 		if not removed then
-			return false, nil, nil, "ItemNotOwned"
+			return false, nil, nil, false, "ItemNotOwned"
 		end
 		PlayerDataService.IncrementTotalFusions(player)
-		return false, keep, { lose.Uid }, nil
+		return false, keep, { lose.Uid }, false, nil
 	end
 
 	-- Pick the result BEFORE touching the inventory, so a config gap can
@@ -130,7 +131,7 @@ local function fuseOnce(
 	local rewardItem = ItemConfig.PickRandomOfTier(nextTier, rng)
 	if not rewardItem then
 		warn(("FusionService: no ItemConfig entry found for tier %s"):format(nextTier))
-		return false, nil, nil, "MissingRewardItem"
+		return false, nil, nil, false, "MissingRewardItem"
 	end
 	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
 	local base = MutationConfig.Worse(itemA.Mutation, itemB.Mutation)
@@ -138,12 +139,20 @@ local function fuseOnce(
 
 	local removed = PlayerDataService.RemoveItemsByUid(player, { itemA.Uid, itemB.Uid })
 	if not removed then
-		return false, nil, nil, "ItemNotOwned"
+		return false, nil, nil, false, "ItemNotOwned"
 	end
 
-	local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
+	local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
 	PlayerDataService.IncrementTotalFusions(player)
-	return true, newEntry, { itemA.Uid, itemB.Uid }, nil
+	return true, newEntry, { itemA.Uid, itemB.Uid }, isNewIndex, nil
+end
+
+-- The tier whose Index page `item` just completed, if it was a new entry.
+local function completedTier(player: Player, item: InventoryItem, isNewIndex: boolean): string?
+	if isNewIndex and IndexConfig.IsTierComplete(PlayerDataService.GetIndex(player), item.Tier) then
+		return item.Tier
+	end
+	return nil
 end
 
 -- Server-wide brag for a Legendary+ result, or any Rainbow: the moment
@@ -228,7 +237,7 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 
 	local consumedTier = itemA.Tier
 	state.lastFusionAt[player.UserId] = os.clock()
-	local upgraded, newEntry, consumedUids, failure = fuseOnce(player, itemA, itemB)
+	local upgraded, newEntry, consumedUids, isNewIndex, failure = fuseOnce(player, itemA, itemB)
 	if not newEntry then
 		reject(player, failure or "ItemNotOwned")
 		return
@@ -241,6 +250,8 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		ConsumedUids = consumedUids,
 		ConsumedTier = consumedTier,
 		NewItem = newEntry,
+		NewIndex = isNewIndex,
+		IndexTierComplete = completedTier(player, newEntry, isNewIndex),
 	})
 	-- Fusions change goal progress (TotalFusions, tiers owned). Sent after
 	-- the result so a goal banner never lands ahead of the fusion itself.
@@ -291,6 +302,8 @@ local function onFuseAllRequest(player: Player)
 	local gained: { [string]: number } = {}
 	local consumed: { [string]: number } = {}
 	local best: InventoryItem? = nil
+	local newIndexItems: { InventoryItem } = {}
+	local tiersCompleted: { string } = {}
 
 	while count < FusionConfig.FuseAllMaxFusions do
 		local itemA, itemB = findFuseAllPair(player)
@@ -298,7 +311,7 @@ local function onFuseAllRequest(player: Player)
 			break
 		end
 		local consumedTier = itemA.Tier
-		local upgraded, newEntry = fuseOnce(player, itemA, itemB)
+		local upgraded, newEntry, _, isNewIndex = fuseOnce(player, itemA, itemB)
 		-- On a fail newEntry is the kept input: one of the two consumed
 		-- counts back, so the summary's net change is the same either way.
 		if not newEntry then
@@ -307,6 +320,13 @@ local function onFuseAllRequest(player: Player)
 		count += 1
 		if upgraded then
 			upgradedCount += 1
+		end
+		if isNewIndex then
+			table.insert(newIndexItems, newEntry)
+			local tier = completedTier(player, newEntry, true)
+			if tier then
+				table.insert(tiersCompleted, tier)
+			end
 		end
 		consumed[consumedTier] = (consumed[consumedTier] or 0) + FusionConfig.ItemsRequiredPerFusion
 		gained[newEntry.Tier] = (gained[newEntry.Tier] or 0) + 1
@@ -328,6 +348,8 @@ local function onFuseAllRequest(player: Player)
 		Gained = gained,
 		Consumed = consumed,
 		Best = best,
+		NewIndexItems = newIndexItems,
+		IndexTiersCompleted = tiersCompleted,
 	})
 
 	-- Only the single best result is announced, and only if it's Legendary+.

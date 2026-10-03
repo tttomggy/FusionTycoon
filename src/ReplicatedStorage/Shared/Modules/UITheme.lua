@@ -79,6 +79,7 @@ UITheme.Gradients = {
 	Red = { Top = hex("#FF7A8E"), Bottom = hex("#E0304E") }, -- close (X), error toasts
 	Gold = { Top = hex("#FFD566"), Bottom = hex("#F0A100") }, -- gacha, goal bar
 	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
+	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 } :: { [string]: GradientPair }
 
@@ -210,6 +211,7 @@ UITheme.PhoneScale = 0.8
 UITheme.Icons = {
 	Upgrades = "",
 	Items = "rbxassetid://18469524765",
+	Index = "",
 	Close = "",
 	Lock = "",
 	Sunburst = "",

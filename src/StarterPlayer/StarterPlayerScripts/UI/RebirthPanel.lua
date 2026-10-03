@@ -362,8 +362,7 @@ local function build()
 		Parent = unlockBody,
 	})
 
-	-- "Index" joins this line once Depth 1's Index exists.
-	infoLines(list, "Keep", 3, "YOU KEEP", Colors.Cash, "Every item · your pedestals · goals · rebirths")
+	infoLines(list, "Keep", 3, "YOU KEEP", Colors.Cash, "Every item · your pedestals · Index · goals · rebirths")
 	infoLines(
 		list,
 		"Reset",

@@ -22,6 +22,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -62,6 +63,9 @@ export type PlayerData = {
 	-- needs RebirthConfig.GetRequirement(Rebirths). Goal rewards and /cash
 	-- don't count.
 	RunEarnings: number,
+	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
+	-- through rebirths; see IndexConfig.
+	Index: { [string]: boolean },
 }
 
 -- Server-computed progress toward the current goal, sent with the snapshot.
@@ -86,6 +90,9 @@ export type TycoonSnapshot = {
 	Rebirths: number,
 	RunEarnings: number,
 	RebirthRequirement: number,
+	-- Found Index keys as a dense list (the client builds the set and
+	-- computes the Index multiplier).
+	IndexKeys: { string },
 }
 
 type State = {
@@ -127,6 +134,7 @@ local DEFAULT_DATA: PlayerData = {
 	TotalFusions = 0,
 	Rebirths = 0,
 	RunEarnings = 0,
+	Index = {},
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -225,6 +233,13 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.RunEarnings) == "number" and raw.RunEarnings >= 0 then
 		data.RunEarnings = raw.RunEarnings
 	end
+	if typeof(raw.Index) == "table" then
+		for key, found in raw.Index do
+			if found == true and IndexConfig.IsValidKey(key) then
+				data.Index[key] = true
+			end
+		end
+	end
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
 	-- happened mid-change) would be stuck forever: unfusable and undisplayable.
@@ -241,6 +256,8 @@ local function reconcile(raw: any): PlayerData
 		if item.Mutation ~= nil and not MutationConfig.IsValid(item.Mutation) then
 			item.Mutation = nil
 		end
+		-- Backfill: everything already owned counts as found.
+		data.Index[IndexConfig.GetKey(item.ItemId, item.Mutation)] = true
 	end
 	return data
 end
@@ -493,10 +510,16 @@ function PlayerDataService.RemoveItemsByUid(player: Player, uids: { string }): (
 	return true, removedEntries
 end
 
-function PlayerDataService.AddItem(player: Player, itemId: string, tier: string, mutation: string?): InventoryItem?
+-- Adds an item and marks its Index entry. Returns (entry, isNewIndexEntry).
+function PlayerDataService.AddItem(
+	player: Player,
+	itemId: string,
+	tier: string,
+	mutation: string?
+): (InventoryItem?, boolean)
 	local data = state.sessionCache[player.UserId]
 	if not data then
-		return nil
+		return nil, false
 	end
 
 	local entry: InventoryItem = {
@@ -507,7 +530,15 @@ function PlayerDataService.AddItem(player: Player, itemId: string, tier: string,
 		Mutation = if MutationConfig.IsValid(mutation) then mutation else nil,
 	}
 	table.insert(data.Inventory, entry)
-	return entry
+	local key = IndexConfig.GetKey(itemId, entry.Mutation)
+	local isNew = not data.Index[key]
+	data.Index[key] = true
+	return entry, isNew
+end
+
+function PlayerDataService.GetIndex(player: Player): { [string]: boolean }
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Index else {}
 end
 
 -- Marks/unmarks an inventory item as "in use" (e.g. currently displayed on a
@@ -671,6 +702,7 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 		PedestalItems = PlayerDataService.GetDisplayedItems(player),
 		CashMultiplierLevel = data.CashMultiplierLevel,
 		Rebirths = data.Rebirths,
+		IndexMultiplier = IndexConfig.GetMultiplier(data.Index),
 	}
 end
 
@@ -686,6 +718,14 @@ function PlayerDataService.GetPassiveCashPerSecond(player: Player): number
 	return if inputs then TycoonConfig.GetPassiveCashPerSecond(inputs) else 0
 end
 
+local function indexKeys(index: { [string]: boolean }): { string }
+	local keys = {}
+	for key in index do
+		table.insert(keys, key)
+	end
+	return keys
+end
+
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 	return {
 		Cash = PlayerDataService.GetCash(player),
@@ -698,6 +738,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		Rebirths = PlayerDataService.GetRebirths(player),
 		RunEarnings = PlayerDataService.GetRunEarnings(player),
 		RebirthRequirement = RebirthConfig.GetRequirement(PlayerDataService.GetRebirths(player)),
+		IndexKeys = indexKeys(PlayerDataService.GetIndex(player)),
 	}
 end
 

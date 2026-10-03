@@ -225,14 +225,16 @@ export type IncomeInputs = {
 	PedestalItems: { PedestalItem },
 	CashMultiplierLevel: number,
 	Rebirths: number,
+	IndexMultiplier: number, -- IndexConfig.GetMultiplier(found entries)
 }
 
 -- "The multiplier" for every per-generator or per-item number the game
--- shows: Multiplier Pad x rebirth. (GetCashMultiplierValue is the pad
--- alone; only the pad's own label and Upgrades row use it.)
+-- shows: Multiplier Pad x rebirth x Index. (GetCashMultiplierValue is the
+-- pad alone; only the pad's own label and Upgrades row use it.)
 function TycoonConfig.GetIncomeMultiplier(inputs: IncomeInputs): number
 	return TycoonConfig.GetCashMultiplierValue(inputs.CashMultiplierLevel)
 		* RebirthConfig.GetIncomeMultiplier(inputs.Rebirths)
+		* inputs.IndexMultiplier
 end
 
 -- Sum of every generator's output, before the multiplier.
@@ -250,7 +252,7 @@ end
 -- Single source of truth for passive income, used by the server's payout tick
 -- AND the client HUD's "+$X/s" readout so the two can never disagree. This
 -- is ALL income: the factory line's balls only picture it.
--- (generators + pedestals) x pad x rebirth.
+-- (generators + pedestals) x pad x rebirth x Index.
 function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
 	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels)
 	for _, item in inputs.PedestalItems do

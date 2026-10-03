@@ -28,6 +28,7 @@ local InventoryController = require(script.Parent.InventoryController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
+local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
@@ -487,6 +488,19 @@ local function buildButtons(isPhone: boolean)
 		OnClick = HudController.OpenInventory,
 	})
 
+	buttonsByName.Index = UIKit.Button({
+		Name = "IndexButton",
+		Parent = buttonRow,
+		Style = "Teal",
+		Text = "INDEX",
+		Icon = UITheme.Icons.Index,
+		IconStacked = isPhone,
+		Size = size,
+		TextSize = layout.ButtonTextSize,
+		LayoutOrder = 3,
+		OnClick = IndexPanel.Toggle,
+	})
+
 	refreshBadge()
 	for name in highlighted do
 		applyHighlight(name)
@@ -638,6 +652,7 @@ function HudController.Init()
 	buildButtonRow()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
+	IndexPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)

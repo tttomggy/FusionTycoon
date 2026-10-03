@@ -29,6 +29,7 @@ local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
+local IndexConfig = require(Config.IndexConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
@@ -420,10 +421,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 
 		debounce = true
 		PlayerDataService.IncrementGachaPulls(player)
+		local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
+		-- After AddItem, so the snapshot's Index (and income) include it.
 		syncTycoon(player)
 		refreshLabel()
-
-		local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
 		burst(pad, FusionConfig.TierAccentColors[resultTier] or World.AccentGold, BURST_COUNT)
@@ -435,7 +436,13 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 		playSound(pad, STATION_SOUND_ID, 0.8)
 
-		RemoteEvents.GachaPullResult:FireClient(player, { Success = true, NewItem = newEntry })
+		local tierComplete = isNewIndex and IndexConfig.IsTierComplete(PlayerDataService.GetIndex(player), rewardItem.Tier)
+		RemoteEvents.GachaPullResult:FireClient(player, {
+			Success = true,
+			NewItem = newEntry,
+			NewIndex = isNewIndex,
+			IndexTierComplete = if tierComplete then rewardItem.Tier else nil,
+		})
 		announcePull(player, newEntry)
 
 		task.wait(STATION_DEBOUNCE_SECONDS)

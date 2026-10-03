@@ -2,6 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -18,6 +19,8 @@ local hasSynced = false
 local rebirths = 0
 local runEarnings = 0
 local rebirthRequirement = 0
+local indexFound: { [string]: boolean } = {}
+local indexMultiplier = 1
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -76,6 +79,11 @@ function TycoonController.GetRebirthRequirement(): number
 	return rebirthRequirement
 end
 
+-- Found Index entries ("<itemId>|<Mutation or Normal>" -> true).
+function TycoonController.GetIndex(): { [string]: boolean }
+	return indexFound
+end
+
 -- False until the first snapshot arrives (so the HUD doesn't flash $0).
 function TycoonController.HasSynced(): boolean
 	return hasSynced
@@ -114,6 +122,7 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		PedestalItems = TycoonController.GetDisplayedItems(),
 		CashMultiplierLevel = cashMultiplierLevel,
 		Rebirths = rebirths,
+		IndexMultiplier = indexMultiplier,
 	}
 end
 
@@ -142,6 +151,15 @@ local function onSyncTycoon(snapshot: any)
 	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0
 	runEarnings = if typeof(snapshot.RunEarnings) == "number" then snapshot.RunEarnings else 0
 	rebirthRequirement = if typeof(snapshot.RebirthRequirement) == "number" then snapshot.RebirthRequirement else 0
+	indexFound = {}
+	if typeof(snapshot.IndexKeys) == "table" then
+		for _, key in snapshot.IndexKeys do
+			if typeof(key) == "string" then
+				indexFound[key] = true
+			end
+		end
+	end
+	indexMultiplier = IndexConfig.GetMultiplier(indexFound)
 	goalIndex = if typeof(snapshot.GoalIndex) == "number" then snapshot.GoalIndex else nil
 	local progress = snapshot.GoalProgress
 	goalProgress = if typeof(progress) == "table"
