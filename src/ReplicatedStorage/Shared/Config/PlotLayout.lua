@@ -306,6 +306,7 @@ PlotLayout.Pedestal = {
 	LabelOffsetY = 8.5, -- filled label, above the pedestal's bottom
 	EmptyLabelOffsetY = 5, -- the small EMPTY pill, above the pedestal's bottom
 	StealMarkerOffsetY = 11.5, -- the heist's red hand marker, above the filled label
+	GuardedChipOffsetY = 13.5, -- the heist's 🛡 GUARDED chip, above the label and marker
 	PromptDistance = 6,
 }
 

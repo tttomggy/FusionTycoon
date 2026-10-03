@@ -41,6 +41,12 @@
 	    hand marker over its label (client-only, hidden while you carry), and
 	    the first time you walk into such a lab a one-time toast says how.
 	    Tapping the Rebirth-0 teaser prompt explains the unlock.
+	  * GUARDED made visible (guarding itself is server-side, GuardedByOwner):
+	    every viewer sees a teal "🛡 GUARDED" chip over a guarded pedestal,
+	    and while an owner is inside their walls each of their filled
+	    pedestals gets a faint teal floor ring of OwnerBlockRadius (stronger
+	    while guarded). Client-only; no light, no Highlight; skipped for
+	    protected (Rebirth 0) labs.
 
 	The alarm reuses the project's one proven sound id (AnnouncementController,
 	RevealEffects): rbxasset://sounds/electronicpingshort.wav, three low pings.
@@ -145,6 +151,12 @@ local STEAL_TIP = "Hold E on their pedestal to steal it!"
 
 -- Pedestal -> its red hand marker (client-only BillboardGui).
 local markers: { [Instance]: BillboardGui } = {}
+-- Pedestal -> its GUARDED chip / its guard ring (client-only).
+local guardChips: { [Instance]: BillboardGui } = {}
+local guardRings: { [Instance]: BasePart } = {}
+local GUARD_CHIP_SIZE = UDim2.fromOffset(150, 34)
+local GUARD_RING_ALPHA = 0.25 -- faint, while the owner is home
+local GUARD_RING_GUARDED_ALPHA = 0.6 -- while that pedestal is guarded
 -- The one-time "how to steal" toast, once per session.
 local tipShown = false
 
@@ -850,6 +862,125 @@ local function buildMarker(pedestal: BasePart): BillboardGui
 	return gui
 end
 
+local function buildGuardChip(pedestal: BasePart): BillboardGui
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "GuardedChip"
+	gui.Size = GUARD_CHIP_SIZE
+	local p = PlotLayout.Pedestal
+	gui.StudsOffset = Vector3.new(0, p.GuardedChipOffsetY - p.ColumnSize.Y / 2, 0)
+	gui.AlwaysOnTop = false
+	gui.LightInfluence = 0
+	gui.MaxDistance = MARKER_MAX_DISTANCE
+	gui.Adornee = pedestal
+	UIKit.Pill({
+		Name = "Text",
+		Parent = gui,
+		Text = "🛡 GUARDED",
+		Color = Colors.ShieldTeal,
+		Font = Fonts.Display,
+		TextSize = 18,
+		Height = 32,
+		TextStroke = 1.5,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+	})
+	gui.Parent = pedestal -- created on this client
+	return gui
+end
+
+-- A faint teal ring on the floor round the pedestal, OwnerBlockRadius wide:
+-- a SurfaceGui ring face (BillboardKit.BuildPadFace), not a Neon disc.
+local function buildGuardRing(pedestal: BasePart, origin: CFrame): BasePart
+	local bottom = pedestal.Position - Vector3.new(0, pedestal.Size.Y / 2, 0)
+	local face = BillboardKit.BuildPadFace(
+		Workspace, -- created on this client: only this player sees it
+		CFrame.new(bottom) * origin.Rotation,
+		HeistConfig.OwnerBlockRadius * 2,
+		Colors.ShieldTeal,
+		nil
+	)
+	face.Name = "GuardRing"
+	local gui = face:FindFirstChild("PadFace")
+	if gui then
+		-- Just the ring: drop the soft glow fill.
+		for _, name in { "GlowOuter", "GlowCore" } do
+			local glow = gui:FindFirstChild(name)
+			if glow and glow:IsA("Frame") then
+				glow.Visible = false
+			end
+		end
+	end
+	return face
+end
+
+local function setGuardRingAlpha(face: BasePart, alpha: number)
+	local gui = face:FindFirstChild("PadFace")
+	local ring = gui and gui:FindFirstChild("Ring")
+	local stroke = ring and ring:FindFirstChild("RingStroke")
+	if stroke and stroke:IsA("UIStroke") then
+		stroke.Transparency = 1 - alpha
+	end
+end
+
+local function ownerIsHome(plot: Instance, origin: CFrame): boolean
+	local ownerId = plot:GetAttribute("OwnerUserId")
+	local owner = typeof(ownerId) == "number" and Players:GetPlayerByUserId(ownerId) or nil
+	local root = owner and getRoot(owner)
+	return root ~= nil and PlotLayout.IsInsidePlot(origin:PointToObjectSpace(root.Position))
+end
+
+-- GUARDED chips (every guarded filled pedestal) and guard rings (filled
+-- pedestals of an owner who's home), for every viewer.
+local function updateGuards()
+	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	if not folder then
+		return
+	end
+	local seenChips: { [Instance]: boolean } = {}
+	local seenRings: { [Instance]: boolean } = {}
+	for _, plot in folder:GetChildren() do
+		local pedestals = plot:FindFirstChild("Pedestals")
+		local origin = plot:IsA("Model") and plot.PrimaryPart
+		if pedestals and origin and plot:GetAttribute("Protected") == false then
+			local home = ownerIsHome(plot, origin.CFrame)
+			for _, pedestal in pedestals:GetChildren() do
+				if pedestal:IsA("BasePart") and pedestal:GetAttribute("Filled") == true then
+					local guarded = pedestal:GetAttribute("GuardedByOwner") == true
+						and pedestal:GetAttribute("BeingStolen") ~= true
+					if guarded then
+						seenChips[pedestal] = true
+						local chip = guardChips[pedestal]
+						if not chip or not chip.Parent then
+							guardChips[pedestal] = buildGuardChip(pedestal)
+						end
+					end
+					if home then
+						seenRings[pedestal] = true
+						local ring = guardRings[pedestal]
+						if not ring or not ring.Parent then
+							ring = buildGuardRing(pedestal, origin.CFrame)
+							guardRings[pedestal] = ring
+						end
+						setGuardRingAlpha(ring :: BasePart, if guarded then GUARD_RING_GUARDED_ALPHA else GUARD_RING_ALPHA)
+					end
+				end
+			end
+		end
+	end
+	for pedestal, chip in guardChips do
+		if not seenChips[pedestal] then
+			chip:Destroy()
+			guardChips[pedestal] = nil
+		end
+	end
+	for pedestal, ring in guardRings do
+		if not seenRings[pedestal] then
+			ring:Destroy()
+			guardRings[pedestal] = nil
+		end
+	end
+end
+
 -- Markers on every grabbable enemy pedestal, and the first-visit tip.
 local function updateTeaching()
 	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
@@ -927,6 +1058,7 @@ function HeistController.Init()
 			fenceAccumulator = 0
 			updateFences()
 			updateTeaching()
+			updateGuards()
 			updateConsole()
 		end
 	end)
