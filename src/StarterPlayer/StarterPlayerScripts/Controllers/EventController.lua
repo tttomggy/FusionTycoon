@@ -24,6 +24,13 @@
 	  Void Moon      a night + purple tint + a purple moon disc
 	  Rainbow Storm  a slow tint through the rainbow stops + rainbow sparkles
 
+	HUD chip (top-centre, clear of the top bar and the goal tracker): the
+	running event on its gradient with a live timer ("⚡ POWER SURGE ·
+	3:12"), else a muted "NEXT · ☄ METEOR SHOWER in 8:40". Tapping it opens
+	the schedule card (NOW / NEXT / THEN and the Admin Abuse line). The two
+	street Event Boards (WorldService) are filled from the same lineup
+	(EventState.GetLineup) every second.
+
 	EventFx (S->C cues): Lightning (beam from the sky, a ColorCorrection
 	flash, low thunder), Meteor (a glowing rock falling to its crater), Coin
 	(a "+$X" pop where your coin was). EventNotice is a toast; EventReward a
@@ -38,6 +45,7 @@ local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
@@ -95,6 +103,14 @@ local FLASH_BRIGHTNESS = 0.35
 local FLASH_SECONDS = 0.18
 
 local METEOR_SHAKE_RADIUS = 60
+
+local CHIP_Y = 12
+local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44) }
+local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
+local CARD_GAP = 10
+local CARD_WIDTH = 330
+local CARD_ROW_HEIGHT = 40
+local LINEUP_COUNT = 3
 
 -- Baseline Lighting, captured before the first change and restored exactly.
 type Baseline = {
@@ -605,6 +621,200 @@ local function onEventReward(payload: any)
 	end
 end
 
+--[[ HUD chip, schedule card, Event Boards ---------------------------------------------- ]]
+
+local hudGui: ScreenGui
+local chip: TextButton
+local chipHolder: Frame
+local chipStyle: string? = nil
+local cardHolder: Frame
+local cardRows: { { Tag: TextLabel, Name: TextLabel, Timer: TextLabel } } = {}
+local cardAdminLabel: TextLabel
+
+local function eventTitle(id: string): string
+	return ("%s %s"):format(EventConfig.Icons[id] or "", EventConfig.Names[id] or id)
+end
+
+local function lineupTimer(entry: EventState.LineupEntry): string
+	local timer = EventState.FormatTimer(entry.Seconds)
+	return if entry.Now then timer .. " left" else "in " .. timer
+end
+
+local function lineupTags(lineup: { EventState.LineupEntry }): { string }
+	local tags = {}
+	local upcoming = 0
+	for index, entry in lineup do
+		if entry.Now then
+			tags[index] = "NOW"
+		else
+			upcoming += 1
+			tags[index] = if upcoming == 1 then "NEXT" else "THEN"
+		end
+	end
+	return tags
+end
+
+local function refreshChip(lineup: { EventState.LineupEntry })
+	local first = lineup[1]
+	local style, text, color
+	if first and first.Now then
+		style = UITheme.EventGradient[first.Id] or "Disabled"
+		text = ("%s · %s"):format(eventTitle(first.Id), EventState.FormatTimer(first.Seconds))
+		color = Colors.Text
+	else
+		style = "Disabled"
+		text = if first then ("NEXT · %s in %s"):format(eventTitle(first.Id), EventState.FormatTimer(first.Seconds)) else ""
+		color = Colors.Muted
+	end
+	UIKit.SetButton(chip, { Style = if style ~= chipStyle then style else nil, Text = text, TextColor3 = color })
+	chipStyle = style
+end
+
+local function refreshCard(lineup: { EventState.LineupEntry })
+	local tags = lineupTags(lineup)
+	for index, row in cardRows do
+		local entry = lineup[index]
+		row.Tag.Text = tags[index] or ""
+		row.Name.Text = if entry then eventTitle(entry.Id) else ""
+		row.Name.TextColor3 = if entry then UITheme.GetEventGradient(entry.Id).Top else Colors.Text
+		row.Timer.Text = if entry then lineupTimer(entry) else ""
+	end
+	cardAdminLabel.Text = EventState.GetAdminAbuseText()
+end
+
+local function refreshBoards(lineup: { EventState.LineupEntry })
+	local world = Workspace:FindFirstChild("World")
+	local boards = world and world:FindFirstChild("EventBoards")
+	if not boards then
+		return
+	end
+	local tags = lineupTags(lineup)
+	local rows: { BillboardKit.EventBoardRow } = {}
+	for index, entry in lineup do
+		rows[index] = {
+			Tag = tags[index],
+			Title = eventTitle(entry.Id),
+			Timer = lineupTimer(entry),
+			Gradient = if entry.Now then UITheme.GetEventGradient(entry.Id) else UITheme.Gradients.Disabled,
+		}
+	end
+	local adminText = EventState.GetAdminAbuseText()
+	for _, descendant in boards:GetDescendants() do
+		if descendant:IsA("SurfaceGui") and descendant.Name == "EventBoardSurface" then
+			BillboardKit.SetEventBoard(descendant, rows, adminText)
+		end
+	end
+end
+
+local function refreshSchedule()
+	local lineup = EventState.GetLineup(LINEUP_COUNT)
+	refreshChip(lineup)
+	if cardHolder.Visible then
+		refreshCard(lineup)
+	end
+	refreshBoards(lineup)
+end
+
+local function buildCard()
+	local height = 44 + LINEUP_COUNT * CARD_ROW_HEIGHT + 34
+	local body, holder = UIKit.Panel({
+		Name = "ScheduleCard",
+		Parent = hudGui,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, CHIP_Y + CHIP_SIZE.Desktop.Y + CARD_GAP),
+		Size = UDim2.fromOffset(CARD_WIDTH, height),
+		Radius = 18,
+	})
+	cardHolder = holder
+	holder.Visible = false
+	local z = body.ZIndex + 1
+	UIKit.Label({
+		Name = "Title",
+		Text = "LAB WEATHER",
+		Font = Fonts.Display,
+		TextSize = 20,
+		TextColor3 = Colors.VioletLight,
+		Position = UDim2.fromOffset(16, 10),
+		Size = UDim2.new(1, -32, 0, 26),
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	for index = 1, LINEUP_COUNT do
+		local y = 44 + (index - 1) * CARD_ROW_HEIGHT
+		local function cell(name: string, x: number, width: number, font: Font, size: number, align: Enum.TextXAlignment): TextLabel
+			return UIKit.Label({
+				Name = name .. index,
+				Text = "",
+				Font = font,
+				TextSize = size,
+				Position = UDim2.new(x, if x == 0 then 16 else 0, 0, y),
+				Size = UDim2.new(width, -16, 0, CARD_ROW_HEIGHT - 6),
+				TextXAlignment = align,
+				ZIndex = z,
+				Stroke = UITheme.Stroke.Text,
+				Parent = body,
+			})
+		end
+		local tag = cell("Tag", 0, 0.2, Fonts.BodyHeavy, 13, Enum.TextXAlignment.Left)
+		tag.TextColor3 = Colors.Muted
+		table.insert(cardRows, {
+			Tag = tag,
+			Name = cell("Name", 0.2, 0.5, Fonts.Display, 17, Enum.TextXAlignment.Left),
+			Timer = cell("Timer", 0.7, 0.3, Fonts.Display, 16, Enum.TextXAlignment.Right),
+		})
+	end
+	cardAdminLabel = UIKit.Label({
+		Name = "AdminAbuse",
+		Text = "",
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextColor3 = Colors.GoldLabel,
+		Position = UDim2.new(0, 16, 1, -32),
+		Size = UDim2.new(1, -32, 0, 22),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Parent = body,
+	})
+end
+
+local function toggleCard()
+	cardHolder.Visible = not cardHolder.Visible
+	if cardHolder.Visible then
+		refreshCard(EventState.GetLineup(LINEUP_COUNT))
+		UIKit.PopIn(cardHolder)
+	end
+end
+
+local function applyLayout(isPhone: boolean)
+	local size = if isPhone then CHIP_SIZE.Phone else CHIP_SIZE.Desktop
+	chipHolder.Size = UDim2.fromOffset(size.X, size.Y)
+	local column = chip:FindFirstChild("Content") and (chip :: any).Content:FindFirstChild("TextColumn")
+	local label = column and column:FindFirstChild("Label")
+	if label and label:IsA("TextLabel") then
+		label.TextSize = if isPhone then CHIP_TEXT_SIZE.Phone else CHIP_TEXT_SIZE.Desktop
+	end
+end
+
+local function buildHud()
+	hudGui = UIKit.Screen("EventHud", 41)
+	chip, chipHolder = UIKit.Button({
+		Name = "EventChip",
+		Parent = hudGui,
+		Style = "Disabled",
+		Text = "",
+		TextSize = CHIP_TEXT_SIZE.Desktop,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, CHIP_Y),
+		Size = UDim2.fromOffset(CHIP_SIZE.Desktop.X, CHIP_SIZE.Desktop.Y),
+		Radius = 22,
+		OnClick = toggleCard,
+	})
+	buildCard()
+	applyLayout(UIKit.IsPhone())
+	UIKit.LayoutChanged:Connect(applyLayout)
+end
+
 --[[ Public ------------------------------------------------------------------------------ ]]
 
 function EventController.Init()
@@ -619,11 +829,15 @@ function EventController.Init()
 			task.defer(onEventChanged, true)
 		end)
 	end
-	-- An event's end time passing (between ticks) is also a change.
+	buildHud()
+	refreshSchedule()
+	-- An event's end time passing (between ticks) is also a change; the
+	-- chip, card and boards tick with it.
 	task.spawn(function()
 		while true do
 			task.wait(1)
 			onEventChanged(true)
+			refreshSchedule()
 		end
 	end)
 	RemoteEvents.EventFx.OnClientEvent:Connect(onEventFx)

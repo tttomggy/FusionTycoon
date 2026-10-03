@@ -696,6 +696,98 @@ function BillboardKit.SetOddsChances(gui: SurfaceGui, rows: { OddsRow })
 	end
 end
 
+--[[ Event Board ------------------------------------------------------------------
+	The street's lab-weather board (WorldService builds two, StreetLayout
+	places them): title, three rows (NOW / NEXT / THEN, each on its event's
+	gradient with a timer) and the Admin Abuse line. The client fills it
+	every second (EventController) through SetEventBoard.
+]]
+
+local EVENT_BOARD_ROWS = 3
+
+export type EventBoardRow = {
+	Tag: string, -- "NOW" / "NEXT" / "THEN"
+	Title: string, -- "⚡ POWER SURGE"
+	Timer: string, -- "3:12 left" / "in 8:40"
+	Gradient: UITheme.GradientPair,
+}
+
+function BillboardKit.EventBoardSurface(board: BasePart, pixelsPerStud: number, maxDistance: number): SurfaceGui
+	local gui = newSurface(board, "EventBoardSurface", Enum.NormalId.Front, pixelsPerStud)
+	gui.MaxDistance = maxDistance
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.BackgroundColor3 = Colors.Panel
+	panel.Size = UDim2.fromScale(1, 1)
+	panel.Parent = gui
+	borderStroke(panel, 8)
+
+	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.03, 0.14)
+	title.Text = "LAB WEATHER"
+	textStroke(title, 3)
+	local rowHeight, rowGap, top = 0.2, 0.025, 0.2
+	for index = 1, EVENT_BOARD_ROWS do
+		local row = Instance.new("Frame")
+		row.Name = "Row" .. index
+		row.BackgroundColor3 = Colors.White
+		row.Position = UDim2.fromScale(0.04, top + (index - 1) * (rowHeight + rowGap))
+		row.Size = UDim2.fromScale(0.92, rowHeight)
+		row.Parent = panel
+		corner(row, UDim.new(0.2, 0))
+		borderStroke(row, 4)
+		gradient(row, UITheme.Gradients.Disabled.Top, UITheme.Gradients.Disabled.Bottom)
+		local tag = scaledLabel(row, "Tag", Fonts.BodyHeavy, Colors.Text, 0.2, 0.6)
+		tag.Position = UDim2.fromScale(0.03, 0.2)
+		tag.Size = UDim2.fromScale(0.16, 0.6)
+		tag.TextXAlignment = Enum.TextXAlignment.Left
+		textStroke(tag, 2)
+		local name = scaledLabel(row, "Name", Fonts.Display, Colors.Text, 0.12, 0.76)
+		name.Position = UDim2.fromScale(0.2, 0.12)
+		name.Size = UDim2.fromScale(0.5, 0.76)
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		textStroke(name, 3)
+		local timer = scaledLabel(row, "Timer", Fonts.Display, Colors.Text, 0.2, 0.6)
+		timer.Position = UDim2.fromScale(0.71, 0.2)
+		timer.Size = UDim2.fromScale(0.26, 0.6)
+		timer.TextXAlignment = Enum.TextXAlignment.Right
+		textStroke(timer, 2)
+	end
+	local footer = scaledLabel(panel, "AdminAbuse", Fonts.Display, Colors.GoldLabel, 0.86, 0.1)
+	textStroke(footer, 2)
+	return gui
+end
+
+-- Fills the board: up to three rows and the Admin Abuse line.
+function BillboardKit.SetEventBoard(gui: SurfaceGui, rows: { EventBoardRow }, adminAbuse: string)
+	local panel = gui:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	for index = 1, EVENT_BOARD_ROWS do
+		local row = panel:FindFirstChild("Row" .. index)
+		local data = rows[index]
+		if row and row:IsA("Frame") then
+			row.Visible = data ~= nil
+			if data then
+				local fill = row:FindFirstChildOfClass("UIGradient")
+				if fill then
+					fill.Color = ColorSequence.new(data.Gradient.Top, data.Gradient.Bottom)
+				end
+				for _, key in { "Tag", "Name", "Timer" } do
+					local label = row:FindFirstChild(key)
+					if label and label:IsA("TextLabel") then
+						label.Text = if key == "Tag" then data.Tag elseif key == "Name" then data.Title else data.Timer
+					end
+				end
+			end
+		end
+	end
+	local footer = panel:FindFirstChild("AdminAbuse")
+	if footer and footer:IsA("TextLabel") then
+		footer.Text = adminAbuse
+	end
+end
+
 export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
 	-- A teal pill between title and detail ("🛡 PROTECTED · NEW LAB"); nil hides it.

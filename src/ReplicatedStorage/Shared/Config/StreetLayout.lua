@@ -90,6 +90,34 @@ function StreetLayout.GetRandomMeteorPoint(rng: Random): Vector3
 	return Vector3.new(rng:NextNumber(-halfX, halfX), StreetLayout.STREET_TOP_Y, side * rng:NextNumber(b.MinAbsZ, b.MaxAbsZ))
 end
 
+-- The two Event Boards (NOW / NEXT / THEN + the Admin Abuse line): one past
+-- each end of the street, on the grass, its Front face looking down the
+-- street at the plots. Past the street's end, so no belt, rail or gate ramp
+-- is ever behind one (asserted below).
+StreetLayout.EventBoard = {
+	CenterAbsX = 276, -- board centre, from the street centre along x
+	Width = 30, -- across the street (z)
+	Height = 17,
+	Thickness = 1,
+	BottomY = 3, -- above the street top
+	PostWidth = 1.2,
+	EndMargin = 6, -- at least this far past the street's end
+	PixelsPerStud = 24,
+	MaxDistance = 420, -- SurfaceGui: readable from most of the street
+}
+
+-- Each board's centre CFrame, looking at the street centre (Front = LookVector).
+function StreetLayout.GetEventBoardCFrames(): { CFrame }
+	local b = StreetLayout.EventBoard
+	local y = StreetLayout.STREET_TOP_Y + b.BottomY + b.Height / 2
+	local list = {}
+	for _, side in { -1, 1 } do
+		local position = Vector3.new(side * b.CenterAbsX, y, 0)
+		table.insert(list, CFrame.lookAt(position, Vector3.new(0, y, 0)))
+	end
+	return list
+end
+
 function StreetLayout.GetBeltLength(): number
 	return StreetLayout.STREET_SIZE.X - StreetLayout.BELT_END_INSET
 end
@@ -131,6 +159,17 @@ do
 	assert(meteor.MinAbsZ > railOuter, "StreetLayout: meteor zone overlaps the rails/belts")
 	assert(meteor.MaxAbsZ < meteor.GateRampReachAbsZ, "StreetLayout: meteor zone reaches the gate ramps")
 	assert(meteor.MaxAbsZ < halfStreet and meteor.MinAbsZ < meteor.MaxAbsZ, "StreetLayout: meteor zone is off the street")
+
+	-- Event Boards stand past the street's ends: the belts (and their end
+	-- rollers) stop inside the street, and every plot gate faces the street
+	-- inside its length, so nothing walkable is blocked.
+	local board = StreetLayout.EventBoard
+	local boardInnerX = board.CenterAbsX - board.Thickness / 2
+	assert(
+		boardInnerX - StreetLayout.STREET_SIZE.X / 2 >= board.EndMargin,
+		"StreetLayout: an Event Board stands on the street"
+	)
+	assert(boardInnerX > StreetLayout.GetBeltLength() / 2, "StreetLayout: an Event Board blocks a belt")
 end
 
 return StreetLayout

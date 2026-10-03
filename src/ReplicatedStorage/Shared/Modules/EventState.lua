@@ -11,6 +11,7 @@
 	  EventClockOffset  seconds added to the clock (Studio /eventclock)
 	  AdminLuck         admin luck multiplier (1 = none) ...
 	  AdminLuckUntil    ... until this server time
+	  NextAdminAbuse    unix seconds (UTC) of the next Admin Abuse, 0 = unset
 
 	Server code that can't reference EventService (PlayerDataService is a
 	leaf) and every client read effects through here, so a roll and the
@@ -75,6 +76,61 @@ function EventState.GetOddsEvent(): FusionConfig.OddsEvent
 		FusionMultipliers = EventState.GetMutationMultipliers("Fusion"),
 		FusionBonus = EventState.GetFusionSuccessBonus(),
 	}
+end
+
+export type LineupEntry = {
+	Id: string,
+	Now: boolean, -- running now
+	Seconds: number, -- left if Now, else until it starts
+}
+
+-- What the HUD chip, schedule card and Event Boards show: the running
+-- event (if any, admin ones included), then the scheduled ones after it.
+function EventState.GetLineup(count: number): { LineupEntry }
+	local list: { LineupEntry } = {}
+	local id, _, endsAt = EventState.GetActive()
+	if id then
+		table.insert(list, { Id = id, Now = true, Seconds = math.max(0, endsAt - Workspace:GetServerTimeNow()) })
+	end
+	local clock = EventState.Now()
+	local slotStart = EventConfig.GetSlotStart(clock) + EventConfig.SlotSeconds
+	while #list < count do
+		local slot = EventConfig.GetEventForSlot(slotStart)
+		table.insert(list, { Id = slot.Id, Now = false, Seconds = slot.StartsAt - clock })
+		slotStart += EventConfig.SlotSeconds
+	end
+	return list
+end
+
+-- "3:12", "1:04:09".
+function EventState.FormatTimer(seconds: number): string
+	local s = math.max(0, math.floor(seconds))
+	if s >= 3600 then
+		return ("%d:%02d:%02d"):format(s // 3600, (s // 60) % 60, s % 60)
+	end
+	return ("%d:%02d"):format(s // 60, s % 60)
+end
+
+local ADMIN_ABUSE_LIVE_SECONDS = 60 * 60
+
+-- The Admin Abuse line ("ADMIN ABUSE · Sat 18:00 · in 2d 4h"), the time in
+-- the viewer's local zone.
+function EventState.GetAdminAbuseText(): string
+	local at = Workspace:GetAttribute("NextAdminAbuse")
+	local now = Workspace:GetServerTimeNow()
+	if typeof(at) ~= "number" or at <= 0 or now > at + ADMIN_ABUSE_LIVE_SECONDS then
+		return "ADMIN ABUSE · date coming soon"
+	end
+	if now >= at then
+		return "ADMIN ABUSE · LIVE NOW!"
+	end
+	local left = math.floor(at - now)
+	local inText = if left >= 86400
+		then ("%dd %dh"):format(left // 86400, (left // 3600) % 24)
+		elseif left >= 3600 then ("%dh %dm"):format(left // 3600, (left // 60) % 60)
+		else EventState.FormatTimer(left)
+	local when = DateTime.fromUnixTimestamp(math.floor(at)):FormatLocalTime("ddd HH:mm", "en-us")
+	return ("ADMIN ABUSE · %s · in %s"):format(when, inText)
 end
 
 -- The admin luck boost (stacks with rebirth luck); 1 when none.
