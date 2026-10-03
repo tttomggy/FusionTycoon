@@ -197,6 +197,7 @@ local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, par
 	light.Color = tierColor
 	light.Range = p.OrbLightRangeBase + p.OrbLightRangePerRank * (ItemConfig.Tiers[tier] or 1)
 	light.Brightness = p.OrbLightBrightness
+	light.Shadows = false
 	light.Parent = orb
 
 	if mutation then
@@ -291,6 +292,7 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: strin
 	light.Color = config.GlowColor
 	light.Brightness = config.LightBrightness
 	light.Range = config.LightRange
+	light.Shadows = false
 	light.Parent = pedestal
 
 	if config.Particles then

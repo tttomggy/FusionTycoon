@@ -490,3 +490,9 @@ testable without luck.
 - [ ] **Phone layout** (iPhone 14 landscape): the Fuse panel fits, its
   tabs, grid and buttons are all ≥ 44 px, and nothing covers the top-left
   Roblox bar.
+
+## 15. Polish 6 (lighting, Fuse panel fit, HUD, offline earnings)
+
+- [ ] **Floor keeps its colour.** `/give mythic_rift Rainbow` four times and
+  display all four. The walkway between the pedestals still reads as the
+  Floor colour, not pink-white; the orbs carry the glow.
