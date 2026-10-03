@@ -75,6 +75,9 @@ PlotLayout.ShieldFence = {
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
 PlotLayout.CLAIM_STATION = v3(0, 0, 24)
+-- The heist LOCK console: inside the gate, right of the walkway, between the
+-- claim pad and the Gacha Pad, facing +Z (the gate) so you see it walking in.
+PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
@@ -306,6 +309,20 @@ PlotLayout.Pedestal = {
 	PromptDistance = 6,
 }
 
+--[[ LOCK console (heist shield button) ---------------------------------------------- ]]
+
+PlotLayout.LockConsole = {
+	Footprint = 3, -- square, for the overlap check
+	PostSize = v3(2, 4.5, 2),
+	TopSize = v3(3.5, 0.6, 2.5),
+	TopTiltDegrees = 25, -- the top leans toward +Z (the gate)
+	ButtonDiameter = 1.5, -- a SurfaceGui disc on the top (no flat Neon disc)
+	ButtonGap = 0.03, -- the disc's face part sits this far above the top
+	PromptDistance = 8,
+	LabelOffsetY = 7, -- above the post's bottom
+	LabelMaxDistance = 60,
+}
+
 --[[ Fusion Machine ---------------------------------------------------------------- ]]
 
 PlotLayout.Machine = {
@@ -429,6 +446,7 @@ local function checkLayout()
 		circle("MultiplierStation", PlotLayout.MULTIPLIER_STATION, stationRadius),
 		circle("FusionMachine", PlotLayout.FUSION_MACHINE, PlotLayout.Machine.RimDiameter / 2),
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
+		boxFootprint("LockConsole", PlotLayout.LOCK_CONSOLE, PlotLayout.LockConsole.Footprint, PlotLayout.LockConsole.Footprint),
 	}
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
 		local cap = PlotLayout.Pedestal.CapSize

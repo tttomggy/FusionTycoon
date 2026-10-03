@@ -28,6 +28,7 @@ local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
@@ -725,6 +726,28 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 	end
 end
 
+--[[ LOCK console (heist shield) ------------------------------------------------------- ]]
+
+-- Built once on claim. HeistService answers the prompt (TryLock) through
+-- ProximityPromptService; each owner's client drives the label pill, the
+-- button colour and the prompt's Enabled from the plot's shield attributes.
+local function createLockConsole(plot: Model, origin: CFrame)
+	local L = PlotLayout.LockConsole
+	local _, post = LockKit.Build(origin, plot)
+	local prompt = newPrompt(post, LockKit.PROMPT_NAME, "Lock lab", ("%ds shield"):format(HeistConfig.ShieldSeconds), L.PromptDistance)
+	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	BillboardKit.Pad(post, {
+		Name = "LockLabel",
+		Title = "🔒 LOCK LAB",
+		TitleColor = UITheme.Colors.Text,
+		Pill = ("READY · %ds shield"):format(HeistConfig.ShieldSeconds),
+		PillGradient = UITheme.Gradients.Shield,
+		StudsOffset = Vector3.new(0, L.LabelOffsetY - L.PostSize.Y / 2, 0),
+		MaxDistance = L.LabelMaxDistance,
+		OwnerOnly = true,
+	})
+end
+
 --[[ Factory line ---------------------------------------------------------------------- ]]
 
 -- The belt, the collector (with its owner-only generator-income label) and the five
@@ -1003,6 +1026,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		TycoonService.RefreshPedestalLabels(player)
 		createFactoryLine(plot, origin, player)
 		createRebirthPortal(plot, origin, player)
+		createLockConsole(plot, origin)
 		syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
 		refreshPlotSigns()
 	end)

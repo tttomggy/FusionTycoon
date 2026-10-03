@@ -40,8 +40,9 @@ HeistConfig.LossCap = 3 -- at most this many items lost ...
 HeistConfig.LossWindowSeconds = 10 * 60 -- ... per this window; then the lab is unstealable until one ages out
 
 -- Shield
-HeistConfig.ShieldSeconds = 60 -- per activation (stepping ONTO your YOURS pad while it's down; standing there does nothing)
-HeistConfig.ShieldRearmSeconds = 20 -- after any shield ends (timeout or drop), the pad can't raise it for this long: the thieves' window
+HeistConfig.ShieldSeconds = 60 -- per LOCK (the console prompt or the HUD LOCK button, from inside your walls)
+HeistConfig.ShieldRearmSeconds = 20 -- after any shield ends (timeout or drop), LOCK recharges for this long: the thieves' window
+HeistConfig.LockRequestDebounceSeconds = 0.5
 HeistConfig.ClaimShieldSeconds = 60 -- automatic, on claim
 HeistConfig.EjectTickSeconds = 0.25 -- shielded labs push non-owners out this often
 

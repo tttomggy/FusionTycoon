@@ -8,16 +8,16 @@
 	  * Per player, until a server time (workspace:GetServerTimeNow()). It is
 	    published as the plot attribute ShieldUntil so every client renders
 	    the fence without a remote.
-	  * Raised for ClaimShieldSeconds on claim, ShieldSeconds when the owner
-	    steps ONTO their YOURS pad (the claimed claim station) while it's
-	    down, and VictimShieldSeconds after losing an item.
-	  * The pad is edge-triggered (off it last tick, on it this tick):
-	    standing on it does nothing, so an AFK owner can't hold a shield up.
-	  * After any shield ends (timeout or a drop) the pad is locked for
+	  * Raised for ClaimShieldSeconds on claim, VictimShieldSeconds after
+	    losing an item, and ShieldSeconds when the owner LOCKs on purpose:
+	    TryLock, from the LOCK console's prompt (LockKit, built on claim) or
+	    the HUD LOCK button (RequestLock). Nothing fires by walking around.
+	  * After any shield ends (timeout or a drop) LOCK recharges for
 	    ShieldRearmSeconds: the thieves' window. Published as the plot
-	    attribute ShieldRearmAt (server time) for the HUD chip, and on the
-	    pad's own owner-only label: READY IN 12s / SHIELD READY / UP · 42s.
-	    The claim and victim shields ignore the lock; /shield 0 clears it.
+	    attribute ShieldRearmAt (server time); clients drive the console's
+	    label, button and prompt and the HUD button from ShieldUntil /
+	    ShieldRearmAt / Protected. The claim and victim shields ignore the
+	    recharge; /shield 0 clears it.
 	  * While up, a loop every EjectTickSeconds moves any non-owner whose
 	    root is inside the plot's walls to the street in front of its gate.
 
@@ -49,11 +49,13 @@
 	    same pedestal in one frame resolve as one win, one reject.
 
 	Follows ServiceTemplate:
-	  :Init()   own state, RequestSteal and PlayerRemoving.
+	  :Init()   own state, RequestSteal, RequestLock, the LOCK prompt and
+	            PlayerRemoving.
 	  :Start()  resolves PlayerDataService and TycoonService, registers the
 	            OnRelease hook, starts the shield loop and the carry loop.
 ]]
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -63,8 +65,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
-local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
-local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -107,12 +108,8 @@ type State = {
 	claimSeen: { [number]: boolean },
 	-- Server time each player's pad may raise the shield again (re-arm).
 	rearmAt: { [number]: number },
-	-- Whether each owner's root was on their pad last tick (edge trigger).
-	onPad: { [number]: boolean },
-	-- Each owner's shield pad label and the text it last showed (only
-	-- changes are written, so a countdown replicates once a second).
-	padLabels: { [number]: BillboardKit.PadLabel },
-	padLabelText: { [number]: string },
+	-- os.clock() of each player's last lock request (RequestLock / console).
+	lastLockRequest: { [number]: number },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
 	-- Active carries by thief UserId, and the Uid -> thief index that keeps
@@ -132,9 +129,7 @@ local state: State = {
 	recentLosses = {},
 	claimSeen = {},
 	rearmAt = {},
-	onPad = {},
-	padLabels = {},
-	padLabelText = {},
+	lastLockRequest = {},
 	debugStealable = {},
 	carries = {},
 	carriedItems = {},
@@ -701,88 +696,74 @@ local function stepCarries()
 	end
 end
 
---[[ Shield loop: claim shield, shield pad, protection, eject --------------- ]]
+--[[ Shield loop: claim shield, protection, guard flags, eject ------------- ]]
 
--- Edge-triggered: only stepping ONTO the pad (off last tick, on now)
--- raises the shield, and only once the re-arm lock has run out.
-local function onPadCheck(player: Player, origin: CFrame)
-	local root = getRoot(player)
-	local inside = false
-	if root then
-		local offset = origin:PointToObjectSpace(root.Position) - PlotLayout.CLAIM_STATION
-		local radius = PlotLayout.Station.PadDiameter / 2
-		inside = Vector3.new(offset.X, 0, offset.Z).Magnitude <= radius
-			and math.abs(offset.Y) <= PlotLayout.Station.LabelOffsetY
+--[[ LOCK: the one way an owner raises their shield on purpose ----------- ]]
+
+export type LockReason = "Protected" | "Carrying" | "AlreadyLocked" | "Recharging" | "NotHome"
+
+-- Raises `player`'s shield for ShieldSeconds if every rule allows it, in
+-- this order: Protected (Rebirth 0), Carrying, AlreadyLocked, Recharging
+-- (the re-arm lock; also returns the seconds left), NotHome (root outside
+-- their own walls). Both the LOCK console's prompt and the HUD LOCK button
+-- (RequestLock) come through here.
+function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
+	if HeistService.IsProtected(player) then
+		return false, "Protected"
 	end
-	local wasInside = state.onPad[player.UserId] == true
-	state.onPad[player.UserId] = inside
-	if not inside or wasInside then
-		return
-	end
-	if HeistService.IsShielded(player) or HeistService.IsProtected(player) then
-		return
-	end
-	-- The shield pad is off-limits while carrying a stolen item.
 	if state.carries[player.UserId] then
-		return
+		return false, "Carrying"
 	end
-	if (state.rearmAt[player.UserId] or 0) > serverNow() then
-		return
+	if HeistService.IsShielded(player) then
+		return false, "AlreadyLocked"
+	end
+	local rearmLeft = (state.rearmAt[player.UserId] or 0) - serverNow()
+	if rearmLeft > 0 then
+		return false, "Recharging", math.ceil(rearmLeft)
+	end
+	local _, origin = getClaimedPlot(player)
+	local root = getRoot(player)
+	if not origin or not root or not isInsidePlot(origin, root.Position) then
+		return false, "NotHome"
 	end
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
 	PlayerDataService.IncrementShieldRaises(player)
-	PlayerDataService.SyncTycoon(player) -- first_shield goal
+	PlayerDataService.SyncTycoon(player) -- pays the first_shield goal
+	return true, nil
 end
 
--- The owner-only label over the YOURS pad: READY IN 12s (muted) during the
--- re-arm lock, SHIELD READY when stepping on will raise it, UP · 42s while
--- it's up. Hidden for protected (Rebirth 0) labs.
-local function refreshPadLabel(player: Player, plot: Model)
-	local label = state.padLabels[player.UserId]
-	if not label then
-		local station = plot:FindFirstChild("ClaimStation")
-		local pad = station and station:FindFirstChild("Pad")
-		if not pad or not pad:IsA("BasePart") then
-			return
-		end
-		label = BillboardKit.Pad(pad, {
-			Name = "ShieldPadLabel",
-			Title = "SHIELD",
-			TitleColor = UITheme.Colors.Text,
-			Pill = "",
-			PillGradient = UITheme.Gradients.Teal,
-			OwnerOnly = true,
-		})
-		state.padLabels[player.UserId] = label
-	end
-	local padLabel = label :: BillboardKit.PadLabel
-	local protected = HeistService.IsProtected(player)
-	padLabel.Gui.Enabled = not protected
-	if protected then
+-- RequestLock (HUD button) and the console prompt: rejections come back on
+-- the heist toast path (HeistEnded Rejected, Role "Lock").
+local function requestLock(player: Player)
+	local now = os.clock()
+	local last = state.lastLockRequest[player.UserId]
+	if last and now - last < HeistConfig.LockRequestDebounceSeconds then
 		return
 	end
-	local now = serverNow()
-	local text: string
-	local gradient: UITheme.GradientPair
-	local detail: string?
-	if HeistService.IsShielded(player) then
-		text = ("UP · %ds"):format(math.ceil((state.shieldUntil[player.UserId] or now) - now))
-		gradient = UITheme.Gradients.Teal
-		detail = nil
-	elseif (state.rearmAt[player.UserId] or 0) > now then
-		text = ("READY IN %ds"):format(math.ceil((state.rearmAt[player.UserId] :: number) - now))
-		gradient = UITheme.Gradients.Disabled
-		detail = "Recharging"
-	else
-		text = "SHIELD READY"
-		gradient = UITheme.Gradients.Teal
-		detail = ("Step on for %ds"):format(HeistConfig.ShieldSeconds)
+	state.lastLockRequest[player.UserId] = now
+	if not PlayerDataService.IsDataLoaded(player) then
+		return
 	end
-	if state.padLabelText[player.UserId] ~= text then
-		state.padLabelText[player.UserId] = text
-		padLabel.SetPill(text)
-		padLabel.SetPillGradient(gradient)
-		padLabel.SetDetail(detail)
+	local ok, reason, seconds = HeistService.TryLock(player)
+	if not ok then
+		RemoteEvents.HeistEnded:FireClient(player, {
+			Role = "Lock",
+			Outcome = "Rejected",
+			Reason = reason,
+			Seconds = seconds,
+		})
+	end
+end
+
+-- The console's prompt is owner-only on clients; the server still checks
+-- the prompt is on the player's own plot.
+local function onPromptTriggered(prompt: ProximityPrompt, player: Player)
+	if prompt.Name ~= LockKit.PROMPT_NAME then
+		return
+	end
+	local plot = TycoonService.GetPlotForPlayer(player)
+	if plot and prompt:IsDescendantOf(plot) then
+		requestLock(player)
 	end
 end
 
@@ -815,8 +796,6 @@ local function shieldTick()
 				if plot:GetAttribute("Protected") ~= protected then
 					plot:SetAttribute("Protected", protected)
 				end
-				onPadCheck(player, origin)
-				refreshPadLabel(player, plot)
 				-- GuardedByOwner: clients show the steal prompt as "Owner is guarding".
 				local pedestals = plot:FindFirstChild("Pedestals")
 				if pedestals then
@@ -846,9 +825,7 @@ local function onPlayerRemoving(player: Player)
 	state.recentLosses[userId] = nil
 	state.claimSeen[userId] = nil
 	state.rearmAt[userId] = nil
-	state.onPad[userId] = nil
-	state.padLabels[userId] = nil
-	state.padLabelText[userId] = nil
+	state.lastLockRequest[userId] = nil
 	state.debugStealable[userId] = nil
 end
 
@@ -856,6 +833,8 @@ end
 
 function HeistService:Init()
 	table.insert(state.connections, RemoteEvents.RequestSteal.OnServerEvent:Connect(onRequestSteal))
+	table.insert(state.connections, RemoteEvents.RequestLock.OnServerEvent:Connect(requestLock))
+	table.insert(state.connections, ProximityPromptService.PromptTriggered:Connect(onPromptTriggered))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(
 		state.connections,

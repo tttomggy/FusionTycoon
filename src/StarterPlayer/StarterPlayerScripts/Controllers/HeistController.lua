@@ -30,6 +30,12 @@
 	    for the rest.
 	  * Shield fences: every plot's ForceField fence fades in and out from its
 	    ShieldUntil attribute, so remote players see your shield too.
+	  * Your LOCK console (built by the server, owner-only label and prompt):
+	    the label pill, the button's colour and the prompt's Enabled follow
+	    your plot's ShieldUntil / ShieldRearmAt / Protected, no remote:
+	    READY (pink, prompt on), LOCKED · 42s (teal), RECHARGING · 12s
+	    (muted), PROTECTED · NEW LAB at Rebirth 0 (prompt off for the last
+	    three). LOCK rejections toast ("Get back to your lab to lock it!").
 	  * Teaching: every enemy pedestal you could grab right now (its
 	    StealPrompt's local Mode is "Steal", WorldLabelController) gets a red
 	    hand marker over its label (client-only, hidden while you carry), and
@@ -52,6 +58,8 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local ShieldState = require(ReplicatedStorage.Shared.Modules.ShieldState)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -101,6 +109,14 @@ local REJECT_MESSAGES: { [string]: string } = {
 	TooFar = "Get closer",
 	NoCharacter = "Can't steal right now",
 	DataNotLoaded = "Can't steal right now",
+}
+
+-- LOCK rejections (HeistService.TryLock reasons; Recharging adds seconds).
+local LOCK_REJECT_MESSAGES: { [string]: string } = {
+	NotHome = "Get back to your lab to lock it!",
+	Carrying = "Not while carrying!",
+	AlreadyLocked = "Your lab is already locked",
+	Protected = "New labs are protected until Rebirth 1",
 }
 
 local THIEF_FAIL_TOASTS: { [string]: string } = {
@@ -652,6 +668,15 @@ local function onHeistEnded(payload: any)
 		return
 	end
 	if payload.Outcome == "Rejected" then
+		if payload.Role == "Lock" then
+			local text = if payload.Reason == "Recharging"
+				then ("Lock recharging · %ds"):format(tonumber(payload.Seconds) or 0)
+				else LOCK_REJECT_MESSAGES[payload.Reason]
+			if text then
+				ToastController.Show(text, "Neutral")
+			end
+			return
+		end
 		if payload.Reason == "Cooldown" then
 			ToastController.Show(("Lay low for %ds"):format(tonumber(payload.Seconds) or 0), "Neutral")
 			return
@@ -704,6 +729,71 @@ local function setFence(plot: Instance, shown: boolean)
 				else FENCE_SHOWN_TRANSPARENCY
 			TweenService:Create(part, info, { Transparency = if shown then shownTransparency else 1 }):Play()
 		end
+	end
+end
+
+--[[ Your LOCK console ------------------------------------------------------------- ]]
+
+local consoleState: ShieldState.State? = nil
+local consoleLabel: BillboardKit.PadLabel? = nil
+local consoleLabelGui: BillboardGui? = nil
+
+local function updateConsole()
+	local plot = getOwnPlot()
+	local console = plot and plot:FindFirstChild("LockConsole")
+	local post = console and console:FindFirstChild("Post")
+	if not plot or not console or not post then
+		return
+	end
+	local labelGui = post:FindFirstChild("LockLabel")
+	if labelGui and labelGui:IsA("BillboardGui") and labelGui ~= consoleLabelGui then
+		consoleLabelGui = labelGui
+		consoleLabel = BillboardKit.FindPadLabel(labelGui)
+		consoleState = nil
+	end
+	local state, seconds = ShieldState.Get(plot)
+	local label = consoleLabel
+	if label then
+		if state == "Locked" then
+			label.SetPill(("LOCKED · %ds"):format(seconds))
+		elseif state == "Recharging" then
+			label.SetPill(("RECHARGING · %ds"):format(seconds))
+		end
+	end
+	if state == consoleState then
+		return
+	end
+	consoleState = state
+	local prompt = post:FindFirstChild("LockPrompt")
+	if prompt and prompt:IsA("ProximityPrompt") then
+		prompt.Enabled = state == "Ready"
+	end
+	if label then
+		if state == "Ready" then
+			label.SetPill(("READY · %ds shield"):format(HeistConfig.ShieldSeconds))
+			label.SetPillGradient(UITheme.Gradients.Shield)
+		elseif state == "Locked" then
+			label.SetPillGradient(UITheme.Gradients.Teal)
+		elseif state == "Recharging" then
+			label.SetPillGradient(UITheme.Gradients.Disabled)
+		else
+			label.SetPill("🛡 PROTECTED · NEW LAB")
+			label.SetPillGradient(UITheme.Gradients.Teal)
+		end
+	end
+	local face = console:FindFirstChild("ButtonFace")
+	local gui = face and face:FindFirstChild("ButtonGui")
+	local disc = gui and gui:FindFirstChild("Disc")
+	if disc and disc:IsA("Frame") then
+		disc.BackgroundColor3 = if state == "Ready"
+			then UITheme.World.Shield
+			elseif state == "Locked" then Colors.ShieldTeal
+			else UITheme.Gradients.Disabled.Top
+		disc.BackgroundTransparency = if state == "Protected" then 0.6 else 0
+	end
+	if gui and gui:IsA("SurfaceGui") then
+		-- Glows teal while locked; dim otherwise when it can't be pressed.
+		gui.Brightness = if state == "Locked" then 2 elseif state == "Ready" then 1.5 else 0.6
 	end
 end
 
@@ -837,6 +927,7 @@ function HeistController.Init()
 			fenceAccumulator = 0
 			updateFences()
 			updateTeaching()
+			updateConsole()
 		end
 	end)
 end

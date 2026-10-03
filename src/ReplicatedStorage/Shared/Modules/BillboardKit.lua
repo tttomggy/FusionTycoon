@@ -137,7 +137,7 @@ export type PadLabel = {
 	SetPill: (text: string) -> (),
 	SetDetail: (text: string?, color: Color3?) -> (),
 	SetSecondPill: (text: string?) -> (),
-	-- Recolours the main pill (the shield pad: muted while recharging).
+	-- Recolours the main pill (e.g. the LOCK console: muted while recharging).
 	SetPillGradient: (pair: UITheme.GradientPair) -> (),
 }
 
@@ -223,6 +223,43 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 		SetDetail = setDetail,
 		SetSecondPill = function(text: string?)
 			if secondPill and secondText then
+				secondText.Text = text or ""
+				secondPill.Visible = text ~= nil
+			end
+		end,
+		SetPillGradient = function(pair: UITheme.GradientPair)
+			local g = pill:FindFirstChildOfClass("UIGradient")
+			if g then
+				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
+			end
+		end,
+	}
+end
+
+-- The PadLabel functions for an existing pad label Gui (one the server built),
+-- so a client can drive it locally (the LOCK console's label). nil if `gui`
+-- isn't a pad label.
+function BillboardKit.FindPadLabel(gui: BillboardGui): PadLabel?
+	local pill = gui:FindFirstChild("Pill")
+	local pillText = pill and pill:FindFirstChild("Text")
+	local detail = gui:FindFirstChild("Detail")
+	if not pill or not pillText or not pillText:IsA("TextLabel") or not detail or not detail:IsA("TextLabel") then
+		return nil
+	end
+	local secondPill = gui:FindFirstChild("SecondPill")
+	local secondText = secondPill and secondPill:FindFirstChild("Text")
+	return {
+		Gui = gui,
+		SetPill = function(text: string)
+			pillText.Text = text
+		end,
+		SetDetail = function(text: string?, color: Color3?)
+			detail.Text = text or ""
+			detail.TextColor3 = color or Colors.Text
+			detail.Visible = text ~= nil and text ~= ""
+		end,
+		SetSecondPill = function(text: string?)
+			if secondPill and secondText and secondText:IsA("TextLabel") and secondPill:IsA("GuiObject") then
 				secondText.Text = text or ""
 				secondPill.Visible = text ~= nil
 			end
@@ -726,6 +763,31 @@ local function circle(parent: Instance, name: string, scale: number, color: Colo
 	frame.Parent = parent
 	corner(frame, UDim.new(0.5, 0))
 	return frame
+end
+
+-- A round button face: an invisible part just above `top` (its top face
+-- along top's up axis) carrying a SurfaceGui filled disc named "Disc" with
+-- an Ink outline. Recolour it with the disc's BackgroundColor3 (the LOCK
+-- console's button). Not a Neon disc: those render as a fan of triangles.
+function BillboardKit.BuildButtonFace(parent: Instance, top: CFrame, diameter: number, color: Color3, gap: number): BasePart
+	local f = PlotLayout.Face
+	local face = PartKit.Part({
+		Name = "ButtonFace",
+		Size = Vector3.new(diameter, f.Thickness, diameter),
+		CFrame = top * CFrame.new(0, gap + f.Thickness / 2, 0),
+		Color = color,
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+		Parent = parent,
+	})
+	local gui = newSurface(face, "ButtonGui", Enum.NormalId.Top, f.PixelsPerStud)
+	gui.Brightness = f.Brightness
+	local disc = circle(gui, "Disc", 0.92, color, 0)
+	borderStroke(disc, f.RingStrokePx, Colors.Ink).Name = "DiscStroke"
+	return face
 end
 
 -- Builds the Face part on top of a pad and returns it. `top` is the pad

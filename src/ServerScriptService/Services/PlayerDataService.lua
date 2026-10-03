@@ -57,7 +57,7 @@ export type PlayerData = {
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
-	-- Heist: items delivered home, and shields raised on the YOURS pad
+	-- Heist: items delivered home, and shields raised with LOCK (console or HUD button)
 	-- (drive the first_steal / first_shield goals).
 	TotalSteals: number,
 	ShieldRaises: number,
@@ -688,7 +688,7 @@ function PlayerDataService.IncrementTotalSteals(player: Player)
 	end
 end
 
--- A shield raised by stepping onto the YOURS pad (HeistService).
+-- A shield raised with LOCK (HeistService.TryLock).
 function PlayerDataService.IncrementShieldRaises(player: Player)
 	local data = state.sessionCache[player.UserId]
 	if data then

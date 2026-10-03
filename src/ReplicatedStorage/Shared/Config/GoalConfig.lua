@@ -42,7 +42,7 @@ GoalConfig.Goals = {
 	-- Checked after the rebirth resets the run, so the reward lands in the new run.
 	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
 	-- Heist (unlocks at Rebirth 1): defend first, then steal.
-	{ Id = "first_shield", Text = "Raise your shield on the YOURS pad", Reward = 10000, Target = "ClaimStation" },
+	{ Id = "first_shield", Text = "Lock your lab with the LOCK button", Reward = 10000, Target = "LockConsole" },
 	{ Id = "first_steal", Text = "Steal an item from another lab", Reward = 50000, Target = "NearestEnemyPedestal" },
 } :: { GoalDef }
 
