@@ -559,21 +559,36 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   **READY IN …**; B can grab in that window. After 20 s, stepping
   onto the pad raises it. The claim shield and the 120 s shield after a
   loss go up regardless of the lock.
-- [ ] **Steal and deliver.** Shield down: B holds E on A's pedestal
-  (**Steal**, the item's name, 1.5 s).
-  - [ ] B: the orb over B's head (Golden shell and 2 satellites), a red
-    beam, **THIEF · 45s** (A sees them too), B walks slower, an orange
-    **GET HOME!** banner with a draining bar, and the arrow on B's gate.
+- [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
+  pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
+  name and its +$/s, 1.5 s).
+  - [ ] B's own screen: a full-width orange **🫳 YOU GRABBED <ITEM>! RUN
+    HOME!** banner for 1.5 s, a pickup blip and a quick FOV punch, then
+    the **RUN!** banner (2 s) turning into **GET HOME!** with a draining
+    bar, and the arrow on B's gate.
+  - [ ] **B sees the orb on B's own screen** over B's head (Golden shell
+    and 2 satellites), with the red beam and the big **<item> · 45s** chip
+    under THIEF; it follows B's jumps, and stays visible zoomed into first
+    person. A sees the same. B walks slower (12), A faster (18).
   - [ ] A: the pedestal shows a red ghost ring and **STOLEN!** +$0/s, A's
-    income drops by that item, a red **THIEF IN YOUR LAB!** banner with
-    the distance, a red **THIEF!** arrow following B, and the alarm.
+    income drops by that item, a red **THIEF IN YOUR LAB!** banner reading
+    **Catch them in 2…1…** then the distance, a red **THIEF!** arrow
+    following B, and the alarm. A's speed is back to 16 when it ends.
   - [ ] B reaches home: **HEIST COMPLETE!** for B, the item (still Golden)
     in B's inventory with a new Uid; A gets the stolen card (shield up
     2 min), the pedestal is empty, and A's shield auto-raises for 120 s.
   - [ ] Server banner (Legendary+): **B stole a Golden <item> from A!** (Golden in its colour)
+- [ ] **Grace window.** A stands 7 studs from the pedestal (just outside
+  the guard radius) and B grabs: A walks straight into B, but nothing
+  happens for 2 s; after that the touch saves it.
+- [ ] **Guarded pedestal.** A stands right next to the pedestal (within
+  6 studs): B's prompt reads **Owner is guarding** with no hold, and
+  tapping it only toasts **The owner is guarding it!**. A steps away and
+  it turns back into **Steal**.
 - [ ] **Steal and tag.** B grabs, A touches B (within 5 studs): A gets
   **SAVED! You got your … back**, B **Caught!**, the item is back on the
-  pedestal, the banner reads **A caught B!**.
+  pedestal, the banner reads **A caught B!**. Both see a white flash ring
+  at B, **CAUGHT!** over B's head, and the orb fly back onto the pedestal.
 - [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
 - [ ] **Cooldown.** Right after any attempt B gets **Lay low for 60s**;
   `/heistcd 0` clears it.
@@ -608,3 +623,25 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   a far pedestal, B's own pedestal, a shielded lab, an empty pedestal and
   a Rebirth-0 owner are all rejected, each with a `HeistService: rejected
   steal …` warning in the server output.
+- [ ] **Locked teaser at Rebirth 0.** A at Rebirth 1 with a displayed item
+  and the shield down; B at Rebirth 0 walks up to it: the prompt reads
+  **🔒 Steal** / **Unlocks at Rebirth 1** at the normal distance, and
+  tapping it only toasts **Stealing unlocks at Rebirth 1**. No hand marker.
+- [ ] **Unlock line.** Before rebirthing, the Rebirth panel's unlock row
+  reads **Stealing + Mythic → Secret fusion**. After the first rebirth the
+  REBIRTH 1! card has **🫳 STEALING UNLOCKED: grab items off other labs'
+  pedestals and run them home!** (the card is taller; LET'S GO below it).
+  Later rebirth cards don't.
+- [ ] **New goals.** After "Rebirth for the first time": **Raise your shield
+  on the YOURS pad** ($10,000; the marker points at the claim pad, and only
+  stepping onto the pad counts, not the claim shield or `/shield`), then
+  **Steal an item from another lab** ($50,000; the marker points at the
+  nearest grabbable enemy pedestal and moves as that changes). Delivering
+  a steal completes it.
+- [ ] **Hand markers.** At Rebirth 1+, every filled, unshielded, unguarded
+  enemy pedestal has a red 🫳 marker above its label, from up to 60 studs.
+  It goes when the lab's shield goes up, the owner guards it, or the item
+  goes; all of them hide while you carry.
+- [ ] **One-time tip.** The first time (this session) a Rebirth 1+ player
+  walks inside a lab with something to steal: **Hold E on their pedestal to
+  steal it!**. Walking into another one doesn't repeat it.

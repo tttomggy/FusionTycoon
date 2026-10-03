@@ -101,7 +101,13 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   saved = the owner within 5 studs; timeout, thief death, either side
   leaving, the victim's plot going, shutdown or `/wipe` = it goes back.
   Thief cooldown 60 s after any attempt; a victim gets a 120 s auto-shield
-  per loss and loses at most 3 per 10 min. While carrying: no pulls,
+  per loss and loses at most 3 per 10 min. **Fairness:** the owner within
+  `OwnerBlockRadius` (6) of the pedestal when the hold completes guards it
+  (rejected `Guarded`; pedestal attribute `GuardedByOwner`, the prompt
+  reads "Owner is guarding"); no tag for `TagGraceSeconds` (2) after a grab
+  (RUN! / "Catch them in 2…1…"); the owner runs at `OwnerChaseWalkSpeed`
+  (18) while any of their items is carried. A catch plays client-side
+  from the thief's `HeistOutcome` / `HeistReturnTo` attributes. While carrying: no pulls,
   fusing, upgrades, Multiplier Pad, rebirth, shield pad or second steal
   (Reason `Carrying`); the owner can't remove a carried item or rebirth
   (`BeingStolen` / `ItemBeingStolen`). A carried pedestal earns nothing.
@@ -128,8 +134,16 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
     the sign's teal PROTECTED pill): no StealPrompt, no eject needed.
-  - Client: WorldLabelController enables a StealPrompt only for an eligible
-    viewer; HeistController draws every carrier's orb (`PedestalVisuals.
+  - **Teaching flow:** Rebirth-0 viewers see a locked "🔒 Steal / Unlocks at
+    Rebirth 1" teaser on stealable enemy pedestals; the Rebirth 1 card and
+    `RebirthConfig.Unlocks[1]` announce stealing; goals `first_shield`
+    (pad raises, `ShieldRaises`) then `first_steal` (deliveries,
+    `TotalSteals`; marker target `NearestEnemyPedestal`); red hand markers
+    over grabbable enemy pedestals; a one-time "Hold E on their pedestal"
+    toast on the first visit to a robbable lab.
+  - Client: WorldLabelController sets each StealPrompt's local `Mode`
+    (Hidden / Locked / Guarded / Steal; Locked and Guarded are no-hold taps
+    that only toast, since Roblox hides disabled prompts); HeistController draws every carrier's orb (`PedestalVisuals.
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
     plot's shield fence; HudController shows the shield chip.
