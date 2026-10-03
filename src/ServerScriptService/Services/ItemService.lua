@@ -48,11 +48,21 @@ local ItemService = {}
 
 ItemService.Name = "ItemService"
 
-local function reject(player: Player, reason: string, isSuspicious: boolean?)
+-- Every result carries the PedestalIndex the request named (when it had a
+-- valid one), so the client can clear that pedestal's pending flag even on
+-- a rejection - without it one rejection locked the pedestal for the session.
+-- Rejections that mean the client's inventory is stale (it offered an item
+-- that's displayed or gone): re-send it so the next try picks a free copy.
+local STALE_INVENTORY_REASONS = { ItemInUse = true, ItemNotOwned = true }
+
+local function reject(player: Player, reason: string, pedestalIndex: number?, isSuspicious: boolean?)
 	if isSuspicious then
 		warn(("ItemService: rejected place-item request from %s (%s)"):format(player.Name, reason))
 	end
-	RemoteEvents.PlaceItemResult:FireClient(player, { Success = false, Reason = reason })
+	if STALE_INVENTORY_REASONS[reason] and PlayerDataService.IsDataLoaded(player) then
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	end
+	RemoteEvents.PlaceItemResult:FireClient(player, { Success = false, Reason = reason, PedestalIndex = pedestalIndex })
 end
 
 local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
@@ -67,29 +77,24 @@ local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
 	return nil
 end
 
--- Pushes a fresh Cash/Generators/... snapshot after a placement changes
--- PedestalDisplays. Mirrors TycoonService's own syncTycoon payload shape;
--- duplicated rather than shared since TycoonService's version is a private
--- local function, and the two rarely change independently anyway.
-local function syncTycoon(player: Player)
-	RemoteEvents.SyncTycoon:FireClient(player, {
-		Cash = PlayerDataService.GetCash(player),
-		Generators = PlayerDataService.GetGenerators(player) or {},
-		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
-		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
-	})
+-- Place and remove flip item.InUse, which lives in the inventory, not the
+-- tycoon snapshot: both go out, or the client keeps offering the displayed
+-- copy of a stack and every later place is rejected as ItemInUse.
+local function syncAll(player: Player)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIndex: unknown)
 	if typeof(rawUid) ~= "string" or typeof(rawPedestalIndex) ~= "number" then
-		reject(player, "InvalidArguments", true)
+		reject(player, "InvalidArguments", nil, true)
 		return
 	end
 	local uid = rawUid :: string
 	local pedestalIndex = math.floor(rawPedestalIndex :: number)
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		reject(player, "DataNotLoaded")
+		reject(player, "DataNotLoaded", pedestalIndex)
 		return
 	end
 
@@ -98,43 +103,42 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	-- player can never target another player's pedestal.
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if not plot then
-		reject(player, "NoPlot")
+		reject(player, "NoPlot", pedestalIndex)
 		return
 	end
 
 	local pedestal = getPedestalPart(plot, pedestalIndex)
 	if not pedestal then
-		reject(player, "InvalidPedestal", true)
+		reject(player, "InvalidPedestal", pedestalIndex, true)
 		return
 	end
 
 	local item = PlayerDataService.GetItemByUid(player, uid)
 	if not item then
-		reject(player, "ItemNotOwned", true)
+		reject(player, "ItemNotOwned", pedestalIndex, true)
 		return
 	end
 
 	if item.InUse then
-		reject(player, "ItemInUse", true)
+		reject(player, "ItemInUse", pedestalIndex, true)
 		return
 	end
 
 	local pedestalDisplays = PlayerDataService.GetPedestalDisplays(player)
 	if pedestalDisplays[pedestalIndex] then
-		reject(player, "PedestalOccupied")
+		reject(player, "PedestalOccupied", pedestalIndex)
 		return
 	end
 
 	PlayerDataService.SetItemInUse(player, uid, true)
 	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, uid)
-	syncTycoon(player)
+	syncAll(player)
 
-	PedestalVisuals.Apply(pedestal, item.Tier)
+	PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+	TycoonService.RefreshPedestalLabels(player)
 
 	local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
 	local itemName = itemConfigEntry and itemConfigEntry.Name or item.ItemId
-
-	print(("ItemService: %s displayed a %s %s on pedestal %d"):format(player.Name, item.Tier, itemName, pedestalIndex))
 
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,
@@ -145,21 +149,26 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	local visualConfig = RarityVisuals.Tiers[item.Tier]
 	if visualConfig and visualConfig.AnnounceServerWide then
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
-			Message = ("%s just displayed a %s %s!"):format(player.Name, item.Tier:upper(), itemName),
+			Message = ("%s just displayed a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 			Tier = item.Tier,
+			Mutation = item.Mutation,
+			-- Parts, so the client can colour the tier word.
+			PlayerName = player.DisplayName,
+			Verb = "displayed",
+			ItemName = itemName,
 		})
 	end
 end
 
 local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	if typeof(rawPedestalIndex) ~= "number" then
-		reject(player, "InvalidArguments", true)
+		reject(player, "InvalidArguments", nil, true)
 		return
 	end
 	local pedestalIndex = math.floor(rawPedestalIndex :: number)
 
 	if not PlayerDataService.IsDataLoaded(player) then
-		reject(player, "DataNotLoaded")
+		reject(player, "DataNotLoaded", pedestalIndex)
 		return
 	end
 
@@ -167,30 +176,29 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	-- resolved from the requesting player's own server-tracked plot.
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if not plot then
-		reject(player, "NoPlot")
+		reject(player, "NoPlot", pedestalIndex)
 		return
 	end
 
 	local pedestal = getPedestalPart(plot, pedestalIndex)
 	if not pedestal then
-		reject(player, "InvalidPedestal", true)
+		reject(player, "InvalidPedestal", pedestalIndex, true)
 		return
 	end
 
 	local pedestalDisplays = PlayerDataService.GetPedestalDisplays(player)
 	local uid = pedestalDisplays[pedestalIndex]
 	if not uid then
-		reject(player, "PedestalEmpty")
+		reject(player, "PedestalEmpty", pedestalIndex)
 		return
 	end
 
 	PlayerDataService.SetItemInUse(player, uid, false)
 	PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
-	syncTycoon(player)
+	syncAll(player)
 
 	PedestalVisuals.Clear(pedestal)
-
-	print(("ItemService: %s picked an item back up from pedestal %d"):format(player.Name, pedestalIndex))
+	TycoonService.RefreshPedestalLabels(player)
 
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,

@@ -8,21 +8,38 @@
 -- Runs server-side only: these are persistent, shared-world effects (not a
 -- one-off personal animation), so they need to be built by the server to
 -- replicate to every player, the same way TycoonService's pads/machine are.
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 
 local PedestalVisuals = {}
 
 local ELEMENTS_FOLDER_NAME = "PedestalVisualElements"
 
-local RING_SIZE = Vector3.new(0.4, 5, 5) -- Cylinder shape: X = thickness, Y/Z = diameter
+local RING_DIAMETER = 5
 local RING_HEIGHT_OFFSET_STUDS = 0.2
-local RING_SPIN_RADIANS_PER_SECOND = math.rad(90)
+
+local SECRET_SHELL_TRANSPARENCY = 0.35
+
+-- A mutation adds a second glass shell around the orb, in the mutation's
+-- colour, with its own sparkle. Rainbow's shell is tagged FT_Rainbow and
+-- cycles hue on clients (WorldAnimationController).
+local MUTATION_SHELL_SCALE = 1.15
+local MUTATION_SHELL_TRANSPARENCY = 0.6
+type ShellSparkle = { Rate: number, Size: number, Speed: NumberRange }
+local MUTATION_SPARKLES: { [string]: ShellSparkle } = {
+	Golden = { Rate = 6, Size = 0.35, Speed = NumberRange.new(0.5, 1) },
+	Diamond = { Rate = 12, Size = 0.22, Speed = NumberRange.new(1.5, 2.5) },
+	Rainbow = { Rate = 10, Size = 0.3, Speed = NumberRange.new(1, 2) },
+}
 
 local PULSE_SECONDS = 1.4
 local PULSE_GROWTH = 1.08
@@ -39,79 +56,179 @@ local PROXIMITY_RADIUS_STUDS = 14
 local PROXIMITY_COOLDOWN_SECONDS = 6
 local PROXIMITY_BURST_COUNT = 40
 
--- Continuous per-pedestal state that can't be cleaned up just by destroying
--- instances (a running Heartbeat connection, an active looped Tween). Keyed
--- by the pedestal part so Clear() only ever touches what it itself started.
-local activeSpins: { [BasePart]: RBXScriptConnection } = {}
-local activePulses: { [BasePart]: Tween } = {}
+-- The floating item orb: a glass ball in the tier colour (bigger for
+-- higher tiers) around a Neon core, with a light. Its centre sits
+-- PlotLayout.Pedestal.OrbCenterY above the pedestal's bottom. The group is
+-- tagged FT_Hover, so clients spin and bob it. Returns the glass Orb part.
+-- Satellites per mutation: how many, seconds per lap, and whether they
+-- leave a short trail. Rainbow's take one RainbowStops hue each.
+type SatelliteSpec = { Count: number, Period: number, Trail: boolean }
+local MUTATION_SATELLITES: { [string]: SatelliteSpec } = {
+	Golden = { Count = 2, Period = 2.4, Trail = false },
+	Diamond = { Count = 4, Period = 1.8, Trail = true },
+	Rainbow = { Count = 6, Period = 1.5, Trail = true },
+}
 
-local function stopSpin(ring: BasePart)
-	local connection = activeSpins[ring]
-	if connection then
-		connection:Disconnect()
-		activeSpins[ring] = nil
+-- Neon balls the client orbits round the orb (FT_Orbit). Built here so
+-- every player sees them; positions are set every frame on clients.
+local function buildSatellites(group: Model, center: CFrame, diameter: number, mutation: string)
+	local spec = MUTATION_SATELLITES[mutation]
+	local color = UITheme.GetMutationColor(mutation)
+	if not spec or not color then
+		return
+	end
+	local p = PlotLayout.Pedestal
+	local satellites = Instance.new("Model")
+	satellites.Name = "Satellites"
+	local stops = UITheme.Mutation.RainbowStops
+	for index = 1, spec.Count do
+		local hue = if mutation == "Rainbow" then stops[(index - 1) % #stops + 1] else color
+		local ball = PartKit.Part({
+			Name = "Satellite" .. index,
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.one * p.SatelliteDiameter,
+			CFrame = center,
+			Color = hue,
+			Material = Enum.Material.Neon,
+			CastShadow = false,
+			Parent = satellites,
+		})
+		PartKit.MakeDecorative(ball)
+		if spec.Trail then
+			local top = Instance.new("Attachment")
+			top.Name = "TrailTop"
+			top.Position = Vector3.new(0, p.SatelliteDiameter / 2, 0)
+			top.Parent = ball
+			local bottom = Instance.new("Attachment")
+			bottom.Name = "TrailBottom"
+			bottom.Position = Vector3.new(0, -p.SatelliteDiameter / 2, 0)
+			bottom.Parent = ball
+			local trail = Instance.new("Trail")
+			trail.Attachment0 = top
+			trail.Attachment1 = bottom
+			trail.Lifetime = p.SatelliteTrailLifetime
+			trail.Color = ColorSequence.new(hue)
+			trail.LightEmission = 1
+			trail.Transparency = NumberSequence.new(0.2, 1)
+			trail.FaceCamera = true
+			trail.Parent = ball
+		end
+	end
+	satellites:SetAttribute("Count", spec.Count)
+	satellites:SetAttribute("Radius", diameter / 2 + p.SatelliteRadiusExtra)
+	satellites:SetAttribute("Period", spec.Period)
+	satellites:SetAttribute("Tilt", p.SatelliteTiltDegrees)
+	satellites:AddTag(PartKit.ORBIT_TAG)
+	satellites.Parent = group
+end
+
+local function buildShell(group: Model, center: CFrame, diameter: number, mutation: string)
+	local color = UITheme.GetMutationColor(mutation)
+	if not color then
+		return
+	end
+	local shell = PartKit.Part({
+		Name = "MutationShell",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter * MUTATION_SHELL_SCALE,
+		CFrame = center,
+		Color = color,
+		Material = Enum.Material.Glass,
+		Transparency = MUTATION_SHELL_TRANSPARENCY,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(shell)
+	if mutation == "Rainbow" then
+		shell:AddTag(PartKit.RAINBOW_TAG)
+	end
+	local preset = MUTATION_SPARKLES[mutation]
+	if preset then
+		local sparkle = SparkleEmitter.Create({ Color = color, Rate = preset.Rate })
+		sparkle.Name = "MutationSparkle"
+		sparkle.Size = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, preset.Size * 0.5),
+			NumberSequenceKeypoint.new(0.5, preset.Size),
+			NumberSequenceKeypoint.new(1, 0),
+		})
+		sparkle.Speed = preset.Speed
+		if mutation == "Rainbow" then
+			sparkle.Color = UITheme.GetRainbowSequence()
+		end
+		sparkle.Parent = shell
 	end
 end
 
-local function startSpin(ring: BasePart)
-	stopSpin(ring)
-	activeSpins[ring] = RunService.Heartbeat:Connect(function(deltaTime: number)
-		ring.CFrame *= CFrame.Angles(RING_SPIN_RADIANS_PER_SECOND * deltaTime, 0, 0)
-	end)
-	-- Safety net: if the ring is ever destroyed some other way (e.g. the
-	-- whole plot getting torn down) the Heartbeat connection above would
-	-- otherwise run forever against a dead instance.
-	ring.Destroying:Connect(function()
-		stopSpin(ring)
-	end)
-end
+local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance, mutation: string?): BasePart
+	local p = PlotLayout.Pedestal
+	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
+	local center = bottom * CFrame.new(0, p.OrbCenterY, 0)
+	local diameter = p.OrbDiameter[tier] or p.OrbDiameter.Common
 
-local function stopPulse(pedestal: BasePart)
-	local tween = activePulses[pedestal]
-	if tween then
-		tween:Cancel()
-		activePulses[pedestal] = nil
+	local group = Instance.new("Model")
+	group.Name = "OrbGroup"
+
+	-- Secret is the one dark orb, so it reads instantly: a VoidShell glass
+	-- shell around the mint core.
+	local isSecret = tier == "Secret"
+	local orb = PartKit.Part({
+		Name = "Orb",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter,
+		CFrame = center,
+		Color = if isSecret then UITheme.World.VoidShell else tierColor,
+		Material = Enum.Material.Glass,
+		Transparency = if isSecret then SECRET_SHELL_TRANSPARENCY else p.OrbTransparency,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(orb)
+	local core = PartKit.Part({
+		Name = "OrbCore",
+		Shape = Enum.PartType.Ball,
+		Size = Vector3.one * diameter * p.InnerOrbScale,
+		CFrame = center,
+		Color = tierColor,
+		Material = Enum.Material.Neon,
+		Parent = group,
+	})
+	PartKit.MakeDecorative(core)
+
+	local light = Instance.new("PointLight")
+	light.Color = tierColor
+	light.Range = p.OrbLightRangeBase + p.OrbLightRangePerRank * (ItemConfig.Tiers[tier] or 1)
+	light.Brightness = p.OrbLightBrightness
+	light.Shadows = false
+	light.Parent = orb
+
+	if mutation then
+		buildShell(group, center, diameter, mutation)
+		buildSatellites(group, center, diameter, mutation)
 	end
-	local baseSize = pedestal:GetAttribute("BaseSize")
-	if baseSize then
-		pedestal.Size = baseSize
-	end
-end
 
-local function startPulse(pedestal: BasePart)
-	stopPulse(pedestal)
-	local baseSize = pedestal:GetAttribute("BaseSize") :: Vector3?
-	if not baseSize then
-		baseSize = pedestal.Size
-		pedestal:SetAttribute("BaseSize", baseSize)
-	end
-
-	local tween = TweenService:Create(
-		pedestal,
-		TweenInfo.new(PULSE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Size = (baseSize :: Vector3) * PULSE_GROWTH }
-	)
-	activePulses[pedestal] = tween
-	tween:Play()
-
-	pedestal.Destroying:Connect(function()
-		stopPulse(pedestal)
-	end)
+	group.PrimaryPart = orb
+	PartKit.SetHover(group, p.OrbSpinDegPerSec, p.OrbBob, p.OrbBobPeriod, "Bob")
+	group.Parent = parent
+	return orb
 end
 
 -- Removes every effect PedestalVisuals.Apply may have added, restoring the
 -- pedestal to its bare, unoccupied appearance. Safe to call on a pedestal
 -- that was never styled.
 function PedestalVisuals.Clear(pedestal: BasePart)
-	stopPulse(pedestal)
+	-- The orb pulse (PartKit.Pulse) dies with the orb in the elements folder.
+
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		cap.Material = Enum.Material.SmoothPlastic
+		cap.Color = UITheme.World.StructureLight
+		local lip = cap:FindFirstChild("CapLip")
+		if lip and lip:IsA("BasePart") then
+			lip.Transparency = 1
+		end
+	end
 
 	local elements = pedestal:FindFirstChild(ELEMENTS_FOLDER_NAME)
 	if elements then
-		for _, descendant in elements:GetDescendants() do
-			if descendant:IsA("BasePart") then
-				stopSpin(descendant)
-			end
-		end
 		elements:Destroy()
 	end
 
@@ -120,6 +237,7 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 		light:Destroy()
 	end
 
+	-- Older builds added a Highlight here; clear any left behind.
 	local highlight = pedestal:FindFirstChild("PedestalHighlight")
 	if highlight then
 		highlight:Destroy()
@@ -131,9 +249,10 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 	end
 end
 
--- Applies tier's RarityVisuals entry to `pedestal`. Clears any previous
--- styling first, so this is also how a pedestal gets reset/restyled.
-function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
+-- Applies tier's RarityVisuals entry to `pedestal`, plus a mutation shell
+-- when the item has one. Clears any previous styling first, so this is
+-- also how a pedestal gets reset/restyled.
+function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: string?)
 	PedestalVisuals.Clear(pedestal)
 
 	local config = RarityVisuals.Tiers[tier]
@@ -150,19 +269,30 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 	elements.Name = ELEMENTS_FOLDER_NAME
 	elements.Parent = pedestal
 
-	local highlight = Instance.new("Highlight")
-	highlight.Name = "PedestalHighlight"
-	highlight.FillTransparency = 1
-	highlight.OutlineColor = config.GlowColor
-	highlight.OutlineTransparency = 0
-	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-	highlight.Parent = pedestal
+	local tierColor = FusionConfig.TierAccentColors[tier] or config.GlowColor
+	local cap = pedestal:FindFirstChild("Cap")
+	if cap and cap:IsA("BasePart") then
+		-- The cap itself stays matte; only the thin lip under it glows.
+		cap.Material = Enum.Material.SmoothPlastic
+		cap.Color = tierColor
+		local lip = cap:FindFirstChild("CapLip")
+		if lip and lip:IsA("BasePart") then
+			lip.Color = tierColor
+			lip.Transparency = 0
+		end
+	end
+	local orb = buildOrb(pedestal, tier, tierColor, elements, mutation)
+
+	-- No Highlight: Roblox renders at most 31 per client, and 12 plots x 4
+	-- pedestals can reach 48, so outlines silently vanish. The cap lip glow
+	-- above already marks a filled pedestal.
 
 	local light = Instance.new("PointLight")
 	light.Name = "PedestalLight"
 	light.Color = config.GlowColor
 	light.Brightness = config.LightBrightness
 	light.Range = config.LightRange
+	light.Shadows = false
 	light.Parent = pedestal
 
 	if config.Particles then
@@ -174,42 +304,38 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string)
 		if particles.SpreadAngle then
 			sparkle.SpreadAngle = particles.SpreadAngle
 		end
-		sparkle.Parent = elements
+		sparkle.Parent = orb
 	end
 
 	if config.RotatingRing then
-		local ring = Instance.new("Part")
+		-- A glowing ring around the cap, drawn as a SurfaceGui face rather
+		-- than a flat Neon disc (which renders as a fan of triangles under
+		-- bloom). The orb already carries this pedestal's light.
+		local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+		local capTop = pedestal.CFrame * CFrame.new(0, baseSize.Y / 2 + RING_HEIGHT_OFFSET_STUDS, 0)
+		local ring = BillboardKit.BuildPadFace(elements, capTop, RING_DIAMETER, config.GlowColor, nil)
 		ring.Name = "Ring"
-		ring.Shape = Enum.PartType.Cylinder
-		ring.Size = RING_SIZE
-		ring.Anchored = true
-		ring.CanCollide = false
-		ring.Material = Enum.Material.Neon
-		ring.Color = config.GlowColor
-		ring.Transparency = 0.4
-		-- The cylinder's axis runs along local X; rotating 90 degrees around
-		-- Z lays it flat, like a ring around the pedestal's base.
-		ring.CFrame = CFrame.new(pedestal.Position - Vector3.new(0, pedestal.Size.Y / 2 - RING_HEIGHT_OFFSET_STUDS, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
-		ring.Parent = elements
-
-		startSpin(ring)
+		local ringLight = ring:FindFirstChild("FaceLight")
+		if ringLight then
+			ringLight:Destroy()
+		end
 	end
 
+	-- The pulse breathes the orb (pulsing the column would push its cap
+	-- and bottom out of place).
 	if config.Pulse then
-		startPulse(pedestal)
+		PartKit.Pulse(orb, PULSE_GROWTH, PULSE_SECONDS, true)
 	end
 
 	if config.Beam then
 		local bottomAttachment = Instance.new("Attachment")
 		bottomAttachment.Name = "BeamBottom"
-		bottomAttachment.Position = Vector3.new(0, pedestal.Size.Y / 2, 0)
-		bottomAttachment.Parent = pedestal
+		bottomAttachment.Parent = orb
 
 		local topAttachment = Instance.new("Attachment")
 		topAttachment.Name = "BeamTop"
 		topAttachment.Position = Vector3.new(0, BEAM_HEIGHT_STUDS, 0)
-		topAttachment.Parent = pedestal
+		topAttachment.Parent = orb
 
 		local beam = Instance.new("Beam")
 		beam.Name = "SkyBeam"

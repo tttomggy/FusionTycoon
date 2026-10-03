@@ -28,7 +28,7 @@ export type TierVisual = {
 RarityVisuals.Tiers = {
 	Common = {
 		GlowColor = Color3.fromRGB(225, 225, 225),
-		LightBrightness = 1.5,
+		LightBrightness = 0.8,
 		LightRange = 8,
 		Particles = nil,
 		RotatingRing = false,
@@ -40,8 +40,8 @@ RarityVisuals.Tiers = {
 	},
 	Rare = {
 		GlowColor = Color3.fromRGB(60, 160, 255),
-		LightBrightness = 3,
-		LightRange = 12,
+		LightBrightness = 1.0,
+		LightRange = 9,
 		Particles = { Rate = 3, Speed = NumberRange.new(0.2, 0.6), SpreadAngle = Vector2.new(20, 20) },
 		RotatingRing = false,
 		Pulse = false,
@@ -52,8 +52,8 @@ RarityVisuals.Tiers = {
 	},
 	Epic = {
 		GlowColor = Color3.fromRGB(190, 60, 255),
-		LightBrightness = 5,
-		LightRange = 16,
+		LightBrightness = 1.2,
+		LightRange = 10,
 		Particles = { Rate = 6, Speed = NumberRange.new(0.5, 1), SpreadAngle = Vector2.new(45, 45) },
 		RotatingRing = true,
 		Pulse = false,
@@ -64,8 +64,8 @@ RarityVisuals.Tiers = {
 	},
 	Legendary = {
 		GlowColor = Color3.fromRGB(255, 190, 40),
-		LightBrightness = 8,
-		LightRange = 22,
+		LightBrightness = 1.4,
+		LightRange = 11,
 		Particles = { Rate = 12, Speed = NumberRange.new(0.5, 1.5), SpreadAngle = Vector2.new(90, 90) },
 		RotatingRing = true,
 		Pulse = true,
@@ -76,8 +76,8 @@ RarityVisuals.Tiers = {
 	},
 	Mythic = {
 		GlowColor = Color3.fromRGB(255, 60, 90),
-		LightBrightness = 12,
-		LightRange = 32,
+		LightBrightness = 1.6,
+		LightRange = 12,
 		Particles = { Rate = 20, Speed = NumberRange.new(1, 2), SpreadAngle = Vector2.new(180, 180) },
 		RotatingRing = true,
 		Pulse = true,
@@ -89,6 +89,20 @@ RarityVisuals.Tiers = {
 		-- electronicpingshort.wav like the one-shot dings elsewhere, since
 		-- looping a short ping would be worse than staying silent.
 		AmbientSoundId = "rbxasset://sounds/bell.wav",
+		ProximityBurst = true,
+		AnnounceServerWide = true,
+	},
+	-- Mythic's structure in mint. The orb itself is the one dark orb
+	-- (PedestalVisuals: VoidShell glass around a mint core); a slow sparkle.
+	Secret = {
+		GlowColor = Color3.fromRGB(61, 255, 208),
+		LightBrightness = 1.6,
+		LightRange = 12,
+		Particles = { Rate = 8, Speed = NumberRange.new(0.2, 0.5), SpreadAngle = Vector2.new(180, 180) },
+		RotatingRing = true,
+		Pulse = true,
+		Beam = true,
+		AmbientSoundId = "rbxasset://sounds/bell.wav", -- same asset gap as Mythic
 		ProximityBurst = true,
 		AnnounceServerWide = true,
 	},

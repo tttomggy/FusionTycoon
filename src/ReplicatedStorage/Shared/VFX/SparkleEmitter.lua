@@ -1,5 +1,5 @@
 -- Factory for the ambient "sparkle" ParticleEmitter used across the sci-fi
--- fusion lab aesthetic (see PadStyler). Returns a fresh, unparented instance
+-- fusion lab aesthetic. Returns a fresh, unparented instance
 -- on every call rather than one shared instance, since a ParticleEmitter can
 -- only live under a single parent at a time and every pad wants its own.
 local SparkleEmitter = {}

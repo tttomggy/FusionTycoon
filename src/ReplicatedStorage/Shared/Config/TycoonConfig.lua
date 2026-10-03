@@ -1,62 +1,122 @@
+--!strict
+local RebirthConfig = require(script.Parent.RebirthConfig)
+local MutationConfig = require(script.Parent.MutationConfig)
+
 local TycoonConfig = {}
 
+--[[ Economy -----------------------------------------------------------------
+	Every number in this file was tuned with the greedy-player simulation in
+	tools/econ_sim.py, run on a brand-new save (generators -> gacha -> fuse ->
+	pedestals -> multiplier -> rebirth; new saves start with Basic Generator
+	at LV 1; rebirth costs cash). Medians from
+	`python3 tools/econ_sim.py 30 12 --fuse=2` (the player fuses pairs), with
+	`--fuse=3` (triples) in brackets:
+
+	    first Gacha pull ..... ~1:10 (1:10)    first Legendary ....... ~6 min (13 min)
+	    first Mythic ......... ~1:05 (2:10)    Rebirth 1 ............. ~1:04 (1:10)
+	    Rebirth 2 ............ ~1:46 (2:13)    Rebirth 3 ............. ~2:46 (3:15)
+	    Singularity Core ..... ~2:37 (3:05)    first Secret .......... ~8:30 (not in 12 h)
+	    Index after 12 h ..... ~38/68 (34/68)  Multiplier maxed ...... never in 12 h
+
+	Secret and Rainbow have huge spreads; judge them by order of magnitude.
+
+	Income is generators + pedestals only (the factory line's cash balls are
+	a client-side picture of it). If you rebalance, change the sim's
+	tunables to match and re-run it rather than eyeballing.
+]]
+
+-- Passive income (generators + pedestals) is paid out on this tick.
 TycoonConfig.PassiveIncomeIntervalSeconds = 1
 
--- Physical cash items spawned by a claimed plot's Dropper1.
-TycoonConfig.DropperCashValue = 5
-TycoonConfig.DropperIntervalSeconds = 3
+-- A claimed plot's Basic Generator never sits below this level, so a new
+-- player's factory line is running from the start.
+TycoonConfig.StartingBasicGeneratorLevel = 1
 
--- Gacha Pad: the only way to acquire a fusable item. Priced against the same
--- observed real-income anchor as the Multiplier Pad (~1.3M cash/hour, i.e.
--- ~21,667/min under normal, non-maximized play) rather than a theoretical
--- floor - that anchor is what proved correct in testing. $30,000 sits at
--- ~1.4 minutes of real income, cheap enough to pull often without being free.
-TycoonConfig.GachaPullCost = 30000
+-- Gacha Pad: the only way to get a brand-new item. The price rises a little
+-- with every pull (GachaPullCostGrowth ^ pulls) so pulling stays a real choice
+-- against buying upgrades instead of becoming free spam once income grows.
+TycoonConfig.GachaBasePullCost = 250
+TycoonConfig.GachaPullCostGrowth = 1.045
 
--- Multiplier Pad: a fixed 10-level table, not a scaling formula. Each level
--- has its own hardcoded Cost/Multiplier, and level 10 is a genuine hard cap -
--- there is no purchase beyond it, no matter how much cash a player has.
--- Rebalance by editing these numbers directly; nothing else in the game
--- computes them.
---
--- Costs are calibrated against real observed play (~1.3M cash/hour with
--- normal, non-maximized dropper+generator income), not a theoretical
--- minimum-income floor - an earlier version anchored to "2 droppers, no
--- multiplier" made Level 1 ($750) affordable in seconds against real income.
+function TycoonConfig.GetGachaPullCost(pullsSoFar: number): number
+	return math.floor(TycoonConfig.GachaBasePullCost * TycoonConfig.GachaPullCostGrowth ^ math.max(0, pullsSoFar))
+end
+
+-- Pull xN: the sum of the next `count` single-pull prices (no discount).
+function TycoonConfig.GetGachaMultiPullCost(pullsSoFar: number, count: number): number
+	local total = 0
+	for offset = 0, count - 1 do
+		total += TycoonConfig.GetGachaPullCost(pullsSoFar + offset)
+	end
+	return total
+end
+
+-- Multiplier Pad: 15 levels, +0.25 each, and the last level jumps to x5.
+-- A long climb, not a quick max: it multiplies ALL income, so a cheap max
+-- trivialised the generators. Written out literally (no formula). Saves
+-- keep their level number, so an old LV 10 save is now x3.5.
 TycoonConfig.CashMultiplierLevels = {
-	{ Level = 1, Cost = 500000, Multiplier = 2 },
-	{ Level = 2, Cost = 1300000, Multiplier = 3 },
-	{ Level = 3, Cost = 3300000, Multiplier = 4 },
-	{ Level = 4, Cost = 8500000, Multiplier = 6 },
-	{ Level = 5, Cost = 20000000, Multiplier = 8 },
-	{ Level = 6, Cost = 50000000, Multiplier = 10 },
-	{ Level = 7, Cost = 120000000, Multiplier = 13 },
-	{ Level = 8, Cost = 300000000, Multiplier = 16 },
-	{ Level = 9, Cost = 750000000, Multiplier = 20 },
-	{ Level = 10, Cost = 1850000000, Multiplier = 25 },
+	{ Level = 1, Cost = 5_000, Multiplier = 1.25 },
+	{ Level = 2, Cost = 30_000, Multiplier = 1.5 },
+	{ Level = 3, Cost = 150_000, Multiplier = 1.75 },
+	{ Level = 4, Cost = 750_000, Multiplier = 2 },
+	{ Level = 5, Cost = 3_500_000, Multiplier = 2.25 },
+	{ Level = 6, Cost = 15_000_000, Multiplier = 2.5 },
+	{ Level = 7, Cost = 60_000_000, Multiplier = 2.75 },
+	{ Level = 8, Cost = 250_000_000, Multiplier = 3 },
+	{ Level = 9, Cost = 1_000_000_000, Multiplier = 3.25 },
+	{ Level = 10, Cost = 4_000_000_000, Multiplier = 3.5 },
+	{ Level = 11, Cost = 15_000_000_000, Multiplier = 3.75 },
+	{ Level = 12, Cost = 50_000_000_000, Multiplier = 4 },
+	{ Level = 13, Cost = 150_000_000_000, Multiplier = 4.25 },
+	{ Level = 14, Cost = 500_000_000_000, Multiplier = 4.5 },
+	{ Level = 15, Cost = 1_500_000_000_000, Multiplier = 5 },
 }
 
--- Multiplies a generator's BaseCashPerSecond according to its Tier. Also
--- reused for the Pedestal Showcase's passive income (see
--- GetPedestalCashPerSecond) rather than introducing a second tier-scaling
--- table - a displayed item's tier is worth the same relative multiplier
--- whichever system is producing the income.
+-- Generator output scaling by the generator's own tier.
 TycoonConfig.TierMultipliers = {
 	Common = 1,
 	Rare = 2.5,
 	Epic = 6,
 	Legendary = 15,
 	Mythic = 40,
-}
+} :: { [string]: number }
 
--- Occupied pedestals generate passive cash/sec via the same
--- calculateTotalCashPerSecond tick Generators use (see TycoonService), just
--- scaled by TierMultipliers instead of a generator's own level.
-TycoonConfig.PedestalBaseCashPerSecond = 1
+-- What a displayed item pays per second on a pedestal (before multiplier).
+-- Deliberately steep: each tier is worth ~4x the one below it, because each
+-- tier costs ~2.5-5 items of the tier below to fuse, and the top tiers jump
+-- further (Legendary 300, Mythic 3000) so displayed items stay worth having
+-- next to late-game generators.
+TycoonConfig.PedestalCashPerSecond = {
+	Common = 3,
+	Rare = 12,
+	Epic = 50,
+	Legendary = 300,
+	Mythic = 3000,
+	Secret = 50000,
+} :: { [string]: number }
 
 function TycoonConfig.GetPedestalCashPerSecond(tier: string): number
-	return TycoonConfig.PedestalBaseCashPerSecond * (TycoonConfig.TierMultipliers[tier] or 1)
+	return TycoonConfig.PedestalCashPerSecond[tier] or 0
 end
+
+-- What one item earns on a pedestal, before the income multiplier: its
+-- tier's rate x its mutation's multiplier. Every item $/s shown or paid
+-- goes through this.
+function TycoonConfig.GetItemCashPerSecond(tier: string, mutation: string?): number
+	return TycoonConfig.GetPedestalCashPerSecond(tier) * MutationConfig.GetMultiplier(mutation)
+end
+
+export type GeneratorDef = {
+	Id: string,
+	Name: string,
+	Tier: string,
+	BaseCashPerSecond: number,
+	BaseUpgradeCost: number,
+	UpgradeCostGrowth: number,
+	MaxLevel: number,
+	UnlockRequirement: { GeneratorId: string, Level: number }?,
+}
 
 -- UnlockRequirement gates a generator behind another generator reaching a level,
 -- forming a progression chain. nil means unlocked from the start.
@@ -65,8 +125,8 @@ TycoonConfig.Generators = {
 		Id = "basic_generator",
 		Name = "Basic Generator",
 		Tier = "Common",
-		BaseCashPerSecond = 1,
-		BaseUpgradeCost = 50,
+		BaseCashPerSecond = 2,
+		BaseUpgradeCost = 25,
 		UpgradeCostGrowth = 1.15,
 		MaxLevel = 25,
 		UnlockRequirement = nil,
@@ -76,7 +136,7 @@ TycoonConfig.Generators = {
 		Name = "Ember Forge",
 		Tier = "Rare",
 		BaseCashPerSecond = 4,
-		BaseUpgradeCost = 500,
+		BaseUpgradeCost = 400,
 		UpgradeCostGrowth = 1.17,
 		MaxLevel = 25,
 		UnlockRequirement = { GeneratorId = "basic_generator", Level = 5 },
@@ -86,7 +146,7 @@ TycoonConfig.Generators = {
 		Name = "Flare Reactor",
 		Tier = "Epic",
 		BaseCashPerSecond = 15,
-		BaseUpgradeCost = 5000,
+		BaseUpgradeCost = 8000,
 		UpgradeCostGrowth = 1.19,
 		MaxLevel = 25,
 		UnlockRequirement = { GeneratorId = "ember_forge", Level = 10 },
@@ -96,7 +156,7 @@ TycoonConfig.Generators = {
 		Name = "Core Engine",
 		Tier = "Legendary",
 		BaseCashPerSecond = 60,
-		BaseUpgradeCost = 50000,
+		BaseUpgradeCost = 150000,
 		UpgradeCostGrowth = 1.21,
 		MaxLevel = 25,
 		UnlockRequirement = { GeneratorId = "flare_reactor", Level = 15 },
@@ -106,14 +166,14 @@ TycoonConfig.Generators = {
 		Name = "Singularity Core",
 		Tier = "Mythic",
 		BaseCashPerSecond = 250,
-		BaseUpgradeCost = 500000,
-		UpgradeCostGrowth = 1.25,
+		BaseUpgradeCost = 4000000,
+		UpgradeCostGrowth = 1.23,
 		MaxLevel = 25,
 		UnlockRequirement = { GeneratorId = "core_engine", Level = 20 },
 	},
-}
+} :: { GeneratorDef }
 
-function TycoonConfig.GetGeneratorById(id: string)
+function TycoonConfig.GetGeneratorById(id: string): GeneratorDef?
 	for _, generator in TycoonConfig.Generators do
 		if generator.Id == id then
 			return generator
@@ -123,12 +183,13 @@ function TycoonConfig.GetGeneratorById(id: string)
 end
 
 -- Cost to purchase the level after `currentLevel`.
-function TycoonConfig.GetUpgradeCost(generator, currentLevel: number): number
+function TycoonConfig.GetUpgradeCost(generator: GeneratorDef, currentLevel: number): number
 	return math.floor(generator.BaseUpgradeCost * (generator.UpgradeCostGrowth ^ currentLevel))
 end
 
--- Cash/second a generator produces at a given level (0 = not yet purchased).
-function TycoonConfig.GetGeneratorCashPerSecond(generator, level: number): number
+-- Cash/second a generator produces at a given level (0 = not yet purchased),
+-- before the cash multiplier.
+function TycoonConfig.GetGeneratorCashPerSecond(generator: GeneratorDef, level: number): number
 	local multiplier = TycoonConfig.TierMultipliers[generator.Tier] or 1
 	return generator.BaseCashPerSecond * multiplier * level
 end
@@ -138,29 +199,82 @@ function TycoonConfig.GetCashMultiplierMaxLevel(): number
 	return #TycoonConfig.CashMultiplierLevels
 end
 
--- Cash multiplier applied per dropped item at a given Multiplier Pad level
--- (0 = not yet purchased, baseline x1).
+-- Income multiplier at a given Multiplier Pad level (0 = baseline x1).
 function TycoonConfig.GetCashMultiplierValue(level: number): number
 	if level <= 0 then
 		return 1
 	end
 	local entry = TycoonConfig.CashMultiplierLevels[level]
-	return entry and entry.Multiplier or 1
+	return if entry then entry.Multiplier else 1
 end
 
--- Cost to purchase the level after `currentLevel`, or nil if `currentLevel`
--- is already at (or past) the hard cap - there's nothing left to buy.
+-- Cost to purchase the level after `currentLevel`, or nil at the hard cap.
 function TycoonConfig.GetCashMultiplierUpgradeCost(currentLevel: number): number?
 	local entry = TycoonConfig.CashMultiplierLevels[currentLevel + 1]
-	return entry and entry.Cost or nil
+	return if entry then entry.Cost else nil
 end
 
-function TycoonConfig.IsUnlocked(generator, generatorLevels: { [string]: number }): boolean
+function TycoonConfig.IsUnlocked(generator: GeneratorDef, generatorLevels: { [string]: number }): boolean
 	local requirement = generator.UnlockRequirement
 	if not requirement then
 		return true
 	end
 	return (generatorLevels[requirement.GeneratorId] or 0) >= requirement.Level
+end
+
+--[[ Income -----------------------------------------------------------------
+	ONE formula, ONE input table. Build IncomeInputs only through
+	PlayerDataService.GetIncomeInputs (server) or
+	TycoonController.GetIncomeInputs (client); later features add fields
+	here, so nothing else should assemble one by hand.
+]]
+export type PedestalItem = { Tier: string, Mutation: string? }
+
+export type IncomeInputs = {
+	GeneratorLevels: { [string]: number },
+	PedestalItems: { PedestalItem },
+	CashMultiplierLevel: number,
+	Rebirths: number,
+	IndexMultiplier: number, -- IndexConfig.GetMultiplier(found entries)
+}
+
+-- "The multiplier" for every per-generator or per-item number the game
+-- shows: Multiplier Pad x rebirth x Index. (GetCashMultiplierValue is the
+-- pad alone; only the pad's own label and Upgrades row use it.)
+function TycoonConfig.GetIncomeMultiplier(inputs: IncomeInputs): number
+	return TycoonConfig.GetCashMultiplierValue(inputs.CashMultiplierLevel)
+		* RebirthConfig.GetIncomeMultiplier(inputs.Rebirths)
+		* inputs.IndexMultiplier
+end
+
+-- Sum of every generator's output, before the multiplier.
+local function baseGeneratorCashPerSecond(generatorLevels: { [string]: number }): number
+	local total = 0
+	for _, generator in TycoonConfig.Generators do
+		local level = generatorLevels[generator.Id] or 0
+		if level > 0 then
+			total += TycoonConfig.GetGeneratorCashPerSecond(generator, level)
+		end
+	end
+	return total
+end
+
+-- Single source of truth for passive income, used by the server's payout tick
+-- AND the client HUD's "+$X/s" readout so the two can never disagree. This
+-- is ALL income: the factory line's balls only picture it.
+-- (generators + pedestals) x pad x rebirth x Index.
+function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
+	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels)
+	for _, item in inputs.PedestalItems do
+		total += TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
+	end
+	return total * TycoonConfig.GetIncomeMultiplier(inputs)
+end
+
+-- The generators' share of GetPassiveCashPerSecond (what the factory balls
+-- add up to): the collector label and the Upgrades panel total.
+function TycoonConfig.GetGeneratorIncome(inputs: IncomeInputs): number
+	return baseGeneratorCashPerSecond(inputs.GeneratorLevels) * TycoonConfig.GetIncomeMultiplier(inputs)
 end
 
 return TycoonConfig

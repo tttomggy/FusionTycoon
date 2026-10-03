@@ -4,7 +4,7 @@ local RunService = game:GetService("RunService")
 local FOLDER_NAME = "RemoteEvents"
 
 local REMOTE_EVENT_NAMES = {
-	"RequestFusion", -- client -> server: attempt to fuse two owned items (by Uid)
+	"RequestFusion", -- client -> server: fuse 2-6 owned same-tier items; { Uids = { string } }
 	"FusionResult", -- server -> client: validated outcome of a fusion attempt
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
 	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
@@ -14,8 +14,17 @@ local REMOTE_EVENT_NAMES = {
 	"PlaceItemResult", -- server -> client: validated outcome of a place-item or remove-item attempt
 	"RequestRemoveItem", -- client -> server: attempt to pick an item back up off one of the player's own pedestals
 	"RareFusionAnnouncement", -- server -> all clients: a Legendary/Mythic item was just displayed
-	"MultiplierUpgraded", -- server -> client: the local player's cash multiplier purchase succeeded
+	"MultiplierUpgraded", -- server -> client: a Multiplier Pad purchase; {Success = true, OldMultiplier, NewMultiplier} or {Success = false, Reason, Cost}
 	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)
+	"GoalCompleted", -- server -> client: the player's current goal was met and paid; {Index, Reward}
+	"RequestFuseAll", -- client -> server: fuse every Common/Rare/Epic pair (cascading) in one go
+	"RequestSync", -- client -> server: ask for a fresh SyncTycoon after a rejection (rate-limited to 1 per 2 s)
+	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
+	"GachaMultiPullResult", -- server -> client: outcome of a Pull x10; {Success, Items, NewIndexItems, IndexTiersCompleted} or {Success = false, Reason, Cost?}
+	"RequestRebirth", -- client -> server: rebirth now (no args); validated by RebirthService
+	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
+	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
+	"ClaimOffline", -- client -> server: collect the pending offline earnings (no args; the server knows the amount)
 }
 
 local function getOrCreateFolder(): Folder
@@ -40,7 +49,7 @@ end
 
 -- Populated once at require-time: the server creates each RemoteEvent, the
 -- client waits for the server to have created it. Either side then references
--- the events directly, e.g. RemoteEvents.RequestFusion:FireServer(tier).
+-- the events directly, e.g. RemoteEvents.RequestFusion:FireServer({ Uids = uids }).
 local RemoteEvents: { [string]: RemoteEvent } = {}
 
 local folder = getOrCreateFolder()
