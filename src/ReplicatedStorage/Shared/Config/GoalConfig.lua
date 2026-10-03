@@ -37,6 +37,8 @@ GoalConfig.Goals = {
 	{ Id = "own_legendary", Text = "Own a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine" },
 	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation" },
 	{ Id = "own_mythic", Text = "Own a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine" },
+	-- Checked after the rebirth resets the run, so the reward lands in the new run.
+	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
 } :: { GoalDef }
 
 function GoalConfig.GetGoal(index: number): GoalDef?

@@ -20,6 +20,9 @@ local REMOTE_EVENT_NAMES = {
 	"RequestFuseAll", -- client -> server: fuse every Common/Rare/Epic pair (cascading) in one go
 	"RequestSync", -- client -> server: ask for a fresh SyncTycoon after a rejection (rate-limited to 1 per 2 s)
 	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
+	"RequestRebirth", -- client -> server: rebirth now (no args); validated by RebirthService
+	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
+	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
 }
 
 local function getOrCreateFolder(): Folder

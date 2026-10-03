@@ -15,6 +15,9 @@ local gachaPulls = 0
 local goalIndex: number? = nil
 local goalProgress: { Current: number, Target: number }? = nil
 local hasSynced = false
+local rebirths = 0
+local runEarnings = 0
+local rebirthRequirement = 0
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -60,6 +63,19 @@ function TycoonController.GetGoalProgress(): { Current: number, Target: number }
 	return goalProgress
 end
 
+function TycoonController.GetRebirths(): number
+	return rebirths
+end
+
+-- Passive earnings since the last rebirth, and what the next one needs.
+function TycoonController.GetRunEarnings(): number
+	return runEarnings
+end
+
+function TycoonController.GetRebirthRequirement(): number
+	return rebirthRequirement
+end
+
 -- False until the first snapshot arrives (so the HUD doesn't flash $0).
 function TycoonController.HasSynced(): boolean
 	return hasSynced
@@ -96,7 +112,7 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		GeneratorLevels = generatorLevels,
 		PedestalTiers = TycoonController.GetDisplayedTiers(),
 		CashMultiplierLevel = cashMultiplierLevel,
-		Rebirths = 0, -- Rebirth data lands with RebirthService
+		Rebirths = rebirths,
 	}
 end
 
@@ -122,6 +138,9 @@ local function onSyncTycoon(snapshot: any)
 	generatorLevels = snapshot.Generators or {}
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
+	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0
+	runEarnings = if typeof(snapshot.RunEarnings) == "number" then snapshot.RunEarnings else 0
+	rebirthRequirement = if typeof(snapshot.RebirthRequirement) == "number" then snapshot.RebirthRequirement else 0
 	goalIndex = if typeof(snapshot.GoalIndex) == "number" then snapshot.GoalIndex else nil
 	local progress = snapshot.GoalProgress
 	goalProgress = if typeof(progress) == "table"

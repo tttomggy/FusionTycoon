@@ -74,13 +74,36 @@ do
 	assert(math.abs(total - 1) < 1e-6, "FusionConfig.GachaRates must sum to 1")
 end
 
--- Rolls a Gacha Pad result tier using cumulative-weight RNG.
-function FusionConfig.RollGachaTier(randomInstance: Random?): string
+-- Tiers whose odds rebirth luck multiplies; Common absorbs the difference.
+FusionConfig.LuckyTiers = { "Legendary", "Mythic" }
+
+-- The effective gacha odds at `luck` (RebirthConfig.GetLuck; 1 = base).
+-- Luck multiplies the LuckyTiers' rates and Common takes up the slack, so
+-- the table still sums to 1. Every odds display uses this with the
+-- player's luck, the same as the roll.
+function FusionConfig.GetGachaRates(luck: number): { [string]: number }
+	local rates = table.clone(FusionConfig.GachaRates)
+	for _, tier in FusionConfig.LuckyTiers do
+		rates[tier] = (rates[tier] or 0) * math.max(luck, 0)
+	end
+	local others = 0
+	for tier, rate in rates do
+		if tier ~= "Common" then
+			others += rate
+		end
+	end
+	rates.Common = math.max(0, 1 - others)
+	return rates
+end
+
+-- Rolls a Gacha Pad result tier at `luck` using cumulative-weight RNG.
+function FusionConfig.RollGachaTier(randomInstance: Random?, luck: number?): string
 	local rng = randomInstance or Random.new()
+	local rates = FusionConfig.GetGachaRates(luck or 1)
 	local roll = rng:NextNumber()
 	local cumulative = 0
 	for _, tier in FusionConfig.TierOrder do
-		cumulative += FusionConfig.GachaRates[tier]
+		cumulative += rates[tier] or 0
 		if roll <= cumulative then
 			return tier
 		end

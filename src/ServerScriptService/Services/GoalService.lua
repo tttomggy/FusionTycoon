@@ -38,6 +38,7 @@ type PlayerData = {
 	GachaPulls: number,
 	GoalIndex: number,
 	TotalFusions: number,
+	Rebirths: number,
 }
 
 -- (done, current, target)
@@ -128,6 +129,9 @@ local EVALUATORS: { [string]: Evaluator } = {
 		return data.CashMultiplierLevel >= 4, math.min(data.CashMultiplierLevel, 4), 4
 	end,
 	own_mythic = ownTierGoal("Mythic", "Legendary", 2),
+	first_rebirth = function(_player, data)
+		return yesNo(data.Rebirths >= 1)
+	end,
 }
 
 --[[ Check ---------------------------------------------------------------- ]]

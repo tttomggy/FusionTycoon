@@ -20,6 +20,7 @@ local RunService = game:GetService("RunService")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -52,6 +53,12 @@ export type PlayerData = {
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
+	-- How many times the player has rebirthed (RebirthConfig).
+	Rebirths: number,
+	-- What the passive payout has paid since the last rebirth; a rebirth
+	-- needs RebirthConfig.GetRequirement(Rebirths). Goal rewards and /cash
+	-- don't count.
+	RunEarnings: number,
 }
 
 -- Server-computed progress toward the current goal, sent with the snapshot.
@@ -73,6 +80,9 @@ export type TycoonSnapshot = {
 	GachaPulls: number,
 	GoalIndex: number,
 	GoalProgress: GoalProgress?,
+	Rebirths: number,
+	RunEarnings: number,
+	RebirthRequirement: number,
 }
 
 type State = {
@@ -112,6 +122,8 @@ local DEFAULT_DATA: PlayerData = {
 	HasDropper2 = false,
 	GoalIndex = 1,
 	TotalFusions = 0,
+	Rebirths = 0,
+	RunEarnings = 0,
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -203,6 +215,12 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.TotalFusions) == "number" then
 		data.TotalFusions = raw.TotalFusions
+	end
+	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
+		data.Rebirths = math.floor(raw.Rebirths)
+	end
+	if typeof(raw.RunEarnings) == "number" and raw.RunEarnings >= 0 then
+		data.RunEarnings = raw.RunEarnings
 	end
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
@@ -298,6 +316,16 @@ local function saveData(userId: number, data: PlayerData?): boolean
 	return success
 end
 
+-- Saves `player`'s data now, on its own thread (never yields the caller).
+-- RebirthService calls it so a rebirth can't be lost to a crash.
+function PlayerDataService.SaveNow(player: Player)
+	local userId = player.UserId
+	local data = state.sessionCache[userId]
+	if data then
+		task.spawn(saveData, userId, data)
+	end
+end
+
 local function saveAll()
 	for userId, data in state.sessionCache do
 		saveData(userId, data)
@@ -330,6 +358,15 @@ local function updateLeaderstatsCash(player: Player)
 	end
 end
 
+local function updateLeaderstatsRebirths(player: Player)
+	local data = state.sessionCache[player.UserId]
+	local leaderstats = player:FindFirstChild("leaderstats")
+	local rebirthsValue = leaderstats and leaderstats:FindFirstChild("Rebirths")
+	if data and rebirthsValue and rebirthsValue:IsA("IntValue") then
+		rebirthsValue.Value = data.Rebirths
+	end
+end
+
 function PlayerDataService.AddCash(player: Player, amount: number)
 	local data = state.sessionCache[player.UserId]
 	if not data then
@@ -337,6 +374,17 @@ function PlayerDataService.AddCash(player: Player, amount: number)
 	end
 	data.Cash = math.max(0, data.Cash + amount)
 	updateLeaderstatsCash(player)
+end
+
+-- The passive payout tick's cash: the only income that counts toward
+-- RunEarnings (goal rewards and /cash go through AddCash and don't).
+function PlayerDataService.AddPassiveIncome(player: Player, amount: number)
+	local data = state.sessionCache[player.UserId]
+	if not data or amount <= 0 then
+		return
+	end
+	data.RunEarnings += amount
+	PlayerDataService.AddCash(player, amount)
 end
 
 -- Atomically checks-and-deducts; fails (no mutation) if funds are insufficient.
@@ -503,6 +551,56 @@ function PlayerDataService.IncrementGachaPulls(player: Player)
 	end
 end
 
+--[[ Public API: rebirth -------------------------------------------------- ]]
+
+function PlayerDataService.GetRebirths(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Rebirths else 0
+end
+
+function PlayerDataService.GetRunEarnings(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.RunEarnings else 0
+end
+
+-- Studio debug (/rebirths <n>).
+function PlayerDataService.SetRebirths(player: Player, rebirths: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Rebirths = math.max(0, math.floor(rebirths))
+		updateLeaderstatsRebirths(player)
+	end
+end
+
+-- Studio debug (/rebirthready).
+function PlayerDataService.SetRunEarnings(player: Player, amount: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.RunEarnings = math.max(0, amount)
+	end
+end
+
+-- Applies a rebirth in one go, with no yields: RebirthService validates
+-- first, then calls this. Resets the run (cash, generators to Basic at
+-- `startingBasicLevel`, the Multiplier Pad, the gacha price, run earnings)
+-- and adds a rebirth. Inventory, pedestals, goals and everything else stay.
+-- Returns the new rebirth count.
+function PlayerDataService.ApplyRebirth(player: Player, startingBasicLevel: number): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	data.Cash = 0
+	data.Generators = { basic_generator = startingBasicLevel }
+	data.CashMultiplierLevel = 0
+	data.GachaPulls = 0
+	data.RunEarnings = 0
+	data.Rebirths += 1
+	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
+	return data.Rebirths
+end
+
 --[[ Public API: goals ---------------------------------------------------- ]]
 
 function PlayerDataService.GetGoalIndex(player: Player): number
@@ -562,7 +660,7 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 		GeneratorLevels = data.Generators,
 		PedestalTiers = PlayerDataService.GetDisplayedTiers(player),
 		CashMultiplierLevel = data.CashMultiplierLevel,
-		Rebirths = 0, -- Rebirth data lands with RebirthService
+		Rebirths = data.Rebirths,
 	}
 end
 
@@ -587,6 +685,9 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),
 		GoalProgress = state.goalProgress[player.UserId],
+		Rebirths = PlayerDataService.GetRebirths(player),
+		RunEarnings = PlayerDataService.GetRunEarnings(player),
+		RebirthRequirement = RebirthConfig.GetRequirement(PlayerDataService.GetRebirths(player)),
 	}
 end
 
@@ -620,6 +721,12 @@ local function createLeaderstats(player: Player)
 	local leaderstats = Instance.new("Folder")
 	leaderstats.Name = "leaderstats"
 
+	-- Created before Cash so it's the first leaderboard column.
+	local rebirthsValue = Instance.new("IntValue")
+	rebirthsValue.Name = "Rebirths"
+	rebirthsValue.Value = 0
+	rebirthsValue.Parent = leaderstats
+
 	local cashValue = Instance.new("IntValue")
 	cashValue.Name = "Cash"
 	cashValue.Value = 0
@@ -639,6 +746,7 @@ local function onPlayerAdded(player: Player)
 	end
 	createLeaderstats(player)
 	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)

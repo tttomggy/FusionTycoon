@@ -27,6 +27,7 @@ local PlotNaming = require(Config.PlotNaming)
 local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
+local RebirthConfig = require(Config.RebirthConfig)
 local ItemConfig = require(Config.ItemConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
@@ -96,7 +97,8 @@ local function onPassiveIncomeTick()
 			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
-				PlayerDataService.AddCash(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
+				-- AddPassiveIncome also counts it toward RunEarnings (rebirth).
+				PlayerDataService.AddPassiveIncome(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
 				syncTycoon(player)
 			end
 		end
@@ -280,6 +282,22 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 	end
 end
 
+--[[ Station label refreshes --------------------------------------------------------
+	Each station registers its label refresh here; the OnSync hook runs them
+	all, so anything that changes a player's numbers (an upgrade, a rebirth)
+	shows on the pads without each caller knowing which labels exist.
+]]
+local stationRefreshesByUserId: { [number]: { () -> () } } = {}
+
+local function addStationRefresh(player: Player, refresh: () -> ())
+	local list = stationRefreshesByUserId[player.UserId]
+	if not list then
+		list = {}
+		stationRefreshesByUserId[player.UserId] = list
+	end
+	table.insert(list, refresh)
+end
+
 --[[ Stations ---------------------------------------------------------------------- ]]
 
 -- Builds a StationKit station named `name` and returns its Pad (which
@@ -302,7 +320,8 @@ end
 
 local gachaRng = Random.new()
 
--- "Common 78% · Rare 18% · Epic 3.5%", straight from FusionConfig.GachaRates.
+-- "Common 78% · Rare 18% · Epic 3.5%", from FusionConfig.GetGachaRates at
+-- the player's rebirth luck.
 local function formatPercent(rate: number): string
 	local percent = rate * 100
 	if math.abs(percent - math.floor(percent + 0.5)) < 1e-6 then
@@ -311,15 +330,20 @@ local function formatPercent(rate: number): string
 	return (("%.1f"):format(percent):gsub("%.0$", "")) .. "%"
 end
 
-local function getGachaRatesText(): string
+local function getLuck(player: Player): number
+	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
+end
+
+local function getGachaRatesText(luck: number): string
+	local rates = FusionConfig.GetGachaRates(luck)
 	local tiers = table.clone(FusionConfig.TierOrder)
 	table.sort(tiers, function(a, b)
-		return (FusionConfig.GachaRates[a] or 0) > (FusionConfig.GachaRates[b] or 0)
+		return (rates[a] or 0) > (rates[b] or 0)
 	end)
 	local parts = {}
 	for index = 1, math.min(GACHA_RATE_TIERS_SHOWN, #tiers) do
 		local tier = tiers[index]
-		table.insert(parts, ("%s %s"):format(tier, formatPercent(FusionConfig.GachaRates[tier] or 0)))
+		table.insert(parts, ("%s %s"):format(tier, formatPercent(rates[tier] or 0)))
 	end
 	return table.concat(parts, " · ")
 end
@@ -334,7 +358,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		PillGradient = UITheme.Gradients.Gold,
 		PillTextColor = UITheme.Colors.GoldText,
 		PillTextStroke = false,
-		Detail = getGachaRatesText(),
+		Detail = getGachaRatesText(getLuck(player)),
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
 	-- E-to-pull, never Touched: walking across the pad must not spend cash.
@@ -343,9 +367,11 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	local function refreshLabel()
 		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
 		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
+		padLabel.SetDetail(getGachaRatesText(getLuck(player)))
 		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
 	end
 	refreshLabel()
+	addStationRefresh(player, refreshLabel)
 
 	local debounce = false
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
@@ -354,7 +380,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		-- Roll first: a config gap can then never charge for nothing.
-		local resultTier = FusionConfig.RollGachaTier(gachaRng)
+		local resultTier = FusionConfig.RollGachaTier(gachaRng, getLuck(player))
 		local rewardItem = ItemConfig.PickRandomOfTier(resultTier, gachaRng)
 		if not rewardItem then
 			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(resultTier))
@@ -424,6 +450,7 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		padLabel.SetDetail(("→ %s · %s · press E"):format(NumberFormat.Multiplier(nextValue), NumberFormat.Money(cost)))
 	end
 	refreshLabel()
+	addStationRefresh(player, refreshLabel)
 
 	local debounce = false
 	prompt.Triggered:Connect(function(triggeringPlayer: Player)
@@ -560,7 +587,9 @@ local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
 end
 
 -- OnSync hook: runs before every snapshot, so the world matches what the
--- client is about to be told. GeneratorKit.SetState skips unchanged ones.
+-- client is about to be told: station labels, pedestal labels, the
+-- collector, generator states (SetState skips unchanged ones). An upgrade,
+-- a rebirth or a debug command all refresh the plot just by syncing.
 -- Must not call SyncTycoon.
 local function refreshFactoryLine(player: Player)
 	local plot = plotByUserId[player.UserId]
@@ -570,6 +599,14 @@ local function refreshFactoryLine(player: Player)
 	end
 	-- Generator income only (what the balls add up to); pedestals pop their
 	-- own share on the client. Same formula as the payout, minus pedestals.
+	local refreshes = stationRefreshesByUserId[player.UserId]
+	if refreshes then
+		for _, refresh in refreshes do
+			refresh()
+		end
+	end
+	-- Pedestal rates include the income multiplier (pad x rebirth).
+	TycoonService.RefreshPedestalLabels(player)
 	local label = collectorLabelByUserId[player.UserId]
 	if label then
 		local inputs = PlayerDataService.GetIncomeInputs(player)
@@ -784,6 +821,7 @@ local function removePlotForPlayer(player: Player)
 	originByUserId[player.UserId] = nil
 	plotSignByUserId[player.UserId] = nil
 	collectorLabelByUserId[player.UserId] = nil
+	stationRefreshesByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
 		occupiedSlots[slotIndex] = nil

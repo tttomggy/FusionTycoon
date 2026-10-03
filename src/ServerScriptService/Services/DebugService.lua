@@ -7,6 +7,9 @@
 -- player-facing feature; delete this file if it's no longer needed.
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -37,6 +40,10 @@ local RESET_MULTIPLIER_COMMAND = "/resetmultiplier"
 local CASH_COMMAND = "/cash"
 -- "/wipe" resets your whole profile to a fresh save (Studio only).
 local WIPE_COMMAND = "/wipe"
+-- "/rebirthready" sets this run's earnings to the next rebirth's requirement.
+local REBIRTH_READY_COMMAND = "/rebirthready"
+-- "/rebirths 3" sets the rebirth count.
+local REBIRTHS_COMMAND = "/rebirths"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -54,6 +61,18 @@ local function onPlayerChatted(player: Player, message: string)
 		PlayerDataService.AddCash(player, amount)
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: gave %s $%s"):format(player.Name, tostring(amount)))
+	elseif command == REBIRTH_READY_COMMAND then
+		local requirement = RebirthConfig.GetRequirement(PlayerDataService.GetRebirths(player))
+		PlayerDataService.SetRunEarnings(player, requirement)
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: %s's run earnings set to %s (rebirth ready)"):format(player.Name, tostring(requirement)))
+	elseif command == REBIRTHS_COMMAND then
+		local count = tonumber(argument)
+		if count then
+			PlayerDataService.SetRebirths(player, count)
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: %s's rebirths set to %d"):format(player.Name, math.floor(count)))
+		end
 	elseif command == WIPE_COMMAND then
 		local data = PlayerDataService.GetData(player)
 		if data then
@@ -65,6 +84,8 @@ local function onPlayerChatted(player: Player, message: string)
 			data.GachaPulls = 0
 			data.GoalIndex = 1
 			data.TotalFusions = 0
+			data.Rebirths = 0
+			data.RunEarnings = 0
 		end
 		player:Kick("Profile wiped (Studio debug). Press Play again.")
 	end
@@ -89,7 +110,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /wipe")
 end
 
 function DebugService:Start()
