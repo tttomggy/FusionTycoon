@@ -15,6 +15,8 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PadStyler = require(ReplicatedStorage.Shared.Modules.PadStyler)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -37,17 +39,11 @@ local VFXFolder = ReplicatedStorage.Shared.VFX
 local levelingUpEffectTemplate = VFXFolder:FindFirstChild("LevelingUpEffect") :: BasePart?
 local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: BasePart?
 
--- Every pad billboard in the plot (Buy Dropper 2, Gacha Pull, Multiplier Pad)
--- shares this MaxDistance. Unset, a BillboardGui renders at any distance -
--- confirmed via testing to be why Fusion Odds and Gacha Pull were visible
--- and overlapping from clear across the map. 20 sits outside every
--- ProximityPrompt's own 10-stud MaxActivationDistance (see
--- GACHA_PAD_PROMPT_MAX_ACTIVATION_DISTANCE/PEDESTAL_PROMPT_MAX_ACTIVATION_DISTANCE
--- below, and FusionMachineService's own PROMPT_MAX_ACTIVATION_DISTANCE), so a
--- label becomes readable before its pad's interaction range kicks in rather
--- than appearing at the same moment. FusionMachineService.lua's own Fusion
--- Odds billboard uses the same value independently, for the same reason.
-local BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS = 20
+-- Pad labels are BillboardKit.Pad (Shared/Modules/BillboardKit.lua): one
+-- look for every pad, MaxDistance 26, never drawn through walls.
+local GACHA_RATE_TIERS_SHOWN = 3
+-- Plot signs refresh on this interval (income and best tier change slowly).
+local PLOT_SIGN_REFRESH_SECONDS = 5
 
 local MAX_PLOT_SLOTS = 50
 -- Must comfortably exceed the plot row's own total footprint (Dropper1 ->
@@ -86,12 +82,10 @@ local CASH_COLLISION_GROUP = "CashParts"
 local PLOT_ENVIRONMENT_COLLISION_GROUP = "PlotEnvironment"
 
 local DROPPER2_COST = TycoonConfig.Dropper2Cost
-local DROPPER2_LABEL = "Buy Dropper 2"
 local DROPPER2_SIDE_OFFSET_STUDS = 12
 
 -- Multiplier Pad sits one row-slot further along the same edge as the
 -- Dropper2 button/spawn spot, so the row reads: Dropper1, Dropper2, Pad.
-local MULTIPLIER_PAD_LABEL = "Buy Multiplier Pad"
 local MULTIPLIER_PAD_ROW_OFFSET_STUDS = DROPPER2_SIDE_OFFSET_STUDS * 2
 -- ClaimButton's placement comes from the template, not this service, so
 -- unlike every other row element (all placed relative to PlotOrigin, which
@@ -127,7 +121,6 @@ local DROPPER_IDLE_PULSE_SECONDS = 2.2
 -- reads: Dropper1, Dropper2, Multiplier Pad, Gacha Pad. The Pedestal Showcase
 -- isn't part of this row at all anymore - it's a separate alcove off to the
 -- side (see PEDESTAL_SHOWCASE_* above and createPedestals below).
-local GACHA_PAD_LABEL = "Gacha Pull"
 local GACHA_PAD_DEBOUNCE_SECONDS = 1
 local GACHA_PAD_ACCENT_COLOR = Color3.fromRGB(255, 215, 60)
 -- rbxasset://sounds/bell.wav fails to load in this project ("Temp read
@@ -491,12 +484,6 @@ local function fixSpawnLocations(plot: Model, player: Player)
 	end
 end
 
--- Shared billboard format for every purchase button/pad so they all read the
--- same way: the item name on top, its cost (or current tier) underneath.
-local function setPurchaseLabelText(label: TextLabel, itemName: string, detail: string)
-	label.Text = ("%s\n%s"):format(itemName, detail)
-end
-
 -- Awards a Collector pickup's worth of cash and pushes an immediate balance sync.
 local function awardCash(player: Player, amount: number)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -639,6 +626,10 @@ local function createCollector(plot: Model, dropper: BasePart, player: Player): 
 		hit:SetAttribute("Collected", true)
 		hit:Destroy()
 		awardCash(player, value)
+		RemoteEvents.CashCollected:FireClient(player, {
+			Amount = value,
+			Position = collector.Position + Vector3.new(0, collector.Size.Y / 2 + 1, 0),
+		})
 	end)
 
 	return collector
@@ -705,21 +696,15 @@ local function createPurchaseButton(plot: Model, player: Player, dropper1: BaseP
 	button.Parent = plot
 	PadStyler.Apply(button, { AccentColor = Color3.fromRGB(60, 160, 255) })
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(220, 60)
-	billboard.StudsOffset = Vector3.new(0, 2, 0)
-	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
-	billboard.AlwaysOnTop = true
-	billboard.Parent = button
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.new(1, 1, 1)
-	setPurchaseLabelText(label, DROPPER2_LABEL, NumberFormat.Money(DROPPER2_COST))
-	label.Parent = billboard
+	BillboardKit.Pad(button, {
+		Name = "Dropper2Label",
+		Title = "DROPPER 2",
+		TitleColor = UITheme.Colors.DropperTitle,
+		Pill = NumberFormat.Money(DROPPER2_COST),
+		PillGradient = UITheme.Gradients.Green,
+		Detail = "Doubles your drops",
+		StudsOffset = Vector3.new(0, 3, 0),
+	})
 
 	local purchased = false
 	local connection: RBXScriptConnection
@@ -750,6 +735,29 @@ end
 -- of that tier. The pull price rises with every pull.
 local gachaRng = Random.new()
 
+-- "Common 78% · Rare 18% · Epic 3.5%": the most likely tiers, straight from
+-- FusionConfig.GachaRates so the label can never disagree with the roll.
+local function formatPercent(rate: number): string
+	local percent = rate * 100
+	if math.abs(percent - math.floor(percent + 0.5)) < 1e-6 then
+		return ("%d%%"):format(math.floor(percent + 0.5))
+	end
+	return (("%.1f"):format(percent):gsub("%.0$", "")) .. "%"
+end
+
+local function getGachaRatesText(): string
+	local tiers = table.clone(FusionConfig.TierOrder)
+	table.sort(tiers, function(a, b)
+		return (FusionConfig.GachaRates[a] or 0) > (FusionConfig.GachaRates[b] or 0)
+	end)
+	local parts = {}
+	for index = 1, math.min(GACHA_RATE_TIERS_SHOWN, #tiers) do
+		local tier = tiers[index]
+		table.insert(parts, ("%s %s"):format(tier, formatPercent(FusionConfig.GachaRates[tier] or 0)))
+	end
+	return table.concat(parts, " · ")
+end
+
 local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	local originCFrame, originY = resolvePlotOrigin(plot, dropper1, player)
 	local rowOffset = PlotLayout.GACHA_PAD_ROW_OFFSET_STUDS
@@ -764,20 +772,17 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	pad.Parent = plot
 	PadStyler.Apply(pad, { AccentColor = GACHA_PAD_ACCENT_COLOR })
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(220, 60)
-	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
-	billboard.AlwaysOnTop = true
-	billboard.Parent = pad
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.Parent = billboard
+	local padLabel = BillboardKit.Pad(pad, {
+		Name = "GachaLabel",
+		Title = "GACHA",
+		TitleColor = UITheme.Colors.GoldLabel,
+		Pill = "",
+		PillGradient = UITheme.Gradients.Gold,
+		PillTextColor = UITheme.Colors.GoldText,
+		PillTextStroke = false,
+		Detail = getGachaRatesText(),
+		StudsOffset = Vector3.new(0, 3.5, 0),
+	})
 
 
 	-- Prompt-gated rather than Touched-triggered: walking onto the pad no
@@ -797,7 +802,7 @@ local function createGachaPad(plot: Model, player: Player, dropper1: BasePart)
 	-- label and prompt are refreshed after each one.
 	local function refreshGachaLabel()
 		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
-		setPurchaseLabelText(label, GACHA_PAD_LABEL, ("%s per pull"):format(NumberFormat.Money(cost)))
+		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
 		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
 	end
 	refreshGachaLabel()
@@ -908,50 +913,32 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 	pad.Parent = plot
 	PadStyler.Apply(pad, { AccentColor = Color3.fromRGB(200, 60, 255) })
 
-	local billboard = Instance.new("BillboardGui")
-	billboard.Size = UDim2.fromOffset(220, 60)
-	-- Deliberately different from the Dropper2 button's billboard offset
-	-- (0, 2, 0): with correctly-spaced parts this alone wouldn't matter, but
-	-- it means two labels never land at the exact same relative height even
-	-- if something ever pulls the parts close together again.
-	billboard.StudsOffset = Vector3.new(0, 2.5, 0)
-	billboard.MaxDistance = BILLBOARD_MAX_VISIBLE_DISTANCE_STUDS
-	billboard.AlwaysOnTop = true
-	billboard.Parent = pad
-
-	local label = Instance.new("TextLabel")
-	label.Size = UDim2.fromScale(1, 1)
-	label.BackgroundTransparency = 1
-	label.TextScaled = true
-	label.Font = Enum.Font.GothamBold
-	label.TextColor3 = Color3.new(1, 1, 1)
-	label.Parent = billboard
+	local padLabel = BillboardKit.Pad(pad, {
+		Name = "MultiplierLabel",
+		Title = "MULTIPLIER",
+		TitleColor = UITheme.Colors.VioletLight,
+		Pill = "",
+		PillGradient = UITheme.Gradients.Violet,
+		StudsOffset = Vector3.new(0, 3.5, 0),
+	})
 
 	local function refreshLabel()
 		local level = PlayerDataService.GetCashMultiplierLevel(player)
-		local maxLevel = TycoonConfig.GetCashMultiplierMaxLevel()
 		local currentMultiplier = TycoonConfig.GetCashMultiplierValue(level)
 
-		if level >= maxLevel then
-			setPurchaseLabelText(
-				label,
-				MULTIPLIER_PAD_LABEL,
-				("Level %d/%d (%s) - MAX"):format(level, maxLevel, NumberFormat.Multiplier(currentMultiplier))
-			)
+		if level >= TycoonConfig.GetCashMultiplierMaxLevel() then
+			padLabel.SetPill(("%s MAX"):format(NumberFormat.Multiplier(currentMultiplier)))
+			padLabel.SetDetail(nil)
 			return
 		end
 
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(level) :: number
 		local nextMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
-		setPurchaseLabelText(
-			label,
-			MULTIPLIER_PAD_LABEL,
-			("%s → %s  ·  %s"):format(
-				NumberFormat.Multiplier(currentMultiplier),
-				NumberFormat.Multiplier(nextMultiplier),
-				NumberFormat.Money(cost)
-			)
-		)
+		padLabel.SetPill(("%s → %s"):format(
+			NumberFormat.Multiplier(currentMultiplier),
+			NumberFormat.Multiplier(nextMultiplier)
+		))
+		padLabel.SetDetail(("%s · press E"):format(NumberFormat.Money(cost)))
 	end
 
 	refreshLabel()
@@ -994,6 +981,8 @@ local function createMultiplierPad(plot: Model, player: Player, dropper1: BasePa
 		PlayerDataService.SetCashMultiplierLevel(player, level + 1)
 		syncTycoon(player)
 		refreshLabel()
+		-- Pedestal labels show income with the multiplier applied.
+		TycoonService.RefreshPedestalLabels(player)
 
 		-- World-visible VFX/sound at the pad, plus a personal screen popup for
 		-- the buyer - pure feedback, no effect on the multiplier/cash logic above.
@@ -1073,6 +1062,10 @@ local function createPedestals(plot: Model, player: Player, dropper1: BasePart)
 		-- displayable item and this specific pedestal is still empty.
 		prompt.Enabled = false
 		prompt.Parent = pedestal
+
+		-- Starts as the owner-only "EMPTY" label; ItemService swaps in the
+		-- filled label on place/restore.
+		BillboardKit.SetPedestalLabel(pedestal, nil)
 	end
 
 end
@@ -1139,6 +1132,39 @@ function TycoonService.GetPlotForPlayer(player: Player): Model?
 	return plotByUserId[player.UserId]
 end
 
+-- Re-labels every pedestal on `player`'s plot: the filled label (item, tier,
+-- income with the owner's multiplier) where something is displayed, the
+-- owner-only EMPTY label elsewhere. ItemService calls this on place/remove;
+-- this service calls it after restoring saved displays on claim and after a
+-- multiplier purchase. Lives here (not ItemService) so the two services
+-- don't reference each other.
+function TycoonService.RefreshPedestalLabels(player: Player)
+	local plot = plotByUserId[player.UserId]
+	local pedestalsFolder = plot and plot:FindFirstChild("Pedestals")
+	if not pedestalsFolder then
+		return
+	end
+	local displays = PlayerDataService.GetPedestalDisplays(player)
+	local multiplier = TycoonConfig.GetCashMultiplierValue(PlayerDataService.GetCashMultiplierLevel(player))
+	for index = 1, PEDESTAL_COUNT do
+		local pedestal = pedestalsFolder:FindFirstChild("Pedestal" .. index)
+		if pedestal and pedestal:IsA("BasePart") then
+			local uid = displays[index]
+			local item = uid and PlayerDataService.GetItemByUid(player, uid)
+			if item then
+				local def = ItemConfig.GetItemById(item.ItemId)
+				BillboardKit.SetPedestalLabel(pedestal, {
+					Tier = item.Tier,
+					ItemName = def and def.Name or item.ItemId,
+					Rate = TycoonConfig.GetPedestalCashPerSecond(item.Tier) * multiplier,
+				})
+			else
+				BillboardKit.SetPedestalLabel(pedestal, nil)
+			end
+		end
+	end
+end
+
 local function connectClaimButton(plot: Model, player: Player)
 	-- Recursive lookup: ClaimButton may be nested under an organizational group/folder.
 	local claimButton = plot:FindFirstChild("ClaimButton", true)
@@ -1155,6 +1181,18 @@ local function connectClaimButton(plot: Model, player: Player)
 	buttonPart.Material = Enum.Material.Neon
 	buttonPart.Color = CLAIM_BUTTON_COLOR
 	local claimPodOrb = createClaimPodRiser(plot, buttonPart)
+
+	-- Owner-only: other players' clients disable it (WorldLabelController).
+	local claimLabel = BillboardKit.Pad(buttonPart, {
+		Name = "ClaimLabel",
+		Title = "CLAIM",
+		TitleColor = UITheme.Colors.Text,
+		Pill = "STEP HERE",
+		PillGradient = UITheme.Gradients.Green,
+		Detail = ("This base is yours, %s"):format(player.DisplayName),
+		StudsOffset = Vector3.new(0, 3.5, 0),
+		OwnerOnly = true,
+	})
 
 	local connection: RBXScriptConnection
 	connection = buttonPart.Touched:Connect(function(hit: BasePart)
@@ -1173,6 +1211,7 @@ local function connectClaimButton(plot: Model, player: Player)
 		connection:Disconnect()
 
 		-- Retire the button visually/physically now that it's served its purpose.
+		claimLabel.Gui:Destroy()
 		buttonPart.Transparency = 1
 		buttonPart.CanCollide = false
 		buttonPart.CanTouch = false
@@ -1245,9 +1284,76 @@ local function connectClaimButton(plot: Model, player: Player)
 		createMultiplierPad(plot, player, dropper1Part)
 		createPedestals(plot, player, dropper1Part)
 		restoreSavedPedestals(plot, player)
+		TycoonService.RefreshPedestalLabels(player)
 		createGachaPad(plot, player, dropper1Part)
 		syncTycoon(player)
 	end)
+end
+
+--[[ Plot sign: "<NAME>'S LAB" on a post at the Floor's front-left corner. ]]
+
+local plotSignByUserId: { [number]: BillboardKit.PlotSign } = {}
+
+local function createPlotSign(plot: Model, player: Player)
+	local plotOrigin = getPlotOrigin(plot)
+	if not plotOrigin then
+		return
+	end
+	local localPosition = PlotLayout.GetPlotSignLocalPosition()
+	local height = PlotLayout.PLOT_SIGN_HEIGHT_STUDS
+	local worldPosition = plotOrigin.CFrame:PointToWorldSpace(localPosition)
+
+	local post = Instance.new("Part")
+	post.Name = "PlotSignPost"
+	post.Size = Vector3.new(PlotLayout.PLOT_SIGN_POST_THICKNESS_STUDS, height, PlotLayout.PLOT_SIGN_POST_THICKNESS_STUDS)
+	post.Anchored = true
+	post.CanCollide = false
+	post.Material = Enum.Material.SmoothPlastic
+	post.Color = UITheme.Colors.Panel3
+	post.Position = Vector3.new(worldPosition.X, plotOrigin.Position.Y + height / 2, worldPosition.Z)
+	post.Parent = plot
+
+	-- Billboard sits at the top of the post, 12 studs up.
+	plotSignByUserId[player.UserId] = BillboardKit.PlotSign(post, Vector3.new(0, height / 2 + 1.5, 0))
+end
+
+local function getBestTier(player: Player): string?
+	local best: string? = nil
+	local bestRank = 0
+	local inventory = PlayerDataService.GetInventory(player)
+	if not inventory then
+		return nil
+	end
+	for _, item in inventory do
+		local rank = ItemConfig.Tiers[item.Tier] or 0
+		if rank > bestRank then
+			bestRank = rank
+			best = item.Tier
+		end
+	end
+	return best
+end
+
+local function refreshPlotSigns()
+	for userId, sign in plotSignByUserId do
+		local player = Players:GetPlayerByUserId(userId)
+		local plot = plotByUserId[userId]
+		if player and plot then
+			if plot:GetAttribute("Claimed") ~= true or not PlayerDataService.IsDataLoaded(player) then
+				sign.Set("FREE LAB", "Step on the green pad")
+			else
+				local multiplierLevel = PlayerDataService.GetCashMultiplierLevel(player)
+				local droppers = if PlayerDataService.HasDropper2(player) then 2 else 1
+				local income = PlayerDataService.GetPassiveCashPerSecond(player)
+					+ TycoonConfig.GetDropperCashPerSecond(droppers, multiplierLevel)
+				local best = getBestTier(player)
+				sign.Set(
+					("%s'S LAB"):format(player.DisplayName:upper()),
+					("%s/s · best: %s"):format(NumberFormat.Money(income), best or "none")
+				)
+			end
+		end
+	end
 end
 
 local function createPlotForPlayer(player: Player)
@@ -1290,6 +1396,7 @@ local function createPlotForPlayer(player: Player)
 		plotModel:PivotTo(CFrame.new((slotIndex - 1) * PLOT_SLOT_SPACING_STUDS, 0, 0))
 		resizeFloorToFitRow(plotModel, player)
 		fixSpawnLocations(plotModel, player)
+		createPlotSign(plotModel, player)
 
 		-- Every plot gets its own Fusion Machine (it used to be one shared
 		-- machine next to slot 1 only).
@@ -1303,6 +1410,7 @@ local function createPlotForPlayer(player: Player)
 
 	plotByUserId[player.UserId] = plot :: Model
 	connectClaimButton(plot :: Model, player)
+	refreshPlotSigns()
 end
 
 local function removePlotForPlayer(player: Player)
@@ -1311,6 +1419,7 @@ local function removePlotForPlayer(player: Player)
 		plot:Destroy()
 		plotByUserId[player.UserId] = nil
 	end
+	plotSignByUserId[player.UserId] = nil
 
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
@@ -1336,6 +1445,13 @@ function TycoonService:Init()
 		while true do
 			task.wait(TycoonConfig.PassiveIncomeIntervalSeconds)
 			onPassiveIncomeTick()
+		end
+	end)
+
+	task.spawn(function()
+		while true do
+			task.wait(PLOT_SIGN_REFRESH_SECONDS)
+			refreshPlotSigns()
 		end
 	end)
 end

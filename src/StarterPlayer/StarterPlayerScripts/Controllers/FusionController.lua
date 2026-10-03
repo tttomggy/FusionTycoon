@@ -64,6 +64,22 @@ function FusionController.IsRequestPending(): boolean
 	return isRequestPending
 end
 
+-- True while another fuse would be accepted right now: nothing in flight,
+-- a spare pair exists, and the local character is within the machine
+-- prompt's reach. Drives the fail card's AGAIN button.
+function FusionController.CanRequestFusion(): boolean
+	if isRequestPending or not core or not prompt or getNextFusableTier() == nil then
+		return false
+	end
+	local character = Players.LocalPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not root then
+		return false
+	end
+	local reach = (prompt :: ProximityPrompt).MaxActivationDistance
+	return (root.Position - (core :: BasePart).Position).Magnitude <= reach
+end
+
 -- Fire-and-forget: does not return until the full request/animation cycle
 -- resolves, so run it in task.spawn if the caller needs to keep going.
 local function requestFusion()
@@ -123,6 +139,10 @@ local function requestFusion()
 	updatePromptState()
 	fusionResolved:Fire(result)
 end
+
+-- Public entry point (the machine prompt and the fail card's AGAIN button).
+-- Yields for the whole charge/reveal cycle; call it with task.spawn.
+FusionController.RequestFusion = requestFusion
 
 local function onFusionResult(payload: any)
 	pendingResult = payload

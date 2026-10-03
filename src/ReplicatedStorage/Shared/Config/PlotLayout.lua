@@ -74,4 +74,19 @@ function PlotLayout.GetFloorRowEndLocalZ(): number
 	return PlotLayout.FLOOR_ROW_POSITIVE_Z_MARGIN_STUDS
 end
 
+-- Plot sign: a thin post at the Floor's front-left corner (lowest local X,
+-- the row's +Z side, i.e. the corner nearest ClaimButton and Dropper1), with
+-- the "<NAME>'S LAB" billboard at its top.
+PlotLayout.PLOT_SIGN_INSET_STUDS = 3
+PlotLayout.PLOT_SIGN_HEIGHT_STUDS = 12
+PlotLayout.PLOT_SIGN_POST_THICKNESS_STUDS = 0.6
+
+function PlotLayout.GetPlotSignLocalPosition(): Vector3
+	return Vector3.new(
+		-PlotLayout.FLOOR_ROW_MARGIN_STUDS + PlotLayout.PLOT_SIGN_INSET_STUDS,
+		0,
+		PlotLayout.GetFloorRowEndLocalZ() - PlotLayout.PLOT_SIGN_INSET_STUDS
+	)
+end
+
 return PlotLayout

@@ -158,6 +158,7 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 	end
 
 	local newEntry = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier)
+	PlayerDataService.IncrementTotalFusions(player)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 
 	RemoteEvents.FusionResult:FireClient(player, {
@@ -167,6 +168,9 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		ConsumedTier = consumedTier,
 		NewItem = newEntry,
 	})
+	-- Fusions change goal progress (TotalFusions, tiers owned). Sent after
+	-- the result so a goal banner never lands ahead of the fusion itself.
+	PlayerDataService.SyncTycoon(player)
 
 	-- Server-wide brag for a Legendary/Mythic fusion: the moment everyone
 	-- else in the server sees and wants for themselves.
@@ -175,6 +179,10 @@ local function onFusionRequest(player: Player, rawUidA: unknown, rawUidB: unknow
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s fused a %s %s!"):format(player.DisplayName, resultTier:upper(), rewardItem.Name),
 			Tier = resultTier,
+			-- Parts, so the client can colour the tier word.
+			PlayerName = player.DisplayName,
+			Verb = "fused",
+			ItemName = rewardItem.Name,
 		})
 	end
 end

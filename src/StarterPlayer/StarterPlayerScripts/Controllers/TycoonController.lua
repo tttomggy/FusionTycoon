@@ -11,6 +11,8 @@ local pedestalDisplays: { [number]: string } = {}
 local cashMultiplierLevel = 0
 local gachaPulls = 0
 local hasDropper2 = false
+local goalIndex: number? = nil
+local goalProgress: { Current: number, Target: number }? = nil
 local hasSynced = false
 
 local tycoonChanged = Instance.new("BindableEvent")
@@ -51,6 +53,16 @@ function TycoonController.HasDropper2(): boolean
 	return hasDropper2
 end
 
+-- Index into GoalConfig.Goals of the current goal (nil before the first
+-- snapshot), and the server-computed progress toward it (nil once all done).
+function TycoonController.GetGoalIndex(): number?
+	return goalIndex
+end
+
+function TycoonController.GetGoalProgress(): { Current: number, Target: number }?
+	return goalProgress
+end
+
 -- False until the first snapshot arrives (so the HUD doesn't flash $0).
 function TycoonController.HasSynced(): boolean
 	return hasSynced
@@ -83,6 +95,13 @@ local function onSyncTycoon(snapshot: any)
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
 	hasDropper2 = snapshot.HasDropper2 == true
+	goalIndex = if typeof(snapshot.GoalIndex) == "number" then snapshot.GoalIndex else nil
+	local progress = snapshot.GoalProgress
+	goalProgress = if typeof(progress) == "table"
+			and typeof(progress.Current) == "number"
+			and typeof(progress.Target) == "number"
+		then { Current = progress.Current, Target = progress.Target }
+		else nil
 	-- Remote tables with numeric keys can arrive keyed by strings; normalise.
 	pedestalDisplays = {}
 	for key, uid in snapshot.PedestalDisplays or {} do

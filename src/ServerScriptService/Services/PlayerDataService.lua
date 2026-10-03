@@ -46,6 +46,17 @@ export type PlayerData = {
 	GachaPulls: number,
 	-- Dropper2 is a one-time purchase and now survives rejoining.
 	HasDropper2: boolean,
+	-- 1-based index into GoalConfig.Goals of the goal currently being
+	-- worked on; past the end means every goal is done.
+	GoalIndex: number,
+	-- Every resolved fusion attempt, success or fail (drives a goal).
+	TotalFusions: number,
+}
+
+-- Server-computed progress toward the current goal, sent with the snapshot.
+export type GoalProgress = {
+	Current: number,
+	Target: number,
 }
 
 -- What SyncTycoon sends to the client. One builder (GetTycoonSnapshot) so the
@@ -57,6 +68,8 @@ export type TycoonSnapshot = {
 	PedestalDisplays: { [number]: string? },
 	GachaPulls: number,
 	HasDropper2: boolean,
+	GoalIndex: number,
+	GoalProgress: GoalProgress?,
 }
 
 type State = {
@@ -66,6 +79,10 @@ type State = {
 	-- UserIds whose data must NEVER be written back (load failed in Studio and
 	-- we fell back to a blank profile). See loadData.
 	noSave: { [number]: boolean },
+	-- Session-only: GoalService's latest progress readout per UserId.
+	goalProgress: { [number]: GoalProgress? },
+	-- Called synchronously at the start of every SyncTycoon (see OnSync).
+	syncHooks: { (Player) -> () },
 	connections: { RBXScriptConnection },
 }
 
@@ -87,6 +104,8 @@ local DEFAULT_DATA: PlayerData = {
 	PedestalDisplays = {},
 	GachaPulls = 0,
 	HasDropper2 = false,
+	GoalIndex = 1,
+	TotalFusions = 0,
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -94,6 +113,8 @@ local DEFAULT_DATA: PlayerData = {
 local state: State = {
 	sessionCache = {},
 	noSave = {},
+	goalProgress = {},
+	syncHooks = {},
 	connections = {},
 }
 
@@ -169,6 +190,12 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.HasDropper2) == "boolean" then
 		data.HasDropper2 = raw.HasDropper2
+	end
+	if typeof(raw.GoalIndex) == "number" and raw.GoalIndex >= 1 then
+		data.GoalIndex = math.floor(raw.GoalIndex)
+	end
+	if typeof(raw.TotalFusions) == "number" then
+		data.TotalFusions = raw.TotalFusions
 	end
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
@@ -481,6 +508,38 @@ function PlayerDataService.SetHasDropper2(player: Player, owned: boolean)
 	end
 end
 
+--[[ Public API: goals ---------------------------------------------------- ]]
+
+function PlayerDataService.GetGoalIndex(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.GoalIndex else 1
+end
+
+function PlayerDataService.SetGoalIndex(player: Player, index: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.GoalIndex = index
+	end
+end
+
+function PlayerDataService.GetTotalFusions(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.TotalFusions else 0
+end
+
+function PlayerDataService.IncrementTotalFusions(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.TotalFusions += 1
+	end
+end
+
+-- Session-only progress readout for the current goal (nil once every goal is
+-- done). Not saved: GoalService recomputes it on every sync.
+function PlayerDataService.SetGoalProgress(player: Player, progress: GoalProgress?)
+	state.goalProgress[player.UserId] = progress
+end
+
 --[[ Public API: income + sync -------------------------------------------- ]]
 
 -- Tiers of the items currently on this player's pedestals.
@@ -518,13 +577,31 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		PedestalDisplays = PlayerDataService.GetPedestalDisplays(player),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
 		HasDropper2 = PlayerDataService.HasDropper2(player),
+		GoalIndex = PlayerDataService.GetGoalIndex(player),
+		GoalProgress = state.goalProgress[player.UserId],
 	}
+end
+
+-- Registers `callback(player)` to run synchronously at the start of every
+-- SyncTycoon, BEFORE the snapshot is built - so anything it changes (a goal
+-- reward, the next goal's progress) goes out in that same snapshot. A plain
+-- callback rather than a BindableEvent on purpose: under deferred signal
+-- behaviour a BindableEvent handler would run after the snapshot was sent.
+-- Callbacks must not call SyncTycoon themselves.
+function PlayerDataService.OnSync(callback: (Player) -> ())
+	table.insert(state.syncHooks, callback)
 end
 
 -- The one way every service pushes cash/upgrade state to a client.
 function PlayerDataService.SyncTycoon(player: Player)
 	if not state.sessionCache[player.UserId] then
 		return
+	end
+	for _, hook in state.syncHooks do
+		-- A failing hook must never stop the snapshot from going out.
+		xpcall(hook, function(err)
+			warn(("PlayerDataService: OnSync hook failed for %s: %s"):format(player.Name, tostring(err)))
+		end, player)
 	end
 	RemoteEvents.SyncTycoon:FireClient(player, PlayerDataService.GetTycoonSnapshot(player))
 end
@@ -568,6 +645,7 @@ local function onPlayerRemoving(player: Player)
 		saveData(userId, data)
 	end
 	state.noSave[userId] = nil
+	state.goalProgress[userId] = nil
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]

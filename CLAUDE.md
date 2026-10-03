@@ -49,19 +49,45 @@ Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 
 ```
 src/ReplicatedStorage/Shared/
-    Config/      shared config tables (PlotLayout, TycoonConfig, FusionConfig, …)
-    Modules/     shared runtime modules (PadStyler, PedestalVisuals)
+    Config/      shared config tables (PlotLayout, TycoonConfig, FusionConfig,
+                 GoalConfig — the ordered onboarding goals, …)
+    Modules/     shared runtime modules (PadStyler, PedestalVisuals,
+                 NumberFormat, UITheme — every UI colour/font token,
+                 BillboardKit — server-built world labels)
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
 src/ServerScriptService/
     Bootstrap.server.lua   entry point; hands Services/ to ServiceManager
     ServiceManager.lua     loading + Init/Start lifecycle
-    Services/              one ModuleScript per service
+    Services/              one ModuleScript per service (GoalService pays
+                           and advances goals from PlayerDataService.OnSync)
 src/StarterPlayer/StarterPlayerScripts/
-    Controllers/  client controllers (one per domain)
+    Controllers/  client controllers (one per domain): HudController,
+                  ToastController (error/neutral toasts), ResultController
+                  (fusion/gacha result cards), AnnouncementController
+                  (banners), WorldLabelController (hides owner-only labels)…
     Effects/      RevealEffects
-    UI/           reusable UI components (ItemPickerUI)
+    UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
+                  Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
 ```
+
+### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
+
+- **All UI colours come from `UITheme`.** No `Color3.fromRGB`/`fromHex` in
+  any UI file other than `UITheme.lua`; add a token instead. Fonts too
+  (`UITheme.Fonts`). This covers server-built BillboardGuis (`BillboardKit`).
+- Build screens from `UIKit` constructors. Panel/Button return
+  `(body, holder)`: position/parent the holder (it also hosts the sibling
+  `Shadow`), style the body. Restyle buttons with `UIKit.SetButton`.
+- Every ScreenGui comes from `UIKit.Screen`, which adds the single mobile
+  `UIScale` (0.8 under 500 px tall). Phone layouts react to
+  `UIKit.LayoutChanged`. Keep the top-left 170×60 px clear (Roblox top bar)
+  **after** that scale, and every tap target ≥ 44 px.
+- Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
+- World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
+  Owner-only labels set the `OwnerOnly` attribute; don't toggle them per
+  player on the server.
+- Studio checklist for UI changes: `docs/UI_TEST.md`.
 
 ## Architecture
 
@@ -115,6 +141,7 @@ calls left in `Services/`.
 | `ItemService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LightingService` | `:Init()` | — | `--!strict` |
 | `DebugService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 
@@ -165,6 +192,15 @@ created; it builds the container folder (named `RemoteEvents`) on the server
 and makes the client `WaitForChild` it. Never call `Instance.new("RemoteEvent")`
 in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
+
+### Sync hooks
+
+`PlayerDataService.OnSync(callback)` registers a function that runs
+synchronously at the start of every `SyncTycoon`, before the snapshot is
+built, so whatever it changes ships in that snapshot (GoalService uses it to
+pay goals and publish `GoalProgress`). Hooks must not call `SyncTycoon`
+themselves. It is a plain callback list on purpose: a BindableEvent handler
+would run deferred, after the snapshot was already sent.
 
 ### Server authority
 

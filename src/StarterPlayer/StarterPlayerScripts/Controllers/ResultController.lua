@@ -1,0 +1,525 @@
+--[[
+	ResultController
+	----------------
+	What you see after a fusion or a gacha pull:
+
+	  * Big result card (centre) - Epic/Legendary/Mythic fusion successes and
+	    Epic+ gacha pulls. Sunburst, tier name, 132 px orb, DISPLAY IT / NICE.
+	    Fusion cards wait for FusionController.FusionResolved, i.e. after the
+	    machine's reveal animation, so the card never spoils it.
+	  * Fail card (bottom) - a failed fusion, 3 s, with an AGAIN button.
+	  * Small pull card (bottom) - Common/Rare gacha pulls; each new pull
+	    replaces the previous card.
+
+	Rare fusion successes keep the top banner (AnnouncementController).
+]]
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local UIKit = require(script.Parent.Parent.UI.UIKit)
+local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
+local FusionController = require(script.Parent.FusionController)
+local TycoonController = require(script.Parent.TycoonController)
+local ItemController = require(script.Parent.ItemController)
+local HudController = require(script.Parent.HudController)
+local ToastController = require(script.Parent.ToastController)
+
+local ResultController = {}
+
+local Colors = UITheme.Colors
+local Fonts = UITheme.Fonts
+
+local BIG_CARD_SIZE = Vector2.new(380, 420)
+local SUNBURST_RAYS = 12
+local SUNBURST_DEGREES_PER_SECOND = 20
+local SUNBURST_RAY_LENGTH = 720
+
+local BOTTOM_CARD_OFFSET = 104 -- above the HUD buttons, same baseline as toasts
+local FAIL_CARD_SIZE = Vector2.new(470, 92)
+local PULL_CARD_SIZE = Vector2.new(440, 74)
+local BOTTOM_CARD_SECONDS = 3
+
+local MYTHIC_SHAKE_MAGNITUDE = 0.35
+local MYTHIC_SHAKE_SECONDS = 0.5
+
+local screenGui: ScreenGui
+
+--[[ Helpers ------------------------------------------------------------------- ]]
+
+local function itemName(item: any): string
+	local def = ItemConfig.GetItemById(item.ItemId)
+	return if def then def.Name else tostring(item.ItemId)
+end
+
+local function earnRate(tier: string): number
+	return TycoonConfig.GetPedestalCashPerSecond(tier)
+		* TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
+end
+
+--[[ Big result card -------------------------------------------------------------- ]]
+
+local bigHolder: Frame? = nil
+local sunburstConnection: RBXScriptConnection? = nil
+
+local function closeBigCard()
+	if sunburstConnection then
+		sunburstConnection:Disconnect()
+		sunburstConnection = nil
+	end
+	local holder = bigHolder
+	bigHolder = nil
+	if holder then
+		local tween = UIKit.PopOut(holder)
+		tween.Completed:Once(function()
+			holder:Destroy()
+		end)
+	end
+end
+
+local function buildSunburst(body: Frame)
+	local burst = Instance.new("CanvasGroup")
+	burst.Name = "Sunburst"
+	burst.BackgroundTransparency = 1
+	burst.Size = UDim2.fromScale(1, 1)
+	burst.ZIndex = body.ZIndex + 1
+	burst.Parent = body
+	UIKit.Corner(burst, 24)
+
+	local spinner: GuiObject
+	if UITheme.Icons.Sunburst ~= "" then
+		local image = Instance.new("ImageLabel")
+		image.BackgroundTransparency = 1
+		image.Image = UITheme.Icons.Sunburst
+		image.AnchorPoint = Vector2.new(0.5, 0.5)
+		image.Position = UDim2.fromScale(0.5, 0.42)
+		image.Size = UDim2.fromOffset(SUNBURST_RAY_LENGTH, SUNBURST_RAY_LENGTH)
+		image.ImageTransparency = 0.6
+		image.ZIndex = burst.ZIndex
+		image.Parent = burst
+		spinner = image
+	else
+		local pivot = Instance.new("Frame")
+		pivot.Name = "Rays"
+		pivot.BackgroundTransparency = 1
+		pivot.AnchorPoint = Vector2.new(0.5, 0.5)
+		pivot.Position = UDim2.fromScale(0.5, 0.42)
+		pivot.Size = UDim2.fromOffset(SUNBURST_RAY_LENGTH, SUNBURST_RAY_LENGTH)
+		pivot.ZIndex = burst.ZIndex
+		pivot.Parent = burst
+		-- 12 thin bars through the centre = 24 rays.
+		for index = 1, SUNBURST_RAYS do
+			local ray = Instance.new("Frame")
+			ray.Name = "Ray"
+			ray.BackgroundColor3 = Colors.White
+			ray.BackgroundTransparency = 0.9
+			ray.BorderSizePixel = 0
+			ray.AnchorPoint = Vector2.new(0.5, 0.5)
+			ray.Position = UDim2.fromScale(0.5, 0.5)
+			ray.Size = UDim2.new(0, 10, 1, 0)
+			ray.Rotation = (index - 1) * (180 / SUNBURST_RAYS)
+			ray.ZIndex = burst.ZIndex
+			ray.Parent = pivot
+		end
+		spinner = pivot
+	end
+
+	-- Rotating the parent rotates every ray around the shared centre.
+	sunburstConnection = RunService.RenderStepped:Connect(function(dt: number)
+		spinner.Rotation = (spinner.Rotation + SUNBURST_DEGREES_PER_SECOND * dt) % 360
+	end)
+end
+
+local function onDisplayIt(uid: string)
+	closeBigCard()
+	if not ItemController.PlaceOnFirstEmpty(uid) then
+		HudController.OpenInventory()
+		ToastController.Show("Pedestals full · remove one first", "Error")
+	end
+end
+
+type BigCardInfo = {
+	Caption: string,
+	Item: any,
+	Description: string,
+}
+
+local function showBigCard(info: BigCardInfo)
+	if bigHolder then
+		if sunburstConnection then
+			sunburstConnection:Disconnect()
+			sunburstConnection = nil
+		end
+		(bigHolder :: Frame):Destroy()
+		bigHolder = nil
+	end
+
+	local tier = info.Item.Tier :: string
+	local tierColor = FusionConfig.TierAccentColors[tier] or Colors.Text
+	local tierLight = UITheme.GetTierLight(tier)
+
+	local body, holder = UIKit.Panel({
+		Name = "BigResult",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(BIG_CARD_SIZE.X, BIG_CARD_SIZE.Y),
+		Gradient = {
+			{ 0, Colors.Panel },
+			{ 0.25, Colors.ResultMid },
+			{ 0.5, UITheme.TowardInk(tierColor, 0.5) },
+			{ 0.75, Colors.ResultMid },
+			{ 1, Colors.Panel },
+		},
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	bigHolder = holder
+	buildSunburst(body)
+	local z = body.ZIndex + 3
+
+	UIKit.Label({
+		Name = "Caption",
+		Text = info.Caption,
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = tierLight,
+		Position = UDim2.fromOffset(0, 20),
+		Size = UDim2.new(1, 0, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "TierName",
+		Text = tier:upper() .. "!",
+		Font = Fonts.Display,
+		TextSize = 64,
+		TextColor3 = tierLight,
+		Position = UDim2.fromOffset(0, 40),
+		Size = UDim2.new(1, 0, 0, 70),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = 4,
+		Parent = body,
+	})
+
+	local orb = UIKit.TierOrb(tier, 132)
+	orb.AnchorPoint = Vector2.new(0.5, 0)
+	orb.Position = UDim2.new(0.5, 0, 0, 116)
+	orb.ZIndex = z
+	orb.Parent = body
+
+	UIKit.Label({
+		Name = "ItemName",
+		Text = itemName(info.Item),
+		Font = Fonts.Display,
+		TextSize = 28,
+		Position = UDim2.fromOffset(12, 258),
+		Size = UDim2.new(1, -24, 0, 32),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Description",
+		Text = info.Description,
+		Font = Fonts.Body,
+		TextSize = 15,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(20, 294),
+		Size = UDim2.new(1, -40, 0, 38),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Top,
+		ZIndex = z,
+		Parent = body,
+	})
+
+	local buttons = Instance.new("Frame")
+	buttons.Name = "Buttons"
+	buttons.BackgroundTransparency = 1
+	buttons.AnchorPoint = Vector2.new(0.5, 0)
+	buttons.Position = UDim2.new(0.5, 0, 0, 342)
+	buttons.Size = UDim2.fromOffset(170 + 12 + 120, 52)
+	buttons.ZIndex = z
+	buttons.Parent = body
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 12)
+	layout.Parent = buttons
+
+	local uid = info.Item.Uid :: string
+	UIKit.Button({
+		Name = "DisplayIt",
+		Parent = buttons,
+		Style = "Green",
+		Text = "DISPLAY IT",
+		TextSize = 20,
+		Size = UDim2.fromOffset(170, 52),
+		LayoutOrder = 1,
+		ZIndex = z,
+		OnClick = function()
+			onDisplayIt(uid)
+		end,
+	})
+	UIKit.Button({
+		Name = "Nice",
+		Parent = buttons,
+		Style = "Disabled",
+		Text = "NICE",
+		TextSize = 20,
+		Size = UDim2.fromOffset(120, 52),
+		LayoutOrder = 2,
+		ZIndex = z,
+		OnClick = closeBigCard,
+	})
+
+	UIKit.PopIn(holder)
+	if tier == "Mythic" then
+		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
+	end
+end
+
+--[[ Bottom cards (fail / small pull) --------------------------------------------- ]]
+
+local bottomHolder: Frame? = nil
+local bottomGeneration = 0
+
+local function hideBottomCard(generation: number)
+	if generation ~= bottomGeneration then
+		return
+	end
+	local holder = bottomHolder
+	bottomHolder = nil
+	ToastController.SetBottomInset(0)
+	if holder then
+		local tween = UIKit.PopOut(holder)
+		tween.Completed:Once(function()
+			holder:Destroy()
+		end)
+	end
+end
+
+-- Builds the shared bottom-row panel, replacing whatever card is showing.
+local function newBottomCard(name: string, size: Vector2): (Frame, number)
+	bottomGeneration += 1
+	if bottomHolder then
+		(bottomHolder :: Frame):Destroy()
+		bottomHolder = nil
+	end
+	local body, holder = UIKit.Panel({
+		Name = name,
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 1),
+		Position = UDim2.new(0.5, 0, 1, -(BOTTOM_CARD_OFFSET + UITheme.SmallShadowOffset)),
+		Size = UDim2.fromOffset(size.X, size.Y),
+		Gradient = { { 0, Colors.Panel2 }, { 1, Colors.Panel } },
+		Radius = 18,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = 2,
+	})
+	bottomHolder = holder
+	ToastController.SetBottomInset(size.Y + 12)
+	UIKit.PopIn(holder)
+
+	local generation = bottomGeneration
+	task.delay(BOTTOM_CARD_SECONDS, hideBottomCard, generation)
+	return body, generation
+end
+
+local function showFailCard(item: any)
+	local tier = item.Tier :: string
+	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
+	local z = body.ZIndex + 1
+
+	local orb = UIKit.TierOrb(tier, 56, 0.15)
+	orb.AnchorPoint = Vector2.new(0, 0.5)
+	orb.Position = UDim2.new(0, 16, 0.5, 0)
+	orb.ZIndex = z
+	orb.Parent = body
+
+	UIKit.Label({
+		Name = "Title",
+		Text = "So close…",
+		Font = Fonts.Display,
+		TextSize = 22,
+		Position = UDim2.fromOffset(86, 14),
+		Size = UDim2.new(1, -(86 + 104 + 28), 0, 26),
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Detail",
+		Text = ("Fusion failed · you kept %s (%s)"):format(
+			"<b>" .. UIKit.Colored("1 " .. tier, UITheme.GetTierLight(tier)) .. "</b>",
+			UIKit.EscapeRichText(itemName(item))
+		),
+		RichText = true,
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(86, 42),
+		Size = UDim2.new(1, -(86 + 104 + 28), 0, 36),
+		TextYAlignment = Enum.TextYAlignment.Top,
+		ZIndex = z,
+		Parent = body,
+	})
+
+	local again = UIKit.Button({
+		Name = "Again",
+		Parent = body,
+		Style = "Violet",
+		Text = "AGAIN",
+		TextSize = 18,
+		Size = UDim2.fromOffset(104, 46),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -14, 0.5, -2),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = z,
+		OnClick = function()
+			if FusionController.CanRequestFusion() then
+				hideBottomCard(generation)
+				task.spawn(FusionController.RequestFusion)
+			end
+		end,
+	})
+
+	-- Enabled only while you're still at your machine with another pair.
+	task.spawn(function()
+		while bottomGeneration == generation and again.Parent do
+			local canFuse = FusionController.CanRequestFusion()
+			UIKit.SetButton(again, {
+				Style = if canFuse then "Violet" else "Disabled",
+				TextColor3 = if canFuse then Colors.Text else Colors.Muted,
+			})
+			task.wait(0.25)
+		end
+	end)
+end
+
+local function showPullCard(item: any)
+	local tier = item.Tier :: string
+	local body = newBottomCard("PullCard", PULL_CARD_SIZE)
+	local z = body.ZIndex + 1
+
+	UIKit.Label({
+		Name = "Caption",
+		Text = "PULLED",
+		Font = Fonts.BodyHeavy,
+		TextSize = 12,
+		TextColor3 = Colors.GoldLabel,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, 16, 0.5, 0),
+		Size = UDim2.fromOffset(56, 16),
+		ZIndex = z,
+		Parent = body,
+	})
+
+	local orb = UIKit.TierOrb(tier, 40)
+	orb.AnchorPoint = Vector2.new(0, 0.5)
+	orb.Position = UDim2.new(0, 78, 0.5, 0)
+	orb.ZIndex = z
+	orb.Parent = body
+
+	UIKit.Label({
+		Name = "ItemName",
+		Text = itemName(item),
+		Font = Fonts.Display,
+		TextSize = 18,
+		Position = UDim2.fromOffset(130, 14),
+		Size = UDim2.new(1, -(130 + 130), 0, 24),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "Tier",
+		Text = tier:upper(),
+		Font = Fonts.BodyHeavy,
+		TextSize = 12,
+		TextColor3 = UITheme.GetTierLight(tier),
+		Position = UDim2.fromOffset(130, 40),
+		Size = UDim2.new(1, -(130 + 130), 0, 16),
+		ZIndex = z,
+		Parent = body,
+	})
+	UIKit.Label({
+		Name = "NextPull",
+		Text = ("next pull %s"):format(NumberFormat.Money(TycoonConfig.GetGachaPullCost(TycoonController.GetGachaPulls()))),
+		Font = Fonts.Body,
+		TextSize = 13,
+		TextColor3 = Colors.Muted,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -16, 0.5, 0),
+		Size = UDim2.fromOffset(120, 18),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = z,
+		Parent = body,
+	})
+end
+
+--[[ Event routing ------------------------------------------------------------------ ]]
+
+-- Exposed so AnnouncementController can skip the banner for these cases.
+function ResultController.ShowsBigCardFor(tier: string): boolean
+	return FusionConfig.MajorRevealTiers[tier] == true
+end
+
+local function onFusionResolved(result: any)
+	if typeof(result) ~= "table" or not result.Success or not result.NewItem then
+		return
+	end
+	local newItem = result.NewItem
+	if not result.Upgraded then
+		showFailCard(newItem)
+		return
+	end
+	if ResultController.ShowsBigCardFor(newItem.Tier) then
+		showBigCard({
+			Caption = "FUSION SUCCESS",
+			Item = newItem,
+			Description = ("2x %s → %s · earns %s/s on a pedestal"):format(
+				tostring(result.ConsumedTier),
+				newItem.Tier,
+				NumberFormat.Money(earnRate(newItem.Tier))
+			),
+		})
+	end
+end
+
+local function onGachaPullResult(payload: any)
+	if typeof(payload) ~= "table" or not payload.Success or not payload.NewItem then
+		return
+	end
+	local newItem = payload.NewItem
+	if ResultController.ShowsBigCardFor(newItem.Tier) then
+		showBigCard({
+			Caption = "YOU PULLED",
+			Item = newItem,
+			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem.Tier))),
+		})
+	else
+		showPullCard(newItem)
+	end
+end
+
+function ResultController.Init()
+	screenGui = UIKit.Screen("Results", 130)
+	FusionController.FusionResolved:Connect(onFusionResolved)
+	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
+end
+
+return ResultController

@@ -121,6 +121,7 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 	syncTycoon(player)
 
 	PedestalVisuals.Apply(pedestal, item.Tier)
+	TycoonService.RefreshPedestalLabels(player)
 
 	local itemConfigEntry = ItemConfig.GetItemById(item.ItemId)
 	local itemName = itemConfigEntry and itemConfigEntry.Name or item.ItemId
@@ -136,6 +137,10 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s just displayed a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 			Tier = item.Tier,
+			-- Parts, so the client can colour the tier word.
+			PlayerName = player.DisplayName,
+			Verb = "displayed",
+			ItemName = itemName,
 		})
 	end
 end
@@ -178,6 +183,7 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	syncTycoon(player)
 
 	PedestalVisuals.Clear(pedestal)
+	TycoonService.RefreshPedestalLabels(player)
 
 	RemoteEvents.PlaceItemResult:FireClient(player, {
 		Success = true,

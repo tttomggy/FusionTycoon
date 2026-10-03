@@ -64,6 +64,8 @@ local function onPlayerChatted(player: Player, message: string)
 			data.PedestalDisplays = {}
 			data.GachaPulls = 0
 			data.HasDropper2 = false
+			data.GoalIndex = 1
+			data.TotalFusions = 0
 		end
 		player:Kick("Profile wiped (Studio debug). Press Play again.")
 	end
