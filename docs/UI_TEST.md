@@ -183,8 +183,8 @@ Then press Play:
 - [ ] **Goal marker on a fresh save.** `/wipe` → Play → claim. A gold
   marker labelled **BUY DROPPER 2** floats over the Dropper 2 slot (visible
   through walls), with a live "N studs" line and a pulsing gold ring on the
-  floor. It hides within 8 studs. At the "Buy a Basic Generator" goal, the
-  UPGRADES button gets a pulsing gold outline instead.
+  floor. It hides within 8 studs. At the "Buy a Basic Generator" goal it
+  points at the Basic Generator in the back-left bay (Polish 2).
 - [ ] **Two players** (Test → Clients and Servers → 2 players): the two labs
   face each other across the street, with gates on the street. Empty slots
   show FREE LAB foundations, and a slot's foundation disappears when a
@@ -223,3 +223,61 @@ Then press Play:
   which stay on the plots anyway.
 - [ ] **Spawn.** You still spawn on the street in front of your gate, and
   the spawn pad's edge doesn't snag you while riding the belt past it.
+
+## 10. Polish 2
+
+- [ ] **Pedestals 1, 3 and 4 (sparse displays).** `/cash 50000`, pull
+  until you have 3 or more items, then display on pedestals 1, 3 and 4 and
+  leave 2 empty. Then check:
+  - [ ] In the client command bar,
+    `require(game.Players.LocalPlayer.PlayerScripts.Controllers.TycoonController).GetPedestalDisplays()`
+    lists all three (keys 1, 3, 4).
+  - [ ] The picker footer reads **Pedestals 3 / 4 used**.
+  - [ ] **DISPLAY IT** on an Epic+ result fills pedestal **2**
+    (PlaceOnFirstEmpty).
+- [ ] **Forced rejection.** With pedestal 1 filled, run this in the client
+  command bar:
+  `game.ReplicatedStorage.RemoteEvents.RequestPlaceItem:FireServer("<uid>", 1)`,
+  where `<uid>` is another item you own (any `Uid` from
+  `require(game.Players.LocalPlayer.PlayerScripts.Controllers.InventoryController).GetInventory()`). Then check:
+  - [ ] A red toast reads **That pedestal is already in use**.
+  - [ ] Pressing E on that pedestal afterwards still works (Remove), and
+    the empty pedestals still open the picker.
+- [ ] **Every toast is readable.** White text on red for errors
+  (**Need $X**, **Need $X for a pull**, **Pedestals full · remove one
+  first**, the rejection toasts). White text on grey for neutral ones
+  (**Nothing to fuse**, **+$X/s**). None is blank.
+- [ ] **Generator bays.** After claiming, the back-left bay holds three
+  generators (Basic, Ember Forge, Flare Reactor) and the back-right bay
+  two (Core Engine, Singularity Core), all facing the lab centre.
+  - [ ] Basic Generator is a ghost in its tier colour with a **BUY /
+    $25** label. The rest are faint ghosts with a lock on their screens
+    and **LOCKED / <Required> LV N**.
+- [ ] **Buying in the world.** Walk to the Basic Generator and press **E ·
+  Buy / Basic Generator · $25**. Then check:
+  - [ ] It turns into the real machine: dark body, tier band and a
+    hovering orb, with **LV 1** on its screen.
+  - [ ] There's a burst at the orb and the body bumps briefly.
+  - [ ] A grey **+$1/s** toast shows (scaled by your multiplier).
+  - [ ] The prompt now reads **Upgrade / LV 1 → 2 · $X**.
+  - [ ] Without enough cash, the prompt shows the red **Need $X** toast.
+  - [ ] Buying from the UPGRADES panel gives the same toast and
+    animation.
+- [ ] **Unlocks and max.** `/cash 5000000`. Basic LV 5 unlocks Ember
+  Forge (it becomes a BUY ghost). The band turns Neon at LV 10. At LV 25
+  the screen reads **MAX**, the band glows with a light, and the prompt is
+  gone.
+- [ ] **Income pops.** Each owned generator floats a **+$X** in its tier's
+  light colour above its orb once a second (its income/s with the
+  multiplier). There's one pop per generator, never stacked, and none
+  when you're more than about 60 studs away.
+- [ ] **Upgrades panel.** Under the title: **Generators earn every second,
+  even while you're away. Find them in the back corners of your lab.** The
+  total generator income/s is on the right. The tabs and list sit below
+  it without overlap (desktop and phone).
+- [ ] **Goal marker.** On a fresh save, the "Buy a Basic Generator" goal
+  marker points at the Basic Generator. The "Unlock the Ember Forge" goal
+  points at the Ember Forge.
+- [ ] **Two players** (2-player local server): as Player 2 you can see
+  Player 1's generators but **not** their BUY/LOCKED labels or their
+  Buy/Upgrade prompts, and you can't trigger them.

@@ -23,7 +23,8 @@ analyze` for that.
 
 ## Game loop & economy (read before balancing)
 
-Claim plot → Dropper1 (+Dropper2) → buy Generators in the UPGRADES panel →
+Claim plot → Dropper1 (+Dropper2) → buy Generators (in the back-corner bays
+or the UPGRADES panel; both fire `RequestUpgrade`) →
 Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
 (success = next tier, fail = 1 item of the same tier back) → display the best
 4 items on pedestals for passive income → Multiplier Pad multiplies ALL income.
@@ -57,6 +58,7 @@ src/ReplicatedStorage/Shared/
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
                  tagging), PlotKit (plot shell + sign gate), StationKit
                  (station pads + holograms), DropperKit (dropper model),
+                 GeneratorKit (the five bay generators + their states),
                  PedestalVisuals, NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -74,7 +76,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   (banners), WorldLabelController (hides owner-only labels),
                   WorldAnimationController (FT_Hover spin/bob, client-only),
                   GoalMarkerController (points at the current goal),
-                  BeltController (client-only belt chevrons)…
+                  BeltController (client-only belt chevrons),
+                  GeneratorController (world Buy/Upgrade prompts, upgrade
+                  pop, per-second income pops)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal), UpgradesPanel, ItemPickerUI
