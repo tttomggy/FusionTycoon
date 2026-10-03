@@ -176,11 +176,11 @@ Then press Play:
   it is a real board facing the gate, angled toward the walkway.
 - [ ] **Fuse All with 40 Commons.** `/cash 50000000`, pull until you have
   about 40 Commons, then stand at the machine:
-  - [ ] **Hold F · Fuse All (N)** shows N = 20.
-  - [ ] Holding it plays a 3 s charge-up, then **one** summary card (N
+  - [ ] The Fuse panel's **FUSE ALL** button shows 20 fusions.
+  - [ ] Pressing it plays a 3 s charge-up, then **one** summary card (N
     fusions, upgraded/failed, tier chips with "−40 COMMON", BEST row).
   - [ ] DISPLAY BEST puts the best item on a pedestal.
-  - [ ] With fewer than 2 pairs, the F prompt is hidden.
+  - [ ] With no pair of normal items, FUSE ALL only toasts **Nothing to fuse**.
   - [ ] Legendaries are never consumed.
 - [ ] **Goal marker on a fresh save.** `/wipe` → Play → claim. A gold
   marker labelled **UPGRADE YOUR BASIC GENERATOR** floats over the Basic
@@ -357,13 +357,13 @@ otherwise.
   **x1.25 · LV 1/15**, with the next value and cost on the detail line.
   The UPGRADES footer pill matches. It climbs by +0.25 per level up to
   **x4.5 · LV 14/15**, then reads **x5 MAX** with the prompt gone.
-- [ ] **Portal ready.** `/rebirthready`:
+- [ ] **Portal ready.** `/rebirthready` (sets cash to the cost):
   - [ ] The back-right portal's swirl turns opaque and spins.
   - [ ] Its base ring pulses and its light brightens.
   - [ ] Its owner-only label reads **READY · x1 → x1.5**, with a full bar
-    and **$30M / $30M this run**.
+    and **$15M / $15M**.
   - [ ] Before that, the swirl is translucent and still, and the pill reads
-    **x1 → x1.5 income**.
+    **REBIRTH · $15M**.
 - [ ] **Panel and two-step confirm.** Hold E at the portal (0.5 s), or tap
   the HUD pill once you have a rebirth.
   - [ ] **REBIRTH n** shows the INCOME and LUCK cards, YOU KEEP / YOU
@@ -390,7 +390,7 @@ otherwise.
   - [ ] Everyone gets the **SERVER · REBIRTH** banner, "<Name> reached
     Rebirth 1!", including you.
 - [ ] **Rejoin** with saving enabled: Rebirths, the HUD pill and the portal's
-  next requirement ($96M for Rebirth 2) persist.
+  next cost ($48M for Rebirth 2) persist.
 - [ ] **Two players:**
   - [ ] Player 2 sees Player 1's rebirth banner.
   - [ ] Player 2 does **not** see Player 1's portal label or its Rebirth
@@ -433,11 +433,12 @@ testable without luck.
   them Golden (`/give common_spark golden`). Fuse All. The Golden Common is
   still there afterwards.
 - [ ] **Mythic → Secret gate.** `/give mythic_rift` twice.
-  - [ ] At 0 rebirths, the machine prompt reads **🔒 Locked / Rebirth 1 to
-    fuse Mythics**, and pressing it only toasts that.
-  - [ ] The odds board lists **2 Mythic → Secret (Rebirth 1) 8%**.
-  - [ ] After `/rebirths 1` the prompt becomes **Fuse 2x Mythic → Secret
-    (8% chance)**.
+  - [ ] At 0 rebirths, the Fuse panel's Mythic tab reads **🔒 Mythic**, the
+    chamber shows **🔒 Rebirth 1 to fuse Mythics**, and tapping the tab
+    only toasts that.
+  - [ ] The odds board's row reads **Mythic → Secret (R1)** with 7% under
+    2 orbs.
+  - [ ] After `/rebirths 1` the tab unlocks and 2 Mythics show **7%**.
   - [ ] A Secret result shows the dark orb (VoidShell glass, mint core)
     and the **SERVER · SECRET** banner.
 - [ ] **Index.** Press **INDEX** (the teal button; the three bottom buttons
@@ -462,3 +463,30 @@ testable without luck.
   - [ ] Player 2 sees Player 1's mutation shells and the
     **SERVER · RAINBOW** / **SERVER · SECRET** banners.
   - [ ] Player 2 does not see Player 1's owner-only labels or prompts.
+
+## 14. Polish 5 (Fuse panel, cash rebirth, mutation marks, pad price)
+
+- [ ] **Pad price.** On a fresh plot the Multiplier Pad shows its price
+  pill and, while you can't afford it, a **Need $X more** caption.
+  Pressing it short toasts **Need $X** and charges nothing.
+- [ ] **Cash rebirth.** `/cash 2e7`:
+  - [ ] The portal turns READY and the pulsing orange **REBIRTH!** button
+    appears above the bottom row.
+  - [ ] Rebirthing takes the cash (cash → $0) and the next cost reads $48M.
+- [ ] **Fuse panel.** Press F at the machine.
+  - [ ] Four Commons in the chamber show **78%**; six always succeed
+    (**100%**). The count chips match the odds board's columns.
+  - [ ] A fail keeps the best input (a mutated one if present, same item)
+    and the card reads **Kept <name>, lost <n>**.
+  - [ ] All-Golden inputs give a Golden result; mixed inputs give a normal
+    item or a fresh roll.
+  - [ ] AUTO-FILL never takes mutated items.
+  - [ ] The Mythic tab is locked before Rebirth 1 (§13).
+- [ ] **Mutation marks.**
+  - [ ] `/give legendary_core golden`: the card and inventory show
+    **GOLDEN ×2** with the orb ring and card outline. Displayed, the
+    pedestal gets 2 orbiting satellites and the label's mutation chip.
+  - [ ] Diamond: 4 satellites with trails. Rainbow: 6, cycling colours.
+- [ ] **Phone layout** (iPhone 14 landscape): the Fuse panel fits, its
+  tabs, grid and buttons are all ≥ 44 px, and nothing covers the top-left
+  Roblox bar.

@@ -26,25 +26,27 @@ analyze` for that.
 Claim plot (Basic Generator starts at LV 1) → upgrade Generators (on the
 factory line along the left wall or in the UPGRADES panel; both fire
 `RequestUpgrade`) →
-Gacha Pad pulls → fuse 2 same-tier items at your plot's Fusion Machine
-(success = next tier, fail = 1 item of the same tier back) → display the best
+Gacha Pad pulls → fuse 2–6 same-tier items in the Fuse panel at your plot's
+Fusion Machine (more = better chance, `FusionConfig.SuccessChanceByCount`;
+success = next tier, fail = keep your best input) → display the best
 4 items on pedestals for passive income → Multiplier Pad multiplies ALL income
 → Rebirth (Portal, back-right corner) → hunt Secrets, mutations and the Index.
 
-Rebirth (`RebirthService`, numbers in `RebirthConfig`) needs this run's
-passive earnings (`RunEarnings`) ≥ the requirement. It resets cash,
-generators (Basic back to LV 1), the Multiplier Pad and the gacha price; it
-keeps every item, the pedestals, goals and the rebirth count, and gives
+Rebirth (`RebirthService`, numbers in `RebirthConfig`) costs cash
+(`RebirthConfig.GetCost`: $15M ×3.2 each time); cash going to 0 pays it. It
+resets cash, generators (Basic back to LV 1), the Multiplier Pad and the
+gacha price; it keeps every item, the pedestals, the Index, goals and the
+rebirth count, and gives
 income ×(1 + 0.5 n) and luck ×(1 + 0.05 n) (luck raises Legendary/Mythic
 gacha odds via `FusionConfig.GetGachaRates`, and every mutation chance).
 
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
 at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
 successful fusion can roll a **mutation** (`MutationConfig`: Golden ×2,
-Diamond ×5, Rainbow ×12 income). Fusion rules: a success keeps the *lower*
-of the two inputs' mutations, then may roll a better one; a fail keeps the
-better input untouched (same Uid) and removes only the other; Fuse All
-never touches mutated items. The **Index** (`IndexConfig`, 68 entries =
+Diamond ×5, Rainbow ×12 income). Fusion rules: a success keeps the *lowest*
+mutation among all inputs (so every input must share it), then may roll a
+better one; a fail keeps the best input untouched (same Uid) and removes
+the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 68 entries =
 item × variant) pays +1% income per entry and +5% per full tier page, and
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
@@ -72,7 +74,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
 - Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
-  `/rebirthready` (sets this run's earnings to the requirement),
+  `/rebirthready` (sets cash to the next rebirth's price),
   `/rebirths <n>`, `/give <itemId> [mutation]`, `/wipe`.
 - **No new `Highlight`s on world objects.** Roblox renders at most 31 per
   client, and 12 plots × 4 pedestals can reach 48 (outlines silently
@@ -122,7 +124,8 @@ src/StarterPlayer/StarterPlayerScripts/
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
-                  ItemPickerUI, RebirthPanel, IndexPanel
+                  ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
+                  orb fusion chamber + picker, opened by the machine prompt)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -291,6 +294,9 @@ checks that no footprints overlap and everything sits inside the walls.
   WorldLabelController.
 - **Hover animation:** tag a Part or Model `FT_Hover`
   (`PartKit.SetHover`); clients animate it. The server never tweens these.
+  Likewise client-only: `FT_Orbit` (mutation satellites round a pedestal
+  orb; attributes Count/Radius/Period/Tilt, one BulkMoveTo per frame),
+  `FT_Rainbow` (hue-cycling shells) and `FT_PortalSwirl`.
 
 ## Gotchas
 

@@ -8,15 +8,15 @@ local TycoonConfig = {}
 	Every number in this file was tuned with the greedy-player simulation in
 	tools/econ_sim.py, run on a brand-new save (generators -> gacha -> fuse ->
 	pedestals -> multiplier -> rebirth; new saves start with Basic Generator
-	at LV 1). Full-design medians (`python3 tools/econ_sim.py 30 12`):
+	at LV 1; rebirth costs cash). Medians from
+	`python3 tools/econ_sim.py 30 12 --fuse=2` (the player fuses pairs), with
+	`--fuse=3` (triples) in brackets:
 
-	    first Gacha pull ..... ~1:10     first Golden .......... ~4 min
-	    first Legendary ...... ~6 min    first Diamond ......... ~14 min
-	    first Mythic ......... ~51 min   Rebirth 1 ............. ~1:00
-	    Rebirth 2 ............ ~1:41     first Rainbow ......... ~1:45
-	    Rebirth 3 ............ ~2:29     Singularity Core ...... ~2:40
-	    first Secret ......... ~4:00     Rebirth 7 ............. ~8:00
-	    Index after 12 h ..... ~39 / 68  Multiplier maxed ...... never in 12 h
+	    first Gacha pull ..... ~1:10 (1:10)    first Legendary ....... ~6 min (13 min)
+	    first Mythic ......... ~1:05 (2:10)    Rebirth 1 ............. ~1:04 (1:10)
+	    Rebirth 2 ............ ~1:46 (2:13)    Rebirth 3 ............. ~2:46 (3:15)
+	    Singularity Core ..... ~2:37 (3:05)    first Secret .......... ~8:30 (not in 12 h)
+	    Index after 12 h ..... ~38/68 (34/68)  Multiplier maxed ...... never in 12 h
 
 	Secret and Rainbow have huge spreads; judge them by order of magnitude.
 
