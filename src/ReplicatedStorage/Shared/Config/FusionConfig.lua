@@ -256,6 +256,64 @@ function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
 	}
 end
 
+--[[ Mutations in a fusion -------------------------------------------------------
+	A success keeps the LOWEST mutation among the inputs (so every input must
+	share it), then may roll a better one. The Fuse panel says so before
+	FUSE, and FusionService uses the same function for the result.
+]]
+-- Inputs are any items with a Mutation field (inventory entries).
+
+-- The mutation a success carries over from `inputs` (before any roll): the
+-- lowest among them, nil if any input is plain.
+function FusionConfig.PredictMutation(inputs: { any }): string?
+	if #inputs == 0 then
+		return nil
+	end
+	local lowest = inputs[1].Mutation
+	for _, input in inputs do
+		lowest = MutationConfig.Worse(lowest, input.Mutation)
+	end
+	return lowest
+end
+
+export type MutationMix = {
+	Kept: string?, -- what a success carries (PredictMutation)
+	Best: string?, -- the highest input mutation (what mixing loses)
+	Mixed: boolean, -- Kept ~= Best: some inputs drag the result down
+	BelowCount: number, -- inputs ranked under Best
+	BelowMutation: string?, -- their shared mutation (nil = plain) …
+	BelowShared: boolean, -- … when they all share one
+}
+
+-- What the inputs' mutations do to a success, for the Fuse panel's line.
+function FusionConfig.GetMutationMix(inputs: { any }): MutationMix
+	local best: string? = nil
+	for _, input in inputs do
+		best = MutationConfig.Better(best, input.Mutation)
+	end
+	local kept = FusionConfig.PredictMutation(inputs)
+	local bestRank = MutationConfig.GetRank(best)
+	local count, shared, belowShared = 0, nil :: string?, true
+	for _, input in inputs do
+		if MutationConfig.GetRank(input.Mutation) < bestRank then
+			if count == 0 then
+				shared = input.Mutation
+			elseif input.Mutation ~= shared then
+				belowShared = false
+			end
+			count += 1
+		end
+	end
+	return {
+		Kept = kept,
+		Best = best,
+		Mixed = MutationConfig.GetRank(kept) < bestRank,
+		BelowCount = count,
+		BelowMutation = shared,
+		BelowShared = belowShared,
+	}
+end
+
 -- Diamond and up (Diamond, Void, Rainbow, Celestial) get the major reveal
 -- whatever the tier.
 FusionConfig.MajorRevealMutationRank = 3

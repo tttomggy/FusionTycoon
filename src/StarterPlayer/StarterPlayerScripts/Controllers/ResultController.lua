@@ -68,7 +68,7 @@ local MYTHIC_SHAKE_MAGNITUDE = 0.35
 local MYTHIC_SHAKE_SECONDS = 0.5
 
 local screenGui: ScreenGui
-local showSkippedLine: (item: any) -> () -- the skipped-card line (defined with the bottom cards)
+local showSkippedLine: (item: any, extra: string?) -> () -- the skipped-card line (defined with the bottom cards)
 
 --[[ Helpers ------------------------------------------------------------------- ]]
 
@@ -168,6 +168,9 @@ type BigCardInfo = {
 	Caption: string,
 	Item: any,
 	Description: string,
+	-- Fusion successes with a mutation: "GOLDEN kept" / "GOLDEN rolled!"
+	-- beside the mutation pill (FusionResult.MutationSource).
+	SourceLine: string?,
 }
 
 local function showBigCard(info: BigCardInfo)
@@ -237,15 +240,30 @@ local function showBigCard(info: BigCardInfo)
 	orb.Position = UDim2.new(0.5, 0, 0, 116)
 	orb.ZIndex = z
 	orb.Parent = body
+	local sourceLine = if info.Item.Mutation then info.SourceLine else nil
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = info.Item.Mutation,
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 228),
+		AnchorPoint = Vector2.new(if sourceLine then 1 else 0.5, 0),
+		Position = UDim2.new(0.5, if sourceLine then -4 else 0, 0, 228),
 		TextSize = 14,
 		Height = 24,
 		ZIndex = z + 1,
 	})
+	if sourceLine then
+		UIKit.Label({
+			Name = "MutationSource",
+			Text = sourceLine,
+			Font = Fonts.Display,
+			TextSize = 16,
+			TextColor3 = UITheme.GetMutationColor(info.Item.Mutation) or Colors.Text,
+			Position = UDim2.new(0.5, 4, 0, 228),
+			Size = UDim2.new(0.5, -16, 0, 24),
+			ZIndex = z + 1,
+			Stroke = UITheme.Stroke.Text,
+			Parent = body,
+		})
+	end
 
 	UIKit.Label({
 		Name = "ItemName",
@@ -1294,8 +1312,14 @@ local function showFailCard(item: any, lostCount: number)
 	})
 	UIKit.Label({
 		Name = "Detail",
-		Text = ("Kept %s, lost %d"):format(
-			"<b>" .. UIKit.Colored(UIKit.EscapeRichText(itemName(item)), UITheme.GetTierLight(tier)) .. "</b>",
+		Text = ("Kept your %s (%s), lost %d"):format(
+			"<b>"
+				.. UIKit.Colored(
+					(if item.Mutation then item.Mutation .. " " else "") .. tier,
+					UITheme.GetMutationColor(item.Mutation) or UITheme.GetTierLight(tier)
+				)
+				.. "</b>",
+			UIKit.EscapeRichText(itemName(item)),
 			lostCount
 		),
 		RichText = true,
@@ -1406,7 +1430,7 @@ end
 
 local skipOrder = 0
 
-showSkippedLine = function(item: any)
+showSkippedLine = function(item: any, extra: string?)
 	if typeof(item) ~= "table" or typeof(item.Tier) ~= "string" then
 		return
 	end
@@ -1443,10 +1467,11 @@ showSkippedLine = function(item: any)
 	local nameColor = UITheme.GetMutationColor(item.Mutation) or Colors.Text
 	UIKit.Label({
 		Name = "Text",
-		Text = ("%s  %s  %s"):format(
+		Text = ("%s  %s  %s%s"):format(
 			UIKit.Colored("+ " .. UIKit.EscapeRichText(itemName(item)), nameColor),
 			UIKit.Colored(tier:upper(), UITheme.GetTierLight(tier)),
-			UIKit.Colored("+" .. NumberFormat.Money(earnRate(item)) .. "/s", Colors.Cash)
+			UIKit.Colored("+" .. NumberFormat.Money(earnRate(item)) .. "/s", Colors.Cash),
+			if extra then "  " .. UIKit.Colored(UIKit.EscapeRichText(extra), nameColor) else ""
 		),
 		RichText = true,
 		Font = Fonts.Display,
@@ -1491,6 +1516,20 @@ function ResultController.ShowsBigCardFor(tier: string, mutation: string?): bool
 	return SettingsConfig.ShowsBigCard(tier, mutation, TycoonController.GetRevealRule())
 end
 
+-- "GOLDEN kept" (carried over from the inputs) or "GOLDEN rolled!" (a
+-- fresh fusion roll), from the server's MutationSource.
+local function mutationSourceLine(mutation: string?, source: unknown): string?
+	if not mutation then
+		return nil
+	end
+	if source == "Kept" then
+		return mutation:upper() .. " kept"
+	elseif source == "Rolled" then
+		return mutation:upper() .. " rolled!"
+	end
+	return nil
+end
+
 local function onFusionResolved(result: any)
 	if typeof(result) ~= "table" or not result.Success or not result.NewItem then
 		return
@@ -1504,9 +1543,11 @@ local function onFusionResolved(result: any)
 		showEventMutationCard(newItem, result.IsNewIndex == true or result.NewIndex == true)
 		return
 	end
+	local sourceLine = mutationSourceLine(newItem.Mutation, result.MutationSource)
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
+			SourceLine = sourceLine,
 			Item = newItem,
 			Description = ("%dx %s → %s · earns %s/s on a pedestal"):format(
 				if typeof(result.Count) == "number" then result.Count else 2,
@@ -1516,7 +1557,7 @@ local function onFusionResolved(result: any)
 			),
 		})
 	else
-		showSkippedLine(newItem)
+		showSkippedLine(newItem, sourceLine)
 	end
 end
 

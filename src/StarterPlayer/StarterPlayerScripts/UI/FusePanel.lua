@@ -9,12 +9,17 @@
 
 	  Left   the chamber: 6 slots in a hexagon round a dim silhouette of the
 	         next tier's orb, the chance (coloured by how safe it is), the
-	         recipe, count chips (2 · 55% ...), the fail rule, and a
-	         mutation line when any input is mutated.
+	         recipe, the mutation prediction, count chips (2 · 55% ...)
+	         and the fail rule.
 	  Right  tier tabs with fusable counts (Mythic locked before Rebirth 1,
 	         no Secret tab) and a grid of that tier's items, normal first.
 	         Tap to add or remove; selected cards dim and show a check.
-	  Bottom AUTO-FILL (normal items only), CLEAR, FUSE (2+), FUSE ALL.
+	  Bottom AUTO-FILL (the first orb's mutation; normal items into an
+	         empty chamber), CLEAR, FUSE (2+), FUSE ALL.
+
+	Under the recipe, the mutation prediction (FusionConfig.GetMutationMix):
+	"✨ Keeps GOLDEN ×2, might roll better" when every orb shares it, a red
+	warning box when a lower orb is mixed in (those orbs get a red ring).
 
 	After FUSE the slot orbs fly into the centre, then FusionController runs
 	the machine's charge-up and ResultController's reveal; the panel stays
@@ -81,7 +86,8 @@ local silhouette: Frame? = nil
 local chanceLabel: TextLabel
 local recipeLabel: TextLabel
 local chipsRow: Frame
-local mutationLabel: TextLabel
+local predictionBox: Frame
+local predictionLabel: TextLabel
 local tabsFrame: Frame
 local grid: ScrollingFrame
 local fuseButton: TextButton
@@ -166,28 +172,37 @@ local function chanceColor(chance: number): Color3
 	return Colors.Danger
 end
 
--- The mutation line: shared mutation carries, mixed doesn't.
-local function mutationText(items: { any }): string?
-	local anyMutated = false
-	local shared: string? = nil
-	local allShare = true
-	for index, item in items do
-		if item.Mutation then
-			anyMutated = true
-		end
-		if index == 1 then
-			shared = item.Mutation
-		elseif item.Mutation ~= shared then
-			allShare = false
-		end
+-- The prediction line under the recipe (FusionConfig.GetMutationMix, the
+-- rule the server applies): all one mutation keeps it, mixed loses it,
+-- all plain says nothing. Returns (text, isWarning, colour) or nil.
+local function predictionText(items: { any }, nextTier: string): (string?, boolean, Color3?)
+	if #items == 0 then
+		return nil, false, nil
 	end
-	if not anyMutated then
-		return nil
+	local mix = FusionConfig.GetMutationMix(items)
+	local best = mix.Best
+	if not best then
+		return nil, false, nil
 	end
-	if allShare and shared then
-		return ("All %s → result stays %s"):format(shared, shared)
+	if not mix.Mixed then
+		return ("✨ Keeps %s ×%d, might roll better"):format(best:upper(), MutationConfig.GetMultiplier(best)),
+			false,
+			UITheme.GetMutationColor(best)
 	end
-	return "Mixed mutations → result is normal (can still roll one)"
+	local below = if mix.BelowShared then (mix.BelowMutation or "plain") else "lower"
+	local result = if mix.Kept then mix.Kept else "plain"
+	return ("⚠ %d %s orb%s mixed in: the %s comes out %s, not %s. Use only %s orbs to keep %s."):format(
+		mix.BelowCount,
+		below,
+		if mix.BelowCount == 1 then "" else "s",
+		nextTier,
+		result,
+		best,
+		best,
+		best
+	),
+		true,
+		Colors.Text
 end
 
 --[[ Chamber ------------------------------------------------------------------ ]]
@@ -209,6 +224,7 @@ local function refreshChamber()
 	local items = selectedItems()
 	local count = #items
 	local nextTier = FusionConfig.GetNextTier(selectedTier) or selectedTier
+	local mix = FusionConfig.GetMutationMix(items)
 
 	-- Silhouette of what you're fusing toward.
 	if silhouette then
@@ -228,6 +244,15 @@ local function refreshChamber()
 			existing:Destroy()
 		end
 		local item = items[index]
+		-- A red ring on every orb dragging the result's mutation down.
+		local dragging = item ~= nil
+			and mix.Mixed
+			and MutationConfig.GetRank(item.Mutation) < MutationConfig.GetRank(mix.Best)
+		local ring = slot:FindFirstChildOfClass("UIStroke")
+		if ring then
+			ring.Color = if dragging then Colors.Danger else Colors.Faint
+			ring.Thickness = if dragging then 4 else 2
+		end
 		if item then
 			local orb = UIKit.TierOrb(item.Tier, hex.Slot - 10, nil, item.Mutation)
 			orb.Name = "Orb"
@@ -307,9 +332,15 @@ local function refreshChamber()
 		chip.Parent = chipsRow
 	end
 
-	local mutation = mutationText(items)
-	mutationLabel.Visible = mutation ~= nil
-	mutationLabel.Text = mutation or ""
+	local prediction, warning, color = predictionText(items, nextTier)
+	predictionBox.Visible = prediction ~= nil
+	predictionLabel.Text = prediction or ""
+	predictionLabel.TextColor3 = color or Colors.Text
+	predictionBox.BackgroundTransparency = if warning then 0 else 1
+	local boxStroke = predictionBox:FindFirstChildOfClass("UIStroke")
+	if boxStroke then
+		boxStroke.Enabled = warning
+	end
 
 	local pending = FusionController.IsRequestPending() or flying
 	local canFuse = count >= FusionConfig.MinFusionInputs and not pending and rebirthsNeeded(selectedTier) == nil
@@ -478,12 +509,28 @@ end
 
 --[[ Actions ------------------------------------------------------------------ ]]
 
--- Tops the chamber up to 6 with unmutated items (never mutated ones).
+-- Tops the chamber up to 6. Empty chamber: unmutated items, as before.
+-- Otherwise only items with the SAME mutation as the first orb in, so a
+-- fill never drags a mutation down.
+local function matchingUids(mutation: string?): { string }
+	if mutation == nil then
+		return FusionController.GetAutoFill(selectedTier)
+	end
+	local uids = {}
+	for _, item in InventoryController.GetInventory() do
+		if item.Tier == selectedTier and item.Mutation == mutation and not InventoryController.IsInUse(item) then
+			table.insert(uids, item.Uid)
+		end
+	end
+	return uids
+end
+
 local function autoFill()
 	if rebirthsNeeded(selectedTier) then
 		return
 	end
-	for _, uid in FusionController.GetAutoFill(selectedTier) do
+	local first = selectedItems()[1]
+	for _, uid in matchingUids(if first then first.Mutation else nil) do
 		if #selected >= FusionConfig.MaxFusionInputs then
 			break
 		end
@@ -585,11 +632,39 @@ local function buildChamber(column: ScrollingFrame)
 		Parent = column,
 	})
 
+	-- The mutation prediction, right under the recipe: plain text when the
+	-- mutation carries, a red box when mixing loses it.
+	predictionBox = Instance.new("Frame")
+	predictionBox.Name = "Prediction"
+	predictionBox.BackgroundColor3 = UITheme.TowardInk(Colors.Danger, 0.55)
+	predictionBox.BackgroundTransparency = 1
+	predictionBox.Size = UDim2.new(1, 0, 0, 0)
+	predictionBox.AutomaticSize = Enum.AutomaticSize.Y
+	predictionBox.LayoutOrder = 4
+	predictionBox.ZIndex = column.ZIndex + 1
+	predictionBox.Visible = false
+	predictionBox.Parent = column
+	UIKit.Corner(predictionBox, 10)
+	local warnStroke = UIKit.Stroke(predictionBox, 2, Colors.Danger)
+	warnStroke.Enabled = false
+	UIKit.Padding(predictionBox, 4, 8, 4, 8)
+	predictionLabel = UIKit.Label({
+		Name = "Text",
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 16),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = predictionBox.ZIndex + 1,
+		Parent = predictionBox,
+	})
+
 	chipsRow = Instance.new("Frame")
 	chipsRow.Name = "Chips"
 	chipsRow.BackgroundTransparency = 1
 	chipsRow.Size = UDim2.new(1, 0, 0, CHIP_HEIGHT)
-	chipsRow.LayoutOrder = 4
+	chipsRow.LayoutOrder = 5
 	chipsRow.ZIndex = column.ZIndex + 1
 	chipsRow.Parent = column
 	-- One row, never two: a non-wrapping list with scale widths (each chip
@@ -609,21 +684,8 @@ local function buildChamber(column: ScrollingFrame)
 		TextColor3 = Colors.Faint,
 		Size = UDim2.new(1, 0, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		LayoutOrder = 5,
-		ZIndex = column.ZIndex + 1,
-		Parent = column,
-	})
-	mutationLabel = UIKit.Label({
-		Name = "MutationRule",
-		Font = Fonts.BodyHeavy,
-		TextSize = 13,
-		TextColor3 = Colors.GoldLabel,
-		TextWrapped = true,
-		Size = UDim2.new(1, 0, 0, 34),
-		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 6,
 		ZIndex = column.ZIndex + 1,
-		Visible = false,
 		Parent = column,
 	})
 	layoutHex()
