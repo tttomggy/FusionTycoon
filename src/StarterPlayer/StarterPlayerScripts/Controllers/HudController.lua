@@ -785,6 +785,70 @@ local function refreshLockChip()
 	setLockPulse(alarm)
 end
 
+--[[ Steal timer chip --------------------------------------------------------
+	Under the LOCK chip, only while your thief cooldown (Player attribute
+	HeistCooldownUntil, server time) is running: muted "🫳 NEXT STEAL IN
+	42s" in amber text. When it reaches 0: "🫳 STEAL READY!" on the Gold
+	gradient for STEAL_READY_SECONDS, then it hides. Not tappable.
+]]
+local STEAL_CHIP_SIZE = Vector2.new(250, 44)
+local STEAL_READY_SECONDS = 2
+
+local stealChip: TextLabel
+-- The Gradient pill's Frame (UIKit.Pill): it takes position and visibility.
+local stealHolder: Frame
+local stealFill: UIGradient?
+local stealWasCounting = false
+local stealReadyUntil = 0
+
+local function buildStealChip()
+	stealChip = UIKit.Pill({
+		Name = "StealTimerChip",
+		Parent = screenGui,
+		Text = "",
+		Font = Fonts.Display,
+		TextSize = 17,
+		Height = STEAL_CHIP_SIZE.Y,
+		Gradient = UITheme.Gradients.Disabled,
+		TextColor3 = Colors.ShieldAmber,
+		TextStroke = 1.5,
+	})
+	stealHolder = stealChip.Parent :: Frame
+	stealHolder.Visible = false
+	stealFill = stealHolder:FindFirstChildOfClass("UIGradient")
+end
+
+local function setStealChip(text: string, ready: boolean)
+	stealChip.Text = text
+	stealChip.TextColor3 = if ready then Colors.Text else Colors.ShieldAmber
+	local fill = stealFill
+	if fill then
+		UIKit.SetPairGradient(fill, if ready then UITheme.Gradients.Gold else UITheme.Gradients.Disabled)
+	end
+	stealHolder.Visible = true
+end
+
+local function refreshStealChip()
+	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
+	local left = if typeof(untilTime) == "number"
+		then math.ceil(untilTime - Workspace:GetServerTimeNow())
+		else 0
+	if left > 0 then
+		stealWasCounting = true
+		setStealChip(("🫳 NEXT STEAL IN %ds"):format(left), false)
+		return
+	end
+	if stealWasCounting then
+		stealWasCounting = false
+		stealReadyUntil = os.clock() + STEAL_READY_SECONDS
+	end
+	if os.clock() < stealReadyUntil then
+		setStealChip("🫳 STEAL READY!", true)
+	else
+		stealHolder.Visible = false
+	end
+end
+
 --[[ Layout ---------------------------------------------------------------- ]]
 
 local cashHolder: Frame
@@ -798,6 +862,9 @@ local function applyLayout(isPhone: boolean)
 		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
 	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_CHIP_SIZE.X + LOCK_BUTTON_GAP, 0)
+	-- The steal timer sits under the LOCK chip (shown even at Rebirth 0's
+	-- hidden LOCK chip: you can't have a cooldown there anyway).
+	stealHolder.Position = lockHolder.Position + UDim2.fromOffset(0, LOCK_CHIP_SIZE.Y + LOCK_BUTTON_GAP)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -853,6 +920,7 @@ function HudController.Init()
 	buildButtonRow()
 	buildRebirthReadyButton()
 	buildLockChip()
+	buildStealChip()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
@@ -867,6 +935,7 @@ function HudController.Init()
 	task.spawn(function()
 		while true do
 			refreshLockChip()
+			refreshStealChip()
 			task.wait(LOCK_REFRESH_SECONDS)
 		end
 	end)

@@ -295,9 +295,10 @@ function HeistService.IsLossCapped(player: Player): boolean
 	return losses ~= nil and #losses >= HeistConfig.LossCap
 end
 
--- Studio /heistcd: clears the thief cooldown.
+-- Studio /heistcd: clears the thief cooldown (and its published attribute).
 function HeistService.ClearCooldown(player: Player)
 	state.cooldownUntil[player.UserId] = nil
+	player:SetAttribute("HeistCooldownUntil", nil)
 end
 
 -- Studio /stealable: toggles stealable-at-Rebirth-0 for this player's lab.
@@ -612,6 +613,8 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	state.carries[thief.UserId] = carry
 	state.carriedItems[uid] = thief.UserId
 	state.cooldownUntil[thief.UserId] = os.clock() + HeistConfig.ThiefCooldownSeconds
+	-- The client's steal timer (HUD chip, "Steal in 42s" prompts), server time.
+	thief:SetAttribute("HeistCooldownUntil", serverNow() + HeistConfig.ThiefCooldownSeconds)
 	PlayerDataService.SetItemCarried(victim, uid, true)
 	PlayerDataService.SetCarrying(thief, true)
 

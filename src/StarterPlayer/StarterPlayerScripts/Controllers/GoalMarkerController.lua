@@ -110,7 +110,8 @@ local function resolveTarget(name: string): Instance?
 			if pedestals then
 				for _, pedestal in pedestals:GetChildren() do
 					local prompt = pedestal:FindFirstChild("StealPrompt")
-					if pedestal:IsA("BasePart") and prompt and prompt:GetAttribute("Mode") == "Steal" then
+					local mode = prompt and prompt:GetAttribute("Mode")
+					if pedestal:IsA("BasePart") and (mode == "Steal" or mode == "Cooldown") then
 						local distance = (pedestal.Position - root.Position).Magnitude
 						if distance < bestDistance then
 							best, bestDistance = pedestal, distance

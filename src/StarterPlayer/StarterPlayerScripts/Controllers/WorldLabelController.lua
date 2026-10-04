@@ -147,10 +147,22 @@ end
 --            "Unlocks at Rebirth 1", an instant tap that only toasts
 --   Guarded  the owner is standing guard: "Owner is guarding", instant tap
 --            that only toasts, so the thief doesn't waste the 1.5 s hold
+--   Cooldown the viewer's thief cooldown is running (Player attribute
+--            HeistCooldownUntil): "Steal in 42s", instant tap that toasts
 --   Steal    "Steal" / item and $/s, hold to grab
--- Roblox hides a disabled prompt, so Locked and Guarded stay enabled with
--- no hold and HeistController answers the tap with a toast instead.
-export type StealMode = "Hidden" | "Locked" | "Guarded" | "Steal"
+-- Precedence: Hidden > Locked > Cooldown > Guarded > Steal. Roblox hides a
+-- disabled prompt, so Locked, Cooldown and Guarded stay enabled with no
+-- hold and HeistController answers the tap with a toast instead.
+export type StealMode = "Hidden" | "Locked" | "Cooldown" | "Guarded" | "Steal"
+
+-- Seconds left on the viewer's thief cooldown (0 when none).
+local function cooldownLeft(): number
+	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
+	if typeof(untilTime) ~= "number" then
+		return 0
+	end
+	return math.max(0, math.ceil(untilTime - Workspace:GetServerTimeNow()))
+end
 
 local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
 	local owner = prompt:GetAttribute("OwnerUserId")
@@ -172,6 +184,9 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 	if viewerRebirths < HeistConfig.MinRebirths then
 		return "Locked"
 	end
+	if cooldownLeft() > 0 then
+		return "Cooldown"
+	end
 	if pedestal:GetAttribute("GuardedByOwner") == true then
 		return "Guarded"
 	end
@@ -186,6 +201,12 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 	if prompt.ObjectText ~= objectText then
 		prompt.ObjectText = objectText
 	end
+	if mode == "Cooldown" then
+		local actionText = ("Steal in %ds"):format(cooldownLeft())
+		if prompt.ActionText ~= actionText then
+			prompt.ActionText = actionText
+		end
+	end
 	if prompt:GetAttribute("Mode") == mode then
 		return
 	end
@@ -196,6 +217,8 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 		prompt.HoldDuration = 0
 	elseif mode == "Guarded" then
 		prompt.ActionText = "Owner is guarding"
+		prompt.HoldDuration = 0
+	elseif mode == "Cooldown" then
 		prompt.HoldDuration = 0
 	else
 		prompt.ActionText = "Steal"
