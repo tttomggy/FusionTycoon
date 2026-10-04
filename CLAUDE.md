@@ -107,9 +107,30 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
   wide, one scrolling list of sections: "Big reveal card" (one 5-segment
   row per tier + a locked Secret row) and "Sound effects" (see Sounds)).
-- Saves: a failed DataStore load kicks the player in live games (never
-  overwrites the real save); in Studio it plays on a blank profile that is
-  never saved. PedestalDisplays are stored with string keys on disk.
+- **Saves (ProfileStore, session-locked):** PlayerDataService's backend is
+  the vendored `Packages/ProfileStore.lua` (MadStudioRoblox, commit
+  45c9847) in the store **`FT_Live_1`**, which is also the save wipe:
+  every save in the old `PlayerData_v1` (plain GetAsync / SetAsync) is
+  abandoned and never read again. A profile is held by ONE server: a
+  second server waits for the lock and steals it after ProfileStore's
+  standard timeout (~40 s), so the old server's later writes are refused;
+  that old server kicks the player ("Your save was opened in another
+  server, please rejoin") from `OnSessionEnd` while they're still in game.
+  A load that fails (or takes over 90 s) kicks in live games and never
+  overwrites the save. The session cache stays separate from
+  `profile.Data` (sparse numeric pedestal keys can't be stored):
+  `OnSave` writes a fresh disk copy (`toDisk`), `OnLastSave("Shutdown")`
+  runs the release hooks and pays pending offline cash first, leaving
+  writes the final copy then `EndSession`. Autosave every 120 s
+  (`AUTO_SAVE_PERIOD`); ProfileStore owns BindToClose. `SaveNow` =
+  `profile:Save()`; `SaveNowAsync` waits for `OnAfterSave` while the
+  profile is still active. `PlayerData.Version = 1` + `profile:Reconcile`
+  against the template, then `reconcile()` sanitises every field.
+  Public API unchanged (plus `IsProfileActive`, `IsReceiptSaved`).
+  **Studio:** ProfileStore's mock store (a blank profile every Play, never
+  saved), unless ServerScriptService has the attribute `FT_StudioSaves =
+  true` (and API access), which uses the separate store `FT_StudioTest_1`
+  to test persistence. PedestalDisplays are stored with string keys on disk.
 - **Offline earnings** (`OfflineConfig`): away time earns 25% of passive
   income per second, for at most 4 h, and nothing under 2 min.
   - `PlayerData.LastOnline` (`os.time()`) is written on every save. On load,
@@ -137,6 +158,10 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   schedule; clients read the same offset), `/eventmut
   <charged|void|celestial>` (a random Epic with that event-only mutation
   through the real reward path: the reveal card + the banner),
+  `/daily day <1-7>` (your next daily claim is that day, claimable now),
+  `/daily miss <days>` (as if you missed that many days: 1 = the free
+  skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
+  (today's play time), `/gifts reset`,
   `/wipe` (fails your active steals first).
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
@@ -289,11 +314,16 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     Lucky, Safe Fusion, Starter Pack, Double Offline Cash). 2× Cash, VIP,
     +2 Pedestals, Auto-Fuse and the cosmetic stay. The gacha and fusion
     stay fully playable with earned cash.
-  - **Receipts:** `ProcessReceipt` is idempotent: a PurchaseId already in
-    `PlayerData.Receipts` (the last 200) → `PurchaseGranted`; else check
-    (`refusal`) → grant (synchronous) → record → `PlayerDataService.
-    SaveNowAsync` → `PurchaseGranted`. Not loaded, a refused item or a
-    failed save → `NotProcessedYet`. Passes: `UserOwnsGamePassAsync` at
+  - **Receipts (the receipt rule):** `ProcessReceipt` grants **only while
+    this server holds the player's profile** (`IsProfileActive`), and
+    answers `PurchaseGranted` only once the PurchaseId is in a SAVED copy
+    (`IsReceiptSaved` reads `profile.LastSavedData`). The `Receipts` list
+    (the last 200) lives in the profile, so a grant and its receipt land
+    in the same write. A PurchaseId already granted this session →
+    granted once that write has landed (else save, re-check); new → check
+    (`refusal`) → grant (synchronous) → record → `SaveNowAsync` → saved?
+    → `PurchaseGranted`. Not loaded, profile not active, a refused item or
+    an unsaved receipt → `NotProcessedYet` (Roblox retries). Passes: `UserOwnsGamePassAsync` at
     join + `PromptGamePassPurchaseFinished` (session state, pushed into
     `PlayerDataService.SetShopSession`). Purchases start with remote
     `RequestShopPurchase { Key }`: the server re-checks (set up, policy,
@@ -367,6 +397,68 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     / 1:20:28 (48%) / 1:01:35 (37%); rebirths after 12 h 7 / 8 / 10.
     Harris decides any change from that table; re-run it after touching a
     shop multiplier (keep the sim's shop block in sync with ShopConfig).
+- **Daily rewards** (`DailyConfig`, granted by `RewardService`): a 7-day
+  cycle, every amount scaled to the player in seconds of BASE income:
+  10 min of income / ×2 income 15 min (the shop's boost bank) / 3 free
+  pulls / ×2 luck 15 min (the Luck Potion bank) / 1 Safe Fusion token /
+  ×2 income 1 h / an item (Epic 70 / Legendary 25 / Mythic 5, the normal
+  mutation roll). `PlayerData.Daily = { Day, LastClaimUtcDay, Skips,
+  Streak }`; one claim per UTC day (`RewardConfig.GetUtcDay`); missing
+  exactly one day spends the free skip, more resets to Day 1 with the skip
+  back; after Day 7 comes Day 1 (the streak keeps counting). Remote
+  `ClaimDaily` (C→S, no payload: the server picks the day and reward;
+  record + grant with no yield) → `DailyResult`. The snapshot's `Daily`
+  is `DailyConfig.GetStatus` at the server's UTC day. Region-restricted
+  players get every free reward. **Free pulls and reward items** go
+  through `TycoonService.GrantFreePulls` / `GrantRewardItem`: the plot's
+  real pull path (VFX, Index, banners, the pull card with the reward's
+  caption) and they **don't raise the pad price**.
+  Client: `DailyController` opens `UI/DailyCard` once per session when
+  claimable, 2 s after the first sync and only when no other card is open
+  (UIKit overlays, shop side cards), so never over the welcome-back card;
+  the 7-tile row (claimed dim ✓, today gold glowing "TODAY", Day 7 purple),
+  "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
+  7 odds). Pull days close the card for the real pull card.
+- **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
+  / 15 / 25 / 40 / 60 minutes played in a UTC day, summed across sessions
+  (5 min income / 1 free pull / ×2 income 10 min / 15 min income / ×2
+  luck 10 min / an item Rare 60, Epic 35, Legendary 5).
+  `PlayerData.Gifts = { UtcDay, PlaySeconds, Claimed }`, ticked once a
+  second on the server while in game (a new UTC day starts a fresh set).
+  Remote `ClaimGift { Index }` (server checks play time and claimed) →
+  `GiftResult`. HUD: the pink "🎁 GIFTS" button right of SHOP (green ready
+  badge + bounce, else a "next in 3:12" pill); `UI/GiftsPanel` (3 × 2
+  boxes: claimed dim ✓ / ready green glow "OPEN!" / locked "25 min" with a
+  bar, and a daily-reward strip on top). The client counts play time on
+  from the snapshot (`TycoonController.GetGiftPlaySeconds`).
+- **Street leaderboards** (`LeaderboardService`, spots in
+  `StreetLayout.Leaderboard`): 💰 BEST INCOME /s (`PlayerData.BestIncome`,
+  the highest BASE income reached), 🏆 MOST REBIRTHS, 📖 INDEX FOUND; past
+  the street's ends flanking the Event Boards (StreetLayout asserts: off
+  the street, past the last plot, clear of the Event Boards, on the
+  ground). OrderedDataStores `LB_Income_1` (stored as
+  floor(log10(1 + $/s) × 1e12)), `LB_Rebirths_1`, `LB_Index_1`; writes at
+  most every 2 min per player (only changed values), on leave (OnRelease)
+  and on BindToClose; reads the top 10 every 2 min. Rows: rank (1 / 2 / 3
+  tinted `RankGold` / `RankSilver` / `RankBronze`), cached headshot
+  (`GetUserThumbnailAsync`), display name (UserService, cached), value
+  (NumberFormat). `BillboardKit.LeaderboardSurface` / `SetLeaderboard`.
+  Studio: fake "TestPlayer1…10" rows, no DataStore calls.
+- **Analytics** (`ServerScriptService/Modules/AnalyticsKit`, the ONE
+  wrapper round AnalyticsService; every call in a pcall; in Studio it
+  prints `[Analytics] …` and sends nothing). `Funnel(player, step)`:
+  `LogOnboardingFunnelStepEvent` once per player ever (`PlayerData.Funnel`,
+  via `SetFunnelStore` from PlayerDataService): Join, ClaimLab,
+  FirstUpgrade, FirstPull, FirstDisplay, FirstFuse, FirstMultiplier,
+  FirstEvent, FirstRebirth, FirstSteal. `Source` / `Sink` →
+  `LogEconomyEvent` ("Cash"): passive income summed per minute
+  (`AddIncome`, flushed on leave too), coins, cash packs (IAP), daily and
+  gift cash (TimedReward); upgrades (a MAX is ONE event), pulls, the pad,
+  rebirth. `Custom`: ShopOpened, OfferShown / OfferAccepted /
+  OfferDismissed (client → remote `ShopAnalytics`, whitelisted,
+  rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
+  StealStarted / StealDelivered / StealSaved. Never call AnalyticsService
+  directly.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
   owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
@@ -406,9 +498,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     item to the thief (new Uid), then syncs and `SaveNow` for both. Every
     other ending just drops the carry: the item never left. An item is in
     at most one carry and a thief in at most one.
-  - **`PlayerDataService.OnRelease(callback)`** runs before a player's save
-    on PlayerRemoving and for everyone before `saveAll` on BindToClose;
-    HeistService fails that player's carries (either side) there.
+  - **`PlayerDataService.OnRelease(callback)`** runs before a player's
+    final save on PlayerRemoving and, on shutdown, in each profile's
+    `OnLastSave("Shutdown")` before its last copy is taken; HeistService
+    fails that player's carries (either side) there. Delivery also needs
+    both profiles active (`IsProfileActive`), else the item goes back.
   - **Shield / LOCK:** per player until a server time, published as the
     plot attribute `ShieldUntil`. Raised 60 s on claim, 120 s after a loss,
     and 60 s when the owner **LOCKs on purpose**: the one entry point is
@@ -501,7 +595,10 @@ src/ReplicatedStorage/Shared/
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals,
                  SettingsConfig — the player's reveal-card rules,
-                 ShopConfig — every pass / product and shop number, …)
+                 ShopConfig — every pass / product and shop number,
+                 RewardConfig — free reward kinds and their labels,
+                 DailyConfig — the 7-day daily reward and streak,
+                 GiftConfig — the playtime gifts, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -521,11 +618,15 @@ src/ServerScriptService/
     Packages/ProfileStore.lua  vendored MadStudioRoblox/ProfileStore (commit
                            45c9847, Apache 2.0, unmodified, `--!nocheck`);
                            only PlayerDataService requires it
+    Modules/AnalyticsKit.lua   the one AnalyticsService wrapper (not a
+                           service; required directly)
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
                            WorldService builds ground, street, Event Boards
                            and FREE LAB placeholders; EventService runs the
-                           event clock; AdminService runs Admin Abuse)
+                           event clock; AdminService runs Admin Abuse;
+                           RewardService the daily reward and playtime
+                           gifts; LeaderboardService the street boards)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
@@ -541,7 +642,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   toast + bump), FactoryController (client-only cash balls
                   on every nearby factory line, collector pops),
                   EventController (event banners, sky, FX, HUD chip, Event
-                  Boards), AdminController (admin panel + broadcasts)…
+                  Boards), AdminController (admin panel + broadcasts),
+                  ShopController, DailyController (when the daily card
+                  opens, ClaimDaily)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
@@ -551,6 +654,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   SettingsPanel (the ⚙ button: reveal-card rules),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
                   THANK YOU cards),
+                  DailyCard (the daily reward card), GiftsPanel (the GIFTS
+                  button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens)
 ```
@@ -635,6 +740,8 @@ calls left in `Services/`.
 | `EventService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `AdminService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 | `MonetizationService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `RewardService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -680,6 +787,9 @@ Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
+`ShopAnalytics` (C→S `{ Event, Key? }`, analytics only), `ClaimDaily`
+(C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
+`GiftResult` (S→C),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
