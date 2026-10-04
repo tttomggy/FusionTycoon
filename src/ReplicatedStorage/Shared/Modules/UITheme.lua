@@ -188,6 +188,12 @@ UITheme.Mutation = {
 	RainbowStops = { hex("#FF5470"), hex("#FFBE28"), hex("#4CF08A"), hex("#4FB3FF"), hex("#A47BFF") },
 }
 
+-- Index book orb looks (UI/IndexPanel): the tint laid over a found orb
+-- where the mutation colour alone is too pale (Void reads deep purple).
+UITheme.MutationOrbTint = {
+	Void = hex("#3A1A78"),
+} :: { [string]: Color3 }
+
 -- A mutation's solid colour (Rainbow's first stop; nil for normal items).
 function UITheme.GetMutationColor(mutation: string?): Color3?
 	if mutation == "Rainbow" then
