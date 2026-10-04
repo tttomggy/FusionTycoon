@@ -23,11 +23,9 @@ local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
-local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -173,7 +171,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 	for _, item in items do
 		table.insert(uids, item.Uid)
 	end
-	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
+	local luck = PlayerDataService.GetLuck(player)
 	-- An event mutation (Void Moon: Void) replaces the normal fusion roll
 	-- when it hits; otherwise the normal roll at the event's odds.
 	local rolled: string?

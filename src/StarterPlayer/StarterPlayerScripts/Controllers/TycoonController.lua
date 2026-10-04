@@ -5,6 +5,8 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local InventoryController = require(script.Parent.InventoryController)
@@ -31,6 +33,32 @@ local tipsSeen: { [string]: boolean } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
+-- The shop's view of this player (snapshot Shop). Timed boosts count down
+-- locally from the moment the snapshot arrived.
+type ShopView = {
+	OwnedPasses: { [string]: boolean },
+	Restricted: boolean,
+	IncomeBoostSeconds: number,
+	LuckBoostSeconds: number,
+	SafeFusionTokens: number,
+	StarterPackBought: boolean,
+	Cosmetics: { [string]: boolean },
+	Sessions: number,
+	OfflineDoubleAmount: number,
+	ReceivedAt: number, -- os.clock()
+}
+local shop: ShopView = {
+	OwnedPasses = {},
+	Restricted = true,
+	IncomeBoostSeconds = 0,
+	LuckBoostSeconds = 0,
+	SafeFusionTokens = 0,
+	StarterPackBought = false,
+	Cosmetics = {},
+	Sessions = 0,
+	OfflineDoubleAmount = 0,
+	ReceivedAt = 0,
+}
 -- Settings (SettingsConfig): the server's copy plus local changes it hasn't
 -- echoed yet (optimistic: they apply at once).
 local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
@@ -204,9 +232,10 @@ function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 		byUid[item.Uid] = item
 	end
 	local items = {}
-	for _, uid in pedestalDisplays do
+	local count = ShopConfig.GetPedestalCount(shop.OwnedPasses)
+	for index, uid in pedestalDisplays do
 		local item = byUid[uid]
-		if item and not carriedUids[uid] then
+		if item and index <= count and not carriedUids[uid] then
 			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 		end
 	end
@@ -222,7 +251,37 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		Rebirths = rebirths,
 		IndexMultiplier = indexMultiplier,
 		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
+		PassMultiplier = ShopConfig.GetPassIncomeMultiplier(shop.OwnedPasses),
+		BoostMultiplier = if TycoonController.GetBoostSecondsLeft("Income") > 0 then ShopConfig.BoostMultiplier else 1,
+		OverclockMultiplier = ShopState.GetOverclockMultiplier(),
 	}
+end
+
+--[[ Shop (read-only view of the server's state) ]]
+
+function TycoonController.GetShop(): ShopView
+	return shop
+end
+
+function TycoonController.OwnsPass(key: string): boolean
+	return shop.OwnedPasses[key] == true
+end
+
+-- Seconds left on a timed boost ("Income" | "Luck"), counted down locally.
+function TycoonController.GetBoostSecondsLeft(kind: "Income" | "Luck"): number
+	local base = if kind == "Income" then shop.IncomeBoostSeconds else shop.LuckBoostSeconds
+	return math.max(0, base - (os.clock() - shop.ReceivedAt))
+end
+
+-- The shop's luck multiplier (Lucky pass x an active Luck Potion), for
+-- displays; the server's PlayerDataService.GetLuck is what rolls use.
+function TycoonController.GetShopLuckMultiplier(): number
+	return ShopConfig.GetLuckMultiplier(shop.OwnedPasses, TycoonController.GetBoostSecondsLeft("Luck"))
+end
+
+-- 4, or 6 with the +2 Pedestals pass.
+function TycoonController.GetPedestalCount(): number
+	return ShopConfig.GetPedestalCount(shop.OwnedPasses)
 end
 
 -- Pad x rebirth: the multiplier every per-generator/per-item number shows.
@@ -339,6 +398,36 @@ local function onSyncTycoon(snapshot: any)
 	applySfx()
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
+	local rawShop = snapshot.Shop
+	if typeof(rawShop) == "table" then
+		local owned: { [string]: boolean } = {}
+		for _, key in (if typeof(rawShop.OwnedPasses) == "table" then rawShop.OwnedPasses else {}) do
+			if typeof(key) == "string" then
+				owned[key] = true
+			end
+		end
+		local cosmetics: { [string]: boolean } = {}
+		for _, key in (if typeof(rawShop.Cosmetics) == "table" then rawShop.Cosmetics else {}) do
+			if typeof(key) == "string" then
+				cosmetics[key] = true
+			end
+		end
+		local function number(value: any): number
+			return if typeof(value) == "number" then value else 0
+		end
+		shop = {
+			OwnedPasses = owned,
+			Restricted = rawShop.Restricted ~= false,
+			IncomeBoostSeconds = number(rawShop.IncomeBoostSeconds),
+			LuckBoostSeconds = number(rawShop.LuckBoostSeconds),
+			SafeFusionTokens = number(rawShop.SafeFusionTokens),
+			StarterPackBought = rawShop.StarterPackBought == true,
+			Cosmetics = cosmetics,
+			Sessions = number(rawShop.Sessions),
+			OfflineDoubleAmount = number(rawShop.OfflineDoubleAmount),
+			ReceivedAt = os.clock(),
+		}
+	end
 	hasSynced = true
 	tycoonChanged:Fire(cash, generatorLevels)
 end

@@ -186,11 +186,25 @@ local function giftPlayer(player: Player, tier: string, mutation: string?)
 end
 
 -- Applies a validated action on THIS server.
+-- Admin Abuse is "running" while an admin's event or luck is on: the shop's
+-- real sales (ShopConfig.Sales) read this window (EventState).
+local function extendAdminAbuse(seconds: number)
+	local now = Workspace:GetServerTimeNow()
+	local current = Workspace:GetAttribute("AdminAbuseUntil")
+	local base = if typeof(current) == "number" and current > now then current else now
+	Workspace:SetAttribute("AdminAbuseUntil", math.max(base, now + seconds))
+end
+
 local function apply(action: string, args: Args)
 	if action == "StartEvent" then
 		EventService.ForceEvent(args.Id, args.Minutes * 60, args.Strength)
+		extendAdminAbuse(args.Minutes * 60)
 	elseif action == "EndEvent" then
 		EventService.EndEvent()
+		-- Ending the event ends the window, unless admin luck is still on.
+		local luckUntil = Workspace:GetAttribute("AdminLuckUntil")
+		local now = Workspace:GetServerTimeNow()
+		Workspace:SetAttribute("AdminAbuseUntil", if typeof(luckUntil) == "number" and luckUntil > now then luckUntil else 0)
 	elseif action == "Gift" then
 		local mutation = if args.Mutation ~= "" then args.Mutation else nil
 		for _, player in Players:GetPlayers() do
@@ -199,6 +213,7 @@ local function apply(action: string, args: Args)
 	elseif action == "Luck" then
 		Workspace:SetAttribute("AdminLuck", AdminConfig.LuckMultiplier)
 		Workspace:SetAttribute("AdminLuckUntil", Workspace:GetServerTimeNow() + AdminConfig.LuckSeconds)
+		extendAdminAbuse(AdminConfig.LuckSeconds)
 		syncEveryone()
 		-- Odds displays drop back when it runs out.
 		task.delay(AdminConfig.LuckSeconds + 1, syncEveryone)

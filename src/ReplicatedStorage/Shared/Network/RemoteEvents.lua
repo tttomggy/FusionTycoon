@@ -32,6 +32,9 @@ local REMOTE_EVENT_NAMES = {
 	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)
+	"RequestShopPurchase", -- client -> server: { Key } (ShopConfig key; the server checks policy, sale window, one-time, then prompts)
+	"ShopPurchased", -- server -> client: { Key, Result = "Granted" | "Refused", Reason?, Lines?, Test? } (the THANK YOU card / a refusal toast)
+	"ShopAnnouncement", -- server -> all: { Kind = "Overclock", PlayerName, Seconds } (the Server Overclock banner)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }
 	"HeistEnded", -- server -> thief and victim: a carry ended; { Role, Outcome = "Delivered"|"Saved"|"Timeout"|"Left"|"Died", Item, OtherName }

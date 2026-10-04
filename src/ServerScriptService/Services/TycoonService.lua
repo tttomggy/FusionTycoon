@@ -413,9 +413,10 @@ end
 
 local gachaRng = Random.new()
 
--- Rebirth luck x the admin luck boost (EventState; stacks).
+-- The one luck number (PlayerDataService.GetLuck: rebirth x admin luck x
+-- the shop's Lucky pass / Luck Potion), for the rolls and the odds label.
 local function getLuck(player: Player): number
-	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
+	return PlayerDataService.GetLuck(player)
 end
 
 -- The pad's odds disclosure at the player's luck (FusionConfig.FormatOdds,
