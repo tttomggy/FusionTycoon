@@ -28,6 +28,8 @@ local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
@@ -38,6 +40,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
@@ -71,7 +74,6 @@ local MULTI_PULL_COUNT = 10
 local PLOT_SIGN_REFRESH_SECONDS = 5
 local STATION_DEBOUNCE_SECONDS = 1
 local BURST_COUNT = 30
-local STATION_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
 local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
@@ -217,13 +219,8 @@ local function validatePlotClone(plot: Model, player: Player)
 	end
 end
 
-local function playSound(parent: Instance, soundId: string, volume: number)
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = volume
-	sound.Parent = parent
-	sound:Play()
-	Debris:AddItem(sound, 3)
+local function playSound(parent: Instance)
+	SoundKit.Play("Station", parent)
 end
 
 local function burst(parent: Instance, color: Color3, count: number)
@@ -331,14 +328,15 @@ end
 
 local gachaRng = Random.new()
 
+-- Rebirth luck x the admin luck boost (EventState; stacks).
 local function getLuck(player: Player): number
-	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player))
+	return RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
 end
 
 -- The pad's odds disclosure at the player's luck (FusionConfig.FormatOdds,
 -- the same numbers the rolls use): all six tiers, then the pull mutations.
 local function getOddsText(luck: number): string
-	local odds = FusionConfig.FormatOdds(luck)
+	local odds = FusionConfig.FormatOdds(luck, EventState.GetOddsEvent())
 	return odds.Gacha .. "\n" .. odds.PullMutations
 end
 
@@ -367,9 +365,11 @@ type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
 -- nothing. nil if any roll has no item to give.
 local function rollPulls(count: number, luck: number): { PulledItem }?
 	local pulls: { PulledItem } = {}
+	-- The live event's mutation odds (Golden Rain, Rainbow Storm).
+	local pullMultipliers = EventState.GetMutationMultipliers("Pull")
 	for _ = 1, count do
 		local tier = FusionConfig.RollGachaTier(gachaRng, luck)
-		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull")
+		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull", pullMultipliers)
 		local def = ItemConfig.PickRandomOfTier(tier, gachaRng)
 		if not def then
 			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(tier))
@@ -464,7 +464,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
 			})
 		end
-		playSound(pad, STATION_SOUND_ID, 0.8)
+		playSound(pad)
 	end
 
 	-- Shared by the single pull and Pull x10.
@@ -632,7 +632,7 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		if levelingUpEffectTemplate then
 			ImportedEffects.Play(levelingUpEffectTemplate, pad.CFrame, plot)
 		end
-		playSound(pad, STATION_SOUND_ID, 0.8)
+		playSound(pad)
 
 		RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = true, OldMultiplier = oldMultiplier, NewMultiplier = newMultiplier })
 
@@ -725,6 +725,28 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 	end
 end
 
+--[[ LOCK console (heist shield) ------------------------------------------------------- ]]
+
+-- Built once on claim. HeistService answers the prompt (TryLock) through
+-- ProximityPromptService; each owner's client drives the label pill, the
+-- button colour and the prompt's Enabled from the plot's shield attributes.
+local function createLockConsole(plot: Model, origin: CFrame)
+	local L = PlotLayout.LockConsole
+	local _, post = LockKit.Build(origin, plot)
+	local prompt = newPrompt(post, LockKit.PROMPT_NAME, "Lock lab", ("%ds shield"):format(HeistConfig.ShieldSeconds), L.PromptDistance)
+	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	BillboardKit.Pad(post, {
+		Name = "LockLabel",
+		Title = "🔒 LOCK LAB",
+		TitleColor = UITheme.Colors.Text,
+		Pill = ("READY · %ds shield"):format(HeistConfig.ShieldSeconds),
+		PillGradient = UITheme.Gradients.Shield,
+		StudsOffset = Vector3.new(0, L.LabelOffsetY - L.PostSize.Y / 2, 0),
+		MaxDistance = L.LabelMaxDistance,
+		OwnerOnly = true,
+	})
+end
+
 --[[ Factory line ---------------------------------------------------------------------- ]]
 
 -- The belt, the collector (with its owner-only generator-income label) and the five
@@ -815,13 +837,17 @@ local function refreshFactoryLine(player: Player)
 	end
 	-- Pedestal rates include the income multiplier (pad x rebirth x Index).
 	TycoonService.RefreshPedestalLabels(player)
-	-- The odds board's fusion mutation line scales with the owner's luck.
+	-- The odds board's chance cells: the owner's rebirths ("R1" until the
+	-- Secret recipe unlocks) and the live event (Void Moon: boosted, purple).
 	local board = plot:FindFirstChild("OddsBoard")
 	local boardPart = board and board:FindFirstChild("Board")
 	local surface = boardPart and boardPart:FindFirstChild("OddsSurface")
 	if surface and surface:IsA("SurfaceGui") then
-		local odds = FusionConfig.FormatOdds(getLuck(player))
-		BillboardKit.SetOddsMutations(surface, "Mutations · " .. odds.FusionMutations)
+		local odds = FusionConfig.FormatOdds(getLuck(player), EventState.GetOddsEvent())
+		BillboardKit.SetOddsChances(surface, odds.Fusion, {
+			Rebirths = PlayerDataService.GetRebirths(player),
+			Boosted = EventState.GetFusionSuccessBonus() > 0,
+		})
 	end
 	refreshRebirthPortal(player)
 	local label = collectorLabelByUserId[player.UserId]
@@ -870,18 +896,25 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 			if item then
 				local def = ItemConfig.GetItemById(item.ItemId)
 				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
+				local rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					Mutation = item.Mutation,
 					ItemName = name,
-					Rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier,
+					Rate = rate,
 					Stolen = PlayerDataService.IsItemCarried(player, item.Uid),
 				})
+				-- What a thief sees on the StealPrompt: the item and its value.
+				-- Also an attribute, so the client can put it back after
+				-- showing its own text (the Rebirth-0 teaser).
+				local stealLabel = ("%s · +%s/s"):format(name, NumberFormat.Money(rate))
+				pedestal:SetAttribute("StealLabel", stealLabel)
 				if steal and steal:IsA("ProximityPrompt") then
-					steal.ObjectText = name
+					steal.ObjectText = stealLabel
 				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
+				pedestal:SetAttribute("StealLabel", "")
 				if steal and steal:IsA("ProximityPrompt") then
 					steal.ObjectText = ""
 				end
@@ -996,6 +1029,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		TycoonService.RefreshPedestalLabels(player)
 		createFactoryLine(plot, origin, player)
 		createRebirthPortal(plot, origin, player)
+		createLockConsole(plot, origin)
 		syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
 		refreshPlotSigns()
 	end)

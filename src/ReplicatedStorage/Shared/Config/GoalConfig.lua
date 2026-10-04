@@ -11,7 +11,9 @@
 	"1 / 2 Rare" progress line; nil means a yes/no goal with no count line.
 	`Target` is where the client's goal marker points: the name of a part or
 	model inside the player's own plot, "FirstEmptyPedestal" (the
-	lowest-index empty pedestal), or "ui:<Button>" for a HUD button.
+	lowest-index empty pedestal), "NearestEnemyPedestal" (the closest
+	pedestal in another lab you could steal from right now), or
+	"ui:<Button>" for a HUD button.
 ]]
 local GoalConfig = {}
 
@@ -39,6 +41,9 @@ GoalConfig.Goals = {
 	{ Id = "own_mythic", Text = "Own a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine" },
 	-- Checked after the rebirth resets the run, so the reward lands in the new run.
 	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
+	-- Heist (unlocks at Rebirth 1): defend first, then steal.
+	{ Id = "first_shield", Text = "Lock your lab with the LOCK button", Reward = 10000, Target = "LockConsole" },
+	{ Id = "first_steal", Text = "Steal an item from another lab", Reward = 50000, Target = "NearestEnemyPedestal" },
 } :: { GoalDef }
 
 function GoalConfig.GetGoal(index: number): GoalDef?

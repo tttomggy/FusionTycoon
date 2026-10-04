@@ -42,12 +42,14 @@ gacha odds via `FusionConfig.GetGachaRates`, and every mutation chance).
 
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
 at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
-successful fusion can roll a **mutation** (`MutationConfig`: Golden ×2,
-Diamond ×5, Rainbow ×12 income). Fusion rules: a success keeps the *lowest*
+successful fusion can roll a **mutation** (`MutationConfig`, ranked by
+multiplier: Golden ×2, Charged ×3, Diamond ×5, Void ×8, Rainbow ×12,
+Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal
+chance, `MutationConfig.IsEventOnly`). Fusion rules: a success keeps the *lowest*
 mutation among all inputs (so every input must share it), then may roll a
 better one; a fail keeps the best input untouched (same Uid) and removes
-the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 68 entries =
-item × variant) pays +1% income per entry and +5% per full tier page, and
+the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 119 entries =
+17 items × 7 variants, built from `MutationConfig.Order`) pays +1% income per entry and +5% per full tier page, and
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
@@ -92,7 +94,123 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   way to test the welcome-back card, since Studio profiles never save),
   `/shield <s>` (0 drops it), `/heistcd 0` (clears your thief cooldown),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
+  `/tips reset` (clears your seen one-time tips),
+  `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
+  MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
+  `/eventclock <offsetMinutes>` (shifts the event clock to walk the
+  schedule; clients read the same offset), `/eventmut
+  <charged|void|celestial>` (a random Epic with that event-only mutation
+  through the real reward path: the reveal card + the banner),
   `/wipe` (fails your active steals first).
+- **Events** (`EventService`, every number in `EventConfig`): lab weather
+  on a shared UTC clock. **The schedule is deterministic from the UTC slot
+  time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
+  draws from a **lowbias32 hash of the slot start** (bit32 only; two draws
+  discarded), so every server and client computes the same lineup with no
+  messaging. Not `Random.new(slotStart)`: slots 900 s apart gave correlated
+  first draws (three POWER SURGEs in a row). `luau
+  tools/event_schedule_check.luau` runs the real EventConfig over 10,000
+  slots (shares within 0.3 pts, repeats at each weather's own share). hh:00 Night 10 min (15% Void Moon);
+  hh:15/:30/:45 one weather by weight (Golden Rain 40 / Power Surge 35 /
+  Meteor Shower 20 / Rainbow Storm 5). An override (`/event`, admin) replaces
+  the scheduled event until it ends, then the clock resumes.
+  - EventService publishes workspace attributes `EventId`, `EventEndsAt`
+    (server time), `EventStrength` (+ `EventClockOffset`, `AdminLuck`,
+    `AdminLuckUntil`, `NextAdminAbuse`). Clients and leaf services read
+    them through `Shared/Modules/EventState`; the effect formulas are pure
+    functions in EventConfig, so a roll and its display always agree.
+  - **Effect hooks** (no globals): `EventService.GetMutationOddsMultiplier
+    (mutation, source)`, `GetFusionSuccessBonus()`,
+    `GetGeneratorMultiplier()`, `GetFusionEventMutation()`. Wired as a
+    multipliers table into `MutationConfig.Roll` / `GetChance` (shared
+    config never requires EventService), a bonus into
+    `FusionConfig.GetFusionChance`, and `IncomeInputs.EventGeneratorMultiplier`
+    (generator income only). `FusionConfig.FormatOdds(luck, event)` shows the
+    boosted numbers; every event change re-syncs players so labels refresh.
+  - Strength ×1–×3 (admin) is clamped: coin ≤ 15 s of income, generators
+    ≤ ×3, mutation odds ≤ ×15.
+  - `tools/econ_sim.py <seeds> <hours> --events` runs the clock and compares
+    with the same seeds without it. **Target: events speed Rebirth 1–3 by
+    ≤ 15%.** The first spec numbers gave 20–27% (Void Moon the biggest
+    part, coins minor), so they were cut: Void Moon 30% → 15% of nights,
+    fusion bonus +10 → +5 points, Void roll 10% → 5%, coin 5 s → 3 s of
+    income, Surge ×1.5 → ×1.25. Events 2 added BIG + street coins
+    (modelled: 1 in 6 street coins per player) and lowered the coin
+    FREQUENCY, not the size: lab coins every 4 → 10 s, street coins every
+    6 → 15 s. Now +10.4% / +14.4% / +10.3% (30 seeds, 12 h). Any change to
+    an event number: re-run and keep it ≤ 15%.
+  - Rewards are server-side (EventService):
+    - **Golden Rain:** lab coins (owner-only, touch + distance check, 3 s of
+      income; 1 in `BigCoinChance` (8) is a **BIG** coin worth 20 s) and
+      **street coins** (in `MeteorBounds`, max 8, anyone grabs, pays the
+      GRABBER 6 s). Value is seconds of income on purpose (never cash).
+      Per-player tally: Player attribute `GoldenRainTally` (chip "💰 +$X
+      this rain", the end toast).
+    - **Power Surge:** generators ×1.25; lightning every 20 s on a target
+      picked by lab, then pedestal, marked `LightningWarningSeconds` (3)
+      early (pedestal attribute `LightningTarget` + EventFx StrikeWarning);
+      25% of a plain displayed item turns Charged (carried items skipped;
+      inventory, Index, pedestal visuals/labels, SyncInventory).
+    - **Meteor Shower:** craters on the street (`StreetLayout.MeteorBounds`;
+      first finished hold wins a core: Epic 60 / Legendary 30 / Mythic 9 /
+      Secret 1, 15% Celestial; a "Hold E · free item" pill).
+    - **Void Moon:** fusion +5 points, 5% Void replacing the normal roll.
+  - **Cleanup:** every object an event makes lives in
+    `Workspace.EventObjects.<EventId>` (EventService builds the folders at
+    Init): server coins, craters and prompts; each client's own FX (sky,
+    moon, lightning, meteors, rings, chips, pops, station pills). Any end
+    (timeout, `/event off`, admin, an override) is one `ClearAllChildren`
+    on each side; a meteor still falling leaves no crater.
+  - **Event-only mutations** (Charged / Void / Celestial) from a pull,
+    fusion, strike, core or `/eventmut` get the **reveal card**
+    (ResultController: "EVENT-ONLY MUTATION", the giant word, how you got
+    it, "Index +1 · Void 3 / 17") and a SERVER banner at any tier
+    (`EventService.AnnounceEventMutation`, RareFusionAnnouncement Verb
+    "event").
+  - Visuals are client-side (`EventController`): start banner (3-2-1),
+    end toast, sky from a captured Lighting baseline restored exactly
+    (never raise a light: Night just darkens), band flicker through
+    `LocalTransparencyModifier`, EventFx cues (strike warnings, lightning +
+    CHARGED!/MISSED, meteors + ☄ INCOMING rings, coin pops: full
+    `NumberFormat.Money`, BIG in gold), "⚡ ×1.25" chips over generators
+    (`BillboardKit.Chip`), faster/brighter factory balls, the two street
+    Event Boards (`StreetLayout.EventBoard`, built by WorldService).
+  - **Every event explains itself:** the top-centre HUD chip opens the
+    **info card** (`UI/EventInfoCard`, copy from `EventConfig.GetInfo`,
+    built from the config numbers; `EventConfig.Blurbs` = the first "what to
+    do" sentence). It auto-opens once per event type per account (Tips
+    `event_<EventId>`, TipConfig) after the start banner, and between
+    events explains the next one. **Event arrows:**
+    `GoalMarkerController.SetEventOverride` (heist > event > goal): Rainbow
+    Storm → your Gacha Pad (then the machine once you're on it), Night /
+    Void Moon → your machine, Meteor Shower → the nearest crater, Golden
+    Rain → the nearest street coin. Station pills: "🌈 MUTATIONS ×5 · PULL
+    NOW" on your pad, "🌙 FUSE NOW" on your machine.
+- **Odds board** (FusionMachineService + `BillboardKit.OddsSurface`): 9 × 6
+  studs at 60 px/stud, a real table (one rounded cell per %, 100% teal),
+  no mutation line (the pad and Index have it). `SetOddsChances(gui, rows,
+  { Rebirths, Boosted })` on every sync: the Mythic → Secret row reads "R1"
+  until the owner has Rebirth 1, a Void Moon turns every cell purple with
+  the boosted number. The Fuse panel's chips are one two-line chip per
+  count, the chamber's count highlighted.
+- **Index headers:** each mutation column heading (ⓘ) opens a "how to get
+  it" box (numbers from EventConfig) with "You have X / 17".
+- **Sounds** (`SoundConfig` slots + `SoundKit.Play(slot, parent?)`): every
+  sound goes through a slot; an empty Id is silent, a failed Id warns once
+  (client `SoundKit.Preload` at boot). No looping ambient sounds (the
+  pedestal bell loop is gone). `docs/SOUNDS.md` lists every slot.
+- **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
+  `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
+  owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
+  the client never builds it otherwise. Every `AdminAction` is re-checked
+  (non-admins get a SUSPICIOUS warn) and every arg whitelisted. Start event,
+  end event, gift everyone (EventReward "🎁 ADMIN GIFT"), luck ×3 for 10
+  min, broadcast (≤ 80 chars, `TextService:FilterStringAsync` broadcast
+  string, dropped if filtering fails), set next Admin Abuse (DataStore
+  `GlobalEvents` key `NextAdminAbuse`, UTC, read on start and every 5 min).
+  "All servers" publishes `{ Action, Args, SenderUserId }` on
+  MessagingService topic **`FT_Admin`**; every receiver re-checks the sender
+  and re-validates. Every action is logged with `warn`.
 - **Heist** (`HeistService`, every number in `HeistConfig`): from Rebirth 1,
   items **on pedestals** can be stolen by another Rebirth 1+ player;
   inventory items never are. Hold E 1.5 s on an enemy pedestal's
@@ -100,8 +218,15 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   WalkSpeed 12. Delivered = the thief's root inside their own walls;
   saved = the owner within 5 studs; timeout, thief death, either side
   leaving, the victim's plot going, shutdown or `/wipe` = it goes back.
-  Thief cooldown 60 s after any attempt; a victim gets a 120 s auto-shield
-  per loss and loses at most 3 per 10 min. While carrying: no pulls,
+  Thief cooldown 60 s after any attempt (published as the Player attribute
+  `HeistCooldownUntil`, server time; `/heistcd 0` clears it); a victim gets a 120 s auto-shield
+  per loss and loses at most 3 per 10 min. **Fairness:** the owner within
+  `OwnerBlockRadius` (6) of the pedestal when the hold completes guards it
+  (rejected `Guarded`; pedestal attribute `GuardedByOwner`, the prompt
+  reads "Owner is guarding"); no tag for `TagGraceSeconds` (2) after a grab
+  (RUN! / "Catch them in 2…1…"); the owner runs at `OwnerChaseWalkSpeed`
+  (18) while any of their items is carried. A catch plays client-side
+  from the thief's `HeistOutcome` / `HeistReturnTo` attributes. While carrying: no pulls,
   fusing, upgrades, Multiplier Pad, rebirth, shield pad or second steal
   (Reason `Carrying`); the owner can't remove a carried item or rebirth
   (`BeingStolen` / `ItemBeingStolen`). A carried pedestal earns nothing.
@@ -116,18 +241,72 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - **`PlayerDataService.OnRelease(callback)`** runs before a player's save
     on PlayerRemoving and for everyone before `saveAll` on BindToClose;
     HeistService fails that player's carries (either side) there.
-  - **Shield:** per player until a server time, published as the plot
-    attribute `ShieldUntil`. Raised 60 s on claim and when the owner steps
-    on their YOURS pad while it's down (server region check). While up, a
+  - **Shield / LOCK:** per player until a server time, published as the
+    plot attribute `ShieldUntil`. Raised 60 s on claim, 120 s after a loss,
+    and 60 s when the owner **LOCKs on purpose**: the one entry point is
+    `HeistService.TryLock(player)`, rejected in order `Protected`,
+    `Carrying`, `AlreadyLocked`, `Recharging` (+ seconds) or `TooFar` (root
+    more than `LockConsole.PromptDistance` + `HeistConfig.LockReachSlack`
+    = 10 studs, flat, from your own console: an exploit firing the prompt
+    from afar is refused); success pays `ShieldRaises` (first_shield).
+    **LOCK is console-only** (you have to run home): the **LOCK console**
+    (`LockKit`, `PlotLayout.LOCK_CONSOLE`, built on claim; owner-only
+    prompt "Lock lab" answered server-side via ProximityPromptService,
+    owner-only "🔒 LOCK LAB" label) is the one way in; there is no lock
+    remote. Rejections toast via `HeistEnded { Role = "Lock", Outcome =
+    "Rejected" }`. The YOURS pad
+    is decorative. After any shield ends LOCK recharges for
+    `ShieldRearmSeconds` (20 s, plot attribute `ShieldRearmAt`); the claim
+    and victim shields ignore it, `/shield 0` clears it. Clients read
+    `ShieldUntil` / `ShieldRearmAt` / `Protected` through `ShieldState` for
+    the console (pill, pink/teal/dim button, prompt on only when Ready) and
+    the HUD **LOCK status chip**, which never locks: muted "🔓 UNLOCKED"
+    (amber text) / teal "🛡 LOCKED · 42s" / muted "RECHARGING · 12s" / red
+    pulsing "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK" (lock ready and a
+    non-owner's root inside your walls). Tapping it points the goal arrow
+    at your console for 8 s ("Your LOCK button is just inside your gate";
+    `HudController.SetLockChipHandler`, answered by HeistController). Under
+    it, the **steal timer chip** while `HeistCooldownUntil` runs: "🫳 NEXT
+    STEAL IN 42s", then "🫳 STEAL READY!" (Gold) for 2 s. While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
     the sign's teal PROTECTED pill): no StealPrompt, no eject needed.
-  - Client: WorldLabelController enables a StealPrompt only for an eligible
-    viewer; HeistController draws every carrier's orb (`PedestalVisuals.
+  - **Teaching flow:** Rebirth-0 viewers see a locked "🔒 Steal / Unlocks at
+    Rebirth 1" teaser on stealable enemy pedestals; the Rebirth 1 card and
+    `RebirthConfig.Unlocks[1]` announce stealing; goals `first_shield`
+    (LOCK, `ShieldRaises`, target `LockConsole`) then `first_steal`
+    (deliveries, `TotalSteals`; marker target `NearestEnemyPedestal`); red
+    hand markers over grabbable enemy pedestals. **GUARDED is visible:** a
+    teal "🛡 GUARDED" chip over every guarded pedestal (every viewer) and,
+    while an owner is home, a faint teal floor ring of `OwnerBlockRadius`
+    round each of their filled pedestals (client-only SurfaceGui faces, no
+    lights). **HOW TO HEIST** (`UI/HowToHeistPanel`, 640 × 480): four
+    slides (GRAB, GUARD, CATCH, LOCK), each a live 3D scene
+    (`UI/HeistScenes`: ViewportFrame + WorldModel with the real pedestal /
+    orb, LockKit console, a wall with its gate gap, flat pink World.Shield
+    panels since ForceField doesn't render in viewports; YOU = a stripped
+    clone of your character, the thief a red R15 rig; your own Animate run
+    / idle ids; labels are 2D pills projected through the scene camera;
+    lighting from `UITheme.HeistScene`). Built on open, destroyed on close,
+    only the visible slide ticks. Auto-opened once per account after the
+    first-rebirth card, and from the HUD's "?" button.
+  - **One-time tips:** `PlayerData.Tips` (saved set), ids whitelisted in
+    `TipConfig` (`howToHeist`, `stealHowTo`, `intruder`, `guarded`,
+    `catch`, `lockAfterLoss`), marked with remote `MarkTipSeen { Id }`,
+    sent as `TipKeys` in the snapshot (`TycoonController.HasSeenTip` /
+    `MarkTipSeen`). Tips are big 4 s toasts (`ToastController.Show(text,
+    kind, { Big = true })`). `/tips reset` clears them.
+  - Client: WorldLabelController sets each StealPrompt's local `Mode`
+    (precedence Hidden > Locked > Cooldown > Guarded > Steal; Locked,
+    Cooldown ("Steal in 42s") and Guarded are no-hold taps that only toast,
+    since Roblox hides disabled prompts; red hand markers stay on during
+    the cooldown); HeistController draws every carrier's orb (`PedestalVisuals.
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
-    plot's shield fence; HudController shows the shield chip.
+    plot's shield fence, drives your LOCK console and shows GUARDED;
+    HudController shows the LOCK status chip, the steal timer chip and the
+    "?" button.
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
@@ -148,6 +327,9 @@ src/ReplicatedStorage/Shared/
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
+                 EventConfig — the event clock, effects and info-card copy,
+                 SoundConfig — every sound slot, AdminConfig —
+                 admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
@@ -157,6 +339,7 @@ src/ReplicatedStorage/Shared/
                  (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
                  ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
+                 SoundKit (every sound, by SoundConfig slot),
                  NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -165,8 +348,9 @@ src/ServerScriptService/
     ServiceManager.lua     loading + Init/Start lifecycle
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
-                           WorldService builds ground, street and FREE LAB
-                           placeholders)
+                           WorldService builds ground, street, Event Boards
+                           and FREE LAB placeholders; EventService runs the
+                           event clock; AdminService runs Admin Abuse)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
@@ -180,12 +364,17 @@ src/StarterPlayer/StarterPlayerScripts/
                   BeltController (client-only belt chevrons),
                   GeneratorController (world Buy/Upgrade prompts, upgrade
                   toast + bump), FactoryController (client-only cash balls
-                  on every nearby factory line, collector pops)…
+                  on every nearby factory line, collector pops),
+                  EventController (event banners, sky, FX, HUD chip, Event
+                  Boards), AdminController (admin panel + broadcasts)…
     Effects/      RevealEffects
     UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
-                  orb fusion chamber + picker, opened by the machine prompt)
+                  orb fusion chamber + picker, opened by the machine prompt),
+                  AdminPanel (built only on the server's AdminOpen),
+                  HowToHeistPanel + HeistScenes (the 3D heist clips),
+                  EventInfoCard (what the HUD event chip opens)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -254,10 +443,10 @@ calls left in `Services/`.
 | Service | Lifecycle | Cross-service refs | Mode |
 | --- | --- | --- | --- |
 | `PlayerDataService` | `:Init()` | — (leaf) | `--!strict` |
-| `FusionService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `FusionService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 | `ItemService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LightingService` | `:Init()` | — | `--!strict` |
-| `DebugService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `DebugService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `EventService` | `--!strict` |
 | `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start) | `--!nonstrict` ⚠ |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
@@ -265,6 +454,8 @@ calls left in `Services/`.
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `OfflineService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `EventService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `AdminService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -306,6 +497,8 @@ in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
+`MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
+prompt only),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
@@ -352,6 +545,9 @@ checks that no footprints overlap and everything sits inside the walls.
   rings on flat surfaces are SurfaceGui faces (`BillboardKit.BuildPadFace`);
   Neon cylinders are only thin bands seen from the side (station/machine
   rims).
+- **LOCK console:** `PlotLayout.LOCK_CONSOLE` (10, 0, 27), inside the gate
+  right of the walkway, facing the gate; 3 × 3 footprint in the assertion
+  block; geometry in `PlotLayout.LockConsole`, prompt distance 8.
 - **Pedestal prompts:** the client handles DisplayPrompts through
   `ProximityPromptService` (PromptTriggered/PromptShown), never by looping a
   folder's children once; server containers are built complete and parented

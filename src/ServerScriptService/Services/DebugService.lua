@@ -14,6 +14,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
@@ -21,6 +22,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
+type EventServiceModule = typeof(require(script.Parent.EventService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -36,6 +38,7 @@ local state: State = {
 -- call sites below read exactly as before.
 local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
+local EventService: EventServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -63,6 +66,18 @@ local SHIELD_COMMAND = "/shield"
 local HEIST_COOLDOWN_COMMAND = "/heistcd"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
+-- "/event powersurge 3" forces an event for 3 min (default its normal
+-- length); "/event off" ends what's on. "/eventclock 15" shifts the event
+-- clock 15 min ahead so the schedule can be walked through.
+local EVENT_COMMAND = "/event"
+local EVENT_CLOCK_COMMAND = "/eventclock"
+-- "/eventmut void" gives a random Epic with an event-only mutation (Charged,
+-- Void, Celestial) through the real reward path, so the reveal card and the
+-- banner can be tested (/give skips them).
+local EVENT_MUTATION_COMMAND = "/eventmut"
+-- "/tips reset" clears your seen one-time tips (TipConfig), so HOW TO HEIST
+-- and the heist tips can be re-tested.
+local TIPS_COMMAND = "/tips"
 -- "/offline 180" pretends you were away 180 minutes: sets the pending
 -- offline earnings and re-sends the snapshot, so the welcome-back card can
 -- be tested (Studio profiles never save, so a real absence can't be).
@@ -103,7 +118,8 @@ local function onPlayerChatted(player: Player, message: string)
 			warn(("DebugService: /give: unknown item id %q"):format(tostring(itemId)))
 			return
 		end
-		-- Chat is lowercased above; mutations are "Golden", "Diamond", "Rainbow".
+		-- Chat is lowercased above; mutations are MutationConfig names ("Golden",
+		-- "Charged", "Diamond", "Void", "Rainbow", "Celestial").
 		local mutation = if rawMutation ~= "" then rawMutation:sub(1, 1):upper() .. rawMutation:sub(2) else nil
 		if mutation and not MutationConfig.IsValid(mutation) then
 			warn(("DebugService: /give: unknown mutation %q"):format(rawMutation))
@@ -116,6 +132,10 @@ local function onPlayerChatted(player: Player, message: string)
 	elseif command == SHIELD_COMMAND then
 		local seconds = tonumber(argument) or HeistConfig.ShieldSeconds
 		HeistService.RaiseShield(player, math.max(0, seconds))
+		if seconds <= 0 then
+			-- /shield 0 also lifts the pad's 20 s re-arm lock, for testing.
+			HeistService.ClearRearm(player)
+		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
 	elseif command == HEIST_COOLDOWN_COMMAND then
 		HeistService.ClearCooldown(player)
@@ -125,6 +145,51 @@ local function onPlayerChatted(player: Player, message: string)
 		stealableToggles[player.UserId] = stealable
 		HeistService.SetDebugStealable(player, stealable)
 		print(("DebugService: %s's lab is %s"):format(player.Name, if stealable then "stealable" else "protected again"))
+	elseif command == EVENT_COMMAND then
+		local name, rawMinutes = argument:match("^(%S+)%s*(%S*)$")
+		if name == "off" then
+			EventService.EndEvent()
+			print("DebugService: event ended")
+			return
+		end
+		-- Chat is lowercased; match the id case-insensitively.
+		local id: string? = nil
+		for _, candidate in EventConfig.Order do
+			if candidate:lower() == name then
+				id = candidate
+			end
+		end
+		if not id then
+			warn(("DebugService: /event: unknown event %q (try %s)"):format(tostring(name), table.concat(EventConfig.Order, ", ")))
+			return
+		end
+		local minutes = tonumber(rawMinutes)
+		local seconds = if minutes then minutes * 60 else EventConfig.Durations[id]
+		EventService.ForceEvent(id, seconds)
+		print(("DebugService: forced %s for %d s"):format(id, seconds))
+	elseif command == EVENT_CLOCK_COMMAND then
+		local minutes = tonumber(argument) or 0
+		EventService.SetClockOffset(minutes)
+		print(("DebugService: event clock offset %d min"):format(minutes))
+	elseif command == EVENT_MUTATION_COMMAND then
+		-- The message was lowercased: match the mutation's real name.
+		local mutation: string? = nil
+		for _, name in MutationConfig.Order do
+			if name:lower() == argument and MutationConfig.IsEventOnly(name) then
+				mutation = name
+			end
+		end
+		if mutation and EventService.GrantEventMutationItem(player, mutation) then
+			print(("DebugService: gave %s a %s Epic"):format(player.Name, mutation))
+		else
+			warn("DebugService: /eventmut <charged|void|celestial>")
+		end
+	elseif command == TIPS_COMMAND then
+		if argument == "reset" then
+			PlayerDataService.ResetTips(player)
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: cleared %s's one-time tips"):format(player.Name))
+		end
 	elseif command == OFFLINE_COMMAND then
 		local minutes = tonumber(argument) or 180
 		local awaySeconds = math.max(0, math.floor(minutes * 60))
@@ -145,6 +210,9 @@ local function onPlayerChatted(player: Player, message: string)
 			data.GachaPulls = 0
 			data.GoalIndex = 1
 			data.TotalFusions = 0
+			data.TotalSteals = 0
+			data.ShieldRaises = 0
+			data.Tips = {}
 			data.Rebirths = 0
 			data.Index = {}
 			data.LastOnline = nil
@@ -173,12 +241,13 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /wipe")
 end
 
 function DebugService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	HeistService = require(script.Parent.HeistService)
+	EventService = require(script.Parent.EventService)
 end
 
 return DebugService

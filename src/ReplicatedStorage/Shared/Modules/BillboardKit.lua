@@ -109,6 +109,52 @@ local function newBillboard(parent: Instance, name: string, studs: Vector2, offs
 	return billboard
 end
 
+--[[ Chip ---------------------------------------------------------------------- ]]
+
+export type ChipProps = {
+	Name: string?,
+	Text: string,
+	Gradient: UITheme.GradientPair?, -- fill (default Panel)
+	TextColor: Color3?,
+	Studs: Vector2?, -- billboard size in studs (default 6 x 1.4)
+	StudsOffset: Vector3?,
+	MaxDistance: number?,
+}
+
+export type Chip = { Gui: BillboardGui, Label: TextLabel }
+
+-- A rounded world pill (event chips: "⚡ ×1.25" over a generator,
+-- "⚡ STRIKE IN 3", "Hold E · free item"): AlwaysOnTop false,
+-- LightInfluence 0, a MaxDistance. Built on the server or a client.
+function BillboardKit.Chip(parent: Instance, props: ChipProps): Chip
+	local gui = newBillboard(
+		parent,
+		props.Name or "Chip",
+		props.Studs or Vector2.new(6, 1.4),
+		props.StudsOffset or Vector3.zero,
+		props.MaxDistance or 80
+	)
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = Colors.White
+	fill.Parent = gui
+	corner(fill, UDim.new(0.5, 0))
+	borderStroke(fill, 3)
+	local pair = props.Gradient
+	if pair then
+		gradient(fill, pair.Top, pair.Bottom)
+	else
+		fill.BackgroundColor3 = Colors.Panel
+	end
+	local label = scaledLabel(fill, "Text", Fonts.Display, props.TextColor or Colors.Text, 0.12, 0.76)
+	label.Position = UDim2.fromScale(0.06, 0.12)
+	label.Size = UDim2.fromScale(0.88, 0.76)
+	label.Text = props.Text
+	textStroke(label, 2)
+	return { Gui = gui, Label = label }
+end
+
 --[[ Pad label --------------------------------------------------------------- ]]
 
 export type PadProps = {
@@ -137,6 +183,8 @@ export type PadLabel = {
 	SetPill: (text: string) -> (),
 	SetDetail: (text: string?, color: Color3?) -> (),
 	SetSecondPill: (text: string?) -> (),
+	-- Recolours the main pill (e.g. the LOCK console: muted while recharging).
+	SetPillGradient: (pair: UITheme.GradientPair) -> (),
 }
 
 -- Title (Display, coloured, ink stroke), a gradient price pill (Display,
@@ -223,6 +271,49 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 			if secondPill and secondText then
 				secondText.Text = text or ""
 				secondPill.Visible = text ~= nil
+			end
+		end,
+		SetPillGradient = function(pair: UITheme.GradientPair)
+			local g = pill:FindFirstChildOfClass("UIGradient")
+			if g then
+				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
+			end
+		end,
+	}
+end
+
+-- The PadLabel functions for an existing pad label Gui (one the server built),
+-- so a client can drive it locally (the LOCK console's label). nil if `gui`
+-- isn't a pad label.
+function BillboardKit.FindPadLabel(gui: BillboardGui): PadLabel?
+	local pill = gui:FindFirstChild("Pill")
+	local pillText = pill and pill:FindFirstChild("Text")
+	local detail = gui:FindFirstChild("Detail")
+	if not pill or not pillText or not pillText:IsA("TextLabel") or not detail or not detail:IsA("TextLabel") then
+		return nil
+	end
+	local secondPill = gui:FindFirstChild("SecondPill")
+	local secondText = secondPill and secondPill:FindFirstChild("Text")
+	return {
+		Gui = gui,
+		SetPill = function(text: string)
+			pillText.Text = text
+		end,
+		SetDetail = function(text: string?, color: Color3?)
+			detail.Text = text or ""
+			detail.TextColor3 = color or Colors.Text
+			detail.Visible = text ~= nil and text ~= ""
+		end,
+		SetSecondPill = function(text: string?)
+			if secondPill and secondText and secondText:IsA("TextLabel") and secondPill:IsA("GuiObject") then
+				secondText.Text = text or ""
+				secondPill.Visible = text ~= nil
+			end
+		end,
+		SetPillGradient = function(pair: UITheme.GradientPair)
+			local g = pill:FindFirstChildOfClass("UIGradient")
+			if g then
+				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
 			end
 		end,
 	}
@@ -554,19 +645,62 @@ export type OddsRow = {
 }
 
 -- The odds board's content on the Front face of `board` (a real board part,
--- not a billboard): title, a header of input counts, one row per recipe
--- (coloured by the tier it fuses into) with its chance at each count, the
--- fail rule and the fusion mutation line. `firstCount` is the count of the
--- first chance column. Update the mutation line later (luck changes) with
--- SetOddsMutations.
-function BillboardKit.OddsSurface(
-	board: BasePart,
-	rows: { OddsRow },
-	firstCount: number,
-	mutations: string,
-	pixelsPerStud: number
-): SurfaceGui
+-- not a billboard), laid out as a table in pixels (PixelsPerStud, so a
+-- 9 x 6 stud board at 60 is 540 x 360):
+--   title "FUSE → TIER UP" with "more orbs = better odds" on the right
+--   a header row "ORBS IN  2 3 4 5 6"
+--   one row per recipe: an orb dot + "Common → Rare" in tier colours, and
+--   each chance in its own rounded cell (a 100% cell is teal)
+--   the footer "❌ Fail = keep your best orb, lose the rest · Secret needs
+--   Rebirth 1"
+-- The mutation odds are NOT here (the Gacha Pad and the Index show them).
+-- SetOddsChances refreshes the cells (the owner's rebirths for "R1", the
+-- Void Moon's boosted, purple cells).
+local ODDS_MARGIN = 16
+local ODDS_TITLE_HEIGHT = 46
+local ODDS_HEADER_HEIGHT = 28
+local ODDS_FOOTER_HEIGHT = 30
+local ODDS_LABEL_WIDTH = 170
+local ODDS_CELL_GAP = 6
+local ODDS_DOT = 14
+
+export type OddsOptions = {
+	Rebirths: number?, -- the board owner's; a gated row reads "R1" until then
+	Boosted: boolean?, -- a Void Moon: every cell turns the Void purple
+}
+
+-- Updates the chance cells: the numbers (FusionConfig.FormatOdds, boosted
+-- during a Void Moon), "R1" on a row the owner hasn't unlocked, teal 100%
+-- cells, purple cells while boosted. `rows` must be the recipes the board
+-- was built with.
+function BillboardKit.SetOddsChances(gui: SurfaceGui, rows: { OddsRow }, options: OddsOptions)
+	local panel = gui:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	local rebirths = options.Rebirths or 0
+	for index, row in rows do
+		local locked = row.RebirthsNeeded ~= nil and rebirths < row.RebirthsNeeded
+		for column, chance in row.ChanceTexts do
+			local cell = panel:FindFirstChild(("Chance%d_%d"):format(index, column))
+			local value = cell and cell:FindFirstChild("Text")
+			if cell and cell:IsA("Frame") and value and value:IsA("TextLabel") then
+				value.Text = if locked then ("R%d"):format(row.RebirthsNeeded or 1) else chance
+				value.TextColor3 = if locked then Colors.Faint else Colors.Text
+				cell.BackgroundColor3 = if locked
+					then Colors.Panel2
+					elseif options.Boosted then UITheme.Mutation.Void
+					elseif chance == "100%" then Colors.ShieldTeal
+					else Colors.Panel2
+			end
+		end
+	end
+end
+
+function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, firstCount: number, pixelsPerStud: number): SurfaceGui
 	local gui = newSurface(board, "OddsSurface", Enum.NormalId.Front, pixelsPerStud)
+	local width = board.Size.X * pixelsPerStud
+	local height = board.Size.Y * pixelsPerStud
 
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
@@ -575,62 +709,194 @@ function BillboardKit.OddsSurface(
 	panel.Parent = gui
 	borderStroke(panel, 6)
 
-	local columns = if rows[1] then #rows[1].ChanceTexts else 0
-	local recipeLeft, recipeWidth = 0.04, 0.4
-	local columnsLeft = recipeLeft + recipeWidth
-	local columnWidth = (0.96 - columnsLeft) / math.max(columns, 1)
-	local titleHeight, headerHeight, footerHeight = 0.15, 0.09, 0.08
-	local rowHeight = (1 - titleHeight - headerHeight - footerHeight * 2 - 0.08) / math.max(#rows, 1)
-
-	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.02, titleHeight)
-	title.Text = ("FUSE %d–%d → TIER UP"):format(firstCount, firstCount + columns - 1)
-	textStroke(title, 2)
-
-	local headerY = 0.03 + titleHeight
-	local inLabel = scaledLabel(panel, "HeaderIn", Fonts.BodyHeavy, Colors.Muted, headerY, headerHeight)
-	inLabel.Position = UDim2.fromScale(recipeLeft, headerY)
-	inLabel.Size = UDim2.fromScale(recipeWidth, headerHeight)
-	inLabel.TextXAlignment = Enum.TextXAlignment.Left
-	inLabel.Text = "ORBS IN →"
-	for column = 1, columns do
-		local header = scaledLabel(panel, "Count" .. column, Fonts.Display, Colors.Muted, headerY, headerHeight)
-		header.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, headerY)
-		header.Size = UDim2.fromScale(columnWidth, headerHeight)
-		header.Text = tostring(firstCount + column - 1)
+	local function text(name: string, value: string, font: Font, color: Color3, x: number, y: number, w: number, h: number, align: Enum.TextXAlignment?): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.BackgroundTransparency = 1
+		label.FontFace = font
+		label.TextColor3 = color
+		label.TextScaled = true
+		label.Text = value
+		label.TextXAlignment = align or Enum.TextXAlignment.Center
+		label.Position = UDim2.fromOffset(x, y)
+		label.Size = UDim2.fromOffset(w, h)
+		label.Parent = panel
+		local constraint = Instance.new("UITextSizeConstraint")
+		constraint.MaxTextSize = math.max(1, math.floor(h))
+		constraint.Parent = label
+		return label
 	end
 
-	for index, row in rows do
-		local y = headerY + headerHeight + 0.01 + (index - 1) * rowHeight
-		local left = scaledLabel(panel, "Recipe" .. index, Fonts.Body, UITheme.GetTierLight(row.ToTier), y, rowHeight * 0.85)
-		left.Position = UDim2.fromScale(recipeLeft, y)
-		left.Size = UDim2.fromScale(recipeWidth, rowHeight * 0.85)
-		left.TextXAlignment = Enum.TextXAlignment.Left
-		left.Text = ("%s → %s"):format(row.FromTier, row.ToTier)
-			.. (if row.RebirthsNeeded then (" (R%d)"):format(row.RebirthsNeeded) else "")
-		textStroke(left, 1.5)
+	local inner = width - ODDS_MARGIN * 2
+	local title = text("Title", "FUSE → TIER UP", Fonts.Display, Colors.VioletLight, ODDS_MARGIN, ODDS_MARGIN, inner * 0.55, ODDS_TITLE_HEIGHT - 10, Enum.TextXAlignment.Left)
+	textStroke(title, 2)
+	text("Hint", "more orbs = better odds", Fonts.Body, Colors.Muted, ODDS_MARGIN + inner * 0.55, ODDS_MARGIN + 8, inner * 0.45, 20, Enum.TextXAlignment.Right)
 
-		for column, text in row.ChanceTexts do
-			local cell = scaledLabel(panel, ("Chance%d_%d"):format(index, column), Fonts.Display, Colors.Text, y, rowHeight * 0.85)
-			cell.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, y)
-			cell.Size = UDim2.fromScale(columnWidth, rowHeight * 0.85)
-			cell.Text = text
-			textStroke(cell, 1.5)
+	local columns = if rows[1] then #rows[1].ChanceTexts else 0
+	local columnsLeft = ODDS_MARGIN + ODDS_LABEL_WIDTH
+	local columnWidth = (width - ODDS_MARGIN - columnsLeft) / math.max(columns, 1)
+	local headerY = ODDS_MARGIN + ODDS_TITLE_HEIGHT
+	text("HeaderIn", "ORBS IN", Fonts.BodyHeavy, Colors.Muted, ODDS_MARGIN, headerY + 4, ODDS_LABEL_WIDTH - 10, ODDS_HEADER_HEIGHT - 8, Enum.TextXAlignment.Left)
+	for column = 1, columns do
+		text("Count" .. column, tostring(firstCount + column - 1), Fonts.Display, Colors.Muted, columnsLeft + (column - 1) * columnWidth, headerY + 2, columnWidth, ODDS_HEADER_HEIGHT - 4)
+	end
+
+	local rowsTop = headerY + ODDS_HEADER_HEIGHT
+	local rowsHeight = height - rowsTop - ODDS_FOOTER_HEIGHT - ODDS_MARGIN
+	local rowHeight = rowsHeight / math.max(#rows, 1)
+	for index, row in rows do
+		local y = rowsTop + (index - 1) * rowHeight
+		local dot = Instance.new("Frame")
+		dot.Name = "Dot" .. index
+		dot.AnchorPoint = Vector2.new(0, 0.5)
+		dot.Position = UDim2.fromOffset(ODDS_MARGIN, y + rowHeight / 2)
+		dot.Size = UDim2.fromOffset(ODDS_DOT, ODDS_DOT)
+		dot.BackgroundColor3 = UITheme.GetTierOrb(row.ToTier).Mid
+		dot.Parent = panel
+		corner(dot, UDim.new(0.5, 0))
+		borderStroke(dot, 2)
+		local recipe = text(
+			"Recipe" .. index,
+			("%s → %s"):format(row.FromTier, row.ToTier),
+			Fonts.Body,
+			UITheme.GetTierLight(row.ToTier),
+			ODDS_MARGIN + ODDS_DOT + 8,
+			y + rowHeight * 0.2,
+			ODDS_LABEL_WIDTH - ODDS_DOT - 12,
+			rowHeight * 0.6,
+			Enum.TextXAlignment.Left
+		)
+		textStroke(recipe, 1.5)
+		for column, chance in row.ChanceTexts do
+			local cell = Instance.new("Frame")
+			cell.Name = ("Chance%d_%d"):format(index, column)
+			cell.BackgroundColor3 = Colors.Panel2
+			cell.Position = UDim2.fromOffset(columnsLeft + (column - 1) * columnWidth + ODDS_CELL_GAP / 2, y + ODDS_CELL_GAP / 2)
+			cell.Size = UDim2.fromOffset(columnWidth - ODDS_CELL_GAP, rowHeight - ODDS_CELL_GAP)
+			cell.Parent = panel
+			corner(cell, UDim.new(0, 10))
+			borderStroke(cell, 2)
+			local value = Instance.new("TextLabel")
+			value.Name = "Text"
+			value.BackgroundTransparency = 1
+			value.FontFace = Fonts.Display
+			value.TextColor3 = Colors.Text
+			value.TextScaled = true
+			value.Text = chance
+			value.Position = UDim2.fromScale(0.08, 0.18)
+			value.Size = UDim2.fromScale(0.84, 0.64)
+			value.Parent = cell
+			local constraint = Instance.new("UITextSizeConstraint")
+			constraint.MinTextSize = 17
+			constraint.MaxTextSize = 26
+			constraint.Parent = value
+			textStroke(value, 1.5)
 		end
 	end
 
-	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight * 2 - 0.04, footerHeight)
-	footer.Text = "Fail = keep your best orb, lose the rest"
-	local mutationText = scaledLabel(panel, "Mutations", Fonts.Body, Colors.GoldLabel, 1 - footerHeight - 0.03, footerHeight)
-	mutationText.Text = mutations
+	text(
+		"Footer",
+		"❌ Fail = keep your best orb, lose the rest · Secret needs Rebirth 1",
+		Fonts.Body,
+		Colors.Muted,
+		ODDS_MARGIN,
+		height - ODDS_MARGIN - ODDS_FOOTER_HEIGHT + 6,
+		inner,
+		ODDS_FOOTER_HEIGHT - 8
+	)
+	BillboardKit.SetOddsChances(gui, rows, {})
 	return gui
 end
 
--- Updates the board's fusion mutation line (it scales with luck).
-function BillboardKit.SetOddsMutations(gui: SurfaceGui, text: string)
+--[[ Event Board ------------------------------------------------------------------
+	The street's lab-weather board (WorldService builds two, StreetLayout
+	places them): title, three rows (NOW / NEXT / THEN, each on its event's
+	gradient with a timer) and the Admin Abuse line. The client fills it
+	every second (EventController) through SetEventBoard.
+]]
+
+local EVENT_BOARD_ROWS = 3
+
+export type EventBoardRow = {
+	Tag: string, -- "NOW" / "NEXT" / "THEN"
+	Title: string, -- "⚡ POWER SURGE"
+	Timer: string, -- "3:12 left" / "in 8:40"
+	Gradient: UITheme.GradientPair,
+}
+
+function BillboardKit.EventBoardSurface(board: BasePart, pixelsPerStud: number, maxDistance: number): SurfaceGui
+	local gui = newSurface(board, "EventBoardSurface", Enum.NormalId.Front, pixelsPerStud)
+	gui.MaxDistance = maxDistance
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.BackgroundColor3 = Colors.Panel
+	panel.Size = UDim2.fromScale(1, 1)
+	panel.Parent = gui
+	borderStroke(panel, 8)
+
+	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.03, 0.14)
+	title.Text = "LAB WEATHER"
+	textStroke(title, 3)
+	local rowHeight, rowGap, top = 0.2, 0.025, 0.2
+	for index = 1, EVENT_BOARD_ROWS do
+		local row = Instance.new("Frame")
+		row.Name = "Row" .. index
+		row.BackgroundColor3 = Colors.White
+		row.Position = UDim2.fromScale(0.04, top + (index - 1) * (rowHeight + rowGap))
+		row.Size = UDim2.fromScale(0.92, rowHeight)
+		row.Parent = panel
+		corner(row, UDim.new(0.2, 0))
+		borderStroke(row, 4)
+		gradient(row, UITheme.Gradients.Disabled.Top, UITheme.Gradients.Disabled.Bottom)
+		local tag = scaledLabel(row, "Tag", Fonts.BodyHeavy, Colors.Text, 0.2, 0.6)
+		tag.Position = UDim2.fromScale(0.03, 0.2)
+		tag.Size = UDim2.fromScale(0.16, 0.6)
+		tag.TextXAlignment = Enum.TextXAlignment.Left
+		textStroke(tag, 2)
+		local name = scaledLabel(row, "Name", Fonts.Display, Colors.Text, 0.12, 0.76)
+		name.Position = UDim2.fromScale(0.2, 0.12)
+		name.Size = UDim2.fromScale(0.5, 0.76)
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		textStroke(name, 3)
+		local timer = scaledLabel(row, "Timer", Fonts.Display, Colors.Text, 0.2, 0.6)
+		timer.Position = UDim2.fromScale(0.71, 0.2)
+		timer.Size = UDim2.fromScale(0.26, 0.6)
+		timer.TextXAlignment = Enum.TextXAlignment.Right
+		textStroke(timer, 2)
+	end
+	local footer = scaledLabel(panel, "AdminAbuse", Fonts.Display, Colors.GoldLabel, 0.86, 0.1)
+	textStroke(footer, 2)
+	return gui
+end
+
+-- Fills the board: up to three rows and the Admin Abuse line.
+function BillboardKit.SetEventBoard(gui: SurfaceGui, rows: { EventBoardRow }, adminAbuse: string)
 	local panel = gui:FindFirstChild("Panel")
-	local label = panel and panel:FindFirstChild("Mutations")
-	if label and label:IsA("TextLabel") then
-		label.Text = text
+	if not panel then
+		return
+	end
+	for index = 1, EVENT_BOARD_ROWS do
+		local row = panel:FindFirstChild("Row" .. index)
+		local data = rows[index]
+		if row and row:IsA("Frame") then
+			row.Visible = data ~= nil
+			if data then
+				local fill = row:FindFirstChildOfClass("UIGradient")
+				if fill then
+					fill.Color = ColorSequence.new(data.Gradient.Top, data.Gradient.Bottom)
+				end
+				for _, key in { "Tag", "Name", "Timer" } do
+					local label = row:FindFirstChild(key)
+					if label and label:IsA("TextLabel") then
+						label.Text = if key == "Tag" then data.Tag elseif key == "Name" then data.Title else data.Timer
+					end
+				end
+			end
+		end
+	end
+	local footer = panel:FindFirstChild("AdminAbuse")
+	if footer and footer:IsA("TextLabel") then
+		footer.Text = adminAbuse
 	end
 end
 
@@ -718,6 +984,31 @@ local function circle(parent: Instance, name: string, scale: number, color: Colo
 	frame.Parent = parent
 	corner(frame, UDim.new(0.5, 0))
 	return frame
+end
+
+-- A round button face: an invisible part just above `top` (its top face
+-- along top's up axis) carrying a SurfaceGui filled disc named "Disc" with
+-- an Ink outline. Recolour it with the disc's BackgroundColor3 (the LOCK
+-- console's button). Not a Neon disc: those render as a fan of triangles.
+function BillboardKit.BuildButtonFace(parent: Instance, top: CFrame, diameter: number, color: Color3, gap: number): BasePart
+	local f = PlotLayout.Face
+	local face = PartKit.Part({
+		Name = "ButtonFace",
+		Size = Vector3.new(diameter, f.Thickness, diameter),
+		CFrame = top * CFrame.new(0, gap + f.Thickness / 2, 0),
+		Color = color,
+		Transparency = 1,
+		CanCollide = false,
+		CanQuery = false,
+		CanTouch = false,
+		CastShadow = false,
+		Parent = parent,
+	})
+	local gui = newSurface(face, "ButtonGui", Enum.NormalId.Top, f.PixelsPerStud)
+	gui.Brightness = f.Brightness
+	local disc = circle(gui, "Disc", 0.92, color, 0)
+	borderStroke(disc, f.RingStrokePx, Colors.Ink).Name = "DiscStroke"
+	return face
 end
 
 -- Builds the Face part on top of a pad and returns it. `top` is the pad

@@ -20,7 +20,6 @@ export type TierVisual = {
 	RotatingRing: boolean, -- rotating light ring around the pedestal's base
 	Pulse: boolean, -- soft rumble/pulse animation on the pedestal itself
 	Beam: boolean, -- animated beam of light from the pedestal into the sky
-	AmbientSoundId: string?, -- nil = no looping ambient sound
 	ProximityBurst: boolean, -- particle burst when a player walks near
 	AnnounceServerWide: boolean, -- fires RareFusionAnnouncement on display
 }
@@ -34,7 +33,6 @@ RarityVisuals.Tiers = {
 		RotatingRing = false,
 		Pulse = false,
 		Beam = false,
-		AmbientSoundId = nil,
 		ProximityBurst = false,
 		AnnounceServerWide = false,
 	},
@@ -46,7 +44,6 @@ RarityVisuals.Tiers = {
 		RotatingRing = false,
 		Pulse = false,
 		Beam = false,
-		AmbientSoundId = nil,
 		ProximityBurst = false,
 		AnnounceServerWide = false,
 	},
@@ -58,7 +55,6 @@ RarityVisuals.Tiers = {
 		RotatingRing = true,
 		Pulse = false,
 		Beam = false,
-		AmbientSoundId = nil,
 		ProximityBurst = false,
 		AnnounceServerWide = false,
 	},
@@ -70,7 +66,6 @@ RarityVisuals.Tiers = {
 		RotatingRing = true,
 		Pulse = true,
 		Beam = false,
-		AmbientSoundId = nil,
 		ProximityBurst = false,
 		AnnounceServerWide = true,
 	},
@@ -82,13 +77,8 @@ RarityVisuals.Tiers = {
 		RotatingRing = true,
 		Pulse = true,
 		Beam = true,
-		-- TODO(asset gap, not a code bug): rbxasset://sounds/bell.wav fails to
-		-- load in this project ("Temp read failed"), so the Mythic pedestal's
-		-- ambient hum is currently silent. Left as-is deliberately until a
-		-- real ambient asset is sourced/uploaded - don't swap this for
-		-- electronicpingshort.wav like the one-shot dings elsewhere, since
-		-- looping a short ping would be worse than staying silent.
-		AmbientSoundId = "rbxasset://sounds/bell.wav",
+		-- No ambient loop (Events 2): four Mythics ringing bell.wav forever was
+		-- the "bugged music". One-shot sounds go through SoundKit.
 		ProximityBurst = true,
 		AnnounceServerWide = true,
 	},
@@ -102,7 +92,6 @@ RarityVisuals.Tiers = {
 		RotatingRing = true,
 		Pulse = true,
 		Beam = true,
-		AmbientSoundId = "rbxasset://sounds/bell.wav", -- same asset gap as Mythic
 		ProximityBurst = true,
 		AnnounceServerWide = true,
 	},

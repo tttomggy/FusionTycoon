@@ -85,8 +85,61 @@ UITheme.Gradients = {
 	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
 	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
+	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
+	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
+	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.
+	GoldRain = { Top = hex("#FFD566"), Bottom = hex("#C98A00") },
+	Surge = { Top = hex("#4FB3FF"), Bottom = hex("#1F3C78") },
+	Meteor = { Top = hex("#FFB066"), Bottom = hex("#B33A1F") },
+	Night = { Top = hex("#3D3A8A"), Bottom = hex("#0B0A1A") },
+	VoidMoon = { Top = hex("#A47BFF"), Bottom = hex("#2A1550") },
+	Rainbow = { Top = hex("#FF5470"), Bottom = hex("#A47BFF") },
 } :: { [string]: GradientPair }
+
+-- HOW TO HEIST's 3D scenes (UI/HeistScenes, ViewportFrames). Viewports
+-- ignore lights, so the look comes from these: tuned to read like the lab
+-- at golden hour (LightingService) without its post effects.
+UITheme.HeistScene = {
+	Background = hex("#2A2552"), -- behind the set (PanelTop: the lab's violet haze)
+	Ambient = hex("#9C94C8"),
+	LightColor = hex("#FFE9D2"),
+	LightDirection = Vector3.new(-0.45, -1, -0.35),
+	ThiefBody = hex("#E0304E"), -- the other player's body colours (red)
+	HomeGate = hex("#4FB3FF"), -- the "🏠 YOUR LAB" gate (AccentBlue)
+	Beam = hex("#FF5470"), -- the carried orb's red beam (Danger)
+	GuardRing = hex("#1FB49A"), -- the owner's guard ring (ShieldTeal)
+	LockedButton = hex("#1FB49A"), -- the console button once locked
+}
+
+-- Event id -> its gradient key above.
+UITheme.EventGradient = {
+	GoldenRain = "GoldRain",
+	PowerSurge = "Surge",
+	MeteorShower = "Meteor",
+	Night = "Night",
+	VoidMoon = "VoidMoon",
+	RainbowStorm = "Rainbow",
+} :: { [string]: string }
+
+function UITheme.GetEventGradient(eventId: string?): GradientPair
+	local key = eventId and UITheme.EventGradient[eventId]
+	return (key and UITheme.Gradients[key]) or UITheme.Gradients.Disabled
+end
+
+-- Event weather on the client (EventController): Lighting tints lerped in
+-- and restored after, and the world FX colours.
+UITheme.EventSky = {
+	GoldTint = hex("#FFE3A8"), -- Golden Rain ColorCorrection tint
+	StormTint = hex("#A8B8FF"), -- Power Surge tint
+	StormHaze = hex("#3A4A80"), -- Power Surge Atmosphere colour
+	VoidTint = hex("#D2B8FF"), -- Void Moon tint
+	Moon = hex("#A47BFF"), -- the Void Moon disc
+	MoonGlow = hex("#E4D6FF"), -- its centre
+	Lightning = hex("#D8F4FF"), -- strike beam
+	MeteorRock = hex("#3B2A22"), -- falling rock
+	MeteorGlow = hex("#FF8A3D"), -- its trail
+}
 
 -- The Rebirth Portal's swirl: a UIGradient through these three stops.
 UITheme.RebirthPortal = { hex("#FF8A3D"), hex("#FFD566"), hex("#FF4F7A") }
@@ -128,20 +181,20 @@ UITheme.GlowTiers = {
 
 UITheme.Mutation = {
 	Golden = hex("#FFD23F"),
+	Charged = hex("#7DF9FF"), -- event: Power Surge lightning
 	Diamond = hex("#BFF4FF"),
+	Void = hex("#A47BFF"), -- event: Void Moon fusions
+	Celestial = hex("#C9F0FF"), -- event: Meteor Shower cores
 	RainbowStops = { hex("#FF5470"), hex("#FFBE28"), hex("#4CF08A"), hex("#4FB3FF"), hex("#A47BFF") },
 }
 
 -- A mutation's solid colour (Rainbow's first stop; nil for normal items).
 function UITheme.GetMutationColor(mutation: string?): Color3?
-	if mutation == "Golden" then
-		return UITheme.Mutation.Golden
-	elseif mutation == "Diamond" then
-		return UITheme.Mutation.Diamond
-	elseif mutation == "Rainbow" then
+	if mutation == "Rainbow" then
 		return UITheme.Mutation.RainbowStops[1]
 	end
-	return nil
+	local color = mutation and (UITheme.Mutation :: any)[mutation]
+	return if typeof(color) == "Color3" then color else nil
 end
 
 -- The five Rainbow stops as an evenly spaced ColorSequence (UIGradient,

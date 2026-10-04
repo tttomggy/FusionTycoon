@@ -540,32 +540,82 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 
 - [ ] **Protected at Rebirth 0.** Before `/rebirths 1`: A's sign shows the
   teal **🛡 PROTECTED · NEW LAB** pill, B sees no Steal prompt on A's
-  pedestals, and A's HUD has no shield chip. After `/rebirths 1` (wait
-  ~5 s for the sign) the pill goes and the chip appears.
+  pedestals, A's HUD has no LOCK chip or "?" button, and A's LOCK console
+  label reads **🛡 PROTECTED · NEW LAB** with the prompt off. After
+  `/rebirths 1` (wait ~5 s for the sign) the pill goes and the buttons
+  appear.
 - [ ] **Shield + eject.** On claim the shield is up 60 s: a pink ForceField
   fence round A's walls and a line across the gate, seen by both players.
-  A's chip reads **🛡 SHIELD · 42s**. B walking in is moved to the street in
-  front of A's gate. When it ends the fence fades, the chip turns amber
-  and pulses (**SHIELD DOWN · step on YOURS**), and A stepping on the YOURS
-  pad raises it again for 60 s. `/shield 0` drops it at once.
-- [ ] **Steal and deliver.** Shield down: B holds E on A's pedestal
-  (**Steal**, the item's name, 1.5 s).
-  - [ ] B: the orb over B's head (Golden shell and 2 satellites), a red
-    beam, **THIEF · 45s** (A sees them too), B walks slower, an orange
-    **GET HOME!** banner with a draining bar, and the arrow on B's gate.
+  B walking in is moved to the street in front of A's gate.
+- [ ] **The YOURS pad does nothing now.** Walking over it, or standing on it
+  after `/shield 0`, never raises the shield.
+- [ ] **Console lock.** The LOCK console stands inside the gate, right of
+  the walkway, between the claim pad and the Gacha Pad, facing you as you
+  walk in. Ready: label **🔒 LOCK LAB / READY · 60s shield** (pink pill),
+  pink button, E prompt **Lock lab / 60s shield** within 8 studs (only A
+  sees label and prompt). Pressing it: the fence goes up, the pill turns
+  teal **LOCKED · 42s**, the button glows teal and the prompt is gone.
+- [ ] **The HUD chip doesn't lock.** Under the cash card (beside it on a
+  phone) A's chip reads **🔓 UNLOCKED** (muted, amber text). Tapping it
+  never raises the shield: it toasts **Your LOCK button is just inside your
+  gate** and the goal arrow points at A's LOCK console for 8 s, then goes
+  back to the goal. Locked at the console it reads **🛡 LOCKED · 42s**
+  (teal). There is no RequestLock remote any more.
+- [ ] **Console reach (exploit check).** A presses the console from right
+  in front of it: it locks. From A's client command bar, set the console
+  prompt's `MaxActivationDistance = 100` and press it from more than 10
+  studs away (e.g. by the gate): if the engine passes the trigger, the
+  server refuses with **Get to your LOCK button inside your gate!** and the
+  shield stays down (TryLock `TooFar`).
+- [ ] **Recharge countdown on both.** When the shield ends (or `/shield 5`
+  and wait), the console pill reads **RECHARGING · 20s** (muted, dim
+  button, prompt off) and the HUD chip **RECHARGING · 20s** (muted). B can
+  grab in that window. At 0 both return to ready. `/shield 0` skips the
+  recharge. The claim shield and the 120 s shield after a loss go up
+  regardless.
+- [ ] **Alarm.** A unlocked and LOCK ready: B walks inside A's walls; A's
+  chip turns red and pulses **🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK**
+  until B leaves or A locks at the console. While recharging it stays
+  RECHARGING (no alarm).
+- [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
+  pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
+  name and its +$/s, 1.5 s).
+  - [ ] B's own screen: a full-width orange **🫳 YOU GRABBED <ITEM>! RUN
+    HOME!** banner for 1.5 s, a pickup blip and a quick FOV punch, then
+    the **RUN!** banner (2 s) turning into **GET HOME!** with a draining
+    bar, and the arrow on B's gate.
+  - [ ] **B sees the orb on B's own screen** over B's head (Golden shell
+    and 2 satellites), with the red beam and the big **<item> · 45s** chip
+    under THIEF; it follows B's jumps, and stays visible zoomed into first
+    person. A sees the same. B walks slower (12), A faster (18).
   - [ ] A: the pedestal shows a red ghost ring and **STOLEN!** +$0/s, A's
-    income drops by that item, a red **THIEF IN YOUR LAB!** banner with
-    the distance, a red **THIEF!** arrow following B, and the alarm.
+    income drops by that item, a red **THIEF IN YOUR LAB!** banner reading
+    **Catch them in 2…1…** then the distance, a red **THIEF!** arrow
+    following B, and the alarm. A's speed is back to 16 when it ends.
   - [ ] B reaches home: **HEIST COMPLETE!** for B, the item (still Golden)
     in B's inventory with a new Uid; A gets the stolen card (shield up
     2 min), the pedestal is empty, and A's shield auto-raises for 120 s.
   - [ ] Server banner (Legendary+): **B stole a Golden <item> from A!** (Golden in its colour)
+- [ ] **Grace window.** A stands 7 studs from the pedestal (just outside
+  the guard radius) and B grabs: A walks straight into B, but nothing
+  happens for 2 s; after that the touch saves it.
+- [ ] **Guarded pedestal.** A stands right next to the pedestal (within
+  6 studs): B's prompt reads **Owner is guarding** with no hold, and
+  tapping it only toasts **The owner is guarding it!**. A steps away and
+  it turns back into **Steal**.
 - [ ] **Steal and tag.** B grabs, A touches B (within 5 studs): A gets
   **SAVED! You got your … back**, B **Caught!**, the item is back on the
-  pedestal, the banner reads **A caught B!**.
+  pedestal, the banner reads **A caught B!**. Both see a white flash ring
+  at B, **CAUGHT!** over B's head, and the orb fly back onto the pedestal.
 - [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
-- [ ] **Cooldown.** Right after any attempt B gets **Lay low for 60s**;
-  `/heistcd 0` clears it.
+- [ ] **Steal timer.** Right after any grab, B's HUD shows **🫳 NEXT STEAL IN
+  60s** (muted, amber) under the LOCK chip, counting down. B's prompts on
+  other filled enemy pedestals read **Steal in 42s** (the item label under
+  it, no hold); tapping one toasts **You can steal again in 42s**. The red
+  hand markers stay on. At 0 the chip shows **🫳 STEAL READY!** (gold) for
+  2 s, then hides, and the prompts read **Steal** again. After a delivered
+  steal the HEIST COMPLETE card's sub-line reads **You can steal again in
+  …s**. `/heistcd 0` clears the timer (the chip flashes STEAL READY!).
 - [ ] **Loss cap.** With A's shield dropped (`/shield 0`) after each loss,
   B steals 3 items in under 10 min: the 4th grab says **This lab has been
   robbed enough for now**.
@@ -579,8 +629,8 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   one of your items! Get it back first**.
 - [ ] **Thief hands full.** While carrying, B's pull, Pull ×10, generator
   upgrade, Multiplier Pad and rebirth all toast **Get home with that item
-  first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B
-  stepping on their YOURS pad doesn't raise B's shield.
+  first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B's
+  own LOCK console toasts **Not while carrying!**.
 - [ ] **Victim /wipe mid-carry:** A's `/wipe` kicks A; B gets **The heist
   was called off** and nothing is added to B.
 - [ ] **Thief leaves mid-carry:** B leaves; the item is back on A's
@@ -597,3 +647,224 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   a far pedestal, B's own pedestal, a shielded lab, an empty pedestal and
   a Rebirth-0 owner are all rejected, each with a `HeistService: rejected
   steal …` warning in the server output.
+- [ ] **Locked teaser at Rebirth 0.** A at Rebirth 1 with a displayed item
+  and the shield down; B at Rebirth 0 walks up to it: the prompt reads
+  **🔒 Steal** / **Unlocks at Rebirth 1** at the normal distance, and
+  tapping it only toasts **Stealing unlocks at Rebirth 1**. No hand marker.
+- [ ] **Unlock line.** Before rebirthing, the Rebirth panel's unlock row
+  reads **Stealing + Mythic → Secret fusion**. After the first rebirth the
+  REBIRTH 1! card has **🫳 STEALING UNLOCKED: grab items off other labs'
+  pedestals and run them home!** (the card is taller; LET'S GO below it).
+  Later rebirth cards don't.
+- [ ] **New goals.** After "Rebirth for the first time": **Lock your lab
+  with the LOCK button** ($10,000; the goal arrow points at the LOCK
+  console; only the console counts, not the claim shield or `/shield`),
+  then
+  **Steal an item from another lab** ($50,000; the marker points at the
+  nearest grabbable enemy pedestal and moves as that changes). Delivering
+  a steal completes it.
+- [ ] **Hand markers.** At Rebirth 1+, every filled, unshielded, unguarded
+  enemy pedestal has a red 🫳 marker above its label, from up to 60 studs.
+  It goes when the lab's shield goes up, the owner guards it, or the item
+  goes; all of them hide while you carry.
+- [ ] **One-time tip.** The first time (this session) a Rebirth 1+ player
+  walks inside a lab with something to steal: **Hold E on their pedestal to
+  steal it!**. Walking into another one doesn't repeat it.
+- [ ] **GUARDED chip.** A walks up to their pedestal: within 6 studs, B sees
+  a teal **🛡 GUARDED** pill over it (above the label), B's red hand marker
+  for it goes, and B's prompt reads **Owner is guarding**. A walks away and
+  it's gone.
+- [ ] **Guard ring.** While A is inside A's walls, each filled pedestal has
+  a faint teal floor ring (6 studs), seen by both; the one A guards is
+  stronger. A leaves the lab and the rings go. A Rebirth-0 lab shows none.
+- [ ] **HOW TO HEIST card.** A real first rebirth (`/rebirthready`, then
+  REBIRTH! at Rebirth 0; `/rebirths 1` skips the result card, so it won't
+  trigger): pressing LET'S GO on the REBIRTH 1! card opens HOW TO HEIST.
+  Four slides (GRAB 45s, GUARD, CATCH, LOCK 60s), ◀ NEXT ▶ and dots, GOT
+  IT on the last. It doesn't auto-open again (rejoin with saving on, or
+  rebirth again) until `/tips reset`. The round **?** button beside the
+  LOCK chip always opens it.
+- [ ] **3D scenes.** Each slide is a live 3D scene in the lab's look
+  (floor, walkway, a wall with its gate gap) with **your own avatar** as
+  YOU, animated (run / idle), looping every ~5 s:
+  - [ ] **1 GRAB**: you walk to a Golden Mythic pedestal (shell and
+    satellites), an **E** ring fills over 1.5 s, the orb lifts over your
+    head with a red beam and you run to the blue **🏠 YOUR LAB** gate.
+  - [ ] **2 GUARD**: you stand on the teal ring by your pedestal
+    (**🛡 GUARDED**); a red thief walks up, **✋ Owner is guarding** pops,
+    and they back away.
+  - [ ] **3 CATCH**: the red thief runs with the orb; you chase and touch
+    them: a white ring flash, **CAUGHT!**, the orb arcs back onto the
+    pedestal.
+  - [ ] **4 LOCK**: you run to the LOCK console and press; its button turns
+    teal, the pink panels rise along the wall, **🔒 LOCKED · 60s** shows,
+    and the thief walks into the wall and is pushed back.
+  - [ ] The pills ("YOU", "THIEF", the item, GUARDED, CAUGHT!, LOCKED)
+    track the actors. Only the slide on screen animates; closing the card
+    removes the scenes (Explorer: no leftover ViewportFrames). With no
+    character loaded yet, YOU is a default rig.
+  - [ ] On a phone (Device emulator, ~390 px tall after the scale) the card
+    fits: the scene shrinks, title, line and ◀ / NEXT ▶ stay on screen.
+- [ ] **Each tip fires once** (then `/tips reset` to see them again):
+  - [ ] **intruder**: B walks into A's unlocked lab; A gets **Someone's in
+    your lab! Stand by your items or run to your LOCK button!**.
+  - [ ] **guarded**: B stands at a pedestal A is guarding: **They're
+    guarding it. Wait for them to walk away.**
+  - [ ] **stealHowTo**: B's first walk into a robbable lab: **Hold E on
+    their pedestal to steal it!**
+  - [ ] **catch**: A's first time as a victim: the banner has a big **TOUCH
+    THEM!** line and the red arrow throbs; the next steal doesn't.
+  - [ ] **lockAfterLoss**: after A's first real loss card: **Tip: hit the
+    LOCK button inside your gate before you leave your lab.**
+
+## 17. Events (lab weather + Admin Abuse)
+
+Plots are built once per session: restart Play after layout changes. Studio
+profiles never save, so the Next Admin Abuse DataStore write needs a
+published place with API access (otherwise it toasts "DataStore save
+failed").
+
+- [ ] **Each `/event <id>`** (GoldenRain, PowerSurge, MeteorShower,
+  RainbowStorm, Night, VoidMoon): the start banner counts **3 · 2 · 1** with
+  a ping, then shows the icon, name and one line on the event's gradient;
+  the HUD chip turns that gradient with a live timer
+  ("⚡ POWER SURGE · 4:58"); the sky changes (gold tint + gold sparkles /
+  storm tint + denser haze + generator bands flicker / dusk to midnight /
+  midnight + purple tint + purple moon / slow rainbow tint + sparkles).
+- [ ] **Exact restore.** Note Lighting.ClockTime (17.2), the
+  ColorCorrection TintColor/Brightness and Atmosphere Density/Color before
+  an event; `/event off` (or let it run out): a toast "<icon> <NAME> is
+  over", the sky tweens back and every value matches the noted ones. The
+  generator bands are solid again.
+- [ ] **Golden Rain coins.** Gold coins (edge-on, spinning, bobbing) appear
+  in your lab on open floor, never inside a station or pedestal, one every
+  10 s, max 30, each gone after 20 s. Touching one pays **3 s of your
+  income** (cash jumps by income × 3) with a green "+$X" pop (the full
+  amount, 24 px). A second player can't pick up yours.
+- [ ] **Surge income.** `/event PowerSurge`: the collector pill's generator
+  income (and the HUD's income/s, generator share only) reads ×1.25 of what
+  it was; back to normal when it ends. Pedestal rates don't change.
+- [ ] **Lightning Charge.** `/event PowerSurge`, display a plain item: every
+  20 s a white-blue bolt hits a displayed item somewhere with a flash (the
+  Thunder slot is empty until a sound is chosen). When yours turns Charged:
+  the event mutation reveal card (below), the pedestal orb gets 3 cyan
+  satellites with a trail, the label and inventory show Charged, the Index
+  gains the Charged cell; everyone sees the SERVER banner. An item being
+  carried in a heist is never hit.
+- [ ] **Meteor race (2 players).** `/event MeteorShower`: glowing rocks fall
+  onto the street (never a belt, never a plot); each leaves a dark crater
+  with orange crack strips and a glowing core. Both players hold **Grab
+  Meteor Core** (2 s): only the first to finish gets the ☄ METEOR CORE
+  card (Epic+ item, sometimes Celestial); the other gets **Too slow!**. A
+  Rebirth 0 player can grab. Unclaimed craters vanish after 60 s.
+- [ ] **Void Moon.** `/event VoidMoon`, open the Fuse panel: the success
+  chance reads 5 points higher (2 Commons 55% → 60%) and the chips turn
+  purple; the machine's odds board cells turn Void purple with the same
+  boosted numbers, and go back at the end. About 1 success in 20 comes out
+  Void. The banner line reads "Fuse as much as you can before the moon
+  sets!".
+- [ ] **Rainbow Storm odds.** `/event RainbowStorm`: the gacha pad's
+  mutation line shows ×5 numbers (Golden 4% → 20%); the big SERVER · EVENT
+  rainbow banner plays once.
+- [ ] **Index.** The Index shows 7 variant columns (Normal + Golden,
+  Charged, Diamond, Void, Rainbow, Celestial); unfound Charged / Void /
+  Celestial cells show a 🕐. It fits on a phone (the page scrolls).
+- [ ] **`/eventclock`.** `/eventclock 0`, then step `/eventclock 15`, `30`,
+  `45`, `60`: hh:00 is always Night or Void Moon, the others a weather; the
+  HUD chip, the info card's NEXT rows and both street Event Boards agree at
+  every step. Between events the chip is muted: "NEXT · ☄ METEOR SHOWER in
+  8:40". The same weather three slots in a row should be rare (chance).
+- [ ] **Street Event Boards.** The two boards past the street ends show NOW
+  / NEXT / THEN with timers and the Admin Abuse line, ticking every second,
+  and block no belt or gate.
+- [ ] **`/admin`.** In Play Solo (your own account = the owner) `/admin`
+  opens ADMIN ABUSE: start each event at ×1/×2/×3 for 5/10/15 min (the
+  banner blurb says "ADMIN x3"), END EVENT, gift everyone (each player gets
+  the 🎁 ADMIN GIFT card), LUCK ×3 (odds displays rise for 10 min),
+  broadcast (≤ 80 chars, the counter stops at 80; everyone sees the
+  SERVER · ADMIN banner, filtered), set next Admin Abuse (the chip card and
+  boards count down to it in your local time). Every action prints a warn
+  with who and what.
+- [ ] **Non-admin.** In a 2-player local server (ids −1/−2, never admins)
+  `/admin` does nothing for either player, and firing AdminAction from the
+  command bar prints **SUSPICIOUS AdminAction** on the server and changes
+  nothing.
+- [ ] **All servers.** An ALL SERVERS action can only be fully tested in a
+  live game with 2 servers: the second server applies it too and logs
+  "FT_Admin from <id>". In Studio it toasts that it applied on this server
+  only if MessagingService isn't available.
+
+### 17b. Events 2 (every event explains itself)
+
+- [ ] **Schedule check.** `luau tools/event_schedule_check.luau` (repo root)
+  prints every event's share within 2 points of its target (they land
+  within 0.3), the "next weather repeats" shares near each weather's own
+  share, a longest run around 9, and **OK**.
+- [ ] **Info card: tap.** Tap the event chip during any event: a card under
+  it on the event's gradient with the icon, name, live timer ("3:12 left")
+  and "Lab weather · every server"; WHAT'S HAPPENING (the numbers match
+  EventConfig: e.g. Power Surge "×1.25", "every 20s", "1 in 4"), WHAT TO
+  DO, "Can give:" mutation pills, NEXT (2 events + the Admin Abuse line).
+  The X or the chip closes it. On a phone it's 90% of the width.
+- [ ] **Info card: between events.** With nothing on, the chip opens the
+  same card for the NEXT event, "Starts in 8:40". When that event starts
+  with the card open, it switches to "… left".
+- [ ] **Info card: auto once.** After `/tips reset`, `/event GoldenRain`:
+  ~1 s after the start banner goes, the card opens by itself. End it and
+  start Golden Rain again: it doesn't reopen. A different event opens its
+  own card once.
+- [ ] **Arrows per event.** Rainbow Storm: the goal arrow points at your
+  Gacha Pad ("PULL HERE"); step on the pad and it moves to your Fusion
+  Machine ("THEN FUSE"). Night / Void Moon: the machine ("FUSE NOW").
+  Meteor Shower: the nearest unclaimed crater. Golden Rain: the nearest
+  street coin. A heist arrow wins while it lasts; every event arrow clears
+  at the end. Pills: "🌈 MUTATIONS ×5 · PULL NOW" over your pad in a
+  Rainbow Storm, "🌙 FUSE NOW" over your machine at night.
+- [ ] **Surge chips + strike warning.** `/event PowerSurge`: a "⚡ ×1.25"
+  chip over every running generator in every lab (from up to 80 studs);
+  cash balls on the factory lines run faster and look brighter. 3 s before
+  each bolt a cyan ring under the target pedestal and a red "⚡ STRIKE IN
+  3·2·1" over it, seen by everyone; then "CHARGED!" (cyan) or "MISSED"
+  (muted) pops for 1.5 s. With two labs, one with 4 items and one with 1,
+  both get struck about as often.
+- [ ] **BIG + street coins and the tally.** `/event GoldenRain`: about 1 in
+  8 lab coins is double size; it pays 20 s of income with a big gold "BIG
+  +$X". Every 15 s a coin lands on the street (off the belts, never in a
+  plot, at most 8); either player can grab it and it pays the grabber 6 s
+  of their own income. The chip shows "💰 +$X this rain" and the end toast
+  "… is over · you earned +$X".
+- [ ] **Meteor warnings.** `/event MeteorShower`: a red "☄ INCOMING" ring
+  and pill where each meteor lands, ~2 s before it hits; craters show
+  "Hold E · free item".
+- [ ] **Cleanup after `/event off` (every event).** Start each event, let it
+  make things (coins, chips, rings, craters, the moon), then `/event off`:
+  Workspace.EventObjects.<Id> is empty on the server (Explorer, Server view)
+  and on the client (Client view); no coin, crater, prompt, ring, chip or
+  pill is left in the world, and no pedestal keeps LightningTarget.
+- [ ] **Event mutation reveal.** `/eventmut void`, `/eventmut charged`,
+  `/eventmut celestial`: each opens the reveal card: mutation-colour
+  background, "EVENT-ONLY MUTATION", "VOID!" (CHARGED! / CELESTIAL!), the
+  orb in its shell, the item, "VOID ×8 income", the how-you-got-it box
+  (Void: "1 in 20 fusions"), "Index +1 · Void 1 / 17" the first time
+  (no "+1" for a repeat), a shake, DISPLAY / OK. Everyone sees the SERVER ·
+  EVENT MUTATION banner ("… got a VOID … under the Void Moon!", "…got
+  CHARGED by lightning!", "…found a CELESTIAL … in a meteor!"). A meteor
+  core that rolls Celestial and a Void Moon Void fusion use the same card.
+- [ ] **Index headers.** In the Index, tap the VOID ⓘ heading: a box under
+  the header row reads "VOID ×8" in purple, "Only from fusing during a
+  Void Moon (1 in 20 fusions). …", "You have X / 17". Tap it again (or
+  change tier) to close. Golden / Diamond / Rainbow mention Rainbow Storm
+  ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
+- [ ] **Odds board.** At desktop distance from the machine the board reads
+  as a table: "FUSE → TIER UP", "more orbs = better odds", ORBS IN 2–6,
+  one row per recipe with an orb dot, every % in its own cell, 100% cells
+  teal, the footer. No mutation line. At Rebirth 0 the Mythic → Secret row
+  reads R1 in every cell; after `/rebirths 1` the numbers show. On a phone
+  (Device emulator) the cells are still legible from the walkway. The Fuse
+  panel's chips are one two-line chip per count with a gap; the count in
+  the chamber is highlighted.
+- [ ] **Sounds.** No bell loops near Mythic / Secret pedestals any more. Put
+  a nonsense id (`rbxassetid://1`) in one SoundConfig slot: the output
+  shows one "SoundKit: <slot> failed to load …" warning at start and that
+  sound is simply silent afterwards; empty slots (Thunder, CoinPickup, …)
+  play nothing with no errors.

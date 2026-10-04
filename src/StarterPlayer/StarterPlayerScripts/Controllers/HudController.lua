@@ -22,6 +22,8 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local ShieldState = require(ReplicatedStorage.Shared.Modules.ShieldState)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -32,6 +34,7 @@ local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
+local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
@@ -636,72 +639,213 @@ function HudController.FloatPop(position: Vector3, text: string, color: Color3):
 	return label
 end
 
---[[ Shield chip -----------------------------------------------------------
-	Under the cash card (beside it on a phone): teal "🛡 SHIELD · 42s" while
-	your lab's shield is up, a pulsing amber "SHIELD DOWN · step on YOURS"
-	while it's down. Hidden under HeistConfig.MinRebirths (the plot sign
-	says PROTECTED instead) and before you claim. Reads the plot's
-	ShieldUntil attribute (HeistService), no remote.
+--[[ LOCK status chip ------------------------------------------------------
+	Under the cash card (beside it on a phone). It is NOT a lock button:
+	locking only happens at your LOCK console (HeistService.TryLock checks
+	you're there). It shows the state from the plot's published attributes
+	(ShieldState):
+	  Unlocked    muted, amber text   "🔓 UNLOCKED"
+	  Locked      teal                "🛡 LOCKED · 42s"
+	  Recharging  muted               "RECHARGING · 12s"
+	  Alarm       red, pulsing        "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+	              (lock ready AND a non-owner's root inside your walls)
+	Tapping it calls the handler HeistController registers
+	(SetLockChipHandler): the goal arrow points at your console for a few
+	seconds. Hidden under HeistConfig.MinRebirths and before you claim.
 ]]
-local SHIELD_CHIP_HEIGHT = 30
-local SHIELD_CHIP_GAP = 8
-local SHIELD_CHIP_REFRESH_SECONDS = 0.25
+local LOCK_CHIP_SIZE = Vector2.new(330, 48)
+local LOCK_CHIP_TEXT_SIZE = 15
+local LOCK_BUTTON_GAP = 8
+local LOCK_REFRESH_SECONDS = 0.25
 
-local shieldChip: TextLabel
-local shieldChipScale: UIScale
-local shieldPulse: Tween? = nil
+local lockChip: TextButton
+local lockHolder: Frame
+-- The round "?" beside it: opens HOW TO HEIST (visible from Rebirth 1).
+local HELP_BUTTON_SIZE = 52 -- >= 44 px after the phone UIScale
+local helpHolder: Frame
+local lockScale: UIScale
+local lockPulse: Tween? = nil
+local lockStyle: string? = nil
+local lockChipHandler: (() -> ())? = nil
 
-local function buildShieldChip()
-	shieldChip = UIKit.Pill({
-		Name = "ShieldChip",
+local function buildLockChip()
+	lockChip, lockHolder = UIKit.Button({
+		Name = "LockChip",
 		Parent = screenGui,
-		Text = "",
-		Color = Colors.ShieldTeal,
-		Font = Fonts.Display,
-		TextSize = 14,
-		Height = SHIELD_CHIP_HEIGHT,
-		TextStroke = 1.5,
+		Style = "Disabled",
+		Text = "🔓 UNLOCKED",
+		TextSize = LOCK_CHIP_TEXT_SIZE,
+		Size = UDim2.fromOffset(LOCK_CHIP_SIZE.X, LOCK_CHIP_SIZE.Y),
+		OnClick = function()
+			if lockChipHandler then
+				lockChipHandler()
+			end
+		end,
 	})
-	shieldChip.Visible = false
-	shieldChipScale = Instance.new("UIScale")
-	shieldChipScale.Parent = shieldChip
+	lockHolder.Visible = false
+	lockScale = Instance.new("UIScale")
+	lockScale.Parent = lockHolder
+
+	local _, help = UIKit.Button({
+		Name = "HowToHeistButton",
+		Parent = screenGui,
+		Style = "Blue",
+		Text = "?",
+		TextSize = 26,
+		Radius = 999,
+		Size = UDim2.fromOffset(HELP_BUTTON_SIZE, HELP_BUTTON_SIZE),
+		OnClick = HowToHeistPanel.Open,
+	})
+	helpHolder = help
+	helpHolder.Visible = false
 end
 
-local function setShieldPulse(on: boolean)
-	if on and not shieldPulse then
+-- HeistController's tap handler (it owns the goal-arrow override).
+function HudController.SetLockChipHandler(handler: () -> ())
+	lockChipHandler = handler
+end
+
+local function setLockPulse(on: boolean)
+	if on and not lockPulse then
 		local tween = TweenService:Create(
-			shieldChipScale,
+			lockScale,
 			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 			{ Scale = 1.06 }
 		)
 		tween:Play()
-		shieldPulse = tween
-	elseif not on and shieldPulse then
-		shieldPulse:Cancel()
-		shieldPulse = nil
-		shieldChipScale.Scale = 1
+		lockPulse = tween
+	elseif not on and lockPulse then
+		lockPulse:Cancel()
+		lockPulse = nil
+		lockScale.Scale = 1
 	end
 end
 
-local function refreshShieldChip()
+local function getOwnPlot(): Instance?
 	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
-	local plot = folder and folder:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
-	if not plot or plot:GetAttribute("Claimed") ~= true or TycoonController.GetRebirths() < HeistConfig.MinRebirths then
-		shieldChip.Visible = false
-		setShieldPulse(false)
+	return folder and folder:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
+end
+
+-- A non-owner's root is inside this plot's walls.
+local function hasIntruder(plot: Instance): boolean
+	local origin = plot:IsA("Model") and plot.PrimaryPart
+	if not origin then
+		return false
+	end
+	for _, other in Players:GetPlayers() do
+		if other ~= localPlayer then
+			local character = other.Character
+			local root = character and character:FindFirstChild("HumanoidRootPart")
+			if root and root:IsA("BasePart") and PlotLayout.IsInsidePlot(origin.CFrame:PointToObjectSpace(root.Position)) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- True while LOCK is ready and someone else is in your lab (the alarm
+-- state; HeistController's intruder tip reads it too).
+function HudController.IsLockUrgent(): boolean
+	return lockPulse ~= nil
+end
+
+local function refreshLockChip()
+	local plot = getOwnPlot()
+	local eligible = TycoonController.GetRebirths() >= HeistConfig.MinRebirths
+	helpHolder.Visible = eligible
+	if not plot or plot:GetAttribute("Claimed") ~= true or not eligible then
+		lockHolder.Visible = false
+		setLockPulse(false)
 		return
 	end
-	local shieldUntil = plot:GetAttribute("ShieldUntil")
-	local left = if typeof(shieldUntil) == "number" then shieldUntil - Workspace:GetServerTimeNow() else 0
-	shieldChip.Visible = true
+	local state, seconds = ShieldState.Get(plot)
+	if state == "Protected" then
+		lockHolder.Visible = false
+		setLockPulse(false)
+		return
+	end
+	lockHolder.Visible = true
+	local alarm = state == "Ready" and hasIntruder(plot)
+	local style = if alarm then "Red" elseif state == "Locked" then "Teal" else "Disabled"
+	local text = if alarm
+		then "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+		elseif state == "Locked" then ("🛡 LOCKED · %ds"):format(seconds)
+		elseif state == "Recharging" then ("RECHARGING · %ds"):format(seconds)
+		else "🔓 UNLOCKED"
+	UIKit.SetButton(lockChip, {
+		Style = if style ~= lockStyle then style else nil,
+		Text = text,
+		TextColor3 = if state == "Recharging" and not alarm
+			then Colors.Muted
+			elseif state == "Ready" and not alarm then Colors.ShieldAmber
+			else Colors.Text,
+	})
+	lockStyle = style
+	setLockPulse(alarm)
+end
+
+--[[ Steal timer chip --------------------------------------------------------
+	Under the LOCK chip, only while your thief cooldown (Player attribute
+	HeistCooldownUntil, server time) is running: muted "🫳 NEXT STEAL IN
+	42s" in amber text. When it reaches 0: "🫳 STEAL READY!" on the Gold
+	gradient for STEAL_READY_SECONDS, then it hides. Not tappable.
+]]
+local STEAL_CHIP_SIZE = Vector2.new(250, 44)
+local STEAL_READY_SECONDS = 2
+
+local stealChip: TextLabel
+-- The Gradient pill's Frame (UIKit.Pill): it takes position and visibility.
+local stealHolder: Frame
+local stealFill: UIGradient?
+local stealWasCounting = false
+local stealReadyUntil = 0
+
+local function buildStealChip()
+	stealChip = UIKit.Pill({
+		Name = "StealTimerChip",
+		Parent = screenGui,
+		Text = "",
+		Font = Fonts.Display,
+		TextSize = 17,
+		Height = STEAL_CHIP_SIZE.Y,
+		Gradient = UITheme.Gradients.Disabled,
+		TextColor3 = Colors.ShieldAmber,
+		TextStroke = 1.5,
+	})
+	stealHolder = stealChip.Parent :: Frame
+	stealHolder.Visible = false
+	stealFill = stealHolder:FindFirstChildOfClass("UIGradient")
+end
+
+local function setStealChip(text: string, ready: boolean)
+	stealChip.Text = text
+	stealChip.TextColor3 = if ready then Colors.Text else Colors.ShieldAmber
+	local fill = stealFill
+	if fill then
+		UIKit.SetPairGradient(fill, if ready then UITheme.Gradients.Gold else UITheme.Gradients.Disabled)
+	end
+	stealHolder.Visible = true
+end
+
+local function refreshStealChip()
+	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
+	local left = if typeof(untilTime) == "number"
+		then math.ceil(untilTime - Workspace:GetServerTimeNow())
+		else 0
 	if left > 0 then
-		shieldChip.Text = ("🛡 SHIELD · %ds"):format(math.ceil(left))
-		shieldChip.BackgroundColor3 = Colors.ShieldTeal
-		setShieldPulse(false)
+		stealWasCounting = true
+		setStealChip(("🫳 NEXT STEAL IN %ds"):format(left), false)
+		return
+	end
+	if stealWasCounting then
+		stealWasCounting = false
+		stealReadyUntil = os.clock() + STEAL_READY_SECONDS
+	end
+	if os.clock() < stealReadyUntil then
+		setStealChip("🫳 STEAL READY!", true)
 	else
-		shieldChip.Text = "SHIELD DOWN · step on YOURS"
-		shieldChip.BackgroundColor3 = Colors.ShieldAmber
-		setShieldPulse(true)
+		stealHolder.Visible = false
 	end
 end
 
@@ -714,9 +858,13 @@ local function applyLayout(isPhone: boolean)
 	cashHolder.Position = layout.CashPosition
 	-- Under the cash card on desktop; beside it on a phone (the goal
 	-- tracker sits under it there).
-	shieldChip.Position = if isPhone
-		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + SHIELD_CHIP_GAP, 0)
-		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + SHIELD_CHIP_GAP)
+	lockHolder.Position = if isPhone
+		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
+		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
+	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_CHIP_SIZE.X + LOCK_BUTTON_GAP, 0)
+	-- The steal timer sits under the LOCK chip (shown even at Rebirth 0's
+	-- hidden LOCK chip: you can't have a cooldown there anyway).
+	stealHolder.Position = lockHolder.Position + UDim2.fromOffset(0, LOCK_CHIP_SIZE.Y + LOCK_BUTTON_GAP)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -771,11 +919,13 @@ function HudController.Init()
 	cashHolder = buildCashCard()
 	buildButtonRow()
 	buildRebirthReadyButton()
-	buildShieldChip()
+	buildLockChip()
+	buildStealChip()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
 	FusePanel.Init()
+	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)
@@ -784,8 +934,9 @@ function HudController.Init()
 	task.spawn(runUpgradesPulse)
 	task.spawn(function()
 		while true do
-			refreshShieldChip()
-			task.wait(SHIELD_CHIP_REFRESH_SECONDS)
+			refreshLockChip()
+			refreshStealChip()
+			task.wait(LOCK_REFRESH_SECONDS)
 		end
 	end)
 

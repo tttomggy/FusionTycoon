@@ -4,7 +4,9 @@
 	------------
 	Builds the shared world once at server start: the grass ground, the
 	street between the two rows of plots with its two speed belts, and a
-	placeholder foundation ("FREE LAB") on every plot slot nobody has taken.
+	placeholder foundation ("FREE LAB") on every plot slot nobody has taken,
+	and the two street Event Boards (StreetLayout.EventBoard; folder
+	World/EventBoards, filled every second by the client's EventController).
 	Removes the default Baseplate if the place still has one.
 
 	TycoonService tells it when a slot is taken or freed
@@ -24,6 +26,7 @@ local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local WorldService = {}
 
@@ -157,6 +160,48 @@ end
 
 -- Called by TycoonService: a player's plot now stands on (or has left)
 -- slot `index`.
+-- The Event Boards: a board on two posts past each end of the street, a
+-- violet strip along its top edge, and the board's SurfaceGui.
+local function buildEventBoards(folder: Folder)
+	local b = StreetLayout.EventBoard
+	local boards = Instance.new("Folder")
+	boards.Name = "EventBoards"
+	for index, cframe in StreetLayout.GetEventBoardCFrames() do
+		local model = Instance.new("Model")
+		model.Name = "EventBoard" .. index
+		local board = PartKit.Part({
+			Name = "Board",
+			Size = Vector3.new(b.Width, b.Height, b.Thickness),
+			CFrame = cframe,
+			Color = World.Structure,
+			Parent = model,
+		})
+		local strip = PartKit.Part({
+			Name = "Strip",
+			Size = Vector3.new(b.Width, 0.4, b.Thickness + 0.2),
+			CFrame = cframe * CFrame.new(0, b.Height / 2 + 0.2, 0),
+			Color = World.AccentViolet,
+			Material = Enum.Material.Neon,
+			Parent = model,
+		})
+		PartKit.MakeDecorative(strip)
+		local postHeight = b.BottomY + b.Height
+		for _, side in { -1, 1 } do
+			PartKit.Part({
+				Name = "Post",
+				Size = Vector3.new(b.PostWidth, postHeight, b.PostWidth),
+				CFrame = cframe * CFrame.new(side * (b.Width / 2 - b.PostWidth), -b.Height / 2 - b.BottomY + postHeight / 2, b.Thickness / 2 + b.PostWidth / 2),
+				Color = World.StructureLight,
+				Parent = model,
+			})
+		end
+		BillboardKit.EventBoardSurface(board, b.PixelsPerStud, b.MaxDistance)
+		model.PrimaryPart = board
+		model.Parent = boards
+	end
+	boards.Parent = folder
+end
+
 function WorldService.SetSlotOccupied(index: number, occupied: boolean)
 	state.occupied[index] = occupied
 	if occupied then
@@ -180,6 +225,7 @@ function WorldService:Init()
 
 	buildGroundAndStreet(folder)
 	buildBelts(folder)
+	buildEventBoards(folder)
 	-- Re-assert the belt velocities in case anything resets them.
 	task.spawn(function()
 		while true do

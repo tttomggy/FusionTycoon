@@ -8,9 +8,17 @@
 	  * Per player, until a server time (workspace:GetServerTimeNow()). It is
 	    published as the plot attribute ShieldUntil so every client renders
 	    the fence without a remote.
-	  * Raised for ClaimShieldSeconds on claim, ShieldSeconds when the owner
-	    stands on their YOURS pad (the claimed claim station) while it's
-	    down, and VictimShieldSeconds after losing an item.
+	  * Raised for ClaimShieldSeconds on claim, VictimShieldSeconds after
+	    losing an item, and ShieldSeconds when the owner LOCKs on purpose:
+	    TryLock, only from the LOCK console's prompt (LockKit, built on
+	    claim), checked server-side to be within reach of that console.
+	    There is no remote for it: you have to run home to lock.
+	  * After any shield ends (timeout or a drop) LOCK recharges for
+	    ShieldRearmSeconds: the thieves' window. Published as the plot
+	    attribute ShieldRearmAt (server time); clients drive the console's
+	    label, button and prompt and the HUD status chip from ShieldUntil /
+	    ShieldRearmAt / Protected. The claim and victim shields ignore the
+	    recharge; /shield 0 clears it.
 	  * While up, a loop every EjectTickSeconds moves any non-owner whose
 	    root is inside the plot's walls to the street in front of its gate.
 
@@ -33,16 +41,22 @@
 	    victim's plot gone, server shutdown, /wipe) is a fail: drop the carry
 	    and the flags; the item never left. PlayerDataService runs the
 	    OnRelease hook before any save on leave and on shutdown.
+	  * Fairness: the owner standing within OwnerBlockRadius of the pedestal
+	    guards it (grab rejected; pedestal attribute GuardedByOwner tells the
+	    client). The owner can't tag for TagGraceSeconds after a grab, and
+	    runs at OwnerChaseWalkSpeed while any of their items is carried.
 	  * The item can be in at most one carry (carriedItems), and a thief in
 	    at most one; server events run one at a time, so two grabs of the
 	    same pedestal in one frame resolve as one win, one reject.
 
 	Follows ServiceTemplate:
-	  :Init()   own state, RequestSteal and PlayerRemoving.
+	  :Init()   own state, RequestSteal, the LOCK prompt and
+	            PlayerRemoving.
 	  :Start()  resolves PlayerDataService and TycoonService, registers the
 	            OnRelease hook, starts the shield loop and the carry loop.
 ]]
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
@@ -52,6 +66,7 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
+local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -92,8 +107,10 @@ type State = {
 	recentLosses: { [number]: { number } },
 	-- Plots seen claimed (the claim shield is raised once, on the change).
 	claimSeen: { [number]: boolean },
-	-- os.clock() of each owner's last shield-pad activation.
-	lastPadAt: { [number]: number },
+	-- Server time each player's pad may raise the shield again (re-arm).
+	rearmAt: { [number]: number },
+	-- os.clock() of each player's last lock request (the console prompt).
+	lastLockRequest: { [number]: number },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
 	-- Active carries by thief UserId, and the Uid -> thief index that keeps
@@ -112,7 +129,8 @@ local state: State = {
 	cooldownUntil = {},
 	recentLosses = {},
 	claimSeen = {},
-	lastPadAt = {},
+	rearmAt = {},
+	lastLockRequest = {},
 	debugStealable = {},
 	carries = {},
 	carriedItems = {},
@@ -180,6 +198,16 @@ local function getPedestal(plot: Model, index: number): BasePart?
 	return if pedestal and pedestal:IsA("BasePart") then pedestal else nil
 end
 
+local function flatDistance(a: Vector3, b: Vector3): number
+	return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+end
+
+-- The owner is standing guard at this pedestal (within OwnerBlockRadius).
+local function isGuarded(owner: Player, pedestal: BasePart): boolean
+	local root = getRoot(owner)
+	return root ~= nil and flatDistance(root.Position, pedestal.Position) <= HeistConfig.OwnerBlockRadius
+end
+
 local function isInsidePlot(origin: CFrame, position: Vector3): boolean
 	return PlotLayout.IsInsidePlot(origin:PointToObjectSpace(position))
 end
@@ -223,14 +251,29 @@ end
 
 --[[ Public API: shield and protection ------------------------------------ ]]
 
--- Raises `player`'s shield for `seconds` from now (0 drops it).
-function HeistService.RaiseShield(player: Player, seconds: number)
-	local untilTime = if seconds > 0 then serverNow() + seconds else 0
-	state.shieldUntil[player.UserId] = untilTime
+local function publishShield(player: Player)
 	local plot = TycoonService.GetPlotForPlayer(player)
 	if plot then
-		plot:SetAttribute("ShieldUntil", untilTime)
+		plot:SetAttribute("ShieldUntil", state.shieldUntil[player.UserId] or 0)
+		plot:SetAttribute("ShieldRearmAt", state.rearmAt[player.UserId] or 0)
 	end
+end
+
+-- Raises `player`'s shield for `seconds` from now (0 drops it). Either way
+-- the pad's re-arm lock runs from the moment this shield ends. Callers that
+-- aren't the pad (claim, victim, /shield) aren't subject to the lock.
+function HeistService.RaiseShield(player: Player, seconds: number)
+	local now = serverNow()
+	local untilTime = if seconds > 0 then now + seconds else 0
+	state.shieldUntil[player.UserId] = untilTime
+	state.rearmAt[player.UserId] = (if seconds > 0 then untilTime else now) + HeistConfig.ShieldRearmSeconds
+	publishShield(player)
+end
+
+-- Studio /shield 0: also lifts the pad's re-arm lock.
+function HeistService.ClearRearm(player: Player)
+	state.rearmAt[player.UserId] = nil
+	publishShield(player)
 end
 
 function HeistService.IsShielded(player: Player): boolean
@@ -252,9 +295,10 @@ function HeistService.IsLossCapped(player: Player): boolean
 	return losses ~= nil and #losses >= HeistConfig.LossCap
 end
 
--- Studio /heistcd: clears the thief cooldown.
+-- Studio /heistcd: clears the thief cooldown (and its published attribute).
 function HeistService.ClearCooldown(player: Player)
 	state.cooldownUntil[player.UserId] = nil
+	player:SetAttribute("HeistCooldownUntil", nil)
 end
 
 -- Studio /stealable: toggles stealable-at-Rebirth-0 for this player's lab.
@@ -341,9 +385,20 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 	local victim = Players:GetPlayerByUserId(carry.VictimUserId)
 	if victim then
 		PlayerDataService.SetItemCarried(victim, carry.ItemUid, false)
+		-- The chase boost lasts while any of their items is out.
+		local humanoid = getHumanoid(victim)
+		if humanoid and not PlayerDataService.HasCarriedItems(victim) then
+			humanoid.WalkSpeed = HeistConfig.NormalWalkSpeed
+		end
 	end
 	if thief then
 		PlayerDataService.SetCarrying(thief, false)
+		-- For every client's cosmetic ending (the catch: flash, CAUGHT!, the
+		-- orb flying home). Set before the Heist* attributes clear.
+		thief:SetAttribute("HeistOutcome", outcome)
+		local victimPlot = victim and TycoonService.GetPlotForPlayer(victim)
+		local pedestal = victimPlot and getPedestal(victimPlot, carry.PedestalIndex)
+		thief:SetAttribute("HeistReturnTo", if pedestal then pedestal.Position else nil)
 		clearThiefAttributes(thief)
 		local humanoid = getHumanoid(thief)
 		if humanoid then
@@ -353,6 +408,7 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 
 	if outcome == "Delivered" then
 		if thief and victim and transferItem(thief, victim, carry) then
+			PlayerDataService.IncrementTotalSteals(thief) -- first_steal goal (paid by the sync below)
 			local losses = state.recentLosses[victim.UserId] or {}
 			table.insert(losses, os.clock())
 			state.recentLosses[victim.UserId] = losses
@@ -523,6 +579,11 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		reject(thief, "TooFar")
 		return
 	end
+	-- The owner standing guard at it blocks the grab (readable defence).
+	if isGuarded(victim, pedestal) then
+		reject(thief, "Guarded")
+		return
+	end
 	-- 7. Not already being carried.
 	if state.carriedItems[uid] then
 		reject(thief, "AlreadyStolen")
@@ -552,6 +613,8 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	state.carries[thief.UserId] = carry
 	state.carriedItems[uid] = thief.UserId
 	state.cooldownUntil[thief.UserId] = os.clock() + HeistConfig.ThiefCooldownSeconds
+	-- The client's steal timer (HUD chip, "Steal in 42s" prompts), server time.
+	thief:SetAttribute("HeistCooldownUntil", serverNow() + HeistConfig.ThiefCooldownSeconds)
 	PlayerDataService.SetItemCarried(victim, uid, true)
 	PlayerDataService.SetCarrying(thief, true)
 
@@ -559,6 +622,10 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		endCarry(thief.UserId, "Died")
 	end)
 	humanoid.WalkSpeed = HeistConfig.CarryWalkSpeed
+	local victimHumanoid = getHumanoid(victim)
+	if victimHumanoid then
+		victimHumanoid.WalkSpeed = HeistConfig.OwnerChaseWalkSpeed
+	end
 
 	thief:SetAttribute("HeistTier", info.Tier)
 	thief:SetAttribute("HeistMutation", info.Mutation)
@@ -577,6 +644,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		OtherName = victim.DisplayName,
 		OtherUserId = victim.UserId,
 		EndsAt = carry.EndsAt,
+		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + HeistConfig.TagGraceSeconds,
 	})
 	RemoteEvents.HeistStarted:FireClient(victim, {
 		Role = "Victim",
@@ -584,6 +652,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		OtherName = thief.DisplayName,
 		OtherUserId = thief.UserId,
 		EndsAt = carry.EndsAt,
+		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + HeistConfig.TagGraceSeconds,
 	})
 	if isFeedTier(info.Tier) then
 		RemoteEvents.HeistFeed:FireAllClients({
@@ -612,8 +681,10 @@ local function stepCarries()
 		end
 		local thiefRoot = getRoot(thief)
 		if thiefRoot then
+			-- No tag in the grace window: the thief gets to see the grab land.
+			local graceOver = os.clock() - carry.StartedAt >= HeistConfig.TagGraceSeconds
 			local victimRoot = getRoot(victim)
-			if victimRoot and (victimRoot.Position - thiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
+			if graceOver and victimRoot and (victimRoot.Position - thiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
 				endCarry(thiefUserId, "Saved")
 				continue
 			end
@@ -629,29 +700,87 @@ local function stepCarries()
 	end
 end
 
---[[ Shield loop: claim shield, shield pad, protection, eject --------------- ]]
+--[[ Shield loop: claim shield, protection, guard flags, eject ------------- ]]
 
-local function onPadCheck(player: Player, origin: CFrame)
+--[[ LOCK: the one way an owner raises their shield on purpose ----------- ]]
+
+export type LockReason = "Protected" | "Carrying" | "AlreadyLocked" | "Recharging" | "TooFar"
+
+-- Is `player`'s root within reach of their own LOCK console (prompt
+-- distance + LockReachSlack, flat)? A client can fire a prompt from
+-- anywhere with an exploit, so the server measures it.
+local function isAtConsole(player: Player): boolean
+	local _, origin = getClaimedPlot(player)
 	local root = getRoot(player)
-	if not root or HeistService.IsShielded(player) or HeistService.IsProtected(player) then
-		return
+	if not origin or not root then
+		return false
 	end
-	-- The shield pad is off-limits while carrying a stolen item.
+	local console = origin:PointToWorldSpace(PlotLayout.LOCK_CONSOLE)
+	local offset = root.Position - console
+	local flat = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	return flat <= PlotLayout.LockConsole.PromptDistance + HeistConfig.LockReachSlack
+end
+
+-- Raises `player`'s shield for ShieldSeconds if every rule allows it, in
+-- this order: Protected (Rebirth 0), Carrying, AlreadyLocked, Recharging
+-- (the re-arm lock; also returns the seconds left), TooFar (not at their
+-- own LOCK console). The console's prompt is the only way in.
+function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
+	if HeistService.IsProtected(player) then
+		return false, "Protected"
+	end
 	if state.carries[player.UserId] then
-		return
+		return false, "Carrying"
 	end
-	local offset = origin:PointToObjectSpace(root.Position) - PlotLayout.CLAIM_STATION
-	local radius = PlotLayout.Station.PadDiameter / 2
-	if Vector3.new(offset.X, 0, offset.Z).Magnitude > radius or math.abs(offset.Y) > PlotLayout.Station.LabelOffsetY then
-		return
+	if HeistService.IsShielded(player) then
+		return false, "AlreadyLocked"
 	end
-	local now = os.clock()
-	local last = state.lastPadAt[player.UserId]
-	if last and now - last < HeistConfig.ShieldPadDebounceSeconds then
-		return
+	local rearmLeft = (state.rearmAt[player.UserId] or 0) - serverNow()
+	if rearmLeft > 0 then
+		return false, "Recharging", math.ceil(rearmLeft)
 	end
-	state.lastPadAt[player.UserId] = now
+	if not isAtConsole(player) then
+		return false, "TooFar"
+	end
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
+	PlayerDataService.IncrementShieldRaises(player)
+	PlayerDataService.SyncTycoon(player) -- pays the first_shield goal
+	return true, nil
+end
+
+-- The console prompt: rejections come back on the heist toast path
+-- (HeistEnded Rejected, Role "Lock").
+local function requestLock(player: Player)
+	local now = os.clock()
+	local last = state.lastLockRequest[player.UserId]
+	if last and now - last < HeistConfig.LockRequestDebounceSeconds then
+		return
+	end
+	state.lastLockRequest[player.UserId] = now
+	if not PlayerDataService.IsDataLoaded(player) then
+		return
+	end
+	local ok, reason, seconds = HeistService.TryLock(player)
+	if not ok then
+		RemoteEvents.HeistEnded:FireClient(player, {
+			Role = "Lock",
+			Outcome = "Rejected",
+			Reason = reason,
+			Seconds = seconds,
+		})
+	end
+end
+
+-- The console's prompt is owner-only on clients; the server still checks
+-- the prompt is on the player's own plot.
+local function onPromptTriggered(prompt: ProximityPrompt, player: Player)
+	if prompt.Name ~= LockKit.PROMPT_NAME then
+		return
+	end
+	local plot = TycoonService.GetPlotForPlayer(player)
+	if plot and prompt:IsDescendantOf(plot) then
+		requestLock(player)
+	end
 end
 
 local function ejectIntruders(owner: Player, plot: Model, origin: CFrame)
@@ -683,7 +812,18 @@ local function shieldTick()
 				if plot:GetAttribute("Protected") ~= protected then
 					plot:SetAttribute("Protected", protected)
 				end
-				onPadCheck(player, origin)
+				-- GuardedByOwner: clients show the steal prompt as "Owner is guarding".
+				local pedestals = plot:FindFirstChild("Pedestals")
+				if pedestals then
+					for _, pedestal in pedestals:GetChildren() do
+						if pedestal:IsA("BasePart") then
+							local guarded = isGuarded(player, pedestal)
+							if pedestal:GetAttribute("GuardedByOwner") ~= guarded then
+								pedestal:SetAttribute("GuardedByOwner", guarded)
+							end
+						end
+					end
+				end
 				-- A protected lab needs no eject: nothing there can be stolen.
 				if not protected and HeistService.IsShielded(player) then
 					ejectIntruders(player, plot, origin)
@@ -700,7 +840,8 @@ local function onPlayerRemoving(player: Player)
 	state.cooldownUntil[userId] = nil
 	state.recentLosses[userId] = nil
 	state.claimSeen[userId] = nil
-	state.lastPadAt[userId] = nil
+	state.rearmAt[userId] = nil
+	state.lastLockRequest[userId] = nil
 	state.debugStealable[userId] = nil
 end
 
@@ -708,6 +849,7 @@ end
 
 function HeistService:Init()
 	table.insert(state.connections, RemoteEvents.RequestSteal.OnServerEvent:Connect(onRequestSteal))
+	table.insert(state.connections, ProximityPromptService.PromptTriggered:Connect(onPromptTriggered))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(
 		state.connections,

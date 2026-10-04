@@ -12,7 +12,10 @@
 
 	An override (SetOverride) replaces the goal while it lasts: the heist
 	points a thief at their own gate (gold) and a victim at the thief's root
-	(Danger red, following them, no floor ring).
+	(Danger red, following them, no floor ring). Under it sits the event
+	override (SetEventOverride, EventController): what to do during the
+	running event (the Gacha Pad in a Rainbow Storm, the Fusion Machine at
+	night, the nearest crater or street coin). Heist > event > goal.
 
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
@@ -62,8 +65,9 @@ local targetPosition: Vector3? = nil
 -- A moving override target (the thief's root): distance is measured to it live.
 local movingTarget: BasePart? = nil
 
-type Override = { Target: Instance, Text: string, Danger: boolean }
+type Override = { Target: Instance, Text: string, Danger: boolean, Pulse: boolean }
 local override: Override? = nil
+local eventOverride: Override? = nil
 
 -- os.clock() a target name was first missed on a claimed plot; names that
 -- already warned.
@@ -93,6 +97,34 @@ local function resolveTarget(name: string): Instance?
 			end
 		end
 		return nil
+	end
+	if name == "NearestEnemyPedestal" then
+		-- The closest pedestal in another lab you could grab right now
+		-- (WorldLabelController marks its StealPrompt Mode "Steal").
+		local folder = plot.Parent
+		local character = localPlayer.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not folder or not root or not root:IsA("BasePart") then
+			return nil
+		end
+		local best: Instance? = nil
+		local bestDistance = math.huge
+		for _, other in folder:GetChildren() do
+			local pedestals = other ~= plot and other:FindFirstChild("Pedestals")
+			if pedestals then
+				for _, pedestal in pedestals:GetChildren() do
+					local prompt = pedestal:FindFirstChild("StealPrompt")
+					local mode = prompt and prompt:GetAttribute("Mode")
+					if pedestal:IsA("BasePart") and (mode == "Steal" or mode == "Cooldown") then
+						local distance = (pedestal.Position - root.Position).Magnitude
+						if distance < bestDistance then
+							best, bestDistance = pedestal, distance
+						end
+					end
+				end
+			end
+		end
+		return best
 	end
 	return plot:FindFirstChild(name)
 end
@@ -128,7 +160,10 @@ local function clearWorldMarker()
 	currentTarget = nil
 end
 
-local function buildMarker(goalText: string, danger: boolean)
+local PULSE_SCALE = 1.25
+local PULSE_SECONDS = 0.6
+
+local function buildMarker(goalText: string, danger: boolean, pulse: boolean?)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "GoalMarker"
 	gui.AlwaysOnTop = true -- a guide, meant to be seen through walls
@@ -201,6 +236,16 @@ local function buildMarker(goalText: string, danger: boolean)
 		TweenInfo.new(BOB_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
 		{ Position = UDim2.fromOffset(0, -BOB_PIXELS) }
 	):Play()
+	if pulse then
+		-- The heist's first-catch tip: the red arrow throbs.
+		local scale = Instance.new("UIScale")
+		scale.Parent = content
+		TweenService:Create(
+			scale,
+			TweenInfo.new(PULSE_SECONDS / 2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = PULSE_SCALE }
+		):Play()
+	end
 
 	gui.Parent = localPlayer:WaitForChild("PlayerGui")
 	marker = gui
@@ -232,13 +277,13 @@ local function buildRing(bottomCenter: Vector3, footprint: number)
 	ring = face
 end
 
-local function showWorldMarker(target: Instance, goalText: string, danger: boolean?)
+local function showWorldMarker(target: Instance, goalText: string, danger: boolean?, pulse: boolean?)
 	-- An unanchored part (a character's root) moves: adorn to it directly.
 	if target:IsA("BasePart") and not target.Anchored then
 		clearWorldMarker()
 		currentTarget = target
 		movingTarget = target
-		buildMarker(goalText, danger == true)
+		buildMarker(goalText, danger == true, pulse)
 		local gui = marker :: BillboardGui
 		gui.Adornee = target
 		gui.StudsOffset = Vector3.new(0, MARKER_HEIGHT_ABOVE_TARGET + 2, 0)
@@ -274,7 +319,7 @@ end
 -- "FirstEmptyPedestal", which is legitimately missing when all are full.
 local function checkTargetExists(name: string, target: Instance?)
 	local plot = getPlot()
-	if target or name == "FirstEmptyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
+	if target or name == "FirstEmptyPedestal" or name == "NearestEnemyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
 		missingSince[name] = nil
 		return
 	end
@@ -298,11 +343,11 @@ local function setUiTarget(name: string?)
 end
 
 local function refresh()
-	local active = override
+	local active = override or eventOverride
 	if active then
 		setUiTarget(nil)
 		if active.Target ~= currentTarget then
-			showWorldMarker(active.Target, active.Text, active.Danger)
+			showWorldMarker(active.Target, active.Text, active.Danger, active.Pulse)
 		end
 		return
 	end
@@ -358,10 +403,10 @@ local function update()
 end
 
 -- Points the marker at `target` instead of the goal until cleared (nil).
--- `danger` tints it red (the heist's victim arrow).
-function GoalMarkerController.SetOverride(target: Instance?, text: string?, danger: boolean?)
+-- `danger` tints it red (the heist's victim arrow); `pulse` makes it throb.
+function GoalMarkerController.SetOverride(target: Instance?, text: string?, danger: boolean?, pulse: boolean?)
 	if target then
-		override = { Target = target, Text = text or "", Danger = danger == true }
+		override = { Target = target, Text = text or "", Danger = danger == true, Pulse = pulse == true }
 	else
 		override = nil
 	end
@@ -370,11 +415,37 @@ function GoalMarkerController.SetOverride(target: Instance?, text: string?, dang
 	refresh()
 end
 
+-- The event layer, under any heist override: points at `target` (nil
+-- clears it). Called often; a no-op while nothing changes.
+function GoalMarkerController.SetEventOverride(target: Instance?, text: string?)
+	local current = eventOverride
+	if target and current and current.Target == target and current.Text == (text or "") then
+		return
+	end
+	if not target and not current then
+		return
+	end
+	eventOverride = if target then { Target = target, Text = text or "", Danger = false, Pulse = false } else nil
+	if override then
+		return -- the heist arrow stays; this shows when it ends
+	end
+	clearWorldMarker()
+	currentGoalIndex = nil
+	refresh()
+end
+
+-- A target in your own plot by GoalConfig name ("GachaStation",
+-- "FusionMachine", ...), or nil before it's built.
+function GoalMarkerController.ResolvePlotTarget(name: string): Instance?
+	return resolveTarget(name)
+end
+
 function GoalMarkerController.Init()
 	TycoonController.TycoonChanged:Connect(refresh)
 	RunService.Heartbeat:Connect(update)
 	-- Targets that don't exist yet (stations built on claim) and targets that
-	-- move (the first empty pedestal) are re-resolved on a slow timer.
+	-- move (the first empty pedestal, the nearest enemy pedestal) are
+	-- re-resolved on a slow timer.
 	task.spawn(function()
 		while true do
 			task.wait(RESOLVE_INTERVAL)

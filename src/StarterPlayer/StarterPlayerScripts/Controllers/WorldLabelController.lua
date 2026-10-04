@@ -14,7 +14,9 @@
 	the owner, the viewer has HeistConfig.MinRebirths (leaderstats), the lab
 	isn't Protected (owner under MinRebirths) or shielded (ShieldUntil), the
 	pedestal is Filled and not BeingStolen, and the viewer isn't already
-	carrying. The server re-checks all of it on RequestSteal.
+	carrying. A pedestal the owner is guarding (GuardedByOwner) shows "Owner
+	is guarding" instead of a hold. The server re-checks all of it on
+	RequestSteal.
 
 	It also hides every plot BillboardGui (pedestal and pad labels) drawn
 	within HIDE_NEAR_STUDS of the camera, showing it again past
@@ -138,33 +140,97 @@ local function findPlot(instance: Instance): Instance?
 	return nil
 end
 
-local function canSteal(prompt: ProximityPrompt, viewerOk: boolean): boolean
-	if not viewerOk then
-		return false
+-- What a StealPrompt shows on this client (the prompt's local "Mode"
+-- attribute; HeistController reads it on trigger):
+--   Hidden   not stealable for this viewer (own lab, empty, shielded, ...)
+--   Locked   the viewer is under MinRebirths: the teaser "🔒 Steal" /
+--            "Unlocks at Rebirth 1", an instant tap that only toasts
+--   Guarded  the owner is standing guard: "Owner is guarding", instant tap
+--            that only toasts, so the thief doesn't waste the 1.5 s hold
+--   Cooldown the viewer's thief cooldown is running (Player attribute
+--            HeistCooldownUntil): "Steal in 42s", instant tap that toasts
+--   Steal    "Steal" / item and $/s, hold to grab
+-- Precedence: Hidden > Locked > Cooldown > Guarded > Steal. Roblox hides a
+-- disabled prompt, so Locked, Cooldown and Guarded stay enabled with no
+-- hold and HeistController answers the tap with a toast instead.
+export type StealMode = "Hidden" | "Locked" | "Cooldown" | "Guarded" | "Steal"
+
+-- Seconds left on the viewer's thief cooldown (0 when none).
+local function cooldownLeft(): number
+	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
+	if typeof(untilTime) ~= "number" then
+		return 0
 	end
+	return math.max(0, math.ceil(untilTime - Workspace:GetServerTimeNow()))
+end
+
+local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
 	local owner = prompt:GetAttribute("OwnerUserId")
-	if owner == localUserId then
-		return false
+	if owner == localUserId or viewerCarrying then
+		return "Hidden"
 	end
 	local pedestal = prompt.Parent
 	if not pedestal or pedestal:GetAttribute("Filled") ~= true or pedestal:GetAttribute("BeingStolen") == true then
-		return false
+		return "Hidden"
 	end
 	local plot = findPlot(prompt)
 	if not plot or plot:GetAttribute("Protected") ~= false then
-		return false
+		return "Hidden"
 	end
 	local shieldUntil = plot:GetAttribute("ShieldUntil")
-	return not (typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow())
+	if typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow() then
+		return "Hidden"
+	end
+	if viewerRebirths < HeistConfig.MinRebirths then
+		return "Locked"
+	end
+	if cooldownLeft() > 0 then
+		return "Cooldown"
+	end
+	if pedestal:GetAttribute("GuardedByOwner") == true then
+		return "Guarded"
+	end
+	return "Steal"
+end
+
+local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
+	-- The item and its $/s (server's StealLabel), except on the teaser.
+	local pedestal = prompt.Parent
+	local label = pedestal and pedestal:GetAttribute("StealLabel")
+	local objectText = if mode == "Locked" then "Unlocks at Rebirth 1" elseif typeof(label) == "string" then label else ""
+	if prompt.ObjectText ~= objectText then
+		prompt.ObjectText = objectText
+	end
+	if mode == "Cooldown" then
+		local actionText = ("Steal in %ds"):format(cooldownLeft())
+		if prompt.ActionText ~= actionText then
+			prompt.ActionText = actionText
+		end
+	end
+	if prompt:GetAttribute("Mode") == mode then
+		return
+	end
+	prompt:SetAttribute("Mode", mode)
+	prompt.Enabled = mode ~= "Hidden"
+	if mode == "Locked" then
+		prompt.ActionText = "🔒 Steal"
+		prompt.HoldDuration = 0
+	elseif mode == "Guarded" then
+		prompt.ActionText = "Owner is guarding"
+		prompt.HoldDuration = 0
+	elseif mode == "Cooldown" then
+		prompt.HoldDuration = 0
+	else
+		prompt.ActionText = "Steal"
+		prompt.HoldDuration = HeistConfig.GrabHoldSeconds
+	end
 end
 
 local function updateStealPrompts()
-	local viewerOk = getLocalRebirths() >= HeistConfig.MinRebirths and localPlayer:GetAttribute("HeistTier") == nil
+	local rebirths = getLocalRebirths()
+	local carrying = localPlayer:GetAttribute("HeistTier") ~= nil
 	for prompt in stealPrompts do
-		local enabled = canSteal(prompt, viewerOk)
-		if prompt.Enabled ~= enabled then
-			prompt.Enabled = enabled
-		end
+		applyStealMode(prompt, stealMode(prompt, rebirths, carrying))
 	end
 	for prompt in ownDisplayPrompts do
 		local pedestal = prompt.Parent
@@ -181,6 +247,7 @@ local function trackStealPrompt(prompt: ProximityPrompt)
 	end
 	stealPrompts[prompt] = true
 	prompt.Enabled = false
+	prompt:SetAttribute("Mode", "Hidden")
 	prompt.Destroying:Connect(function()
 		stealPrompts[prompt] = nil
 	end)
