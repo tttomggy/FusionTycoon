@@ -24,6 +24,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
+local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -65,6 +66,9 @@ export type PlayerData = {
 	ShieldRaises: number,
 	-- One-time tips/cards already shown (TipConfig ids -> true).
 	Tips: { [string]: boolean },
+	-- Player settings (SettingsConfig): RevealRule = which tiers / mutations
+	-- get the big reveal card. Old saves get the defaults.
+	Settings: SettingsConfig.Settings,
 	-- How many times the player has rebirthed (RebirthConfig).
 	Rebirths: number,
 	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
@@ -114,6 +118,8 @@ export type TycoonSnapshot = {
 	CarriedUids: { string },
 	-- One-time tips already seen (TipConfig ids), as a dense list.
 	TipKeys: { string },
+	-- The player's settings (SettingsConfig), a copy.
+	Settings: SettingsConfig.Settings,
 }
 
 type State = {
@@ -139,6 +145,8 @@ type State = {
 	syncHooks: { (Player) -> () },
 	-- os.clock() of each player's last honoured RequestSync.
 	lastSyncRequest: { [number]: number },
+	-- A settings change already has a sync scheduled (SetSetting).
+	settingsSyncQueued: { [number]: boolean },
 	connections: { RBXScriptConnection },
 }
 
@@ -150,6 +158,7 @@ local LOAD_RETRY_ATTEMPTS = 3
 local LOAD_RETRY_DELAY_SECONDS = 2
 local AUTOSAVE_INTERVAL_SECONDS = 120
 local SYNC_REQUEST_COOLDOWN_SECONDS = 2
+local SETTINGS_SYNC_DELAY_SECONDS = 0.25 -- a burst of SetSettings syncs once
 
 local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
 
@@ -166,6 +175,7 @@ local DEFAULT_DATA: PlayerData = {
 	TotalSteals = 0,
 	ShieldRaises = 0,
 	Tips = {},
+	Settings = SettingsConfig.GetDefaultSettings(),
 	Rebirths = 0,
 	Index = {},
 }
@@ -182,6 +192,7 @@ local state: State = {
 	releaseHooks = {},
 	syncHooks = {},
 	lastSyncRequest = {},
+	settingsSyncQueued = {},
 	connections = {},
 }
 
@@ -277,6 +288,9 @@ local function reconcile(raw: any): PlayerData
 			end
 		end
 	end
+	data.Settings = {
+		RevealRule = SettingsConfig.SanitizeRevealRule(typeof(raw.Settings) == "table" and raw.Settings.RevealRule or nil),
+	}
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
 	end
@@ -718,6 +732,16 @@ function PlayerDataService.MarkTipSeen(player: Player, id: string)
 	end
 end
 
+-- SetSetting RevealRule: one tier's value (SettingsConfig-validated).
+function PlayerDataService.SetRevealRule(player: Player, tier: string, value: string): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data or not SettingsConfig.IsRevealTier(tier) or not SettingsConfig.IsRevealValue(value) then
+		return false
+	end
+	data.Settings.RevealRule[tier] = value
+	return true
+end
+
 -- Studio /tips reset.
 function PlayerDataService.ResetTips(player: Player)
 	local data = state.sessionCache[player.UserId]
@@ -821,6 +845,9 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
+		Settings = {
+			RevealRule = SettingsConfig.SanitizeRevealRule(data and data.Settings.RevealRule or nil),
+		},
 	}
 end
 
@@ -1043,6 +1070,34 @@ function PlayerDataService:Init()
 			local id = typeof(payload) == "table" and (payload :: any).Id or nil
 			if TipConfig.IsValid(id) then
 				PlayerDataService.MarkTipSeen(player, id :: string)
+			end
+		end)
+	)
+
+	-- SetSetting { Key = "RevealRule", Tier, Value }: tier and value
+	-- whitelisted (SettingsConfig); stored in the saved profile, then one
+	-- (coalesced) sync carries Settings back.
+	table.insert(
+		state.connections,
+		RemoteEvents.SetSetting.OnServerEvent:Connect(function(player: Player, payload: unknown)
+			if typeof(payload) ~= "table" then
+				return
+			end
+			local request = payload :: any
+			if request.Key ~= "RevealRule" then
+				return
+			end
+			if not PlayerDataService.SetRevealRule(player, request.Tier, request.Value) then
+				return
+			end
+			if not state.settingsSyncQueued[player.UserId] then
+				state.settingsSyncQueued[player.UserId] = true
+				task.delay(SETTINGS_SYNC_DELAY_SECONDS, function()
+					state.settingsSyncQueued[player.UserId] = nil
+					if player.Parent and state.sessionCache[player.UserId] then
+						PlayerDataService.SyncTycoon(player)
+					end
+				end)
 			end
 		end)
 	)

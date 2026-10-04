@@ -4,6 +4,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local InventoryController = require(script.Parent.InventoryController)
 
@@ -29,6 +30,10 @@ local tipsSeen: { [string]: boolean } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
+-- Settings (SettingsConfig): the server's copy plus local changes it hasn't
+-- echoed yet (optimistic: they apply at once).
+local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
+local pendingReveal: { [string]: string } = {}
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -130,6 +135,21 @@ function TycoonController.MarkTipSeen(id: string)
 	tipsSeen[id] = true
 	pendingTipMarks[id] = true
 	RemoteEvents.MarkTipSeen:FireServer({ Id = id })
+end
+
+-- Which tiers / mutations get the big reveal card (SettingsConfig).
+function TycoonController.GetRevealRule(): SettingsConfig.RevealRule
+	return revealRule
+end
+
+-- Changes one tier's reveal rule now and saves it on the server.
+function TycoonController.SetRevealRule(tier: string, value: string)
+	if not SettingsConfig.IsRevealTier(tier) or not SettingsConfig.IsRevealValue(value) then
+		return
+	end
+	revealRule[tier] = value
+	pendingReveal[tier] = value
+	RemoteEvents.SetSetting:FireServer({ Key = "RevealRule", Tier = tier, Value = value })
 end
 
 -- One of this player's displayed items is being carried off by a thief.
@@ -254,6 +274,16 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 	end
+	local settings = snapshot.Settings
+	local rule = SettingsConfig.SanitizeRevealRule(if typeof(settings) == "table" then settings.RevealRule else nil)
+	for tier, value in pendingReveal do
+		if rule[tier] == value then
+			pendingReveal[tier] = nil
+		else
+			rule[tier] = value -- not echoed yet: keep the local choice
+		end
+	end
+	revealRule = rule
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	hasSynced = true

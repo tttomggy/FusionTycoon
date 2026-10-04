@@ -33,6 +33,7 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
+local SettingsPanel = require(script.Parent.Parent.UI.SettingsPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
 local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
@@ -68,6 +69,7 @@ local CASH_CARD_SIZE = Vector2.new(260, 96)
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
+local SETTINGS_BUTTON_SIZE = 56
 
 local CASH_POP_LIFETIME = 0.8
 local CASH_POP_RISE_STUDS = 3
@@ -508,6 +510,18 @@ local function buildButtons(isPhone: boolean)
 		OnClick = IndexPanel.Toggle,
 	})
 
+	-- ⚙ Settings: a 56 px square at the right end of the bar.
+	buttonsByName.Settings = UIKit.Button({
+		Name = "SettingsButton",
+		Parent = buttonRow,
+		Style = "Disabled",
+		Text = "⚙",
+		Size = UDim2.fromOffset(SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE),
+		TextSize = 26,
+		LayoutOrder = 4,
+		OnClick = SettingsPanel.Toggle,
+	})
+
 	refreshBadge()
 	for name in highlighted do
 		applyHighlight(name)
@@ -886,6 +900,7 @@ function HudController.Init()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
+	SettingsPanel.Init()
 	FusePanel.Init()
 	HowToHeistPanel.Init()
 
