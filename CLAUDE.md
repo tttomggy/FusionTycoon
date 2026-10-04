@@ -163,7 +163,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   WalkSpeed 12. Delivered = the thief's root inside their own walls;
   saved = the owner within 5 studs; timeout, thief death, either side
   leaving, the victim's plot going, shutdown or `/wipe` = it goes back.
-  Thief cooldown 60 s after any attempt; a victim gets a 120 s auto-shield
+  Thief cooldown 60 s after any attempt (published as the Player attribute
+  `HeistCooldownUntil`, server time; `/heistcd 0` clears it); a victim gets a 120 s auto-shield
   per loss and loses at most 3 per 10 min. **Fairness:** the owner within
   `OwnerBlockRadius` (6) of the pedestal when the hold completes guards it
   (rejected `Guarded`; pedestal attribute `GuardedByOwner`, the prompt
@@ -189,20 +190,29 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     plot attribute `ShieldUntil`. Raised 60 s on claim, 120 s after a loss,
     and 60 s when the owner **LOCKs on purpose**: the one entry point is
     `HeistService.TryLock(player)`, rejected in order `Protected`,
-    `Carrying`, `AlreadyLocked`, `Recharging` (+ seconds) or `NotHome` (root
-    outside your walls); success pays `ShieldRaises` (first_shield). Two
-    ways in: the **LOCK console** (`LockKit`, `PlotLayout.LOCK_CONSOLE`,
-    built on claim; owner-only prompt "Lock lab" answered server-side via
-    ProximityPromptService, owner-only "🔒 LOCK LAB" label) and the HUD
-    **LOCK LAB** button (remote `RequestLock`, no payload); rejections toast
-    via `HeistEnded { Role = "Lock", Outcome = "Rejected" }`. The YOURS pad
+    `Carrying`, `AlreadyLocked`, `Recharging` (+ seconds) or `TooFar` (root
+    more than `LockConsole.PromptDistance` + `HeistConfig.LockReachSlack`
+    = 10 studs, flat, from your own console: an exploit firing the prompt
+    from afar is refused); success pays `ShieldRaises` (first_shield).
+    **LOCK is console-only** (you have to run home): the **LOCK console**
+    (`LockKit`, `PlotLayout.LOCK_CONSOLE`, built on claim; owner-only
+    prompt "Lock lab" answered server-side via ProximityPromptService,
+    owner-only "🔒 LOCK LAB" label) is the one way in; there is no lock
+    remote. Rejections toast via `HeistEnded { Role = "Lock", Outcome =
+    "Rejected" }`. The YOURS pad
     is decorative. After any shield ends LOCK recharges for
     `ShieldRearmSeconds` (20 s, plot attribute `ShieldRearmAt`); the claim
     and victim shields ignore it, `/shield 0` clears it. Clients read
     `ShieldUntil` / `ShieldRearmAt` / `Protected` through `ShieldState` for
     the console (pill, pink/teal/dim button, prompt on only when Ready) and
-    the HUD button (pink / teal LOCKED · 42s / muted RECHARGING, pulsing
-    while ready and a non-owner is inside your walls). While up, a
+    the HUD **LOCK status chip**, which never locks: muted "🔓 UNLOCKED"
+    (amber text) / teal "🛡 LOCKED · 42s" / muted "RECHARGING · 12s" / red
+    pulsing "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK" (lock ready and a
+    non-owner's root inside your walls). Tapping it points the goal arrow
+    at your console for 8 s ("Your LOCK button is just inside your gate";
+    `HudController.SetLockChipHandler`, answered by HeistController). Under
+    it, the **steal timer chip** while `HeistCooldownUntil` runs: "🫳 NEXT
+    STEAL IN 42s", then "🫳 STEAL READY!" (Gold) for 2 s. While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
@@ -216,9 +226,16 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     teal "🛡 GUARDED" chip over every guarded pedestal (every viewer) and,
     while an owner is home, a faint teal floor ring of `OwnerBlockRadius`
     round each of their filled pedestals (client-only SurfaceGui faces, no
-    lights). **HOW TO HEIST** (`UI/HowToHeistPanel`): four slides (GRAB,
-    GUARD, CATCH, LOCK) built from UIKit pieces, auto-opened once per
-    account after the first-rebirth card, and from the HUD's "?" button.
+    lights). **HOW TO HEIST** (`UI/HowToHeistPanel`, 640 × 480): four
+    slides (GRAB, GUARD, CATCH, LOCK), each a live 3D scene
+    (`UI/HeistScenes`: ViewportFrame + WorldModel with the real pedestal /
+    orb, LockKit console, a wall with its gate gap, flat pink World.Shield
+    panels since ForceField doesn't render in viewports; YOU = a stripped
+    clone of your character, the thief a red R15 rig; your own Animate run
+    / idle ids; labels are 2D pills projected through the scene camera;
+    lighting from `UITheme.HeistScene`). Built on open, destroyed on close,
+    only the visible slide ticks. Auto-opened once per account after the
+    first-rebirth card, and from the HUD's "?" button.
   - **One-time tips:** `PlayerData.Tips` (saved set), ids whitelisted in
     `TipConfig` (`howToHeist`, `stealHowTo`, `intruder`, `guarded`,
     `catch`, `lockAfterLoss`), marked with remote `MarkTipSeen { Id }`,
@@ -226,12 +243,15 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `MarkTipSeen`). Tips are big 4 s toasts (`ToastController.Show(text,
     kind, { Big = true })`). `/tips reset` clears them.
   - Client: WorldLabelController sets each StealPrompt's local `Mode`
-    (Hidden / Locked / Guarded / Steal; Locked and Guarded are no-hold taps
-    that only toast, since Roblox hides disabled prompts); HeistController draws every carrier's orb (`PedestalVisuals.
+    (precedence Hidden > Locked > Cooldown > Guarded > Steal; Locked,
+    Cooldown ("Steal in 42s") and Guarded are no-hold taps that only toast,
+    since Roblox hides disabled prompts; red hand markers stay on during
+    the cooldown); HeistController draws every carrier's orb (`PedestalVisuals.
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
     plot's shield fence, drives your LOCK console and shows GUARDED;
-    HudController shows the LOCK LAB and "?" buttons.
+    HudController shows the LOCK status chip, the steal timer chip and the
+    "?" button.
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
@@ -295,7 +315,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),
-                  AdminPanel (built only on the server's AdminOpen)
+                  AdminPanel (built only on the server's AdminOpen),
+                  HowToHeistPanel + HeistScenes (the 3D heist clips)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -418,7 +439,8 @@ in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
-`RequestLock` (C→S, no payload), `MarkTipSeen` (C→S `{ Id }`),
+`MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
+prompt only),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

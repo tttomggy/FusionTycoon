@@ -540,7 +540,7 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 
 - [ ] **Protected at Rebirth 0.** Before `/rebirths 1`: A's sign shows the
   teal **🛡 PROTECTED · NEW LAB** pill, B sees no Steal prompt on A's
-  pedestals, A's HUD has no LOCK LAB or "?" button, and A's LOCK console
+  pedestals, A's HUD has no LOCK chip or "?" button, and A's LOCK console
   label reads **🛡 PROTECTED · NEW LAB** with the prompt off. After
   `/rebirths 1` (wait ~5 s for the sign) the pill goes and the buttons
   appear.
@@ -555,18 +555,28 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   pink button, E prompt **Lock lab / 60s shield** within 8 studs (only A
   sees label and prompt). Pressing it: the fence goes up, the pill turns
   teal **LOCKED · 42s**, the button glows teal and the prompt is gone.
-- [ ] **HUD lock.** The HUD's **🔒 LOCK LAB** (under the cash card; beside
-  it on a phone) locks from anywhere inside A's walls. From the street it
-  toasts **Get back to your lab to lock it!**. Locked it reads **🛡 LOCKED ·
-  42s** (teal).
+- [ ] **The HUD chip doesn't lock.** Under the cash card (beside it on a
+  phone) A's chip reads **🔓 UNLOCKED** (muted, amber text). Tapping it
+  never raises the shield: it toasts **Your LOCK button is just inside your
+  gate** and the goal arrow points at A's LOCK console for 8 s, then goes
+  back to the goal. Locked at the console it reads **🛡 LOCKED · 42s**
+  (teal). There is no RequestLock remote any more.
+- [ ] **Console reach (exploit check).** A presses the console from right
+  in front of it: it locks. From A's client command bar, set the console
+  prompt's `MaxActivationDistance = 100` and press it from more than 10
+  studs away (e.g. by the gate): if the engine passes the trigger, the
+  server refuses with **Get to your LOCK button inside your gate!** and the
+  shield stays down (TryLock `TooFar`).
 - [ ] **Recharge countdown on both.** When the shield ends (or `/shield 5`
   and wait), the console pill reads **RECHARGING · 20s** (muted, dim
-  button, prompt off) and the HUD button **RECHARGING · 20s** (muted);
-  tapping it toasts **Lock recharging · 12s**. B can grab in that window.
-  At 0 both return to ready. `/shield 0` skips the recharge. The claim
-  shield and the 120 s shield after a loss go up regardless.
-- [ ] **HUD button pulses for intruders.** A unlocked and LOCK ready: B walks
-  inside A's walls; A's LOCK LAB button pulses until B leaves or A locks.
+  button, prompt off) and the HUD chip **RECHARGING · 20s** (muted). B can
+  grab in that window. At 0 both return to ready. `/shield 0` skips the
+  recharge. The claim shield and the 120 s shield after a loss go up
+  regardless.
+- [ ] **Alarm.** A unlocked and LOCK ready: B walks inside A's walls; A's
+  chip turns red and pulses **🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK**
+  until B leaves or A locks at the console. While recharging it stays
+  RECHARGING (no alarm).
 - [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
   pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
   name and its +$/s, 1.5 s).
@@ -598,8 +608,14 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   pedestal, the banner reads **A caught B!**. Both see a white flash ring
   at B, **CAUGHT!** over B's head, and the orb fly back onto the pedestal.
 - [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
-- [ ] **Cooldown.** Right after any attempt B gets **Lay low for 60s**;
-  `/heistcd 0` clears it.
+- [ ] **Steal timer.** Right after any grab, B's HUD shows **🫳 NEXT STEAL IN
+  60s** (muted, amber) under the LOCK chip, counting down. B's prompts on
+  other filled enemy pedestals read **Steal in 42s** (the item label under
+  it, no hold); tapping one toasts **You can steal again in 42s**. The red
+  hand markers stay on. At 0 the chip shows **🫳 STEAL READY!** (gold) for
+  2 s, then hides, and the prompts read **Steal** again. After a delivered
+  steal the HEIST COMPLETE card's sub-line reads **You can steal again in
+  …s**. `/heistcd 0` clears the timer (the chip flashes STEAL READY!).
 - [ ] **Loss cap.** With A's shield dropped (`/shield 0`) after each loss,
   B steals 3 items in under 10 min: the 4th grab says **This lab has been
   robbed enough for now**.
@@ -614,7 +630,7 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 - [ ] **Thief hands full.** While carrying, B's pull, Pull ×10, generator
   upgrade, Multiplier Pad and rebirth all toast **Get home with that item
   first!**; the Fuse panel's FUSE / FUSE ALL do too (no charge-up); B's
-  LOCK LAB toasts **Not while carrying!**.
+  own LOCK console toasts **Not while carrying!**.
 - [ ] **Victim /wipe mid-carry:** A's `/wipe` kicks A; B gets **The heist
   was called off** and nothing is added to B.
 - [ ] **Thief leaves mid-carry:** B leaves; the item is back on A's
@@ -642,8 +658,8 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   Later rebirth cards don't.
 - [ ] **New goals.** After "Rebirth for the first time": **Lock your lab
   with the LOCK button** ($10,000; the goal arrow points at the LOCK
-  console; the console or the HUD button counts, not the claim shield or
-  `/shield`), then
+  console; only the console counts, not the claim shield or `/shield`),
+  then
   **Steal an item from another lab** ($50,000; the marker points at the
   nearest grabbable enemy pedestal and moves as that changes). Delivering
   a steal completes it.
@@ -664,21 +680,42 @@ Test → Clients and Servers, **2 players** (A and B). Both run
 - [ ] **HOW TO HEIST card.** A real first rebirth (`/rebirthready`, then
   REBIRTH! at Rebirth 0; `/rebirths 1` skips the result card, so it won't
   trigger): pressing LET'S GO on the REBIRTH 1! card opens HOW TO HEIST.
-  Four slides (GRAB 45s, GUARD, CATCH, LOCK 60s), ◀ ▶ and dots, GOT IT on
-  the last. It doesn't auto-open again (rejoin with saving on, or rebirth
-  again) until `/tips reset`. The round **?** button beside LOCK LAB always
-  opens it. On a phone it fits with the picture over the text.
+  Four slides (GRAB 45s, GUARD, CATCH, LOCK 60s), ◀ NEXT ▶ and dots, GOT
+  IT on the last. It doesn't auto-open again (rejoin with saving on, or
+  rebirth again) until `/tips reset`. The round **?** button beside the
+  LOCK chip always opens it.
+- [ ] **3D scenes.** Each slide is a live 3D scene in the lab's look
+  (floor, walkway, a wall with its gate gap) with **your own avatar** as
+  YOU, animated (run / idle), looping every ~5 s:
+  - [ ] **1 GRAB**: you walk to a Golden Mythic pedestal (shell and
+    satellites), an **E** ring fills over 1.5 s, the orb lifts over your
+    head with a red beam and you run to the blue **🏠 YOUR LAB** gate.
+  - [ ] **2 GUARD**: you stand on the teal ring by your pedestal
+    (**🛡 GUARDED**); a red thief walks up, **✋ Owner is guarding** pops,
+    and they back away.
+  - [ ] **3 CATCH**: the red thief runs with the orb; you chase and touch
+    them: a white ring flash, **CAUGHT!**, the orb arcs back onto the
+    pedestal.
+  - [ ] **4 LOCK**: you run to the LOCK console and press; its button turns
+    teal, the pink panels rise along the wall, **🔒 LOCKED · 60s** shows,
+    and the thief walks into the wall and is pushed back.
+  - [ ] The pills ("YOU", "THIEF", the item, GUARDED, CAUGHT!, LOCKED)
+    track the actors. Only the slide on screen animates; closing the card
+    removes the scenes (Explorer: no leftover ViewportFrames). With no
+    character loaded yet, YOU is a default rig.
+  - [ ] On a phone (Device emulator, ~390 px tall after the scale) the card
+    fits: the scene shrinks, title, line and ◀ / NEXT ▶ stay on screen.
 - [ ] **Each tip fires once** (then `/tips reset` to see them again):
   - [ ] **intruder**: B walks into A's unlocked lab; A gets **Someone's in
-    your lab! Stand by your items or LOCK your lab!**.
+    your lab! Stand by your items or run to your LOCK button!**.
   - [ ] **guarded**: B stands at a pedestal A is guarding: **They're
     guarding it. Wait for them to walk away.**
   - [ ] **stealHowTo**: B's first walk into a robbable lab: **Hold E on
     their pedestal to steal it!**
   - [ ] **catch**: A's first time as a victim: the banner has a big **TOUCH
     THEM!** line and the red arrow throbs; the next steal doesn't.
-  - [ ] **lockAfterLoss**: after A's first real loss card: **Tip: press LOCK
-    LAB when you leave your lab.**
+  - [ ] **lockAfterLoss**: after A's first real loss card: **Tip: hit the
+    LOCK button inside your gate before you leave your lab.**
 
 ## 17. Events (lab weather + Admin Abuse)
 
