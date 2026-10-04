@@ -17,6 +17,13 @@
 	running event (the Gacha Pad in a Rainbow Storm, the Fusion Machine at
 	night, the nearest crater or street coin). Heist > event > goal.
 
+	Goal targets resolve inside YOUR plot only: the marker is placed from
+	the target's own parts that stand inside your walls (never a model's
+	pivot, which for a part-less or still-streaming model is the world
+	origin: the middle of the street), and it moves if those parts move or
+	stream in. The one exception is "NearestEnemyPedestal" (the steal goal),
+	which is in another lab by definition.
+
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
 	claimed warns once (a renamed part or a stale GoalConfig entry).
@@ -29,6 +36,7 @@ local Workspace = game:GetService("Workspace")
 
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -61,6 +69,9 @@ local markerAnchor: Attachment? = nil
 local distanceText: TextLabel? = nil
 local ring: BasePart? = nil
 local targetPosition: Vector3? = nil
+-- Centre of the bounds the marker was last placed from (moves re-place it).
+local placedCenter: Vector3? = nil
+local PLACE_MOVE_STUDS = 1
 -- A moving override target (the thief's root): distance is measured to it live.
 local movingTarget: BasePart? = nil
 
@@ -128,14 +139,47 @@ local function resolveTarget(name: string): Instance?
 	return plot:FindFirstChild(name)
 end
 
--- World-space bounding box of a part or model: (centre CFrame, size).
-local function getBounds(target: Instance): (CFrame?, Vector3?)
-	if target:IsA("Model") then
-		return target:GetBoundingBox()
-	elseif target:IsA("BasePart") then
-		return target.CFrame, target.Size
+local function getPlotOrigin(): CFrame?
+	local plot = getPlot()
+	local origin = plot and plot:FindFirstChild("PlotOrigin", true)
+	return if origin and origin:IsA("BasePart") then origin.CFrame else nil
+end
+
+-- World-space box (centre CFrame, size) of the target's own BaseParts: the
+-- target itself and its descendants. Never Model:GetBoundingBox, whose
+-- fallback for a model with no parts here yet (streaming) is its pivot.
+-- With `origin`, only parts standing inside that plot's walls count.
+-- (nil, nil) when no part qualifies yet.
+local function getBounds(target: Instance, origin: CFrame?): (CFrame?, Vector3?)
+	local low: Vector3? = nil
+	local high: Vector3? = nil
+	local function add(part: BasePart)
+		if origin and not PlotLayout.IsInsidePlot(origin:PointToObjectSpace(part.Position)) then
+			return
+		end
+		local cf, size = part.CFrame, part.Size / 2
+		local extent = Vector3.new(
+			math.abs(cf.RightVector.X) * size.X + math.abs(cf.UpVector.X) * size.Y + math.abs(cf.LookVector.X) * size.Z,
+			math.abs(cf.RightVector.Y) * size.X + math.abs(cf.UpVector.Y) * size.Y + math.abs(cf.LookVector.Y) * size.Z,
+			math.abs(cf.RightVector.Z) * size.X + math.abs(cf.UpVector.Z) * size.Y + math.abs(cf.LookVector.Z) * size.Z
+		)
+		local a, b = part.Position - extent, part.Position + extent
+		low = if low then low:Min(a) else a
+		high = if high then high:Max(b) else b
 	end
-	return nil, nil
+	if target:IsA("BasePart") then
+		add(target)
+	end
+	for _, descendant in target:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			add(descendant)
+		end
+	end
+	if not low or not high then
+		return nil, nil
+	end
+	local lowV, highV = low :: Vector3, high :: Vector3
+	return CFrame.new((lowV + highV) / 2), highV - lowV
 end
 
 --[[ Marker visuals ---------------------------------------------------------------- ]]
@@ -155,6 +199,7 @@ local function clearWorldMarker()
 	end
 	distanceText = nil
 	targetPosition = nil
+	placedCenter = nil
 	movingTarget = nil
 	currentTarget = nil
 end
@@ -276,7 +321,7 @@ local function buildRing(bottomCenter: Vector3, footprint: number)
 	ring = face
 end
 
-local function showWorldMarker(target: Instance, goalText: string, danger: boolean?, pulse: boolean?)
+local function showWorldMarker(target: Instance, goalText: string, danger: boolean?, pulse: boolean?, origin: CFrame?)
 	-- An unanchored part (a character's root) moves: adorn to it directly.
 	if target:IsA("BasePart") and not target.Anchored then
 		clearWorldMarker()
@@ -288,12 +333,15 @@ local function showWorldMarker(target: Instance, goalText: string, danger: boole
 		gui.StudsOffset = Vector3.new(0, MARKER_HEIGHT_ABOVE_TARGET + 2, 0)
 		return
 	end
-	local center, size = getBounds(target)
+	local center, size = getBounds(target, origin)
 	if not center or not size then
+		-- Nothing of it here yet (not built / not streamed in): retried.
+		clearWorldMarker()
 		return
 	end
 	clearWorldMarker()
 	currentTarget = target
+	placedCenter = center.Position
 
 	local top = center.Position + Vector3.new(0, size.Y / 2, 0)
 	local bottom = center.Position - Vector3.new(0, size.Y / 2, 0)
@@ -370,10 +418,28 @@ local function refresh()
 
 	local target = resolveTarget(targetName)
 	checkTargetExists(targetName, target)
-	if target ~= currentTarget or index ~= currentGoalIndex then
+	-- Inside your own walls only (the steal goal is the one exception).
+	local origin = if targetName == "NearestEnemyPedestal" then nil else getPlotOrigin()
+	if target and not origin and targetName ~= "NearestEnemyPedestal" then
+		target = nil -- no plot origin yet: can't check, so don't guess
+	end
+	if target and origin and not getBounds(target, origin) and getBounds(target) then
+		-- It exists but stands outside your walls: never point there.
+		local key = "outside:" .. targetName
+		if not warnedTargets[key] then
+			warnedTargets[key] = true
+			warn(("GoalMarkerController: goal target %q resolved to %s, outside your plot; ignored"):format(targetName, target:GetFullName()))
+		end
+	end
+	local moved = false
+	if target and target == currentTarget and placedCenter then
+		local center = getBounds(target, origin)
+		moved = center == nil or (center.Position - placedCenter).Magnitude > PLACE_MOVE_STUDS
+	end
+	if target ~= currentTarget or index ~= currentGoalIndex or moved or (target and not placedCenter) then
 		currentGoalIndex = index
 		if target then
-			showWorldMarker(target, goal.Text)
+			showWorldMarker(target, goal.Text, nil, nil, origin)
 		else
 			-- Not built yet (e.g. stations appear after claiming); retried.
 			clearWorldMarker()

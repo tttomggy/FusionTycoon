@@ -1259,3 +1259,14 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   "next in 9:59" pill comes back. No sale live: SHOP stays visible with no
   SALE tag (a solid-colour pill's `.Parent` used to be hidden, which was
   the whole row / the SHOP button).
+- [ ] **Goal markers stay in your lab (bug 3).** Fresh profile, claim:
+  the "UPGRADE YOUR BASIC GENERATOR" marker sits right over your own Basic
+  Generator (distance a few studs from the generator, not ~54), and its
+  floor ring is round the generator. Walk far down the street and come
+  back (parts stream out and in): the marker re-settles on the generator.
+  Step through the goals (`/cash`, pulls, …): every marker (Gacha Pad,
+  first empty pedestal, Fusion Machine, Multiplier Pad, Portal, LOCK
+  console) is inside your walls; never over the street, a leaderboard, an
+  event object or another lab. Only "Steal an item from another lab"
+  points at an enemy pedestal. Output shows no "outside your plot" warning
+  (it names the offending instance if one ever appears).
