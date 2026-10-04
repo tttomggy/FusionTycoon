@@ -11,7 +11,8 @@
 	  [ CLAIM DAY 4 ]
 	  footer: the skip rule and the Day 7 odds (DailyConfig.GetFooter)
 
-	Claimed tiles are dim with a ✓; today's is gold, glowing, "TODAY"; Day 7
+	Claimed tiles are dimmed to 50% with a small green check badge in the
+	top-right corner; today's is gold, glowing, "TODAY"; Day 7
 	is purple. CLAIM fires ClaimDaily; ShowReveal plays the result on the
 	card (the claimed tile pops its ✓, the lines in green) and turns the
 	button into NICE. Pulls and the Day 7 item show through the real pull
@@ -36,7 +37,8 @@ local CARD_SIZE = Vector2.new(640, 390)
 local DISPLAY_ORDER = 125 -- the welcome-back card's layer, under Results (130)
 local TILE_GAP = 6
 local TILE_HEIGHT = 118
-local CLAIMED_TRANSPARENCY = 0.55
+local CLAIMED_OPACITY = 0.5
+local CHECK_BADGE_SIZE = 22
 local GLOW_PERIOD = 1.4
 local AUTO_CLOSE_PULL_SECONDS = 0.5
 
@@ -168,19 +170,26 @@ local function buildTile(day: number, stateName: string, z: number)
 		glowTween = tween
 	end
 	if stateName == "Claimed" then
-		UIKit.SetOpacity(holder, 1 - CLAIMED_TRANSPARENCY)
-		UIKit.Label({
+		-- Dimmed to half, the text still readable; a small green check badge
+		-- in the top-right corner (added after the dim, so it stays bright).
+		UIKit.SetOpacity(holder, CLAIMED_OPACITY)
+		local badge = UIKit.Label({
 			Name = "Check",
 			Text = "✓",
 			Font = Fonts.Display,
-			TextSize = 40,
-			TextColor3 = Colors.Cash,
-			Size = UDim2.fromScale(1, 1),
+			TextSize = 15,
+			TextColor3 = Colors.CoinText,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -4, 0, 4),
+			Size = UDim2.fromOffset(CHECK_BADGE_SIZE, CHECK_BADGE_SIZE),
 			TextXAlignment = Enum.TextXAlignment.Center,
+			BackgroundTransparency = 0,
+			BackgroundColor3 = Colors.Cash,
 			ZIndex = inner + 2,
-			Stroke = UITheme.Stroke.Text,
 			Parent = holder,
 		})
+		UIKit.Corner(badge, 999)
+		UIKit.Stroke(badge, 2)
 	end
 end
 

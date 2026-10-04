@@ -1270,3 +1270,7 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   event object or another lab. Only "Steal an item from another lab"
   points at an enemy pedestal. Output shows no "outside your plot" warning
   (it names the offending instance if one ever appears).
+- [ ] **Daily claimed tiles (bug 4).** `/daily day 5`: Days 1–4 are dimmed
+  to half with their DAY / icon / label still readable, and each has a
+  small green round ✓ badge in its top-right corner (no big ✓ over the
+  text). CLAIM: Day 5 pops and gets the same badge.

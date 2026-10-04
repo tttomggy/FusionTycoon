@@ -418,7 +418,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   Client: `DailyController` opens `UI/DailyCard` once per session when
   claimable, 2 s after the first sync and only when no other card is open
   (UIKit overlays, shop side cards), so never over the welcome-back card;
-  the 7-tile row (claimed dim ✓, today gold glowing "TODAY", Day 7 purple),
+  the 7-tile row (claimed: 50% dim + a small green ✓ badge top-right,
+  today gold glowing "TODAY", Day 7 purple),
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
 - **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
