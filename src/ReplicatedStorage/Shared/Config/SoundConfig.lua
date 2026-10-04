@@ -20,7 +20,7 @@ export type Slot = { Id: string, Volume: number }
 local PING = "rbxasset://sounds/electronicpingshort.wav"
 
 SoundConfig.Slots = {
-	EventStart = { Id = PING, Volume = 0.6 }, -- the event banner's 3-2-1 and its reveal
+	EventStart = { Id = PING, Volume = 0.6 }, -- the event start banner
 	EventEnd = { Id = "", Volume = 0.6 }, -- "<event> is over"
 	CoinPickup = { Id = "", Volume = 0.5 }, -- a Golden Rain coin
 	BigCoin = { Id = "", Volume = 0.8 }, -- a BIG coin

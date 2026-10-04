@@ -20,8 +20,8 @@ TipConfig.Ids = {
 	lockAfterLoss = true, -- after your first real loss
 } :: { [string]: boolean }
 
--- "event_<EventId>": the "ⓘ TAP" tag on the HUD event chip, until the
--- first tap for that event (EventController).
+-- "event_<EventId>": the HUD event chip pulses until the first tap for
+-- that event (EventController).
 for _, eventId in EventConfig.Order do
 	TipConfig.Ids["event_" .. eventId] = true
 end

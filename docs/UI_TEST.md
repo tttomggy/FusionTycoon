@@ -729,8 +729,9 @@ published place with API access (otherwise it toasts "DataStore save
 failed").
 
 - [ ] **Each `/event <id>`** (GoldenRain, PowerSurge, MeteorShower,
-  RainbowStorm, Night, VoidMoon): the start banner counts **3 · 2 · 1** with
-  a ping, then shows the icon, name and one line on the event's gradient;
+  RainbowStorm, Night, VoidMoon): the start banner appears **at once** (no
+  3-2-1 countdown) with one ping: the icon, name and one line on the
+  event's gradient, gone after ~2.5 s;
   the HUD chip turns that gradient with a live timer
   ("⚡ POWER SURGE · 4:58"); the sky changes (gold tint + gold sparkles /
   storm tint + denser haze + generator bands flicker / dusk to midnight /
@@ -814,11 +815,16 @@ failed").
 - [ ] **Info card: between events.** With nothing on, the chip opens the
   same card for the NEXT event, "Starts in 8:40". When that event starts
   with the card open, it switches to "… left".
-- [ ] **No pop-up; the TAP tag instead.** After `/tips reset`, `/event
-  GoldenRain`: the card does **not** open by itself. A small gold "ⓘ TAP"
-  tag bounces beside the event chip. Tap the chip once: the card opens and
-  the tag is gone for good (end Golden Rain and start it again: no tag). A
-  different event type shows its own tag once.
+- [ ] **No pop-up; the chip pulses instead.** After `/tips reset`, `/event
+  GoldenRain`: the card does **not** open by itself, and there is **no**
+  separate tag beside the chip. The chip itself pulses (a gentle scale
+  bounce with a gold glow behind it). Tap anywhere on it once (the text or
+  the ⓘ): the card opens and the pulse stops for good (end Golden Rain and
+  start it again: no pulse). A different event type pulses once too.
+- [ ] **ⓘ inside the chip.** A small ⓘ sits inside the chip's right end in
+  every state (running event, muted NEXT); the chip text stays centred and
+  never runs under it, on desktop and on a phone. Tapping the ⓘ or the
+  text both open the card.
 - [ ] **Info card closes.** With the card open: tapping anywhere outside it
   (the world, another HUD button) closes it; tapping the chip toggles it;
   ✕ closes it. When the running event ends, the open card closes itself.
@@ -880,8 +886,8 @@ failed").
 
 ## 18. Polish 7 (Index book, MAX upgrades, smaller HUD)
 
-The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up and
-the TAP tag, the card closing) live in §16 / §17b.
+The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up,
+the chip's ⓘ and first-time pulse, the card closing) live in §16 / §17b.
 
 - [ ] **Index orbs.** Open INDEX on a fresh save, `/give` a few items with
   `[mutation]`. Found cells are the real orb in that variant: Normal the

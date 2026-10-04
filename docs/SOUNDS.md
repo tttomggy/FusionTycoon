@@ -17,7 +17,7 @@ needs to change.
 
 | Slot | Should sound like | Plays when / where | Now |
 |---|---|---|---|
-| `EventStart` | Rising 3-note "something's coming" sting, < 1 s | Event start banner: each 3-2-1 tick (pitched up) and the reveal (EventController) | ping |
+| `EventStart` | Rising 3-note "something's coming" sting, < 1 s | Event start banner, once as it appears (EventController) | ping |
 | `EventEnd` | Soft descending "wind-down" chime, < 1 s | "<Event> is over" toast | empty |
 | `CoinPickup` | Short bright coin blip, < 0.5 s | You collect a Golden Rain coin, lab or street (EventController) | empty |
 | `BigCoin` | Fuller coin "ka-ching" with sparkle, < 1 s | You collect a BIG coin | empty |

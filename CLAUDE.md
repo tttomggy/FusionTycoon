@@ -202,7 +202,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     it, "Index +1 · Void 3 / 17") and a SERVER banner at any tier
     (`EventService.AnnounceEventMutation`, RareFusionAnnouncement Verb
     "event").
-  - Visuals are client-side (`EventController`): start banner (3-2-1),
+  - Visuals are client-side (`EventController`): start banner (straight away, 2.5 s, no countdown),
     end toast, sky from a captured Lighting baseline restored exactly
     (never raise a light: Night just darkens), band flicker through
     `LocalTransparencyModifier`, EventFx cues (strike warnings, lightning +
@@ -213,10 +213,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - **Every event explains itself:** the top-centre HUD chip opens the
     **info card** (`UI/EventInfoCard`, copy from `EventConfig.GetInfo`,
     built from the config numbers; `EventConfig.Blurbs` = the first "what to
-    do" sentence). It **never opens itself**: the first time a player sees
-    each event type the chip gets a bouncing gold "ⓘ TAP" tag until they
-    tap it once (that tap marks Tips `event_<EventId>`, TipConfig). Every
-    tap opens it; ✕, a tap outside it or the event ending closes it.
+    do" sentence). It **never opens itself**: a small ⓘ sits inside the chip's
+    right end, and the first time a player sees each event type the chip
+    itself pulses (UIScale bounce + a gold glow behind it) until they tap
+    it once (that tap marks Tips `event_<EventId>`, TipConfig). A tap
+    anywhere on the chip opens it; ✕, a tap outside it or the event ending closes it.
     Between events it explains the next one. **Event arrows:**
     `GoalMarkerController.SetEventOverride` (heist > event > goal): Rainbow
     Storm → your Gacha Pad (then the machine once you're on it), Night /
