@@ -89,8 +89,8 @@ again), `/cash <amount>`, `/resetmultiplier`.
      still have another pair.
    - [ ] Walking away, or running out of pairs, greys it out.
    - [ ] Pressing it starts another fusion.
-4. A Common or Rare gacha pull shows the smaller **PULLED** row with **next
-   pull $X**, and a new pull replaces it.
+4. A Common or Rare gacha pull (default settings) pops a small skipped-card
+   line above the bottom bar (Polish 8, §19); several stack, at most 3.
 
 ## 5. Phone layout (Device emulator: iPhone 14, landscape)
 
@@ -480,7 +480,8 @@ testable without luck.
     and the card reads **Kept <name>, lost <n>**.
   - [ ] All-Golden inputs give a Golden result; mixed inputs give a normal
     item or a fresh roll.
-  - [ ] AUTO-FILL never takes mutated items.
+  - [ ] AUTO-FILL into an empty chamber never takes mutated items (with a
+    mutated orb in, it adds only that mutation, §19).
   - [ ] The Mythic tab is locked before Rebirth 1 (§13).
 - [ ] **Mutation marks.**
   - [ ] `/give legendary_core golden`: the card and inventory show
@@ -920,3 +921,40 @@ the TAP tag, the card closing) live in §16 / §17b.
   "Get home with that item first!", no level, no cash spent.
 - [ ] **Refresh rate.** With UPGRADES open and income ticking, the MAX labels
   follow your cash (N and $X grow) without flicker.
+
+## 19. Polish 8 (reveal settings, fuse chips, mixed mutations)
+
+- [ ] **Defaults.** Fresh save, open ⚙ (right end of the bottom bar, after
+  INDEX): Common Diamond+, Rare Diamond+, Epic / Legendary / Mythic Always
+  (today's big-card rule), plus the locked Secret row "🔒 Always shows. So
+  do ⚡ Charged, 🌙 Void and ☄ Celestial."
+- [ ] **Every option, pull.** For Rare, try each segment and pull until a
+  Rare lands (`/give` doesn't pull): Never → a small line; Golden+ → the big
+  card only for Golden or better; Diamond+ / Rainbow+ likewise; Always →
+  every Rare gets the big card. The choice sticks across a rejoin in a
+  live test place (Studio profiles never save).
+- [ ] **Every option, fusion.** Set Epic to Never and fuse Rares → Epic:
+  no big card, a small line ("+ … EPIC +$X/s"). Set Always: the big card.
+  Pull ×10 with Epic Never: the grid shows, no BEST OF 10 card, a small
+  line for the best. Fail cards and the Fuse All summary are unchanged.
+- [ ] **Always shown.** Set every tier to Never: a Secret (`/give` won't
+  pull; use the gacha with luck or fuse Mythics) and `/eventmut void` /
+  `charged` / `celestial` still get their cards.
+- [ ] **Skipped line.** Pull several Commons fast: each pops "◉ + Plasma
+  Orb  COMMON  +$X/s" above the bottom bar for 2.5 s; at most 3 stack,
+  older ones dimmer; a Golden one names it in gold. RevealMinor plays.
+- [ ] **Fuse chips at phone size.** Device emulator (iPhone SE landscape):
+  the five chips stay in one row, equal widths, "100%" (e.g. Common ×6)
+  fully visible, the current count highlighted, purple during a Void Moon.
+- [ ] **Mixed warning.** `/give <rare item id> golden` ×4 plus one plain
+  Rare; put all five in: a red box "⚠ 1 plain orb mixed in: the Epic comes
+  out plain, not Golden. Use only Golden orbs to keep Golden." and a red
+  ring on the plain orb. FUSE until a success: the Epic is plain (unless
+  it rolled one: the card then says "GOLDEN rolled!").
+- [ ] **Keeps GOLDEN.** Five Golden Rares: "✨ Keeps GOLDEN ×2, might roll
+  better" in gold, no red rings. A success: the card shows the GOLDEN ×2
+  pill and "GOLDEN kept".
+- [ ] **AUTO-FILL keeps the mutation.** Put one Golden Rare in, AUTO-FILL:
+  only Golden Rares are added. Empty chamber + AUTO-FILL: plain Rares only.
+- [ ] **Fail card.** A failed fusion with a Golden in: "Kept your Golden
+  Rare (Golden …), lost N".

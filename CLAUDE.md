@@ -48,7 +48,19 @@ Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal
 chance, `MutationConfig.IsEventOnly`). Fusion rules: a success keeps the *lowest*
 mutation among all inputs (so every input must share it), then may roll a
 better one; a fail keeps the best input untouched (same Uid) and removes
-the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 119 entries =
+the rest; Fuse All (pairs, Common–Epic) never touches mutated items.
+`FusionConfig.PredictMutation(inputs)` (the lowest input mutation) is what
+FusionService carries and what the Fuse panel predicts **before** FUSE
+(`GetMutationMix`): every orb the same mutation → "✨ Keeps GOLDEN ×2, might
+roll better"; mixed → a red warning box naming how many lower orbs are in
+and what is lost ("⚠ 1 plain orb mixed in: the Epic comes out plain, not
+Golden…"), those orbs ringed red; all plain → no line. AUTO-FILL only adds
+the first orb's mutation (an empty chamber fills plain orbs). The fusion
+result carries `MutationSource = "Kept" | "Rolled"`: the success card (big
+card and skipped line) shows the pill and "GOLDEN kept" / "GOLDEN rolled!";
+the fail card says "Kept your Golden Rare (…)". The five count chips sit in
+**one row** (non-wrapping list, scale widths, 6 px gaps; the % TextScaled
+with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 17 items × 7 variants, built from `MutationConfig.Order`) pays +1% income per entry and +5% per full tier page, and
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
@@ -72,6 +84,25 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
   called from `TycoonService.createPlotForPlayer`).
+- **Settings** (`SettingsConfig`, saved as `PlayerData.Settings`, sent as
+  `Settings` in the snapshot): `RevealRule = { [tier] = "Never" | "Golden"
+  | "Diamond" | "Rainbow" | "Always" }` for Common → Mythic; "Golden" =
+  Golden or any higher-ranked mutation (`MutationConfig.GetRank`). The
+  defaults are **derived** from `FusionConfig.IsMajorReveal` (a
+  `MajorRevealTiers` tier → Always, else the lowest threshold reaching
+  `MajorRevealMutationRank`, i.e. Diamond); old saves get them. **Secret and
+  the event-only mutations always show** (`SettingsConfig.ShowsBigCard`).
+  Remote `SetSetting` (C→S `{ Key = "RevealRule", Tier, Value }`,
+  tier/value whitelisted; a coalesced sync 0.25 s later echoes it).
+  `ResultController.ShowsBigCardFor` reads the rule for single pulls,
+  BEST OF 10 and fusion successes (fail cards and Fuse All unchanged); a
+  skipped card pops a **small line** above the bottom bar for 2.5 s (orb
+  dot, "+ Golden Plasma Orb" in the mutation colour, the tier, "+$X/s";
+  max 3, older ones fade). The client applies a change at once
+  (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
+  UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
+  wide, one scrolling list of sections; only "Big reveal card" so far:
+  one 5-segment row per tier + a locked Secret row).
 - Saves: a failed DataStore load kicks the player in live games (never
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
@@ -354,7 +385,8 @@ src/ReplicatedStorage/Shared/
                  SoundConfig — every sound slot, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
-                 GoalConfig — the ordered onboarding goals, …)
+                 GoalConfig — the ordered onboarding goals,
+                 SettingsConfig — the player's reveal-card rules, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -396,6 +428,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),
                   AdminPanel (built only on the server's AdminOpen),
+                  SettingsPanel (the ⚙ button: reveal-card rules),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens)
 ```
@@ -521,7 +554,7 @@ stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
-prompt only),
+prompt only), `SetSetting` (C→S `{ Key, Tier, Value }`, SettingsConfig),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
