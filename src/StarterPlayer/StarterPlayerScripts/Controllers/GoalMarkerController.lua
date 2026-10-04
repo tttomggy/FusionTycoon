@@ -29,7 +29,6 @@ local Workspace = game:GetService("Workspace")
 
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -91,7 +90,7 @@ local function resolveTarget(name: string): Instance?
 		if not pedestals then
 			return nil
 		end
-		for index = 1, PlotLayout.PEDESTAL_COUNT do
+		for index = 1, TycoonController.GetPedestalCount() do
 			if not TycoonController.GetPedestalDisplay(index) then
 				return pedestals:FindFirstChild("Pedestal" .. index)
 			end

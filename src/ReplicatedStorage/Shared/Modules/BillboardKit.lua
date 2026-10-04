@@ -567,6 +567,26 @@ local function setMutationChip(gui: BillboardGui, mutation: string?)
 	end
 end
 
+-- A locked spot (the +2 Pedestals pass): the owner-only empty label reads
+-- "🔒 +2 PEDESTALS" instead of "+ EMPTY". Call after SetPedestalLabel(nil).
+function BillboardKit.SetPedestalLocked(pedestal: BasePart, locked: boolean)
+	local empty = pedestal:FindFirstChild("EmptyLabel")
+	local panel = empty and empty:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	local word = panel:FindFirstChild("Empty")
+	local badge = panel:FindFirstChild("Plus")
+	local glyph = badge and badge:FindFirstChild("Glyph")
+	if word and word:IsA("TextLabel") then
+		word.Text = if locked then "+2 PEDESTALS" else "EMPTY"
+		word.TextColor3 = if locked then Colors.GoldLabel else Colors.Muted
+	end
+	if glyph and glyph:IsA("TextLabel") then
+		glyph.Text = if locked then "🔒" else "+"
+	end
+end
+
 -- Shows the filled label (everyone) for `info`, or the owner-only empty
 -- label when `info` is nil. Creates both on first use.
 function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)

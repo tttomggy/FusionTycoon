@@ -21,6 +21,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -550,6 +551,27 @@ function AnnouncementController.ShowAdminBroadcast(text: string)
 			Caption = "SERVER · ADMIN",
 			CaptionColor = Colors.MythicBannerLabel,
 			Left = UITheme.Gradients.Heist.Bottom,
+			Right = Colors.Panel,
+			Emblem = rainbowEmblem,
+			Shake = false,
+		},
+	})
+end
+
+-- The Server Overclock: "⚡ Harris overclocked the server! ×2 income for
+-- everyone" on the big gold banner, for everyone.
+function AnnouncementController.ShowOverclock(playerName: string, seconds: number)
+	enqueue({
+		Text = ("⚡ %s overclocked the server! ×%d income for everyone · %d min"):format(
+			UIKit.EscapeRichText(playerName),
+			ShopConfig.OverclockMultiplier,
+			math.max(1, math.floor(seconds / 60))
+		),
+		AccentColor = UITheme.World.VipGold,
+		Big = {
+			Caption = "SERVER · OVERCLOCK",
+			CaptionColor = Colors.GoldLabel,
+			Left = UITheme.Gradients.Gold.Bottom,
 			Right = Colors.Panel,
 			Emblem = rainbowEmblem,
 			Shake = false,

@@ -97,7 +97,7 @@ local pedestalPopClock = 0
 
 --[[ Pool ------------------------------------------------------------------------ ]]
 
-local function acquireBall(tier: string): (BasePart, number)
+local function acquireBall(tier: string, pink: boolean?): (BasePart, number)
 	local b = PlotLayout.FactoryBall
 	local diameter = b.Diameter[tier] or b.Diameter.Common
 	local part = table.remove(pool)
@@ -122,7 +122,8 @@ local function acquireBall(tier: string): (BasePart, number)
 		part = new
 	end
 	local ball = part :: BasePart
-	local color = FusionConfig.TierAccentColors[tier] or UITheme.World.AccentGold
+	-- The Neon Pink Lab (LabStyle) skins that lab's balls pink.
+	local color = if pink then UITheme.World.AccentPink else FusionConfig.TierAccentColors[tier] or UITheme.World.AccentGold
 	ball.Size = Vector3.one * diameter
 	-- Power Surge: brighter balls (toward white; no light is raised).
 	ball.Color = if EventState.GetGeneratorMultiplier() > 1 then color:Lerp(UITheme.Colors.White, SURGE_BALL_WHITEN) else color
@@ -196,7 +197,7 @@ end
 
 local function spawnBall(state: PlotState, generator: TycoonConfig.GeneratorDef, spot: PlotLayout.GeneratorSpot, value: number)
 	local origin = state.Origin
-	local part, diameter = acquireBall(generator.Tier)
+	local part, diameter = acquireBall(generator.Tier, state.Model:GetAttribute("LabStyle") == true)
 	local radius = diameter / 2
 	local bodyCenter = Vector3.new(spot.Position.X, spot.Height / 2, spot.Position.Z)
 	local belt = PlotLayout.FactoryBelt

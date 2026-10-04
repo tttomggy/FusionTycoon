@@ -43,10 +43,14 @@ local Workspace = game:GetService("Workspace")
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 local PlayerDataService: PlayerDataServiceModule
+local TycoonService: TycoonServiceModule
 
 --[[ Private state -------------------------------------------------------- ]]
 
@@ -80,6 +84,10 @@ local state: State = {
 -- purchase dialog may still be open when the window closes).
 local SALE_RECEIPT_GRACE_SECONDS = 10 * 60
 local TICK_SECONDS = 1
+local VIP_TAG_NAME = "VipTag"
+local VIP_TAG_STUDS = Vector2.new(3.6, 1.1)
+local VIP_TAG_OFFSET = Vector3.new(0, 2.4, 0)
+local VIP_TAG_MAX_DISTANCE = 70
 
 local MonetizationService = {}
 
@@ -398,6 +406,45 @@ local function onPlayerRemoving(player: Player)
 	state.salePromptedAt[userId] = nil
 end
 
+--[[ Pass effects -------------------------------------------------------------
+	Run after a join check, a pass purchase or any grant: the pedestal spots
+	(+2 Pedestals), the lab look (VIP trim, Neon Pink), the VIP head tag and
+	the Player attribute "VIP" (clients prefix that player's chat).
+]]
+
+local function applyVipTag(player: Player)
+	local character = player.Character
+	local head = character and character:FindFirstChild("Head")
+	if not head then
+		return
+	end
+	local existing = head:FindFirstChild(VIP_TAG_NAME)
+	local vip = PlayerDataService.OwnsPass(player, "VIP")
+	if vip and not existing then
+		BillboardKit.Chip(head, {
+			Name = VIP_TAG_NAME,
+			Text = "👑 VIP",
+			Gradient = UITheme.Gradients.Gold,
+			TextColor = UITheme.Colors.GoldText,
+			Studs = VIP_TAG_STUDS,
+			StudsOffset = VIP_TAG_OFFSET,
+			MaxDistance = VIP_TAG_MAX_DISTANCE,
+		})
+	elseif not vip and existing then
+		existing:Destroy()
+	end
+end
+
+local function applyPassEffects(player: Player)
+	if not player.Parent then
+		return
+	end
+	player:SetAttribute("VIP", PlayerDataService.OwnsPass(player, "VIP"))
+	applyVipTag(player)
+	TycoonService.RefreshPedestalLabels(player)
+	TycoonService.ApplyLabLook(player)
+end
+
 --[[ Public API -------------------------------------------------------------- ]]
 
 -- Studio: runs the real grant path without Robux (`/shop grant <key>`).
@@ -433,6 +480,10 @@ function MonetizationService:Init()
 	table.insert(state.connections, RemoteEvents.RequestShopPurchase.OnServerEvent:Connect(onRequestShopPurchase))
 	table.insert(state.connections, Players.PlayerAdded:Connect(function(player: Player)
 		task.spawn(checkPlayer, player)
+		table.insert(state.connections, player.CharacterAdded:Connect(function(character: Model)
+			character:WaitForChild("Head", 10)
+			applyVipTag(player)
+		end))
 	end))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(state.connections, RunService.Heartbeat:Connect(onHeartbeat))
@@ -442,6 +493,8 @@ end
 
 function MonetizationService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
+	TycoonService = require(script.Parent.TycoonService)
+	MonetizationService.OnPassesChanged(applyPassEffects)
 	for _, player in Players:GetPlayers() do
 		task.spawn(checkPlayer, player)
 	end

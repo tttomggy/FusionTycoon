@@ -112,6 +112,11 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 		reject(player, "InvalidPedestal", pedestalIndex, true)
 		return
 	end
+	-- Spots 5-6 need the +2 Pedestals pass.
+	if pedestalIndex > PlayerDataService.GetPedestalCount(player) then
+		reject(player, "PedestalLocked", pedestalIndex)
+		return
+	end
 
 	local item = PlayerDataService.GetItemByUid(player, uid)
 	if not item then

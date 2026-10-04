@@ -68,6 +68,9 @@ local sfxMuted = false
 -- Local sound changes not echoed yet (nil = none pending).
 local pendingSfxVolume: number? = nil
 local pendingSfxMuted: boolean? = nil
+-- The Auto-Fuse pass's toggle (Settings.AutoFuse), optimistic like the rest.
+local autoFuse = false
+local pendingAutoFuse: boolean? = nil
 
 local function applySfx()
 	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
@@ -217,6 +220,16 @@ function TycoonController.SetSfxMuted(muted: boolean)
 	pendingSfxMuted = muted
 	applySfx()
 	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
+end
+
+function TycoonController.IsAutoFuseOn(): boolean
+	return autoFuse
+end
+
+function TycoonController.SetAutoFuse(on: boolean)
+	autoFuse = on
+	pendingAutoFuse = on
+	RemoteEvents.SetSetting:FireServer({ Key = "AutoFuse", Value = on })
 end
 
 -- One of this player's displayed items is being carried off by a thief.
@@ -388,6 +401,14 @@ local function onSyncTycoon(snapshot: any)
 	end
 	if pendingSfxMuted ~= nil and settings.SfxMuted == pendingSfxMuted then
 		pendingSfxMuted = nil
+	end
+	if pendingAutoFuse ~= nil and settings.AutoFuse == pendingAutoFuse then
+		pendingAutoFuse = nil
+	end
+	if pendingAutoFuse ~= nil then
+		autoFuse = pendingAutoFuse
+	else
+		autoFuse = settings.AutoFuse
 	end
 	sfxVolume = if pendingSfxVolume ~= nil then pendingSfxVolume else settings.SfxVolume
 	if pendingSfxMuted ~= nil then

@@ -411,6 +411,26 @@ function ShopConfig.GetSaleFor(key: string): Sale?
 	return nil
 end
 
+-- Is `key` offered to this viewer at all? (Set up, or Studio; allowed by
+-- their policy; not a bought one-time pack. A sale product also needs its
+-- window live: ShopState.IsSaleLive.) Server and client both ask this.
+function ShopConfig.IsOffered(key: string, restricted: boolean, isStudio: boolean, starterBought: boolean): boolean
+	local item = ShopConfig.Items[key]
+	if not item then
+		return false
+	end
+	if item.Id == 0 and not isStudio then
+		return false
+	end
+	if item.PolicyRestricted and restricted then
+		return false
+	end
+	if key == "StarterPack" and starterBought then
+		return false
+	end
+	return true
+end
+
 -- Permanent income multiplier from passes: 2x Cash x VIP.
 function ShopConfig.GetPassIncomeMultiplier(owned: { [string]: boolean }): number
 	return (if owned.DoubleCash then ShopConfig.DoubleCashMultiplier else 1)

@@ -105,7 +105,9 @@ local function blockedByHeist(): boolean
 	return false
 end
 
-local function requestFusion(uids: { string }?)
+-- `safe`: spend a Safe Fusion token (the Fuse panel's toggle); a fail then
+-- keeps every orb. AGAIN on the fail card never passes it.
+local function requestFusion(uids: { string }?, safe: boolean?)
 	if isRequestPending or blockedByHeist() then
 		return
 	end
@@ -141,7 +143,7 @@ local function requestFusion(uids: { string }?)
 	end)
 
 	local startTime = os.clock()
-	RemoteEvents.RequestFusion:FireServer({ Uids = chosen })
+	RemoteEvents.RequestFusion:FireServer({ Uids = chosen, Safe = safe == true })
 
 	repeat
 		task.wait()
@@ -212,6 +214,12 @@ end
 function FusionController.Init()
 	RemoteEvents.FusionResult.OnClientEvent:Connect(onFusionResult)
 	RemoteEvents.FuseAllResult.OnClientEvent:Connect(function(payload: any)
+		-- An Auto-Fuse summary arrives unasked: show it straight away and
+		-- never let it answer a manual Fuse All that's waiting.
+		if typeof(payload) == "table" and payload.Auto == true then
+			fuseAllResolved:Fire(payload)
+			return
+		end
 		pendingFuseAllResult = if typeof(payload) == "table" then payload else { Count = 0 }
 	end)
 

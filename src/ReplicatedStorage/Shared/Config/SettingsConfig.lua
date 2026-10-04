@@ -27,7 +27,7 @@ local MutationConfig = require(script.Parent.MutationConfig)
 local SettingsConfig = {}
 
 export type RevealRule = { [string]: string }
-export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean }
+export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean, AutoFuse: boolean }
 
 SettingsConfig.DefaultSfxVolume = 0.8
 
@@ -48,6 +48,8 @@ function SettingsConfig.Sanitize(raw: unknown): Settings
 		RevealRule = SettingsConfig.SanitizeRevealRule(source.RevealRule),
 		SfxVolume = SettingsConfig.SanitizeSfxVolume(source.SfxVolume),
 		SfxMuted = source.SfxMuted == true,
+		-- The Auto-Fuse pass's toggle (Fuse panel); off until switched on.
+		AutoFuse = source.AutoFuse == true,
 	}
 end
 
@@ -135,6 +137,7 @@ function SettingsConfig.GetDefaultSettings(): Settings
 		RevealRule = SettingsConfig.GetDefaultRevealRule(),
 		SfxVolume = SettingsConfig.DefaultSfxVolume,
 		SfxMuted = false,
+		AutoFuse = false,
 	}
 end
 

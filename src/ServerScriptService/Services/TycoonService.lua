@@ -57,6 +57,16 @@ type WorldServiceModule = typeof(require(script.Parent.WorldService))
 local FusionMachineService: FusionMachineServiceModule
 local WorldService: WorldServiceModule
 
+-- Run after every successful pull (FusionService: Auto-Fuse). A plain list
+-- so FusionService can subscribe without this service referencing it.
+local pullHooks: { (Player) -> () } = {}
+
+local function runPullHooks(player: Player)
+	for _, hook in pullHooks do
+		task.spawn(hook, player)
+	end
+end
+
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
 
@@ -590,6 +600,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 			IndexTierComplete = tiersCompleted[1],
 		})
 		announcePull(player, newEntry)
+		runPullHooks(player)
 
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
@@ -630,6 +641,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		for _, item in items do
 			announcePull(player, item)
 		end
+		runPullHooks(player)
 
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
@@ -953,6 +965,28 @@ end
 
 --[[ Public ---------------------------------------------------------------------------- ]]
 
+-- The shop's lab look on `player`'s claimed plot: Neon Pink (LabStyle pass
+-- or the Starter Pack's cosmetic) and the VIP gold trim. Also publishes the
+-- plot attributes LabStyle / VIP (clients: pink cash balls). Called on
+-- claim and whenever passes change (MonetizationService).
+function TycoonService.ApplyLabLook(player: Player)
+	local plot = plotByUserId[player.UserId]
+	if not plot or not plot:GetAttribute("Claimed") then
+		return
+	end
+	local pink = PlayerDataService.HasCosmetic(player, "LabStyle")
+	local vip = PlayerDataService.OwnsPass(player, "VIP")
+	plot:SetAttribute("LabStyle", pink)
+	plot:SetAttribute("VIP", vip)
+	PlotKit.ApplyLabLook(plot, pink, vip)
+end
+
+-- Registers `callback(player)` to run after every successful pull (Pull
+-- or Pull x10), on its own thread.
+function TycoonService.OnPull(callback: (Player) -> ())
+	table.insert(pullHooks, callback)
+end
+
 -- `player`'s plot Model, or nil. Lets ItemService resolve pedestals without
 -- trusting a client-supplied plot.
 function TycoonService.GetPlotForPlayer(player: Player): Model?
@@ -972,10 +1006,21 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
 	local multiplier = PlayerDataService.GetIncomeMultiplier(player)
+	local unlocked = PlayerDataService.GetPedestalCount(player)
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
 		local pedestal = folder:FindFirstChild("Pedestal" .. index)
 		if pedestal and pedestal:IsA("BasePart") then
-			local uid = displays[index]
+			-- Spots past 4 need the +2 Pedestals pass: a dim plinth with a
+			-- locked label until then (its prompt offers the pass, client).
+			local locked = index > unlocked
+			pedestal:SetAttribute("Locked", locked)
+			local dim = if locked then PlotLayout.LockedPedestalTransparency else 0
+			pedestal.Transparency = dim
+			local cap = pedestal:FindFirstChild("Cap")
+			if cap and cap:IsA("BasePart") then
+				cap.Transparency = dim
+			end
+			local uid = if locked then nil else displays[index]
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
 			local steal = pedestal:FindFirstChild("StealPrompt")
 			pedestal:SetAttribute("Filled", item ~= nil)
@@ -1000,6 +1045,7 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
+				BillboardKit.SetPedestalLocked(pedestal, locked)
 				pedestal:SetAttribute("StealLabel", "")
 				if steal and steal:IsA("ProximityPrompt") then
 					steal.ObjectText = ""
@@ -1113,6 +1159,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		createPedestals(plot, origin, player)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
+		TycoonService.ApplyLabLook(player)
 		createFactoryLine(plot, origin, player)
 		createRebirthPortal(plot, origin, player)
 		createLockConsole(plot, origin)

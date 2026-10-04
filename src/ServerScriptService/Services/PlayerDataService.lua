@@ -1402,6 +1402,12 @@ function PlayerDataService:Init()
 				changed = PlayerDataService.SetSfx(player, request.Value, nil)
 			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
 				changed = PlayerDataService.SetSfx(player, nil, request.Value)
+			elseif request.Key == "AutoFuse" and typeof(request.Value) == "boolean" then
+				local data = state.sessionCache[player.UserId]
+				if data then
+					data.Settings.AutoFuse = request.Value
+					changed = true
+				end
 			end
 			if not changed then
 				return

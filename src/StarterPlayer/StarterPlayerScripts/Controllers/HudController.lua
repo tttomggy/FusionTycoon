@@ -80,6 +80,10 @@ local displayedCash = 0
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
 local multiplierPill: TextLabel
+local breakdownHolder: Frame
+local breakdownLabel: TextLabel
+local breakdownToken = 0
+local BREAKDOWN_SECONDS = 5
 local rebirthPill: TextLabel
 
 local goalHolder: Frame
@@ -361,6 +365,46 @@ local function buildCashCard(): Frame
 		LayoutOrder = 2,
 		ZIndex = z,
 	})
+	-- Tap the total for its breakdown (pad, rebirths, Index, passes, boost,
+	-- Overclock); a >= 44 px clear hit area like the rebirth pill's.
+	local multiplierHit = Instance.new("TextButton")
+	multiplierHit.Name = "Hit"
+	multiplierHit.Text = ""
+	multiplierHit.BackgroundTransparency = 1
+	multiplierHit.AnchorPoint = Vector2.new(0.5, 0.5)
+	multiplierHit.Position = UDim2.fromScale(0.5, 0.5)
+	multiplierHit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
+	multiplierHit.ZIndex = z + 2
+	multiplierHit.Parent = multiplierPill.Parent
+	multiplierHit.Activated:Connect(function()
+		HudController.ToggleIncomeBreakdown()
+	end)
+
+	local breakdown, breakdownFrame = UIKit.Panel({
+		Name = "IncomeBreakdown",
+		Parent = holder,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 1, 8),
+		Size = UDim2.fromOffset(220, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Color = Colors.Panel,
+		Radius = UITheme.Radius.Row,
+		ZIndex = z + 5,
+	})
+	UIKit.Padding(breakdown, 8, 12, 8, 12)
+	breakdownLabel = UIKit.Label({
+		Name = "Lines",
+		Font = Fonts.Body,
+		TextSize = 14,
+		RichText = true,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 18),
+		ZIndex = z + 6,
+		Parent = breakdown,
+	})
+	breakdownFrame.Visible = false
+	breakdownHolder = breakdownFrame
 
 	return holder
 end
@@ -875,10 +919,12 @@ local function refreshAll()
 		NumberFormat.Money(getIncomePerSecond()),
 		UIKit.Colored("/s", Colors.Muted)
 	)
-	-- The Multiplier Pad's own value; rebirth has its own pill beside it.
-	multiplierPill.Text = NumberFormat.Multiplier(
-		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
-	)
+	-- The TOTAL income multiplier (pad x rebirth x Index x the shop); tap
+	-- it for the breakdown.
+	multiplierPill.Text = NumberFormat.Multiplier(TycoonController.GetIncomeMultiplier())
+	if breakdownHolder.Visible then
+		HudController.RefreshIncomeBreakdown()
+	end
 	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
 	local rebirths = TycoonController.GetRebirths()
 	local rebirthFill = rebirthPill.Parent :: Frame
@@ -887,6 +933,40 @@ local function refreshAll()
 	refreshBadge()
 	refreshGoal()
 	UpgradesPanel.Refresh()
+end
+
+-- The lines under the multiplier pill: every factor that isn't x1, then the
+-- total. Same IncomeInputs as the HUD's income (one formula).
+function HudController.RefreshIncomeBreakdown()
+	local inputs = TycoonController.GetIncomeInputs()
+	local lines = {}
+	for _, part in TycoonConfig.GetIncomeBreakdown(inputs) do
+		if math.abs(part.Value - 1) > 1e-6 then
+			table.insert(lines, ("%s  %s"):format(part.Label, UIKit.Colored(NumberFormat.Multiplier(part.Value), Colors.Cash)))
+		end
+	end
+	if #lines == 0 then
+		table.insert(lines, "No boosts yet")
+	end
+	table.insert(lines, ("<b>Total  %s</b>"):format(UIKit.Colored(NumberFormat.Multiplier(TycoonConfig.GetIncomeMultiplier(inputs)), Colors.Cash)))
+	breakdownLabel.Text = table.concat(lines, "\n")
+end
+
+function HudController.ToggleIncomeBreakdown()
+	breakdownToken += 1
+	if breakdownHolder.Visible then
+		breakdownHolder.Visible = false
+		return
+	end
+	HudController.RefreshIncomeBreakdown()
+	breakdownHolder.Visible = true
+	UIKit.PopIn(breakdownHolder)
+	local token = breakdownToken
+	task.delay(BREAKDOWN_SECONDS, function()
+		if breakdownToken == token then
+			breakdownHolder.Visible = false
+		end
+	end)
 end
 
 function HudController.Init()

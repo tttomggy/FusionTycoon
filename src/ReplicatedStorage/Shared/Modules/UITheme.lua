@@ -70,6 +70,8 @@ UITheme.World = {
 	Belt = hex("#1B1834"), -- speed belt surface
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
+	AccentPink = hex("#FF5CC8"), -- the Neon Pink Lab (LabStyle): wall + sign strips, cash balls
+	VipGold = hex("#FFD23F"), -- the VIP pass: sign border, wall trims, head tag
 	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
 }
 
