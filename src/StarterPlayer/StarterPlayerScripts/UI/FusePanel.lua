@@ -57,7 +57,8 @@ local TAB_HEIGHT = 50 -- tier name over its count; five equal tabs, no scroll
 local TAB_GAP = 6
 local CARD_SIZE = Vector2.new(100, 112)
 local CHIP_HEIGHT = 40 -- two lines: "3 orbs" over the chance
-local CHIP_GAP = 8
+local CHIP_GAP = 6
+local CHIP_CHANCE_MAX_TEXT = 18 -- the % scales down to fit ("100%" on the narrowest phone)
 local FLY_SECONDS = 0.35
 
 -- Chamber geometry (px) per layout. Height = 2 x Radius + Slot. Desktop
@@ -258,15 +259,17 @@ local function refreshChamber()
 			chip:Destroy()
 		end
 	end
+	local chipTotal = FusionConfig.MaxFusionInputs - FusionConfig.MinFusionInputs + 1
 	for chipCount = FusionConfig.MinFusionInputs, FusionConfig.MaxFusionInputs do
 		local current = chipCount == count
-		-- Each count its own chip (the grid keeps a gap between them): the
+		-- Each count its own chip (one row, a 6 px gap between them): the
 		-- count small on top, its chance bold under it. The count matching
 		-- the chamber is highlighted; a Void Moon tints every chip purple.
 		local chip = Instance.new("Frame")
 		chip.Name = "Chip" .. chipCount
 		chip.BackgroundColor3 = if current then Colors.VioletPill elseif bonus > 0 then UITheme.TowardInk(UITheme.Mutation.Void, 0.45) else Colors.Panel2
 		chip.LayoutOrder = chipCount
+		chip.Size = UDim2.new(1 / chipTotal, -CHIP_GAP * (chipTotal - 1) / chipTotal, 1, 0)
 		chip.ZIndex = chipsRow.ZIndex + 1
 		UIKit.Corner(chip, 12)
 		UIKit.Stroke(chip, if current then 3 else 2, if current then Colors.White else nil)
@@ -275,6 +278,7 @@ local function refreshChamber()
 			Text = ("%d orbs"):format(chipCount),
 			Font = Fonts.BodyHeavy,
 			TextSize = 11,
+			TextTruncate = Enum.TextTruncate.AtEnd,
 			TextColor3 = if current then Colors.Text else Colors.Muted,
 			Position = UDim2.fromOffset(0, 3),
 			Size = UDim2.new(1, 0, 0, 14),
@@ -282,19 +286,24 @@ local function refreshChamber()
 			ZIndex = chip.ZIndex + 1,
 			Parent = chip,
 		})
-		UIKit.Label({
+		local chanceLabel = UIKit.Label({
 			Name = "Chance",
 			Text = percent(FusionConfig.GetFusionChance(selectedTier, chipCount, bonus)),
 			Font = Fonts.Display,
-			TextSize = 17,
+			TextSize = CHIP_CHANCE_MAX_TEXT,
+			TextScaled = true,
 			TextColor3 = Colors.Text,
-			Position = UDim2.fromOffset(0, 17),
-			Size = UDim2.new(1, 0, 0, 22),
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, 17),
+			Size = UDim2.new(1, -6, 0, 20),
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = chip.ZIndex + 1,
 			Stroke = UITheme.Stroke.Text,
 			Parent = chip,
 		})
+		local cap = Instance.new("UITextSizeConstraint")
+		cap.MaxTextSize = CHIP_CHANCE_MAX_TEXT
+		cap.Parent = chanceLabel
 		chip.Parent = chipsRow
 	end
 
@@ -583,10 +592,12 @@ local function buildChamber(column: ScrollingFrame)
 	chipsRow.LayoutOrder = 4
 	chipsRow.ZIndex = column.ZIndex + 1
 	chipsRow.Parent = column
-	local chipCount = FusionConfig.MaxFusionInputs - FusionConfig.MinFusionInputs + 1
-	local chipLayout = Instance.new("UIGridLayout")
-	chipLayout.CellSize = UDim2.new(1 / chipCount, -CHIP_GAP * (chipCount - 1) / chipCount, 0, CHIP_HEIGHT)
-	chipLayout.CellPadding = UDim2.fromOffset(CHIP_GAP, 0)
+	-- One row, never two: a non-wrapping list with scale widths (each chip
+	-- sizes itself to 1/5 of the row minus its share of the gaps).
+	local chipLayout = Instance.new("UIListLayout")
+	chipLayout.FillDirection = Enum.FillDirection.Horizontal
+	chipLayout.Wraps = false
+	chipLayout.Padding = UDim.new(0, CHIP_GAP)
 	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	chipLayout.Parent = chipsRow
 
