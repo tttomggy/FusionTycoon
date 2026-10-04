@@ -105,6 +105,9 @@ type FuseOutcome = {
 	IsNewIndex: boolean,
 	Chance: number,
 	KeptUid: string?, -- fail only
+	-- Success with a mutation: "Kept" (carried over from the inputs) or
+	-- "Rolled" (a fresh fusion roll beat it). nil otherwise.
+	MutationSource: string?,
 }
 
 -- Fuses 2-6 already-validated, same-tier, not-in-use items. Fires no
@@ -163,10 +166,11 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 		warn(("FusionService: no ItemConfig entry found for tier %s"):format(nextTier))
 		return nil, "MissingRewardItem"
 	end
-	local base = items[1].Mutation
+	-- The lowest input mutation carries (FusionConfig.PredictMutation, the
+	-- same function the Fuse panel's prediction line shows).
+	local base = FusionConfig.PredictMutation(items)
 	local uids = {}
 	for _, item in items do
-		base = MutationConfig.Worse(base, item.Mutation)
 		table.insert(uids, item.Uid)
 	end
 	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
@@ -200,6 +204,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 		IsNewIndex = isNewIndex,
 		Chance = chance,
 		KeptUid = nil,
+		MutationSource = if mutation == nil then nil elseif mutation == base then "Kept" else "Rolled",
 	},
 		nil
 end
@@ -338,6 +343,7 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		ConsumedTier = tier,
 		NewItem = outcome.Entry,
 		KeptUid = outcome.KeptUid,
+		MutationSource = outcome.MutationSource,
 		LostCount = if outcome.Upgraded then nil else #outcome.ConsumedUids,
 		NewIndex = outcome.IsNewIndex,
 		IndexTierComplete = completedTier(player, outcome.Entry, outcome.IsNewIndex),

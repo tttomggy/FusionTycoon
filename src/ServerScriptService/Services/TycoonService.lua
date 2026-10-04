@@ -112,6 +112,32 @@ local function onPassiveIncomeTick()
 	end
 end
 
+-- Buys ONE level of `generatorId` (validation, cost, unlocks, cap). The
+-- single source of an upgrade purchase: RequestUpgrade calls it once,
+-- RequestUpgradeMax in a loop. No result event, no sync. Returns (true,
+-- nil, newLevel), or (false, reason, the unaffordable cost if it was cash).
+local function buyOneLevel(player: Player, generatorId: string): (boolean, string?, number?)
+	local generator = TycoonConfig.GetGeneratorById(generatorId)
+	if not generator then
+		return false, "InvalidGenerator"
+	end
+	local generatorLevels = PlayerDataService.GetGenerators(player) or {}
+	if not TycoonConfig.IsUnlocked(generator, generatorLevels) then
+		return false, "Locked"
+	end
+	local currentLevel = generatorLevels[generatorId] or 0
+	if currentLevel >= generator.MaxLevel then
+		return false, "MaxLevel"
+	end
+	local cost = TycoonConfig.GetUpgradeCost(generator, currentLevel)
+	if not PlayerDataService.SpendCash(player, cost) then
+		return false, "InsufficientCash", cost
+	end
+	local newLevel = currentLevel + 1
+	PlayerDataService.SetGeneratorLevel(player, generatorId, newLevel)
+	return true, nil, newLevel
+end
+
 local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 	if typeof(rawGeneratorId) ~= "string" then
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "InvalidGenerator" })
@@ -129,33 +155,92 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		return
 	end
 
-	local generator = TycoonConfig.GetGeneratorById(generatorId)
-	if not generator then
-		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "InvalidGenerator", GeneratorId = generatorId })
+	local ok, reason, newLevel = buyOneLevel(player, generatorId)
+	if not ok then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = reason, GeneratorId = generatorId })
 		return
 	end
-
-	local generatorLevels = PlayerDataService.GetGenerators(player) or {}
-	if not TycoonConfig.IsUnlocked(generator, generatorLevels) then
-		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "Locked", GeneratorId = generatorId })
-		return
-	end
-
-	local currentLevel = generatorLevels[generatorId] or 0
-	if currentLevel >= generator.MaxLevel then
-		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "MaxLevel", GeneratorId = generatorId })
-		return
-	end
-
-	local cost = TycoonConfig.GetUpgradeCost(generator, currentLevel)
-	if not PlayerDataService.SpendCash(player, cost) then
-		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "InsufficientCash", GeneratorId = generatorId })
-		return
-	end
-
-	local newLevel = currentLevel + 1
-	PlayerDataService.SetGeneratorLevel(player, generatorId, newLevel)
 	RemoteEvents.UpgradeResult:FireClient(player, { Success = true, GeneratorId = generatorId, NewLevel = newLevel })
+	syncTycoon(player)
+end
+
+-- MAX ×N / MAX ALL: { GeneratorId } buys that generator's levels while cash
+-- lasts; { All = true } buys the cheapest available level across every
+-- unlocked generator, one at a time (TycoonConfig.GetCheapestUpgrade, the
+-- same pick GetMaxAllPlan shows). Each level goes through buyOneLevel; one
+-- sync and one UpgradeMaxResult at the end. Zero levels bought = nothing
+-- spent.
+local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
+	local request = if typeof(rawRequest) == "table" then rawRequest :: { [any]: any } else {}
+	local all = request.All == true
+	local singleId = if not all and typeof(request.GeneratorId) == "string" then request.GeneratorId :: string else nil
+	local function reject(reason: string, nextCost: number?)
+		RemoteEvents.UpgradeMaxResult:FireClient(player, {
+			Success = false,
+			Reason = reason,
+			All = all,
+			GeneratorId = singleId,
+			NextCost = nextCost,
+		})
+	end
+	if not all and not (singleId and TycoonConfig.GetGeneratorById(singleId)) then
+		reject("InvalidGenerator")
+		return
+	end
+	if not PlayerDataService.IsDataLoaded(player) then
+		reject("DataNotLoaded")
+		return
+	end
+	if PlayerDataService.IsCarrying(player) then
+		reject("Carrying")
+		return
+	end
+
+	local levels, spent = 0, 0
+	local perGenerator: { [string]: number } = {}
+	local newLevels: { [string]: number } = {}
+	local stopReason: string? = nil
+	local nextCost: number? = nil
+	for _ = 1, TycoonConfig.MaxUpgradeSteps do
+		local generatorId = singleId
+		local cost = 0
+		if all then
+			local generator, cheapest = TycoonConfig.GetCheapestUpgrade(PlayerDataService.GetGenerators(player) or {})
+			if not generator then
+				stopReason = "MaxLevel"
+				break
+			end
+			generatorId, cost = generator.Id, cheapest
+		else
+			local generator = TycoonConfig.GetGeneratorById(singleId :: string) :: TycoonConfig.GeneratorDef
+			cost = TycoonConfig.GetUpgradeCost(generator, PlayerDataService.GetGeneratorLevel(player, generator.Id))
+		end
+		local id = generatorId :: string
+		local ok, reason, newLevel = buyOneLevel(player, id)
+		if not ok then
+			stopReason = reason
+			nextCost = if reason == "InsufficientCash" then newLevel else nil
+			break
+		end
+		levels += 1
+		spent += cost
+		perGenerator[id] = (perGenerator[id] or 0) + 1
+		newLevels[id] = newLevel :: number
+	end
+
+	if levels == 0 then
+		reject(stopReason or "InsufficientCash", nextCost)
+		return
+	end
+	RemoteEvents.UpgradeMaxResult:FireClient(player, {
+		Success = true,
+		All = all,
+		GeneratorId = singleId,
+		Levels = levels,
+		Spent = spent,
+		PerGenerator = perGenerator,
+		NewLevels = newLevels,
+	})
 	syncTycoon(player)
 end
 
@@ -1099,6 +1184,7 @@ end
 
 function TycoonService:Init()
 	RemoteEvents.RequestUpgrade.OnServerEvent:Connect(onRequestUpgrade)
+	RemoteEvents.RequestUpgradeMax.OnServerEvent:Connect(onRequestUpgradeMax)
 
 	Players.PlayerAdded:Connect(createPlotForPlayer)
 	Players.PlayerRemoving:Connect(removePlotForPlayer)

@@ -169,9 +169,57 @@ local function onUpgradeResolved(result: any)
 	end
 end
 
+-- A MAX ×N / MAX ALL: one toast ("+9 levels · Core Engine LV 15", or
+-- "+23 levels across 3 generators") and one bump per generator that changed.
+local function onUpgradeMaxResolved(result: any)
+	if typeof(result) ~= "table" then
+		return
+	end
+	if result.Success ~= true then
+		if result.Reason == "InsufficientCash" and typeof(result.NextCost) == "number" then
+			ToastController.Show(("Need %s"):format(NumberFormat.Money(result.NextCost)), "Error")
+		end
+		return
+	end
+	local perGenerator = if typeof(result.PerGenerator) == "table" then result.PerGenerator else {}
+	local newLevels = if typeof(result.NewLevels) == "table" then result.NewLevels else {}
+	local changed: { TycoonConfig.GeneratorDef } = {}
+	for _, generator in TycoonConfig.Generators do
+		if typeof(perGenerator[generator.Id]) == "number" and perGenerator[generator.Id] > 0 then
+			table.insert(changed, generator)
+		end
+	end
+	local levels = if typeof(result.Levels) == "number" then result.Levels else 0
+	local noun = if levels == 1 then "level" else "levels"
+	if #changed == 1 then
+		local generator = changed[1]
+		local newLevel = newLevels[generator.Id]
+		ToastController.Show(
+			if typeof(newLevel) == "number"
+				then ("+%d %s · %s LV %d"):format(levels, noun, generator.Name, newLevel)
+				else ("+%d %s · %s"):format(levels, noun, generator.Name),
+			"Neutral"
+		)
+	elseif #changed > 1 then
+		ToastController.Show(("+%d %s across %d generators"):format(levels, noun, #changed), "Neutral")
+	end
+	for _, generator in changed do
+		local model = getModel(generator.Id)
+		local body = model and model:FindFirstChild("Body")
+		if model and body and body:IsA("BasePart") then
+			bump(generator.Id, model, body)
+			local core = getCore(model)
+			if core then
+				burst(core, GeneratorKit.GetTierColor(generator.Tier))
+			end
+		end
+	end
+end
+
 function GeneratorController.Init()
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	TycoonController.UpgradeResolved:Connect(onUpgradeResolved)
+	TycoonController.UpgradeMaxResolved:Connect(onUpgradeMaxResolved)
 end
 
 return GeneratorController

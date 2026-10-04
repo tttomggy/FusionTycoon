@@ -9,6 +9,8 @@ local REMOTE_EVENT_NAMES = {
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
 	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
 	"UpgradeResult", -- server -> client: validated outcome of an upgrade attempt
+	"RequestUpgradeMax", -- client -> server: { GeneratorId } or { All = true }: buy every level cash allows
+	"UpgradeMaxResult", -- server -> client: { Success, Levels, Spent, PerGenerator, NewLevels, Reason?, NextCost? }
 	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
 	"RequestPlaceItem", -- client -> server: attempt to display an owned item (by Uid) on one of the player's own pedestals
 	"PlaceItemResult", -- server -> client: validated outcome of a place-item or remove-item attempt
@@ -29,6 +31,7 @@ local REMOTE_EVENT_NAMES = {
 	"EventNotice", -- server -> client: an event toast for one player; { Text, Big? } ("⚡ Your <item> got CHARGED!", "Too slow!")
 	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
+	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } (SettingsConfig-whitelisted; the next snapshot carries Settings)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }
 	"HeistEnded", -- server -> thief and victim: a carry ended; { Role, Outcome = "Delivered"|"Saved"|"Timeout"|"Left"|"Died", Item, OtherName }

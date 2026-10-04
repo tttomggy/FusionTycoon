@@ -43,6 +43,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 local Debris = game:GetService("Debris")
+local UserInputService = game:GetService("UserInputService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
@@ -121,9 +122,13 @@ local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44)
 local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
 local CARD_GAP = 10
 local LINEUP_COUNT = 3
--- The info card opens by itself once per event type (Tips "event_<Id>"),
--- this long after the start banner has gone.
-local AUTO_INFO_AFTER_BANNER = 1
+-- The first time you see an event type (Tips "event_<Id>" unseen) the chip
+-- gets a bouncing gold "ⓘ TAP" tag until you tap it once. The card never
+-- opens by itself.
+local TAP_TAG_SIZE = Vector2.new(64, 26)
+local TAP_TAG_GAP = 8
+local TAP_TAG_BOUNCE_PIXELS = 4
+local TAP_TAG_BOUNCE_SECONDS = 0.45
 local GUIDE_SECONDS = 0.5 -- event arrows and pad pills refresh
 local ON_PAD_RADIUS = 6 -- standing on your Gacha Pad: the arrow moves to the machine
 local EVENT_PILL_MAX_DISTANCE = 120
@@ -518,9 +523,10 @@ end
 
 --[[ Event changes -------------------------------------------------------------------- ]]
 
--- Defined with the HUD below (it needs the chip's ScreenGui).
-local autoOpenInfo: (id: string, myGeneration: number) -> ()
+-- Defined with the HUD below.
 local refreshGuidance: () -> ()
+local refreshTapTag: () -> ()
+local placeTapTag: () -> ()
 
 local function onEventChanged(live: boolean)
 	local id = EventState.GetActive()
@@ -556,8 +562,6 @@ local function onEventChanged(live: boolean)
 	end)
 	if live then
 		showStartBanner(id, myGeneration)
-		-- After the banner (countdown + hold), the first time ever: the card.
-		task.delay(COUNTDOWN_STEP * 3 + BANNER_HOLD_SECONDS + AUTO_INFO_AFTER_BANNER, autoOpenInfo, id, myGeneration)
 		if id == "RainbowStorm" then
 			local info = EventConfig.GetInfo(id)
 			AnnouncementController.ShowEventHype("🌈 RAINBOW STORM! " .. (if info then info.Happening[1] else ""))
@@ -789,6 +793,35 @@ end
 local hudGui: ScreenGui
 local chip: TextButton
 local chipHolder: Frame
+local tapTagFrame: GuiObject? = nil
+local tapBounce: Tween? = nil
+
+-- The gold "ⓘ TAP" tag beside the chip: shown while the running event's
+-- type is unseen (Tips "event_<Id>"), bouncing gently.
+refreshTapTag = function()
+	local frame = tapTagFrame
+	if not frame then
+		return
+	end
+	local running = EventState.GetActive()
+	local show = running ~= nil
+		and TycoonController.HasSynced()
+		and not TycoonController.HasSeenTip("event_" .. running)
+	frame.Visible = show
+	if show and not tapBounce then
+		local tween = TweenService:Create(
+			frame,
+			TweenInfo.new(TAP_TAG_BOUNCE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Position = frame.Position - UDim2.fromOffset(0, TAP_TAG_BOUNCE_PIXELS) }
+		)
+		tween:Play()
+		tapBounce = tween
+	elseif not show and tapBounce then
+		tapBounce:Cancel()
+		tapBounce = nil
+		placeTapTag()
+	end
+end
 local chipStyle: string? = nil
 local function cardTop(): number
 	return CHIP_Y + CHIP_SIZE.Desktop.Y + CARD_GAP
@@ -871,13 +904,18 @@ end
 local function refreshSchedule()
 	local lineup = EventState.GetLineup(LINEUP_COUNT)
 	refreshChip(lineup)
-	-- The open card follows the chip: a new event (or the next one once it
-	-- ends) replaces what it explains.
+	-- The open card follows the chip: it closes when the event it explains
+	-- ends, and a "next" card turns into the running one when it starts.
 	local shownId, shownNow = EventInfoCard.GetShown()
 	local first = lineup[1]
 	if shownId and first and (first.Id ~= shownId or first.Now ~= shownNow) then
-		EventInfoCard.Show(hudGui, cardTop(), first.Id, first.Now)
+		if shownNow then
+			EventInfoCard.Hide()
+		else
+			EventInfoCard.Show(hudGui, cardTop(), first.Id, first.Now)
+		end
 	end
+	refreshTapTag()
 	EventInfoCard.Refresh()
 	refreshBoards(lineup)
 end
@@ -892,6 +930,13 @@ local function cardSubject(): (string?, boolean)
 end
 
 local function toggleCard()
+	-- Tapping the chip during an event you haven't tapped before marks it
+	-- seen (the TAP tag goes for good).
+	local running = EventState.GetActive()
+	if running and TycoonController.HasSynced() and not TycoonController.HasSeenTip("event_" .. running) then
+		TycoonController.MarkTipSeen("event_" .. running)
+		refreshTapTag()
+	end
 	if EventInfoCard.IsOpen() then
 		EventInfoCard.Hide()
 		return
@@ -902,22 +947,47 @@ local function toggleCard()
 	end
 end
 
--- The first time this account sees `id`: open its info card once.
-autoOpenInfo = function(id: string, myGeneration: number)
-	local tip = "event_" .. id
-	if not TycoonController.HasSynced() or TycoonController.HasSeenTip(tip) then
+-- A tap anywhere outside the card (and not on the chip, which toggles it)
+-- closes it.
+local function isInside(gui: GuiObject, position: Vector2): boolean
+	local at, size = gui.AbsolutePosition, gui.AbsoluteSize
+	return position.X >= at.X and position.X <= at.X + size.X and position.Y >= at.Y and position.Y <= at.Y + size.Y
+end
+
+local function onInputBegan(input: InputObject)
+	if input.UserInputType ~= Enum.UserInputType.MouseButton1 and input.UserInputType ~= Enum.UserInputType.Touch then
 		return
 	end
-	if generation ~= myGeneration or EventState.GetActive() ~= id then
+	local card = EventInfoCard.GetFrame()
+	if not card or not card.Visible then
 		return
 	end
-	TycoonController.MarkTipSeen(tip)
-	EventInfoCard.Show(hudGui, cardTop(), id, true)
+	local position = Vector2.new(input.Position.X, input.Position.Y)
+	if isInside(card, position) or isInside(chipHolder, position) then
+		return
+	end
+	EventInfoCard.Hide()
+end
+
+-- The tag sits right of the chip (the chip is centred, so half its width
+-- plus a gap from the screen's centre).
+placeTapTag = function()
+	local frame = tapTagFrame
+	if frame then
+		local width = chipHolder.Size.X.Offset
+		frame.Position = UDim2.new(0.5, width / 2 + TAP_TAG_GAP, 0, CHIP_Y + (CHIP_SIZE.Desktop.Y - TAP_TAG_SIZE.Y) / 2)
+	end
 end
 
 local function applyLayout(isPhone: boolean)
 	local size = if isPhone then CHIP_SIZE.Phone else CHIP_SIZE.Desktop
 	chipHolder.Size = UDim2.fromOffset(size.X, size.Y)
+	if tapBounce then
+		tapBounce:Cancel()
+		tapBounce = nil
+	end
+	placeTapTag()
+	refreshTapTag()
 	local column = chip:FindFirstChild("Content") and (chip :: any).Content:FindFirstChild("TextColumn")
 	local label = column and column:FindFirstChild("Label")
 	if label and label:IsA("TextLabel") then
@@ -939,7 +1009,21 @@ local function buildHud()
 		Radius = 22,
 		OnClick = toggleCard,
 	})
+	local tag = UIKit.Pill({
+		Name = "TapTag",
+		Parent = hudGui,
+		Text = "ⓘ TAP",
+		Gradient = UITheme.Gradients.Gold,
+		TextColor3 = Colors.GoldText,
+		Font = Fonts.Display,
+		TextSize = 14,
+		Height = TAP_TAG_SIZE.Y,
+	})
+	local tagFrame = tag.Parent :: GuiObject
+	tapTagFrame = tagFrame
+	tagFrame.Visible = false
 	applyLayout(UIKit.IsPhone())
+	UserInputService.InputBegan:Connect(onInputBegan)
 	UIKit.LayoutChanged:Connect(applyLayout)
 end
 

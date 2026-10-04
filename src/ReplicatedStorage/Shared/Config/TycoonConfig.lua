@@ -222,6 +222,77 @@ function TycoonConfig.IsUnlocked(generator: GeneratorDef, generatorLevels: { [st
 	return (generatorLevels[requirement.GeneratorId] or 0) >= requirement.Level
 end
 
+--[[ MAX upgrades -------------------------------------------------------------
+	The Upgrades panel's MAX ×N / MAX ALL labels and TycoonService's
+	RequestUpgradeMax loop agree through these: same costs (GetUpgradeCost),
+	same unlocks, same caps. Pure functions of (levels, cash).
+]]
+TycoonConfig.MaxUpgradeSteps = 500 -- levels one MAX request may buy
+
+-- Levels of `generator` that `cash` buys in a row from `level`: how many,
+-- their total cost, and the price of the first one it can't afford (nil
+-- when it stopped at the max level).
+function TycoonConfig.GetMaxAffordable(generator: GeneratorDef, level: number, cash: number): (number, number, number?)
+	local count, total, current = 0, 0, level
+	while count < TycoonConfig.MaxUpgradeSteps and current < generator.MaxLevel do
+		local cost = TycoonConfig.GetUpgradeCost(generator, current)
+		if total + cost > cash then
+			return count, total, cost
+		end
+		total += cost
+		count += 1
+		current += 1
+	end
+	return count, total, nil
+end
+
+-- The cheapest next level across every unlocked, unmaxed generator (ties:
+-- the earlier generator in the line), or nil when everything is maxed.
+function TycoonConfig.GetCheapestUpgrade(levels: { [string]: number }): (GeneratorDef?, number)
+	local best: GeneratorDef? = nil
+	local bestCost = math.huge
+	for _, generator in TycoonConfig.Generators do
+		local level = levels[generator.Id] or 0
+		if level < generator.MaxLevel and TycoonConfig.IsUnlocked(generator, levels) then
+			local cost = TycoonConfig.GetUpgradeCost(generator, level)
+			if cost < bestCost then
+				best, bestCost = generator, cost
+			end
+		end
+	end
+	return best, bestCost
+end
+
+export type MaxAllPlan = {
+	Levels: number,
+	Spent: number,
+	PerGenerator: { [string]: number },
+	NextCost: number?, -- the cheapest level it couldn't afford (nil: all maxed)
+}
+
+-- MAX ALL: buy the cheapest available level, one at a time, re-checking
+-- unlocks after each (a newly unlocked generator joins), until cash runs
+-- out, everything is maxed or MaxUpgradeSteps levels.
+function TycoonConfig.GetMaxAllPlan(levels: { [string]: number }, cash: number): MaxAllPlan
+	local simulated = table.clone(levels)
+	local plan: MaxAllPlan = { Levels = 0, Spent = 0, PerGenerator = {}, NextCost = nil }
+	while plan.Levels < TycoonConfig.MaxUpgradeSteps do
+		local generator, cost = TycoonConfig.GetCheapestUpgrade(simulated)
+		if not generator then
+			return plan
+		end
+		if plan.Spent + cost > cash then
+			plan.NextCost = cost
+			return plan
+		end
+		plan.Spent += cost
+		plan.Levels += 1
+		simulated[generator.Id] = (simulated[generator.Id] or 0) + 1
+		plan.PerGenerator[generator.Id] = (plan.PerGenerator[generator.Id] or 0) + 1
+	end
+	return plan
+end
+
 --[[ Income -----------------------------------------------------------------
 	ONE formula, ONE input table. Build IncomeInputs only through
 	PlayerDataService.GetIncomeInputs (server) or

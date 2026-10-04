@@ -3,13 +3,14 @@
 	----------------
 	What you see after a fusion or a gacha pull:
 
-	  * Big result card (centre) - Epic/Legendary/Mythic fusion successes and
-	    Epic+ gacha pulls. Sunburst, tier name, 132 px orb, DISPLAY IT / NICE.
+	  * Big result card (centre) - pulls and fusion successes the player's
+	    RevealRule picks (SettingsConfig; default Epic+, or Diamond+). Sunburst, tier name, 132 px orb, DISPLAY IT / NICE.
 	    Fusion cards wait for FusionController.FusionResolved, i.e. after the
 	    machine's reveal animation, so the card never spoils it.
 	  * Fail card (bottom) - a failed fusion, 3 s, with an AGAIN button.
-	  * Small pull card (bottom) - Common/Rare gacha pulls; each new pull
-	    replaces the previous card.
+	  * Skipped-card lines (bottom) - a pull / fusion success / BEST OF 10
+	    whose big card the player's RevealRule skips (Settings): one small
+	    line each, 2.5 s, at most 3.
 
 	  * Pull x10 grid (centre) - all ten pulls popping in 0.06 s apart; the
 	    best one (by GetItemCashPerSecond) is outlined and, if it qualifies,
@@ -28,6 +29,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -60,13 +62,13 @@ local SUNBURST_RAY_LENGTH = 720
 
 local BOTTOM_CARD_OFFSET = UITheme.BottomStackOffset -- above the HUD buttons and REBIRTH!, same baseline as toasts
 local FAIL_CARD_SIZE = Vector2.new(470, 92)
-local PULL_CARD_SIZE = Vector2.new(440, 74)
 local BOTTOM_CARD_SECONDS = 3
 
 local MYTHIC_SHAKE_MAGNITUDE = 0.35
 local MYTHIC_SHAKE_SECONDS = 0.5
 
 local screenGui: ScreenGui
+local showSkippedLine: (item: any, extra: string?) -> () -- the skipped-card line (defined with the bottom cards)
 
 --[[ Helpers ------------------------------------------------------------------- ]]
 
@@ -166,6 +168,9 @@ type BigCardInfo = {
 	Caption: string,
 	Item: any,
 	Description: string,
+	-- Fusion successes with a mutation: "GOLDEN kept" / "GOLDEN rolled!"
+	-- beside the mutation pill (FusionResult.MutationSource).
+	SourceLine: string?,
 }
 
 local function showBigCard(info: BigCardInfo)
@@ -235,15 +240,30 @@ local function showBigCard(info: BigCardInfo)
 	orb.Position = UDim2.new(0.5, 0, 0, 116)
 	orb.ZIndex = z
 	orb.Parent = body
+	local sourceLine = if info.Item.Mutation then info.SourceLine else nil
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = info.Item.Mutation,
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, 228),
+		AnchorPoint = Vector2.new(if sourceLine then 1 else 0.5, 0),
+		Position = UDim2.new(0.5, if sourceLine then -4 else 0, 0, 228),
 		TextSize = 14,
 		Height = 24,
 		ZIndex = z + 1,
 	})
+	if sourceLine then
+		UIKit.Label({
+			Name = "MutationSource",
+			Text = sourceLine,
+			Font = Fonts.Display,
+			TextSize = 16,
+			TextColor3 = UITheme.GetMutationColor(info.Item.Mutation) or Colors.Text,
+			Position = UDim2.new(0.5, 4, 0, 228),
+			Size = UDim2.new(0.5, -16, 0, 24),
+			ZIndex = z + 1,
+			Stroke = UITheme.Stroke.Text,
+			Parent = body,
+		})
+	end
 
 	UIKit.Label({
 		Name = "ItemName",
@@ -700,6 +720,8 @@ local function showMultiCard(items: { any })
 				Item = best,
 				Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(best))),
 			})
+		elseif multiHolder == holder then
+			showSkippedLine(best)
 		end
 	end)
 end
@@ -1214,6 +1236,13 @@ end
 
 local bottomHolder: Frame? = nil
 local bottomGeneration = 0
+-- Toasts sit above whichever is taller: a bottom card or the skipped lines.
+local bottomCardInset = 0
+local skipInset = 0
+
+local function applyBottomInset()
+	ToastController.SetBottomInset(math.max(bottomCardInset, skipInset))
+end
 
 local function hideBottomCard(generation: number)
 	if generation ~= bottomGeneration then
@@ -1221,7 +1250,8 @@ local function hideBottomCard(generation: number)
 	end
 	local holder = bottomHolder
 	bottomHolder = nil
-	ToastController.SetBottomInset(0)
+	bottomCardInset = 0
+	applyBottomInset()
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -1249,7 +1279,8 @@ local function newBottomCard(name: string, size: Vector2): (Frame, number)
 		ZIndex = 2,
 	})
 	bottomHolder = holder
-	ToastController.SetBottomInset(size.Y + 12)
+	bottomCardInset = size.Y + 12
+	applyBottomInset()
 	UIKit.PopIn(holder)
 
 	local generation = bottomGeneration
@@ -1281,8 +1312,14 @@ local function showFailCard(item: any, lostCount: number)
 	})
 	UIKit.Label({
 		Name = "Detail",
-		Text = ("Kept %s, lost %d"):format(
-			"<b>" .. UIKit.Colored(UIKit.EscapeRichText(itemName(item)), UITheme.GetTierLight(tier)) .. "</b>",
+		Text = ("Kept your %s (%s), lost %d"):format(
+			"<b>"
+				.. UIKit.Colored(
+					(if item.Mutation then item.Mutation .. " " else "") .. tier,
+					UITheme.GetMutationColor(item.Mutation) or UITheme.GetTierLight(tier)
+				)
+				.. "</b>",
+			UIKit.EscapeRichText(itemName(item)),
 			lostCount
 		),
 		RichText = true,
@@ -1329,77 +1366,127 @@ local function showFailCard(item: any, lostCount: number)
 	end)
 end
 
-local function showPullCard(item: any)
+--[[ Skipped-card lines -------------------------------------------------------------
+	A pull or fusion success whose big card the player's RevealRule skips
+	(SettingsConfig) pops one small line above the bottom bar for 2.5 s: an
+	orb dot, "+ Golden Plasma Orb" (mutation colour), the tier, "+$94.5/s".
+	At most 3 stack; older lines fade.
+]]
+local SKIP_LINE_SECONDS = 2.5
+local SKIP_LINE_MAX = 3
+local SKIP_LINE_HEIGHT = 34
+local SKIP_LINE_GAP = 6
+local SKIP_LINE_FADE = { 0, 0.3, 0.55 } -- GroupTransparency, newest first
+
+local skipStack: Frame? = nil
+local skipLines: { CanvasGroup } = {} -- oldest first
+
+local function restackSkipLines()
+	local count = #skipLines
+	for index, line in skipLines do
+		local age = count - index + 1 -- 1 = newest
+		TweenService:Create(line, TweenInfo.new(0.15), { GroupTransparency = SKIP_LINE_FADE[age] or 0.7 }):Play()
+	end
+	skipInset = if count > 0 then count * (SKIP_LINE_HEIGHT + SKIP_LINE_GAP) + 6 else 0
+	applyBottomInset()
+end
+
+local function removeSkipLine(line: CanvasGroup)
+	local index = table.find(skipLines, line)
+	if not index then
+		return
+	end
+	table.remove(skipLines, index)
+	restackSkipLines()
+	local tween = TweenService:Create(line, TweenInfo.new(0.2), { GroupTransparency = 1 })
+	tween.Completed:Once(function()
+		line:Destroy()
+	end)
+	tween:Play()
+end
+
+local function ensureSkipStack(): Frame
+	local existing = skipStack
+	if existing then
+		return existing
+	end
+	local stack = Instance.new("Frame")
+	stack.Name = "SkippedLines"
+	stack.BackgroundTransparency = 1
+	stack.AnchorPoint = Vector2.new(0.5, 1)
+	stack.Position = UDim2.new(0.5, 0, 1, -BOTTOM_CARD_OFFSET)
+	stack.Size = UDim2.fromOffset(0, 0)
+	stack.AutomaticSize = Enum.AutomaticSize.XY
+	stack.Parent = screenGui
+	local layout = Instance.new("UIListLayout")
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, SKIP_LINE_GAP)
+	layout.Parent = stack
+	skipStack = stack
+	return stack
+end
+
+local skipOrder = 0
+
+showSkippedLine = function(item: any, extra: string?)
+	if typeof(item) ~= "table" or typeof(item.Tier) ~= "string" then
+		return
+	end
+	local stack = ensureSkipStack()
+	if #skipLines >= SKIP_LINE_MAX then
+		local oldest = skipLines[1]
+		table.remove(skipLines, 1)
+		oldest:Destroy()
+	end
+	skipOrder += 1
 	local tier = item.Tier :: string
-	local body = newBottomCard("PullCard", PULL_CARD_SIZE)
-	local z = body.ZIndex + 1
+	local line = Instance.new("CanvasGroup")
+	line.Name = "SkippedLine"
+	line.BackgroundColor3 = Colors.Panel
+	line.BackgroundTransparency = 0.1
+	line.Size = UDim2.fromOffset(0, SKIP_LINE_HEIGHT)
+	line.AutomaticSize = Enum.AutomaticSize.X
+	line.LayoutOrder = skipOrder
+	line.ZIndex = 2
+	UIKit.Corner(line, 999)
+	UIKit.Stroke(line, 2, UITheme.GetMutationColor(item.Mutation) or Colors.Ink)
+	UIKit.Padding(line, 0, 14, 0, 8)
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 8)
+	layout.Parent = line
 
+	local orb = UIKit.TierOrb(tier, 20, nil, nil)
+	orb.LayoutOrder = 1
+	orb.ZIndex = 3
+	orb.Parent = line
+	local nameColor = UITheme.GetMutationColor(item.Mutation) or Colors.Text
 	UIKit.Label({
-		Name = "Caption",
-		Text = "PULLED",
-		Font = Fonts.BodyHeavy,
-		TextSize = 12,
-		TextColor3 = Colors.GoldLabel,
-		AnchorPoint = Vector2.new(0, 0.5),
-		Position = UDim2.new(0, 16, 0.5, 0),
-		Size = UDim2.fromOffset(56, 16),
-		ZIndex = z,
-		Parent = body,
-	})
-
-	UIKit.MutationCardStroke(body, item.Mutation)
-	local orb = UIKit.TierOrb(tier, 40, nil, item.Mutation)
-	orb.AnchorPoint = Vector2.new(0, 0.5)
-	orb.Position = UDim2.new(0, 78, 0.5, 0)
-	orb.ZIndex = z
-	orb.Parent = body
-	-- Mutation tag under the orb, on the card's bottom edge.
-	UIKit.MutationPill({
-		Parent = body,
-		Mutation = item.Mutation,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0, 98, 1, -4),
-		TextSize = 11,
-		Height = 18,
-		ZIndex = z + 1,
-	})
-
-	UIKit.Label({
-		Name = "ItemName",
-		Text = itemName(item),
+		Name = "Text",
+		Text = ("%s  %s  %s%s"):format(
+			UIKit.Colored("+ " .. UIKit.EscapeRichText(itemName(item)), nameColor),
+			UIKit.Colored(tier:upper(), UITheme.GetTierLight(tier)),
+			UIKit.Colored("+" .. NumberFormat.Money(earnRate(item)) .. "/s", Colors.Cash),
+			if extra then "  " .. UIKit.Colored(UIKit.EscapeRichText(extra), nameColor) else ""
+		),
+		RichText = true,
 		Font = Fonts.Display,
-		TextSize = 18,
-		Position = UDim2.fromOffset(130, 14),
-		Size = UDim2.new(1, -(130 + 130), 0, 24),
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		ZIndex = z,
+		TextSize = 15,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, SKIP_LINE_HEIGHT),
+		LayoutOrder = 2,
+		ZIndex = 3,
 		Stroke = UITheme.Stroke.Text,
-		Parent = body,
+		Parent = line,
 	})
-	UIKit.Label({
-		Name = "Tier",
-		Text = tier:upper(),
-		Font = Fonts.BodyHeavy,
-		TextSize = 12,
-		TextColor3 = UITheme.GetTierLight(tier),
-		Position = UDim2.fromOffset(130, 40),
-		Size = UDim2.new(1, -(130 + 130), 0, 16),
-		ZIndex = z,
-		Parent = body,
-	})
-	UIKit.Label({
-		Name = "NextPull",
-		Text = ("next pull %s"):format(NumberFormat.Money(TycoonConfig.GetGachaPullCost(TycoonController.GetGachaPulls()))),
-		Font = Fonts.Body,
-		TextSize = 13,
-		TextColor3 = Colors.Muted,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -16, 0.5, 0),
-		Size = UDim2.fromOffset(120, 18),
-		TextXAlignment = Enum.TextXAlignment.Right,
-		ZIndex = z,
-		Parent = body,
-	})
+	line.Parent = stack
+	table.insert(skipLines, line)
+	restackSkipLines()
+	task.delay(SKIP_LINE_SECONDS, removeSkipLine, line)
 end
 
 --[[ Event routing ------------------------------------------------------------------ ]]
@@ -1423,8 +1510,24 @@ function ResultController.ShowItemCard(caption: string, item: any, description: 
 	})
 end
 
+-- The player's RevealRule (SettingsConfig): Secret and event-only
+-- mutations always; otherwise per tier (Never / Golden+ / … / Always).
 function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean
-	return FusionConfig.IsMajorReveal(tier, mutation)
+	return SettingsConfig.ShowsBigCard(tier, mutation, TycoonController.GetRevealRule())
+end
+
+-- "GOLDEN kept" (carried over from the inputs) or "GOLDEN rolled!" (a
+-- fresh fusion roll), from the server's MutationSource.
+local function mutationSourceLine(mutation: string?, source: unknown): string?
+	if not mutation then
+		return nil
+	end
+	if source == "Kept" then
+		return mutation:upper() .. " kept"
+	elseif source == "Rolled" then
+		return mutation:upper() .. " rolled!"
+	end
+	return nil
 end
 
 local function onFusionResolved(result: any)
@@ -1440,9 +1543,11 @@ local function onFusionResolved(result: any)
 		showEventMutationCard(newItem, result.IsNewIndex == true or result.NewIndex == true)
 		return
 	end
+	local sourceLine = mutationSourceLine(newItem.Mutation, result.MutationSource)
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
+			SourceLine = sourceLine,
 			Item = newItem,
 			Description = ("%dx %s → %s · earns %s/s on a pedestal"):format(
 				if typeof(result.Count) == "number" then result.Count else 2,
@@ -1451,6 +1556,8 @@ local function onFusionResolved(result: any)
 				NumberFormat.Money(earnRate(newItem))
 			),
 		})
+	else
+		showSkippedLine(newItem, sourceLine)
 	end
 end
 
@@ -1470,7 +1577,8 @@ local function onGachaPullResult(payload: any)
 			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
 		})
 	else
-		showPullCard(newItem)
+		SoundKit.Play("RevealMinor", nil)
+		showSkippedLine(newItem)
 	end
 end
 

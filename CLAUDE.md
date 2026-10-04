@@ -25,7 +25,7 @@ analyze` for that.
 
 Claim plot (Basic Generator starts at LV 1) → upgrade Generators (on the
 factory line along the left wall or in the UPGRADES panel; both fire
-`RequestUpgrade`) →
+`RequestUpgrade`; the panel's MAX ×N / MAX ALL fire `RequestUpgradeMax`) →
 Gacha Pad pulls → fuse 2–6 same-tier items in the Fuse panel at your plot's
 Fusion Machine (more = better chance, `FusionConfig.SuccessChanceByCount`;
 success = next tier, fail = keep your best input) → display the best
@@ -48,7 +48,19 @@ Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal
 chance, `MutationConfig.IsEventOnly`). Fusion rules: a success keeps the *lowest*
 mutation among all inputs (so every input must share it), then may roll a
 better one; a fail keeps the best input untouched (same Uid) and removes
-the rest; Fuse All (pairs, Common–Epic) never touches mutated items. The **Index** (`IndexConfig`, 119 entries =
+the rest; Fuse All (pairs, Common–Epic) never touches mutated items.
+`FusionConfig.PredictMutation(inputs)` (the lowest input mutation) is what
+FusionService carries and what the Fuse panel predicts **before** FUSE
+(`GetMutationMix`): every orb the same mutation → "✨ Keeps GOLDEN ×2, might
+roll better"; mixed → a red warning box naming how many lower orbs are in
+and what is lost ("⚠ 1 plain orb mixed in: the Epic comes out plain, not
+Golden…"), those orbs ringed red; all plain → no line. AUTO-FILL only adds
+the first orb's mutation (an empty chamber fills plain orbs). The fusion
+result carries `MutationSource = "Kept" | "Rolled"`: the success card (big
+card and skipped line) shows the pill and "GOLDEN kept" / "GOLDEN rolled!";
+the fail card says "Kept your Golden Rare (…)". The five count chips sit in
+**one row** (non-wrapping list, scale widths, 6 px gaps; the % TextScaled
+with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 17 items × 7 variants, built from `MutationConfig.Order`) pays +1% income per entry and +5% per full tier page, and
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
@@ -72,6 +84,25 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
   called from `TycoonService.createPlotForPlayer`).
+- **Settings** (`SettingsConfig`, saved as `PlayerData.Settings`, sent as
+  `Settings` in the snapshot): `RevealRule = { [tier] = "Never" | "Golden"
+  | "Diamond" | "Rainbow" | "Always" }` for Common → Mythic; "Golden" =
+  Golden or any higher-ranked mutation (`MutationConfig.GetRank`). The
+  defaults are **derived** from `FusionConfig.IsMajorReveal` (a
+  `MajorRevealTiers` tier → Always, else the lowest threshold reaching
+  `MajorRevealMutationRank`, i.e. Diamond); old saves get them. **Secret and
+  the event-only mutations always show** (`SettingsConfig.ShowsBigCard`).
+  Remote `SetSetting` (C→S `{ Key = "RevealRule", Tier, Value }`,
+  tier/value whitelisted; a coalesced sync 0.25 s later echoes it).
+  `ResultController.ShowsBigCardFor` reads the rule for single pulls,
+  BEST OF 10 and fusion successes (fail cards and Fuse All unchanged); a
+  skipped card pops a **small line** above the bottom bar for 2.5 s (orb
+  dot, "+ Golden Plasma Orb" in the mutation colour, the tier, "+$X/s";
+  max 3, older ones fade). The client applies a change at once
+  (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
+  UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
+  wide, one scrolling list of sections; only "Big reveal card" so far:
+  one 5-segment row per tier + a locked Secret row).
 - Saves: a failed DataStore load kicks the player in live games (never
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
@@ -178,9 +209,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   - **Every event explains itself:** the top-centre HUD chip opens the
     **info card** (`UI/EventInfoCard`, copy from `EventConfig.GetInfo`,
     built from the config numbers; `EventConfig.Blurbs` = the first "what to
-    do" sentence). It auto-opens once per event type per account (Tips
-    `event_<EventId>`, TipConfig) after the start banner, and between
-    events explains the next one. **Event arrows:**
+    do" sentence). It **never opens itself**: the first time a player sees
+    each event type the chip gets a bouncing gold "ⓘ TAP" tag until they
+    tap it once (that tap marks Tips `event_<EventId>`, TipConfig). Every
+    tap opens it; ✕, a tap outside it or the event ending closes it.
+    Between events it explains the next one. **Event arrows:**
     `GoalMarkerController.SetEventOverride` (heist > event > goal): Rainbow
     Storm → your Gacha Pad (then the machine once you're on it), Night /
     Void Moon → your machine, Meteor Shower → the nearest crater, Golden
@@ -193,8 +226,29 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   until the owner has Rebirth 1, a Void Moon turns every cell purple with
   the boosted number. The Fuse panel's chips are one two-line chip per
   count, the chamber's count highlighted.
-- **Index headers:** each mutation column heading (ⓘ) opens a "how to get
-  it" box (numbers from EventConfig) with "You have X / 17".
+- **Index book** (`UI/IndexPanel`, 720 wide): tier tabs (name in the tier
+  colour, "8 / 21", a thin bar, "+5% at 21" on the selected one); column
+  headings in the mutation colours, event-only ones with ⚡ 🌙 ☄ (not
+  tappable); one row card per item (name, "3 / 7 · $/s", seven orb cells:
+  found = `UIKit.TierOrb` + the mutation's look, Rainbow hue-cycling only
+  while open; missing = a dark dashed well with "?" or the event icon). A
+  7/7 row gets a gold stroke + glow and "★ COMPLETE 7/7". Tapping an orb
+  fills the bottom **info strip** ("<Item> · <Variant ×N>", how to get it,
+  found / not found yet). Only the selected tier is built; it rebuilds on
+  a tab change, an Index change or a phone switch (orbs 54 → 40 px, the
+  cell stays the ≥ 44 px target). No check marks or clocks.
+- **MAX upgrades:** `RequestUpgradeMax` (C→S `{ GeneratorId }` or
+  `{ All = true }`) loops TycoonService's `buyOneLevel`, the same path as
+  `RequestUpgrade` (cost, unlocks, cap, Carrying), up to
+  `TycoonConfig.MaxUpgradeSteps` (500); All buys the cheapest available
+  level each step (`GetCheapestUpgrade`, unlocks re-checked). One sync and
+  one `UpgradeMaxResult { Levels, Spent, PerGenerator, NewLevels }`;
+  nothing is spent if no level was bought. The panel's "MAX ×N / $X",
+  "MAX / need $X" and "⚡ MAX ALL · $X" come from
+  `TycoonConfig.GetMaxAffordable(generator, level, cash)` and
+  `GetMaxAllPlan(levels, cash)`, so labels and server agree. Toast "+9
+  levels · Core Engine LV 15" / "+23 levels across 3 generators", one
+  bump per changed generator; the panel refreshes at most 4×/s.
 - **Sounds** (`SoundConfig` slots + `SoundKit.Play(slot, parent?)`): every
   sound goes through a slot; an empty Id is silent, a failed Id warns once
   (client `SoundKit.Preload` at boot). No looping ambient sounds (the
@@ -262,12 +316,13 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     the console (pill, pink/teal/dim button, prompt on only when Ready) and
     the HUD **LOCK status chip**, which never locks: muted "🔓 UNLOCKED"
     (amber text) / teal "🛡 LOCKED · 42s" / muted "RECHARGING · 12s" / red
-    pulsing "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK" (lock ready and a
-    non-owner's root inside your walls). Tapping it points the goal arrow
+    pulsing "🚨 RUN TO LOCK!" (lock ready and a non-owner's root inside
+    your walls). It is sized to its text (`AutomaticSize = X`, 44 px tall,
+    14 px side padding), the "?" button 8 px to its right. Tapping it points the goal arrow
     at your console for 8 s ("Your LOCK button is just inside your gate";
-    `HudController.SetLockChipHandler`, answered by HeistController). Under
-    it, the **steal timer chip** while `HeistCooldownUntil` runs: "🫳 NEXT
-    STEAL IN 42s", then "🫳 STEAL READY!" (Gold) for 2 s. While up, a
+    `HudController.SetLockChipHandler`, answered by HeistController). There
+    is **no steal timer chip**: the cooldown shows on enemy pedestals'
+    prompts ("Steal in 42s") and in the toast. While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
@@ -305,8 +360,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
     plot's shield fence, drives your LOCK console and shows GUARDED;
-    HudController shows the LOCK status chip, the steal timer chip and the
-    "?" button.
+    HudController shows the LOCK status chip and the "?" button.
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor
@@ -331,7 +385,8 @@ src/ReplicatedStorage/Shared/
                  SoundConfig — every sound slot, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
-                 GoalConfig — the ordered onboarding goals, …)
+                 GoalConfig — the ordered onboarding goals,
+                 SettingsConfig — the player's reveal-card rules, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -373,6 +428,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),
                   AdminPanel (built only on the server's AdminOpen),
+                  SettingsPanel (the ⚙ button: reveal-card rules),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens)
 ```
@@ -498,7 +554,7 @@ stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
-prompt only),
+prompt only), `SetSetting` (C→S `{ Key, Tier, Value }`, SettingsConfig),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

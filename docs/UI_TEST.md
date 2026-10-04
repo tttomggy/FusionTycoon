@@ -89,8 +89,8 @@ again), `/cash <amount>`, `/resetmultiplier`.
      still have another pair.
    - [ ] Walking away, or running out of pairs, greys it out.
    - [ ] Pressing it starts another fusion.
-4. A Common or Rare gacha pull shows the smaller **PULLED** row with **next
-   pull $X**, and a new pull replaces it.
+4. A Common or Rare gacha pull (default settings) pops a small skipped-card
+   line above the bottom bar (Polish 8, §19); several stack, at most 3.
 
 ## 5. Phone layout (Device emulator: iPhone 14, landscape)
 
@@ -443,8 +443,8 @@ testable without luck.
     and the **SERVER · SECRET** banner.
 - [ ] **Index.** Press **INDEX** (the teal button; the three bottom buttons
   fit at 844 × 390).
-  - [ ] The header pill shows the bonus, and the count line reads **n / 68
-    found · +1% each · +5% per full tier page**.
+  - [ ] The header pill shows the bonus, and the line under INDEX reads
+    **n / 119 found · every find +1% income · a full page +5%**.
   - [ ] The tabs show per-tier counts (Secret x/8).
   - [ ] Pull or `/give` something new: the toast **NEW IN INDEX · Golden
     Star Core · +1%** shows, and the cell fills.
@@ -480,7 +480,8 @@ testable without luck.
     and the card reads **Kept <name>, lost <n>**.
   - [ ] All-Golden inputs give a Golden result; mixed inputs give a normal
     item or a fresh roll.
-  - [ ] AUTO-FILL never takes mutated items.
+  - [ ] AUTO-FILL into an empty chamber never takes mutated items (with a
+    mutated orb in, it adds only that mutation, §19).
   - [ ] The Mythic tab is locked before Rebirth 1 (§13).
 - [ ] **Mutation marks.**
   - [ ] `/give legendary_core golden`: the card and inventory show
@@ -574,9 +575,13 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   recharge. The claim shield and the 120 s shield after a loss go up
   regardless.
 - [ ] **Alarm.** A unlocked and LOCK ready: B walks inside A's walls; A's
-  chip turns red and pulses **🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK**
-  until B leaves or A locks at the console. While recharging it stays
-  RECHARGING (no alarm).
+  chip turns red and pulses **🚨 RUN TO LOCK!** until B leaves or A locks
+  at the console. While recharging it stays RECHARGING (no alarm).
+- [ ] **The LOCK chip fits its text.** "🔓 UNLOCKED" sits in a pill just
+  wider than the words (14 px each side, 44 px tall), not a 340 px bar;
+  the chip grows and shrinks as the text changes (LOCKED · 42s, RECHARGING
+  · 12s, 🚨 RUN TO LOCK!). The round "?" stays 8 px to its right through
+  every change, on desktop and phone.
 - [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
   pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
   name and its +$/s, 1.5 s).
@@ -608,14 +613,13 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   pedestal, the banner reads **A caught B!**. Both see a white flash ring
   at B, **CAUGHT!** over B's head, and the orb fly back onto the pedestal.
 - [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
-- [ ] **Steal timer.** Right after any grab, B's HUD shows **🫳 NEXT STEAL IN
-  60s** (muted, amber) under the LOCK chip, counting down. B's prompts on
-  other filled enemy pedestals read **Steal in 42s** (the item label under
-  it, no hold); tapping one toasts **You can steal again in 42s**. The red
-  hand markers stay on. At 0 the chip shows **🫳 STEAL READY!** (gold) for
-  2 s, then hides, and the prompts read **Steal** again. After a delivered
-  steal the HEIST COMPLETE card's sub-line reads **You can steal again in
-  …s**. `/heistcd 0` clears the timer (the chip flashes STEAL READY!).
+- [ ] **Steal timer (no HUD chip).** Right after any grab there is **no**
+  steal timer chip on B's HUD. B's prompts on other filled enemy pedestals
+  read **Steal in 42s** (the item label under it, no hold); tapping one
+  toasts **You can steal again in 42s**. The red hand markers stay on. At 0
+  the prompts read **Steal** again. After a delivered steal the HEIST
+  COMPLETE card's sub-line reads **You can steal again in …s**. `/heistcd
+  0` clears the timer.
 - [ ] **Loss cap.** With A's shield dropped (`/shield 0`) after each loss,
   B steals 3 items in under 10 min: the 4th grab says **This lab has been
   robbed enough for now**.
@@ -768,7 +772,8 @@ failed").
   rainbow banner plays once.
 - [ ] **Index.** The Index shows 7 variant columns (Normal + Golden,
   Charged, Diamond, Void, Rainbow, Celestial); unfound Charged / Void /
-  Celestial cells show a 🕐. It fits on a phone (the page scrolls).
+  Celestial cells show their event icon (⚡ 🌙 ☄), never a clock. It fits
+  on a phone (the page scrolls).
 - [ ] **`/eventclock`.** `/eventclock 0`, then step `/eventclock 15`, `30`,
   `45`, `60`: hh:00 is always Night or Void Moon, the others a weather; the
   HUD chip, the info card's NEXT rows and both street Event Boards agree at
@@ -809,10 +814,14 @@ failed").
 - [ ] **Info card: between events.** With nothing on, the chip opens the
   same card for the NEXT event, "Starts in 8:40". When that event starts
   with the card open, it switches to "… left".
-- [ ] **Info card: auto once.** After `/tips reset`, `/event GoldenRain`:
-  ~1 s after the start banner goes, the card opens by itself. End it and
-  start Golden Rain again: it doesn't reopen. A different event opens its
-  own card once.
+- [ ] **No pop-up; the TAP tag instead.** After `/tips reset`, `/event
+  GoldenRain`: the card does **not** open by itself. A small gold "ⓘ TAP"
+  tag bounces beside the event chip. Tap the chip once: the card opens and
+  the tag is gone for good (end Golden Rain and start it again: no tag). A
+  different event type shows its own tag once.
+- [ ] **Info card closes.** With the card open: tapping anywhere outside it
+  (the world, another HUD button) closes it; tapping the chip toggles it;
+  ✕ closes it. When the running event ends, the open card closes itself.
 - [ ] **Arrows per event.** Rainbow Storm: the goal arrow points at your
   Gacha Pad ("PULL HERE"); step on the pad and it moves to your Fusion
   Machine ("THEN FUSE"). Night / Void Moon: the machine ("FUSE NOW").
@@ -850,11 +859,11 @@ failed").
   EVENT MUTATION banner ("… got a VOID … under the Void Moon!", "…got
   CHARGED by lightning!", "…found a CELESTIAL … in a meteor!"). A meteor
   core that rolls Celestial and a Void Moon Void fusion use the same card.
-- [ ] **Index headers.** In the Index, tap the VOID ⓘ heading: a box under
-  the header row reads "VOID ×8" in purple, "Only from fusing during a
-  Void Moon (1 in 20 fusions). …", "You have X / 17". Tap it again (or
-  change tier) to close. Golden / Diamond / Rainbow mention Rainbow Storm
-  ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
+- [ ] **Index how-to-get.** (Polish 7: the headings are no longer tap
+  targets; the info strip replaced the boxes, see §18.) Tap any Void orb:
+  the strip reads "<Item> · Void ×8" in purple, "Only from fusing during a
+  Void Moon (1 in 20 fusions). …". Golden / Diamond / Rainbow mention
+  Rainbow Storm ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
 - [ ] **Odds board.** At desktop distance from the machine the board reads
   as a table: "FUSE → TIER UP", "more orbs = better odds", ORBS IN 2–6,
   one row per recipe with an orb dot, every % in its own cell, 100% cells
@@ -868,3 +877,84 @@ failed").
   shows one "SoundKit: <slot> failed to load …" warning at start and that
   sound is simply silent afterwards; empty slots (Thunder, CoinPickup, …)
   play nothing with no errors.
+
+## 18. Polish 7 (Index book, MAX upgrades, smaller HUD)
+
+The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up and
+the TAP tag, the card closing) live in §16 / §17b.
+
+- [ ] **Index orbs.** Open INDEX on a fresh save, `/give` a few items with
+  `[mutation]`. Found cells are the real orb in that variant: Normal the
+  tier orb, Golden gold, Charged cyan with a glow, Diamond pale with a
+  faceted sweep, Void deep purple, Rainbow hue-cycling, Celestial
+  white-blue with a soft glow. Missing cells are dark dashed circles with a
+  muted "?". No check marks or clocks anywhere.
+- [ ] **Event icons.** The CHARGED / VOID / CELESTIAL headings carry ⚡ 🌙 ☄
+  and their missing cells show the same icon instead of "?". Tapping a
+  heading does nothing.
+- [ ] **Tabs.** Every tab shows its tier name in the tier colour, "x / N"
+  and a thin bar; only the selected one shows "+5% at N".
+- [ ] **Complete row.** `/give` one item in all 7 variants: its row card
+  gets a gold stroke and a soft gold glow, the sub-line reads "★ COMPLETE
+  7/7 · $X/s" in gold. The tab count and the header line go up.
+- [ ] **Info strip.** Tap a found Golden orb: the strip reads "<Item> ·
+  Golden ×2", the how-to-get line and "✦ found". Tap a missing one: "not
+  found yet". Tap a Normal orb: "Any pull, or a fusion without a mutation."
+- [ ] **Phone scroll.** Device emulator (iPhone 14 landscape): the rows
+  scroll, orbs are ~40 px, every orb is still easy to tap (the cell is the
+  target), the info strip stays visible at the bottom.
+- [ ] **MAX ×N exact.** `/cash 5000000`, open UPGRADES. Note a row's "MAX ×N
+  / $X" and your cash. Press it: the generator goes up exactly N levels,
+  cash drops by exactly $X, one toast "+N levels · <Generator> LV L" and
+  one bump on that generator.
+- [ ] **MAX ALL.** "⚡ MAX ALL · $X / +N levels" under the list: press it.
+  Exactly N levels across the generators, $X spent, toast "+N levels
+  across K generators", one bump per generator that changed. A generator
+  that unlocks during the run gets levels too.
+- [ ] **need $X.** With too little cash for even one level, the row's button
+  is muted "MAX / need $X" (X = that generator's next price) and MAX ALL
+  reads "need $X" (the cheapest next level). Pressing either toasts "Need
+  $X" and buys nothing. A maxed generator shows MAXED and no MAX button.
+- [ ] **MAX while carrying.** Steal an item (two players, Rebirth 1) and
+  press MAX / MAX ALL while carrying (or fire
+  `RequestUpgradeMax:FireServer({ All = true })` from the command bar):
+  "Get home with that item first!", no level, no cash spent.
+- [ ] **Refresh rate.** With UPGRADES open and income ticking, the MAX labels
+  follow your cash (N and $X grow) without flicker.
+
+## 19. Polish 8 (reveal settings, fuse chips, mixed mutations)
+
+- [ ] **Defaults.** Fresh save, open ⚙ (right end of the bottom bar, after
+  INDEX): Common Diamond+, Rare Diamond+, Epic / Legendary / Mythic Always
+  (today's big-card rule), plus the locked Secret row "🔒 Always shows. So
+  do ⚡ Charged, 🌙 Void and ☄ Celestial."
+- [ ] **Every option, pull.** For Rare, try each segment and pull until a
+  Rare lands (`/give` doesn't pull): Never → a small line; Golden+ → the big
+  card only for Golden or better; Diamond+ / Rainbow+ likewise; Always →
+  every Rare gets the big card. The choice sticks across a rejoin in a
+  live test place (Studio profiles never save).
+- [ ] **Every option, fusion.** Set Epic to Never and fuse Rares → Epic:
+  no big card, a small line ("+ … EPIC +$X/s"). Set Always: the big card.
+  Pull ×10 with Epic Never: the grid shows, no BEST OF 10 card, a small
+  line for the best. Fail cards and the Fuse All summary are unchanged.
+- [ ] **Always shown.** Set every tier to Never: a Secret (`/give` won't
+  pull; use the gacha with luck or fuse Mythics) and `/eventmut void` /
+  `charged` / `celestial` still get their cards.
+- [ ] **Skipped line.** Pull several Commons fast: each pops "◉ + Plasma
+  Orb  COMMON  +$X/s" above the bottom bar for 2.5 s; at most 3 stack,
+  older ones dimmer; a Golden one names it in gold. RevealMinor plays.
+- [ ] **Fuse chips at phone size.** Device emulator (iPhone SE landscape):
+  the five chips stay in one row, equal widths, "100%" (e.g. Common ×6)
+  fully visible, the current count highlighted, purple during a Void Moon.
+- [ ] **Mixed warning.** `/give <rare item id> golden` ×4 plus one plain
+  Rare; put all five in: a red box "⚠ 1 plain orb mixed in: the Epic comes
+  out plain, not Golden. Use only Golden orbs to keep Golden." and a red
+  ring on the plain orb. FUSE until a success: the Epic is plain (unless
+  it rolled one: the card then says "GOLDEN rolled!").
+- [ ] **Keeps GOLDEN.** Five Golden Rares: "✨ Keeps GOLDEN ×2, might roll
+  better" in gold, no red rings. A success: the card shows the GOLDEN ×2
+  pill and "GOLDEN kept".
+- [ ] **AUTO-FILL keeps the mutation.** Put one Golden Rare in, AUTO-FILL:
+  only Golden Rares are added. Empty chamber + AUTO-FILL: plain Rares only.
+- [ ] **Fail card.** A failed fusion with a Golden in: "Kept your Golden
+  Rare (Golden …), lost N".

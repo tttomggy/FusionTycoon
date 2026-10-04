@@ -33,6 +33,7 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
+local SettingsPanel = require(script.Parent.Parent.UI.SettingsPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
 local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
@@ -68,6 +69,7 @@ local CASH_CARD_SIZE = Vector2.new(260, 96)
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
+local SETTINGS_BUTTON_SIZE = 56
 
 local CASH_POP_LIFETIME = 0.8
 local CASH_POP_RISE_STUDS = 3
@@ -508,6 +510,18 @@ local function buildButtons(isPhone: boolean)
 		OnClick = IndexPanel.Toggle,
 	})
 
+	-- ⚙ Settings: a 56 px square at the right end of the bar.
+	buttonsByName.Settings = UIKit.Button({
+		Name = "SettingsButton",
+		Parent = buttonRow,
+		Style = "Disabled",
+		Text = "⚙",
+		Size = UDim2.fromOffset(SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE),
+		TextSize = 26,
+		LayoutOrder = 4,
+		OnClick = SettingsPanel.Toggle,
+	})
+
 	refreshBadge()
 	for name in highlighted do
 		applyHighlight(name)
@@ -647,19 +661,25 @@ end
 	  Unlocked    muted, amber text   "🔓 UNLOCKED"
 	  Locked      teal                "🛡 LOCKED · 42s"
 	  Recharging  muted               "RECHARGING · 12s"
-	  Alarm       red, pulsing        "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+	  Alarm       red, pulsing        "🚨 RUN TO LOCK!"
 	              (lock ready AND a non-owner's root inside your walls)
+	It sizes itself to its text (AutomaticSize X, 44 px tall, 14 px side
+	padding); the round "?" sits 8 px to its right (one row frame with a
+	horizontal list layout).
 	Tapping it calls the handler HeistController registers
 	(SetLockChipHandler): the goal arrow points at your console for a few
 	seconds. Hidden under HeistConfig.MinRebirths and before you claim.
 ]]
-local LOCK_CHIP_SIZE = Vector2.new(330, 48)
+local LOCK_CHIP_HEIGHT = 44
+local LOCK_CHIP_PADDING = 14
 local LOCK_CHIP_TEXT_SIZE = 15
 local LOCK_BUTTON_GAP = 8
 local LOCK_REFRESH_SECONDS = 0.25
 
 local lockChip: TextButton
 local lockHolder: Frame
+-- The row holding the LOCK chip and the "?" (it takes the position).
+local lockRow: Frame
 -- The round "?" beside it: opens HOW TO HEIST (visible from Rebirth 1).
 local HELP_BUTTON_SIZE = 52 -- >= 44 px after the phone UIScale
 local helpHolder: Frame
@@ -669,26 +689,51 @@ local lockStyle: string? = nil
 local lockChipHandler: (() -> ())? = nil
 
 local function buildLockChip()
+	lockRow = Instance.new("Frame")
+	lockRow.Name = "LockRow"
+	lockRow.BackgroundTransparency = 1
+	lockRow.AutomaticSize = Enum.AutomaticSize.X
+	lockRow.Size = UDim2.fromOffset(0, HELP_BUTTON_SIZE)
+	lockRow.Parent = screenGui
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rowLayout.Padding = UDim.new(0, LOCK_BUTTON_GAP)
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Parent = lockRow
+
 	lockChip, lockHolder = UIKit.Button({
 		Name = "LockChip",
-		Parent = screenGui,
+		Parent = lockRow,
 		Style = "Disabled",
 		Text = "🔓 UNLOCKED",
 		TextSize = LOCK_CHIP_TEXT_SIZE,
-		Size = UDim2.fromOffset(LOCK_CHIP_SIZE.X, LOCK_CHIP_SIZE.Y),
+		Size = UDim2.fromOffset(0, LOCK_CHIP_HEIGHT),
+		LayoutOrder = 1,
 		OnClick = function()
 			if lockChipHandler then
 				lockChipHandler()
 			end
 		end,
 	})
+	-- Fit the text: holder, body and content all auto-size on X (minimum 0).
+	lockHolder.AutomaticSize = Enum.AutomaticSize.X
+	lockChip.AutomaticSize = Enum.AutomaticSize.X
+	lockChip.Size = UDim2.new(0, 0, 1, 0)
+	local content = lockChip:FindFirstChild("Content")
+	if content and content:IsA("Frame") then
+		content.AutomaticSize = Enum.AutomaticSize.X
+		content.Size = UDim2.new(0, 0, 1, 0)
+		UIKit.Padding(content, 0, LOCK_CHIP_PADDING, 0, LOCK_CHIP_PADDING)
+	end
 	lockHolder.Visible = false
 	lockScale = Instance.new("UIScale")
 	lockScale.Parent = lockHolder
 
 	local _, help = UIKit.Button({
 		Name = "HowToHeistButton",
-		Parent = screenGui,
+		Parent = lockRow,
+		LayoutOrder = 2,
 		Style = "Blue",
 		Text = "?",
 		TextSize = 26,
@@ -769,7 +814,7 @@ local function refreshLockChip()
 	local alarm = state == "Ready" and hasIntruder(plot)
 	local style = if alarm then "Red" elseif state == "Locked" then "Teal" else "Disabled"
 	local text = if alarm
-		then "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+		then "🚨 RUN TO LOCK!"
 		elseif state == "Locked" then ("🛡 LOCKED · %ds"):format(seconds)
 		elseif state == "Recharging" then ("RECHARGING · %ds"):format(seconds)
 		else "🔓 UNLOCKED"
@@ -785,70 +830,6 @@ local function refreshLockChip()
 	setLockPulse(alarm)
 end
 
---[[ Steal timer chip --------------------------------------------------------
-	Under the LOCK chip, only while your thief cooldown (Player attribute
-	HeistCooldownUntil, server time) is running: muted "🫳 NEXT STEAL IN
-	42s" in amber text. When it reaches 0: "🫳 STEAL READY!" on the Gold
-	gradient for STEAL_READY_SECONDS, then it hides. Not tappable.
-]]
-local STEAL_CHIP_SIZE = Vector2.new(250, 44)
-local STEAL_READY_SECONDS = 2
-
-local stealChip: TextLabel
--- The Gradient pill's Frame (UIKit.Pill): it takes position and visibility.
-local stealHolder: Frame
-local stealFill: UIGradient?
-local stealWasCounting = false
-local stealReadyUntil = 0
-
-local function buildStealChip()
-	stealChip = UIKit.Pill({
-		Name = "StealTimerChip",
-		Parent = screenGui,
-		Text = "",
-		Font = Fonts.Display,
-		TextSize = 17,
-		Height = STEAL_CHIP_SIZE.Y,
-		Gradient = UITheme.Gradients.Disabled,
-		TextColor3 = Colors.ShieldAmber,
-		TextStroke = 1.5,
-	})
-	stealHolder = stealChip.Parent :: Frame
-	stealHolder.Visible = false
-	stealFill = stealHolder:FindFirstChildOfClass("UIGradient")
-end
-
-local function setStealChip(text: string, ready: boolean)
-	stealChip.Text = text
-	stealChip.TextColor3 = if ready then Colors.Text else Colors.ShieldAmber
-	local fill = stealFill
-	if fill then
-		UIKit.SetPairGradient(fill, if ready then UITheme.Gradients.Gold else UITheme.Gradients.Disabled)
-	end
-	stealHolder.Visible = true
-end
-
-local function refreshStealChip()
-	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
-	local left = if typeof(untilTime) == "number"
-		then math.ceil(untilTime - Workspace:GetServerTimeNow())
-		else 0
-	if left > 0 then
-		stealWasCounting = true
-		setStealChip(("🫳 NEXT STEAL IN %ds"):format(left), false)
-		return
-	end
-	if stealWasCounting then
-		stealWasCounting = false
-		stealReadyUntil = os.clock() + STEAL_READY_SECONDS
-	end
-	if os.clock() < stealReadyUntil then
-		setStealChip("🫳 STEAL READY!", true)
-	else
-		stealHolder.Visible = false
-	end
-end
-
 --[[ Layout ---------------------------------------------------------------- ]]
 
 local cashHolder: Frame
@@ -858,13 +839,9 @@ local function applyLayout(isPhone: boolean)
 	cashHolder.Position = layout.CashPosition
 	-- Under the cash card on desktop; beside it on a phone (the goal
 	-- tracker sits under it there).
-	lockHolder.Position = if isPhone
+	lockRow.Position = if isPhone
 		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
-	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_CHIP_SIZE.X + LOCK_BUTTON_GAP, 0)
-	-- The steal timer sits under the LOCK chip (shown even at Rebirth 0's
-	-- hidden LOCK chip: you can't have a cooldown there anyway).
-	stealHolder.Position = lockHolder.Position + UDim2.fromOffset(0, LOCK_CHIP_SIZE.Y + LOCK_BUTTON_GAP)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -920,10 +897,10 @@ function HudController.Init()
 	buildButtonRow()
 	buildRebirthReadyButton()
 	buildLockChip()
-	buildStealChip()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
+	SettingsPanel.Init()
 	FusePanel.Init()
 	HowToHeistPanel.Init()
 
@@ -935,7 +912,6 @@ function HudController.Init()
 	task.spawn(function()
 		while true do
 			refreshLockChip()
-			refreshStealChip()
 			task.wait(LOCK_REFRESH_SECONDS)
 		end
 	end)

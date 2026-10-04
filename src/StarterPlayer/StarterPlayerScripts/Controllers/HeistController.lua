@@ -1139,6 +1139,7 @@ function HeistController.Init()
 		RemoteEvents.GachaPullResult,
 		RemoteEvents.GachaMultiPullResult,
 		RemoteEvents.UpgradeResult,
+		RemoteEvents.UpgradeMaxResult,
 		RemoteEvents.MultiplierUpgraded,
 	} do
 		remote.OnClientEvent:Connect(function(payload: any)
