@@ -1274,3 +1274,16 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   to half with their DAY / icon / label still readable, and each has a
   small green round ✓ badge in its top-right corner (no big ✓ over the
   text). CLAIM: Day 5 pops and gets the same badge.
+- [ ] **Phone HUD at 844 × 390 (bug 5).** Device emulator, custom 844 ×
+  390 landscape (0.8 UI scale → a 1055 × 487.5 canvas). Force an event you
+  haven't tapped (`/tips reset`, `/event powersurge`) so the top chip
+  pulses, and `/gifts time 15` so GIFTS bounces with its badge. Check:
+  the GIFTS badge and the SHOP SALE tag stay below the chip's glow (the
+  SHOP / GIFTS row now starts 8 px lower than the cash card, at y 84
+  logical); the SALE tag no longer touches the bouncing GIFTS (row gap
+  8 → 14); the NEXT GOAL tracker sits under the cash card (y 184, it used
+  to cover the card's bottom 22 px); the LOCK row stays under SHOP; the
+  effect pills end well short of the right edge; the top-left Roblox bar
+  area stays clear. Computed: no overlaps among top bar, event chip (with
+  pulse + glow), cash card, goal tracker, SHOP, SALE, GIFTS (bounce),
+  badge, next pill, effect pills, LOCK row.
