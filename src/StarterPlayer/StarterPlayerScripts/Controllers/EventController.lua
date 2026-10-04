@@ -52,6 +52,7 @@ local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local AnnouncementController = require(script.Parent.AnnouncementController)
@@ -71,8 +72,6 @@ local localPlayer = Players.LocalPlayer
 
 -- The one sound id proven to load in this project (see RevealEffects);
 -- thunder is the same ping slowed right down.
-local SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
-local THUNDER_SPEED = 0.25
 
 local SKY_TWEEN_SECONDS = 3
 local NIGHT_TWEEN_SECONDS = 6
@@ -176,15 +175,7 @@ local function tween(instance: Instance, seconds: number, goal: { [string]: any 
 	TweenService:Create(instance, TweenInfo.new(seconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), goal):Play()
 end
 
-local function playSound(parent: Instance, speed: number?, volume: number?)
-	local sound = Instance.new("Sound")
-	sound.SoundId = SOUND_ID
-	sound.PlaybackSpeed = speed or 1
-	sound.Volume = volume or 0.8
-	sound.Parent = parent
-	sound:Play()
-	Debris:AddItem(sound, 6)
-end
+
 
 --[[ Sky ------------------------------------------------------------------------- ]]
 
@@ -483,7 +474,7 @@ local function showStartBanner(id: string, myGeneration: number)
 				return
 			end
 			numeral.Text = tostring(count)
-			playSound(screenGui, 0.8 + (3 - count) * 0.1, 0.5)
+			SoundKit.Play("EventStart", nil, { PlaybackSpeed = 0.8 + (3 - count) * 0.1, Volume = 0.8 })
 			task.wait(COUNTDOWN_STEP)
 		end
 		if bannerHolder ~= holder or generation ~= myGeneration then
@@ -516,7 +507,7 @@ local function showStartBanner(id: string, myGeneration: number)
 			Stroke = UITheme.Stroke.Text,
 			Parent = body,
 		})
-		playSound(screenGui, 1.2, 1)
+		SoundKit.Play("EventStart", nil, { PlaybackSpeed = 1.2 })
 		UIKit.PopIn(holder)
 		task.wait(BANNER_HOLD_SECONDS)
 		if bannerHolder == holder then
@@ -550,6 +541,7 @@ local function onEventChanged(live: boolean)
 				text ..= (" · you earned +%s"):format(NumberFormat.Money(tally))
 			end
 			ToastController.Show(text, "Neutral")
+			SoundKit.Play("EventEnd", nil)
 		end
 	end
 	if not id then
@@ -603,7 +595,7 @@ local function strikeLightning(position: Vector3)
 		cc.Brightness = base.Brightness + FLASH_BRIGHTNESS
 		tween(cc, FLASH_SECONDS, { Brightness = base.Brightness })
 	end
-	playSound(bottom, THUNDER_SPEED, 1)
+	SoundKit.Play("Thunder", bottomPart)
 	task.delay(LIGHTNING_SECONDS, function()
 		beam.Transparency = NumberSequence.new(0.6)
 	end)
@@ -641,6 +633,7 @@ local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
 	TweenService:Create(rock, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { CFrame = CFrame.new(to) }):Play()
 	task.delay(seconds, function()
 		rock:Destroy()
+		SoundKit.Play("MeteorImpact", nil)
 		local character = localPlayer.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") and (root.Position - to).Magnitude < METEOR_SHAKE_RADIUS then
@@ -768,6 +761,7 @@ local function onEventFx(payload: any)
 		task.delay(payload.Seconds - warning, incomingRing, payload.To, warning)
 	elseif payload.Kind == "Coin" and typeof(payload.Position) == "Vector3" and typeof(payload.Amount) == "number" then
 		local big = payload.Big == true
+		SoundKit.Play(if big then "BigCoin" else "CoinPickup", nil)
 		floatPop(
 			fxParent("GoldenRain"),
 			payload.Position,

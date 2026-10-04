@@ -38,6 +38,7 @@ local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
@@ -331,7 +332,6 @@ end
 local EVENT_CARD_SIZE = Vector2.new(400, 500)
 local EVENT_SHAKE_MAGNITUDE = 0.5
 local EVENT_SHAKE_SECONDS = 0.6
-local EVENT_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 
 local function oneIn(chance: number): number
 	return math.floor(1 / chance + 0.5)
@@ -510,12 +510,7 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 	UIKit.PopIn(holder)
 	-- The major reveal: a shake and the reveal sound.
 	RevealEffects.ShakeCamera(EVENT_SHAKE_MAGNITUDE, EVENT_SHAKE_SECONDS)
-	local sound = Instance.new("Sound")
-	sound.SoundId = EVENT_SOUND_ID
-	sound.PlaybackSpeed = 0.8
-	sound.Volume = 1
-	sound.Parent = holder
-	sound:Play()
+	SoundKit.Play("EventReveal", holder)
 end
 
 -- An event-only mutation always gets the reveal card instead.

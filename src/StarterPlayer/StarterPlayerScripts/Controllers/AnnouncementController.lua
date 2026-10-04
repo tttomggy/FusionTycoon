@@ -15,9 +15,9 @@
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -44,8 +44,6 @@ local HOLD_SECONDS = 3.5
 local MYTHIC_HOLD_SECONDS = 5
 local MYTHIC_SHAKE_MAGNITUDE_STUDS = 0.35
 local MYTHIC_SHAKE_DURATION_SECONDS = 0.5
--- The one sound id proven to load in this project (see RevealEffects).
-local SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- How often a hold re-checks for a newer instant banner preempting it.
 local HOLD_POLL_SECONDS = 0.1
 
@@ -273,12 +271,7 @@ local function processQueue()
 			local banner = buildBanner(announcement)
 			currentBanner = banner
 
-			local sound = Instance.new("Sound")
-			sound.SoundId = SOUND_ID
-			sound.Volume = if big then 1 else 0.7
-			sound.Parent = banner
-			sound:Play()
-			Debris:AddItem(sound, 3)
+			SoundKit.Play("Toast", banner, { Volume = if big then 1.4 else 1 })
 
 			TweenService:Create(
 				banner,

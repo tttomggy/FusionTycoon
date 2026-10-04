@@ -1,4 +1,8 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Controllers = script.Parent.Controllers
+
+-- Preload every sound slot (SoundConfig); a bad id warns once, then is silent.
+require(ReplicatedStorage.Shared.Modules.SoundKit).Preload()
 
 local InventoryController = require(Controllers.InventoryController)
 local FusionController = require(Controllers.FusionController)

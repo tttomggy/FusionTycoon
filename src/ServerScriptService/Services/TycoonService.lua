@@ -40,6 +40,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local StationKit = require(ReplicatedStorage.Shared.Modules.StationKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
@@ -73,7 +74,6 @@ local MULTI_PULL_COUNT = 10
 local PLOT_SIGN_REFRESH_SECONDS = 5
 local STATION_DEBOUNCE_SECONDS = 1
 local BURST_COUNT = 30
-local STATION_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local GACHA_MAJOR_EXPLOSION_SCALE = 0.5
 local GACHA_MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
@@ -219,13 +219,8 @@ local function validatePlotClone(plot: Model, player: Player)
 	end
 end
 
-local function playSound(parent: Instance, soundId: string, volume: number)
-	local sound = Instance.new("Sound")
-	sound.SoundId = soundId
-	sound.Volume = volume
-	sound.Parent = parent
-	sound:Play()
-	Debris:AddItem(sound, 3)
+local function playSound(parent: Instance)
+	SoundKit.Play("Station", parent)
 end
 
 local function burst(parent: Instance, color: Color3, count: number)
@@ -469,7 +464,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				BurstSeconds = GACHA_MAJOR_EXPLOSION_BURST_SECONDS,
 			})
 		end
-		playSound(pad, STATION_SOUND_ID, 0.8)
+		playSound(pad)
 	end
 
 	-- Shared by the single pull and Pull x10.
@@ -637,7 +632,7 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		if levelingUpEffectTemplate then
 			ImportedEffects.Play(levelingUpEffectTemplate, pad.CFrame, plot)
 		end
-		playSound(pad, STATION_SOUND_ID, 0.8)
+		playSound(pad)
 
 		RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = true, OldMultiplier = oldMultiplier, NewMultiplier = newMultiplier })
 

@@ -72,6 +72,7 @@ local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local ShieldState = require(ReplicatedStorage.Shared.Modules.ShieldState)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
@@ -97,12 +98,10 @@ local FOV_PUNCH = 8
 local FOV_PUNCH_SECONDS = 0.3
 -- The project's one sound id proven to load (a free library whoosh can't
 -- be verified to load from here), pitched up into a quick pickup blip.
-local GRAB_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local GRAB_SOUND_SPEED = 1.6
 local PILL_MAX_DISTANCE = 200
 local BANNER_SIZE = Vector2.new(480, 92)
 local BANNER_TOP = 118 -- under the server banners (AnnouncementController)
-local ALARM_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 local ALARM_PINGS = 3
 local ALARM_GAP_SECONDS = 0.25
 local FENCE_FADE_SECONDS = 0.3
@@ -610,15 +609,7 @@ local function playGrabMoment(itemName: string)
 	})
 	UIKit.PopIn(holder)
 
-	local sound = Instance.new("Sound")
-	sound.SoundId = GRAB_SOUND_ID
-	sound.PlaybackSpeed = GRAB_SOUND_SPEED
-	sound.Volume = 1
-	sound.Parent = screenGui
-	sound:Play()
-	sound.Ended:Once(function()
-		sound:Destroy()
-	end)
+	SoundKit.Play("Grab", nil, { PlaybackSpeed = GRAB_SOUND_SPEED })
 
 	local camera = Workspace.CurrentCamera
 	if camera then
@@ -637,15 +628,7 @@ end
 local function playAlarm()
 	task.spawn(function()
 		for _ = 1, ALARM_PINGS do
-			local sound = Instance.new("Sound")
-			sound.SoundId = ALARM_SOUND_ID
-			sound.Volume = 1
-			sound.PlaybackSpeed = 0.7
-			sound.Parent = screenGui
-			sound:Play()
-			sound.Ended:Once(function()
-				sound:Destroy()
-			end)
+			SoundKit.Play("Alarm", nil, { PlaybackSpeed = 0.7 })
 			task.wait(ALARM_GAP_SECONDS)
 		end
 	end)

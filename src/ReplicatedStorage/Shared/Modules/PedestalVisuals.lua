@@ -272,10 +272,6 @@ function PedestalVisuals.Clear(pedestal: BasePart)
 		highlight:Destroy()
 	end
 
-	local sound = pedestal:FindFirstChild("PedestalAmbientSound")
-	if sound then
-		sound:Destroy()
-	end
 end
 
 -- A thief is carrying this pedestal's item: the orb, light and effects go
@@ -403,16 +399,6 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: strin
 		beam.TextureLength = 4
 		beam.TextureSpeed = 0.5
 		beam.Parent = elements
-	end
-
-	if config.AmbientSoundId then
-		local sound = Instance.new("Sound")
-		sound.Name = "PedestalAmbientSound"
-		sound.SoundId = config.AmbientSoundId
-		sound.Looped = true
-		sound.Volume = 0.4
-		sound.Parent = pedestal
-		sound:Play()
 	end
 
 	if config.ProximityBurst then
