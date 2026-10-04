@@ -645,19 +645,62 @@ export type OddsRow = {
 }
 
 -- The odds board's content on the Front face of `board` (a real board part,
--- not a billboard): title, a header of input counts, one row per recipe
--- (coloured by the tier it fuses into) with its chance at each count, the
--- fail rule and the fusion mutation line. `firstCount` is the count of the
--- first chance column. Update the mutation line later (luck changes) with
--- SetOddsMutations.
-function BillboardKit.OddsSurface(
-	board: BasePart,
-	rows: { OddsRow },
-	firstCount: number,
-	mutations: string,
-	pixelsPerStud: number
-): SurfaceGui
+-- not a billboard), laid out as a table in pixels (PixelsPerStud, so a
+-- 9 x 6 stud board at 60 is 540 x 360):
+--   title "FUSE → TIER UP" with "more orbs = better odds" on the right
+--   a header row "ORBS IN  2 3 4 5 6"
+--   one row per recipe: an orb dot + "Common → Rare" in tier colours, and
+--   each chance in its own rounded cell (a 100% cell is teal)
+--   the footer "❌ Fail = keep your best orb, lose the rest · Secret needs
+--   Rebirth 1"
+-- The mutation odds are NOT here (the Gacha Pad and the Index show them).
+-- SetOddsChances refreshes the cells (the owner's rebirths for "R1", the
+-- Void Moon's boosted, purple cells).
+local ODDS_MARGIN = 16
+local ODDS_TITLE_HEIGHT = 46
+local ODDS_HEADER_HEIGHT = 28
+local ODDS_FOOTER_HEIGHT = 30
+local ODDS_LABEL_WIDTH = 170
+local ODDS_CELL_GAP = 6
+local ODDS_DOT = 14
+
+export type OddsOptions = {
+	Rebirths: number?, -- the board owner's; a gated row reads "R1" until then
+	Boosted: boolean?, -- a Void Moon: every cell turns the Void purple
+}
+
+-- Updates the chance cells: the numbers (FusionConfig.FormatOdds, boosted
+-- during a Void Moon), "R1" on a row the owner hasn't unlocked, teal 100%
+-- cells, purple cells while boosted. `rows` must be the recipes the board
+-- was built with.
+function BillboardKit.SetOddsChances(gui: SurfaceGui, rows: { OddsRow }, options: OddsOptions)
+	local panel = gui:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	local rebirths = options.Rebirths or 0
+	for index, row in rows do
+		local locked = row.RebirthsNeeded ~= nil and rebirths < row.RebirthsNeeded
+		for column, chance in row.ChanceTexts do
+			local cell = panel:FindFirstChild(("Chance%d_%d"):format(index, column))
+			local value = cell and cell:FindFirstChild("Text")
+			if cell and cell:IsA("Frame") and value and value:IsA("TextLabel") then
+				value.Text = if locked then ("R%d"):format(row.RebirthsNeeded or 1) else chance
+				value.TextColor3 = if locked then Colors.Faint else Colors.Text
+				cell.BackgroundColor3 = if locked
+					then Colors.Panel2
+					elseif options.Boosted then UITheme.Mutation.Void
+					elseif chance == "100%" then Colors.ShieldTeal
+					else Colors.Panel2
+			end
+		end
+	end
+end
+
+function BillboardKit.OddsSurface(board: BasePart, rows: { OddsRow }, firstCount: number, pixelsPerStud: number): SurfaceGui
 	local gui = newSurface(board, "OddsSurface", Enum.NormalId.Front, pixelsPerStud)
+	local width = board.Size.X * pixelsPerStud
+	local height = board.Size.Y * pixelsPerStud
 
 	local panel = Instance.new("Frame")
 	panel.Name = "Panel"
@@ -666,80 +709,103 @@ function BillboardKit.OddsSurface(
 	panel.Parent = gui
 	borderStroke(panel, 6)
 
-	local columns = if rows[1] then #rows[1].ChanceTexts else 0
-	local recipeLeft, recipeWidth = 0.04, 0.4
-	local columnsLeft = recipeLeft + recipeWidth
-	local columnWidth = (0.96 - columnsLeft) / math.max(columns, 1)
-	local titleHeight, headerHeight, footerHeight = 0.15, 0.09, 0.08
-	local rowHeight = (1 - titleHeight - headerHeight - footerHeight * 2 - 0.08) / math.max(#rows, 1)
+	local function text(name: string, value: string, font: Font, color: Color3, x: number, y: number, w: number, h: number, align: Enum.TextXAlignment?): TextLabel
+		local label = Instance.new("TextLabel")
+		label.Name = name
+		label.BackgroundTransparency = 1
+		label.FontFace = font
+		label.TextColor3 = color
+		label.TextScaled = true
+		label.Text = value
+		label.TextXAlignment = align or Enum.TextXAlignment.Center
+		label.Position = UDim2.fromOffset(x, y)
+		label.Size = UDim2.fromOffset(w, h)
+		label.Parent = panel
+		local constraint = Instance.new("UITextSizeConstraint")
+		constraint.MaxTextSize = math.max(1, math.floor(h))
+		constraint.Parent = label
+		return label
+	end
 
-	local title = scaledLabel(panel, "Title", Fonts.Display, Colors.VioletLight, 0.02, titleHeight)
-	title.Text = ("FUSE %d–%d → TIER UP"):format(firstCount, firstCount + columns - 1)
+	local inner = width - ODDS_MARGIN * 2
+	local title = text("Title", "FUSE → TIER UP", Fonts.Display, Colors.VioletLight, ODDS_MARGIN, ODDS_MARGIN, inner * 0.55, ODDS_TITLE_HEIGHT - 10, Enum.TextXAlignment.Left)
 	textStroke(title, 2)
+	text("Hint", "more orbs = better odds", Fonts.Body, Colors.Muted, ODDS_MARGIN + inner * 0.55, ODDS_MARGIN + 8, inner * 0.45, 20, Enum.TextXAlignment.Right)
 
-	local headerY = 0.03 + titleHeight
-	local inLabel = scaledLabel(panel, "HeaderIn", Fonts.BodyHeavy, Colors.Muted, headerY, headerHeight)
-	inLabel.Position = UDim2.fromScale(recipeLeft, headerY)
-	inLabel.Size = UDim2.fromScale(recipeWidth, headerHeight)
-	inLabel.TextXAlignment = Enum.TextXAlignment.Left
-	inLabel.Text = "ORBS IN →"
+	local columns = if rows[1] then #rows[1].ChanceTexts else 0
+	local columnsLeft = ODDS_MARGIN + ODDS_LABEL_WIDTH
+	local columnWidth = (width - ODDS_MARGIN - columnsLeft) / math.max(columns, 1)
+	local headerY = ODDS_MARGIN + ODDS_TITLE_HEIGHT
+	text("HeaderIn", "ORBS IN", Fonts.BodyHeavy, Colors.Muted, ODDS_MARGIN, headerY + 4, ODDS_LABEL_WIDTH - 10, ODDS_HEADER_HEIGHT - 8, Enum.TextXAlignment.Left)
 	for column = 1, columns do
-		local header = scaledLabel(panel, "Count" .. column, Fonts.Display, Colors.Muted, headerY, headerHeight)
-		header.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, headerY)
-		header.Size = UDim2.fromScale(columnWidth, headerHeight)
-		header.Text = tostring(firstCount + column - 1)
+		text("Count" .. column, tostring(firstCount + column - 1), Fonts.Display, Colors.Muted, columnsLeft + (column - 1) * columnWidth, headerY + 2, columnWidth, ODDS_HEADER_HEIGHT - 4)
 	end
 
+	local rowsTop = headerY + ODDS_HEADER_HEIGHT
+	local rowsHeight = height - rowsTop - ODDS_FOOTER_HEIGHT - ODDS_MARGIN
+	local rowHeight = rowsHeight / math.max(#rows, 1)
 	for index, row in rows do
-		local y = headerY + headerHeight + 0.01 + (index - 1) * rowHeight
-		local left = scaledLabel(panel, "Recipe" .. index, Fonts.Body, UITheme.GetTierLight(row.ToTier), y, rowHeight * 0.85)
-		left.Position = UDim2.fromScale(recipeLeft, y)
-		left.Size = UDim2.fromScale(recipeWidth, rowHeight * 0.85)
-		left.TextXAlignment = Enum.TextXAlignment.Left
-		left.Text = ("%s → %s"):format(row.FromTier, row.ToTier)
-			.. (if row.RebirthsNeeded then (" (R%d)"):format(row.RebirthsNeeded) else "")
-		textStroke(left, 1.5)
-
-		for column, text in row.ChanceTexts do
-			local cell = scaledLabel(panel, ("Chance%d_%d"):format(index, column), Fonts.Display, Colors.Text, y, rowHeight * 0.85)
-			cell.Position = UDim2.fromScale(columnsLeft + (column - 1) * columnWidth, y)
-			cell.Size = UDim2.fromScale(columnWidth, rowHeight * 0.85)
-			cell.Text = text
-			textStroke(cell, 1.5)
+		local y = rowsTop + (index - 1) * rowHeight
+		local dot = Instance.new("Frame")
+		dot.Name = "Dot" .. index
+		dot.AnchorPoint = Vector2.new(0, 0.5)
+		dot.Position = UDim2.fromOffset(ODDS_MARGIN, y + rowHeight / 2)
+		dot.Size = UDim2.fromOffset(ODDS_DOT, ODDS_DOT)
+		dot.BackgroundColor3 = UITheme.GetTierOrb(row.ToTier).Mid
+		dot.Parent = panel
+		corner(dot, UDim.new(0.5, 0))
+		borderStroke(dot, 2)
+		local recipe = text(
+			"Recipe" .. index,
+			("%s → %s"):format(row.FromTier, row.ToTier),
+			Fonts.Body,
+			UITheme.GetTierLight(row.ToTier),
+			ODDS_MARGIN + ODDS_DOT + 8,
+			y + rowHeight * 0.2,
+			ODDS_LABEL_WIDTH - ODDS_DOT - 12,
+			rowHeight * 0.6,
+			Enum.TextXAlignment.Left
+		)
+		textStroke(recipe, 1.5)
+		for column, chance in row.ChanceTexts do
+			local cell = Instance.new("Frame")
+			cell.Name = ("Chance%d_%d"):format(index, column)
+			cell.BackgroundColor3 = Colors.Panel2
+			cell.Position = UDim2.fromOffset(columnsLeft + (column - 1) * columnWidth + ODDS_CELL_GAP / 2, y + ODDS_CELL_GAP / 2)
+			cell.Size = UDim2.fromOffset(columnWidth - ODDS_CELL_GAP, rowHeight - ODDS_CELL_GAP)
+			cell.Parent = panel
+			corner(cell, UDim.new(0, 10))
+			borderStroke(cell, 2)
+			local value = Instance.new("TextLabel")
+			value.Name = "Text"
+			value.BackgroundTransparency = 1
+			value.FontFace = Fonts.Display
+			value.TextColor3 = Colors.Text
+			value.TextScaled = true
+			value.Text = chance
+			value.Position = UDim2.fromScale(0.08, 0.18)
+			value.Size = UDim2.fromScale(0.84, 0.64)
+			value.Parent = cell
+			local constraint = Instance.new("UITextSizeConstraint")
+			constraint.MinTextSize = 17
+			constraint.MaxTextSize = 26
+			constraint.Parent = value
+			textStroke(value, 1.5)
 		end
 	end
 
-	local footer = scaledLabel(panel, "Footer", Fonts.Body, Colors.Muted, 1 - footerHeight * 2 - 0.04, footerHeight)
-	footer.Text = "Fail = keep your best orb, lose the rest"
-	local mutationText = scaledLabel(panel, "Mutations", Fonts.Body, Colors.GoldLabel, 1 - footerHeight - 0.03, footerHeight)
-	mutationText.Text = mutations
+	text(
+		"Footer",
+		"❌ Fail = keep your best orb, lose the rest · Secret needs Rebirth 1",
+		Fonts.Body,
+		Colors.Muted,
+		ODDS_MARGIN,
+		height - ODDS_MARGIN - ODDS_FOOTER_HEIGHT + 6,
+		inner,
+		ODDS_FOOTER_HEIGHT - 8
+	)
+	BillboardKit.SetOddsChances(gui, rows, {})
 	return gui
-end
-
--- Updates the board's fusion mutation line (it scales with luck).
-function BillboardKit.SetOddsMutations(gui: SurfaceGui, text: string)
-	local panel = gui:FindFirstChild("Panel")
-	local label = panel and panel:FindFirstChild("Mutations")
-	if label and label:IsA("TextLabel") then
-		label.Text = text
-	end
-end
-
--- Updates the board's chance cells (a Void Moon raises every fusion chance).
--- `rows` must be the same recipes OddsSurface was built with.
-function BillboardKit.SetOddsChances(gui: SurfaceGui, rows: { OddsRow })
-	local panel = gui:FindFirstChild("Panel")
-	if not panel then
-		return
-	end
-	for index, row in rows do
-		for column, text in row.ChanceTexts do
-			local cell = panel:FindFirstChild(("Chance%d_%d"):format(index, column))
-			if cell and cell:IsA("TextLabel") then
-				cell.Text = text
-			end
-		end
-	end
 end
 
 --[[ Event Board ------------------------------------------------------------------

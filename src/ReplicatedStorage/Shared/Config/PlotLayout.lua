@@ -86,7 +86,7 @@ PlotLayout.PEDESTAL_Z = -2
 PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17 } -- face +Z (the gate)
 
 PlotLayout.FUSION_MACHINE = v3(0, 0, -19)
-PlotLayout.ODDS_BOARD = v3(13, 0, -19)
+PlotLayout.ODDS_BOARD = v3(14, 0, -19) -- Events 2: 13 -> 14 for the 9-wide board (clear of the machine and the portal)
 -- Faces the gate (+Z), yawed this far toward the walkway (-X from here).
 PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES = 30
 
@@ -359,7 +359,8 @@ PlotLayout.Machine = {
 	PromptDistance = 10,
 
 	OddsPostSize = v3(0.6, 6, 0.6),
-	OddsBoardSize = v3(7, 5, 0.4),
+	OddsBoardSize = v3(9, 6, 0.4), -- Events 2: a real table (was 7 x 5)
+	OddsPixelsPerStud = 60,
 	SurfacePixelsPerStud = 40,
 }
 

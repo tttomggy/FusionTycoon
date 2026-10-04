@@ -56,8 +56,8 @@ local BAR_HEIGHT = 56
 local TAB_HEIGHT = 50 -- tier name over its count; five equal tabs, no scroll
 local TAB_GAP = 6
 local CARD_SIZE = Vector2.new(100, 112)
-local CHIP_HEIGHT = 28
-local CHIP_GAP = 4
+local CHIP_HEIGHT = 40 -- two lines: "3 orbs" over the chance
+local CHIP_GAP = 8
 local FLY_SECONDS = 0.35
 
 -- Chamber geometry (px) per layout. Height = 2 x Radius + Slot. Desktop
@@ -260,21 +260,41 @@ local function refreshChamber()
 	end
 	for chipCount = FusionConfig.MinFusionInputs, FusionConfig.MaxFusionInputs do
 		local current = chipCount == count
-		-- Equal-width cells (the grid layout sizes them), so five always fit.
-		local chip = UIKit.Label({
-			Name = "Chip" .. chipCount,
-			Text = ("%d · %s"):format(chipCount, percent(FusionConfig.GetFusionChance(selectedTier, chipCount, bonus))),
+		-- Each count its own chip (the grid keeps a gap between them): the
+		-- count small on top, its chance bold under it. The count matching
+		-- the chamber is highlighted; a Void Moon tints every chip purple.
+		local chip = Instance.new("Frame")
+		chip.Name = "Chip" .. chipCount
+		chip.BackgroundColor3 = if current then Colors.VioletPill elseif bonus > 0 then UITheme.TowardInk(UITheme.Mutation.Void, 0.45) else Colors.Panel2
+		chip.LayoutOrder = chipCount
+		chip.ZIndex = chipsRow.ZIndex + 1
+		UIKit.Corner(chip, 12)
+		UIKit.Stroke(chip, if current then 3 else 2, if current then Colors.White else nil)
+		UIKit.Label({
+			Name = "Count",
+			Text = ("%d orbs"):format(chipCount),
 			Font = Fonts.BodyHeavy,
-			TextSize = 14,
+			TextSize = 11,
 			TextColor3 = if current then Colors.Text else Colors.Muted,
+			Position = UDim2.fromOffset(0, 3),
+			Size = UDim2.new(1, 0, 0, 14),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			BackgroundTransparency = 0,
-			LayoutOrder = chipCount,
-			ZIndex = chipsRow.ZIndex + 1,
+			ZIndex = chip.ZIndex + 1,
+			Parent = chip,
 		})
-		chip.BackgroundColor3 = if current then Colors.VioletPill else Colors.Panel2
-		UIKit.Corner(chip, 999)
-		UIKit.Stroke(chip, 2)
+		UIKit.Label({
+			Name = "Chance",
+			Text = percent(FusionConfig.GetFusionChance(selectedTier, chipCount, bonus)),
+			Font = Fonts.Display,
+			TextSize = 17,
+			TextColor3 = Colors.Text,
+			Position = UDim2.fromOffset(0, 17),
+			Size = UDim2.new(1, 0, 0, 22),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = chip.ZIndex + 1,
+			Stroke = UITheme.Stroke.Text,
+			Parent = chip,
+		})
 		chip.Parent = chipsRow
 	end
 

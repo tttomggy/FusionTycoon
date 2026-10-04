@@ -205,17 +205,11 @@ local function buildOddsBoard(originCFrame: CFrame, parent: Instance)
 		Parent = board,
 	})
 
-	-- The same formatter as the gacha pad (FusionConfig.FormatOdds). Base
-	-- luck here; TycoonService refreshes the mutation line at the owner's
-	-- luck on every sync.
+	-- The same formatter as the gacha pad (FusionConfig.FormatOdds).
+	-- TycoonService refreshes the cells on every sync (the owner's rebirths
+	-- for the "R1" row, a Void Moon's boosted numbers).
 	local odds = FusionConfig.FormatOdds(1)
-	BillboardKit.OddsSurface(
-		boardPart,
-		odds.Fusion,
-		FusionConfig.MinFusionInputs,
-		"Mutations · " .. odds.FusionMutations,
-		M.SurfacePixelsPerStud
-	)
+	BillboardKit.OddsSurface(boardPart, odds.Fusion, FusionConfig.MinFusionInputs, M.OddsPixelsPerStud)
 
 	board.Parent = parent
 end
