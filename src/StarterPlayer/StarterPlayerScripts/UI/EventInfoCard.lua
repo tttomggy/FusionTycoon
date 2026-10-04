@@ -358,6 +358,11 @@ function EventInfoCard.Hide()
 	end
 end
 
+-- The card's frame (nil before the first open), for outside-tap checks.
+function EventInfoCard.GetFrame(): Frame?
+	return holder
+end
+
 function EventInfoCard.IsOpen(): boolean
 	local frame = holder
 	return frame ~= nil and frame.Visible

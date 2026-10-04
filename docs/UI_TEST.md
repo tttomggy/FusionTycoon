@@ -574,9 +574,13 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   recharge. The claim shield and the 120 s shield after a loss go up
   regardless.
 - [ ] **Alarm.** A unlocked and LOCK ready: B walks inside A's walls; A's
-  chip turns red and pulses **🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK**
-  until B leaves or A locks at the console. While recharging it stays
-  RECHARGING (no alarm).
+  chip turns red and pulses **🚨 RUN TO LOCK!** until B leaves or A locks
+  at the console. While recharging it stays RECHARGING (no alarm).
+- [ ] **The LOCK chip fits its text.** "🔓 UNLOCKED" sits in a pill just
+  wider than the words (14 px each side, 44 px tall), not a 340 px bar;
+  the chip grows and shrinks as the text changes (LOCKED · 42s, RECHARGING
+  · 12s, 🚨 RUN TO LOCK!). The round "?" stays 8 px to its right through
+  every change, on desktop and phone.
 - [ ] **Steal and deliver.** Shield down, A more than 6 studs from the
   pedestal: B holds E on A's pedestal (**Steal**, ObjectText = the item's
   name and its +$/s, 1.5 s).
@@ -608,14 +612,13 @@ Test → Clients and Servers, **2 players** (A and B). Both run
   pedestal, the banner reads **A caught B!**. Both see a white flash ring
   at B, **CAUGHT!** over B's head, and the orb fly back onto the pedestal.
 - [ ] **Timeout.** B grabs and waits 45 s: **Too slow!**, the item returns.
-- [ ] **Steal timer.** Right after any grab, B's HUD shows **🫳 NEXT STEAL IN
-  60s** (muted, amber) under the LOCK chip, counting down. B's prompts on
-  other filled enemy pedestals read **Steal in 42s** (the item label under
-  it, no hold); tapping one toasts **You can steal again in 42s**. The red
-  hand markers stay on. At 0 the chip shows **🫳 STEAL READY!** (gold) for
-  2 s, then hides, and the prompts read **Steal** again. After a delivered
-  steal the HEIST COMPLETE card's sub-line reads **You can steal again in
-  …s**. `/heistcd 0` clears the timer (the chip flashes STEAL READY!).
+- [ ] **Steal timer (no HUD chip).** Right after any grab there is **no**
+  steal timer chip on B's HUD. B's prompts on other filled enemy pedestals
+  read **Steal in 42s** (the item label under it, no hold); tapping one
+  toasts **You can steal again in 42s**. The red hand markers stay on. At 0
+  the prompts read **Steal** again. After a delivered steal the HEIST
+  COMPLETE card's sub-line reads **You can steal again in …s**. `/heistcd
+  0` clears the timer.
 - [ ] **Loss cap.** With A's shield dropped (`/shield 0`) after each loss,
   B steals 3 items in under 10 min: the 4th grab says **This lab has been
   robbed enough for now**.
@@ -809,10 +812,14 @@ failed").
 - [ ] **Info card: between events.** With nothing on, the chip opens the
   same card for the NEXT event, "Starts in 8:40". When that event starts
   with the card open, it switches to "… left".
-- [ ] **Info card: auto once.** After `/tips reset`, `/event GoldenRain`:
-  ~1 s after the start banner goes, the card opens by itself. End it and
-  start Golden Rain again: it doesn't reopen. A different event opens its
-  own card once.
+- [ ] **No pop-up; the TAP tag instead.** After `/tips reset`, `/event
+  GoldenRain`: the card does **not** open by itself. A small gold "ⓘ TAP"
+  tag bounces beside the event chip. Tap the chip once: the card opens and
+  the tag is gone for good (end Golden Rain and start it again: no tag). A
+  different event type shows its own tag once.
+- [ ] **Info card closes.** With the card open: tapping anywhere outside it
+  (the world, another HUD button) closes it; tapping the chip toggles it;
+  ✕ closes it. When the running event ends, the open card closes itself.
 - [ ] **Arrows per event.** Rainbow Storm: the goal arrow points at your
   Gacha Pad ("PULL HERE"); step on the pad and it moves to your Fusion
   Machine ("THEN FUSE"). Night / Void Moon: the machine ("FUSE NOW").
