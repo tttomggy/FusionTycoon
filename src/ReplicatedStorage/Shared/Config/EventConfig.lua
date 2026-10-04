@@ -82,15 +82,9 @@ EventConfig.Icons = {
 	VoidMoon = "🌑",
 } :: { [string]: string }
 
--- One line of what it does (the start banner).
-EventConfig.Blurbs = {
-	GoldenRain = "Grab the gold coins in your lab! Golden odds x3",
-	PowerSurge = "Generators x1.25 · lightning can CHARGE a displayed item",
-	MeteorShower = "Meteors hit the street: grab a core first!",
-	RainbowStorm = "Every mutation chance x5!",
-	Night = "Fusion mutation odds x2",
-	VoidMoon = "Fusion success +5% · fusions can come out VOID",
-} :: { [string]: string }
+-- The start banner's one line is the first "what to do" sentence of the
+-- info card (EventConfig.Blurbs, filled from GetInfo below).
+EventConfig.Blurbs = {} :: { [string]: string }
 
 --[[ Effect numbers (at strength 1) ------------------------------------------ ]]
 
@@ -105,6 +99,16 @@ EventConfig.CoinMaxLive = 30 -- per plot
 EventConfig.CoinLifetimeSeconds = 20
 EventConfig.CoinCollectDistance = 5 -- server distance check for a touch
 EventConfig.GoldenRainGoldenOdds = 3
+-- BIG coins: 1 in BigCoinChance lab coins is double size and worth
+-- BigCoinIncomeSeconds of income instead.
+EventConfig.BigCoinChance = 8
+EventConfig.BigCoinIncomeSeconds = 20
+-- Street coins: one every StreetCoinIntervalSeconds on the street (inside
+-- StreetLayout.MeteorBounds), at most StreetCoinMaxLive; anyone can grab
+-- one and it pays the GRABBER StreetCoinIncomeSeconds of their income.
+EventConfig.StreetCoinIntervalSeconds = 6
+EventConfig.StreetCoinMaxLive = 8
+EventConfig.StreetCoinIncomeSeconds = 6
 
 -- Power Surge: generators x(1 + 0.25 x strength), clamped; a lightning strike
 -- every LightningIntervalSeconds / strength on one random displayed item.
@@ -140,6 +144,118 @@ EventConfig.VoidChance = 0.05
 EventConfig.RainbowStormOdds = 5
 
 EventConfig.MaxMutationOdds = 15 -- clamp for every mutation multiplier
+
+--[[ Info card copy (every number from the fields above) ------------------------ ]]
+
+export type EventInfo = {
+	Happening: { string }, -- WHAT'S HAPPENING (2 bullets at most)
+	ToDo: string, -- WHAT TO DO (the banner shows its first sentence)
+	CanGive: { string }, -- mutation names for the "Can give" pills
+	CanGiveNote: string?, -- e.g. "(more often)"
+}
+
+-- 1.25 -> "1.25", 3 -> "3", 0.05 * 100 -> "5" (no float noise in copy).
+local function num(n: number): string
+	local rounded = math.floor(n * 100 + 0.5) / 100
+	if rounded == math.floor(rounded) then
+		return tostring(math.floor(rounded))
+	end
+	return (("%.2f"):format(rounded):gsub("0+$", ""))
+end
+
+local function oneIn(chance: number): string
+	return num(1 / chance)
+end
+
+local INFO: { [string]: () -> EventInfo } = {
+	GoldenRain = function()
+		return {
+			Happening = {
+				("Gold coins fall in your lab and on the street. Each pays %ss of your income. BIG coins pay %ss."):format(
+					num(EventConfig.CoinIncomeSeconds),
+					num(EventConfig.BigCoinIncomeSeconds)
+				),
+				("Golden mutations are ×%s more likely on pulls and fusions."):format(num(EventConfig.GoldenRainGoldenOdds)),
+			},
+			ToDo = "Run and grab coins! Street coins go to whoever gets there first.",
+			CanGive = { "Golden" },
+			CanGiveNote = "(more often)",
+		}
+	end,
+	PowerSurge = function()
+		return {
+			Happening = {
+				("Your generators make ×%s cash."):format(num(1 + EventConfig.SurgeGeneratorBonus)),
+				("Lightning strikes a displayed item every %ss. 1 in %s strikes turns it CHARGED ×3."):format(
+					num(EventConfig.LightningIntervalSeconds),
+					oneIn(EventConfig.LightningChargeChance)
+				),
+			},
+			ToDo = "Put your best plain items on pedestals. Mutated items can't be charged.",
+			CanGive = { "Charged" },
+		}
+	end,
+	MeteorShower = function()
+		return {
+			Happening = {
+				"Meteors crash onto the street. Each one leaves a glowing core.",
+				("Hold E on a crater for %ss. First player wins a free Epic or better item, sometimes CELESTIAL ×20."):format(
+					num(EventConfig.MeteorGrabSeconds)
+				),
+			},
+			ToDo = "Get to the street and race!",
+			CanGive = { "Celestial" },
+		}
+	end,
+	Night = function()
+		return {
+			Happening = {
+				("Fusions are ×%s more likely to mutate."):format(num(EventConfig.NightFusionMutationOdds)),
+			},
+			ToDo = "Fuse at your Fusion Machine now.",
+			CanGive = { "Golden", "Diamond", "Rainbow" },
+			CanGiveNote = "(from fusing)",
+		}
+	end,
+	VoidMoon = function()
+		return {
+			Happening = {
+				("Every fusion is +%s%% more likely to succeed (the odds board turns purple)."):format(
+					num(EventConfig.VoidMoonFusionBonus * 100)
+				),
+				("1 in %s successful fusions comes out VOID ×8."):format(oneIn(EventConfig.VoidChance)),
+			},
+			ToDo = "Fuse as much as you can before the moon sets!",
+			CanGive = { "Void" },
+		}
+	end,
+	RainbowStorm = function()
+		return {
+			Happening = {
+				("Every mutation is ×%s more likely on pulls and fusions."):format(num(EventConfig.RainbowStormOdds)),
+			},
+			ToDo = "Pull at your Gacha Pad and fuse. The arrow shows you where.",
+			CanGive = { "Golden", "Diamond", "Rainbow" },
+		}
+	end,
+}
+
+-- The info card's copy for `eventId` (nil for an unknown id).
+function EventConfig.GetInfo(eventId: string): EventInfo?
+	local build = INFO[eventId]
+	return if build then build() else nil
+end
+
+-- The first sentence of a "what to do" line (up to the first ! or .).
+local function firstSentence(text: string): string
+	local sentence = text:match("^(.-[%.!])%s") or text
+	return sentence
+end
+
+for _, id in EventConfig.Order do
+	local info = EventConfig.GetInfo(id)
+	EventConfig.Blurbs[id] = if info then firstSentence(info.ToDo) else ""
+end
 
 --[[ The clock ------------------------------------------------------------------ ]]
 

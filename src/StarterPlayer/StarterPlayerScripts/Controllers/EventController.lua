@@ -57,6 +57,9 @@ local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local AnnouncementController = require(script.Parent.AnnouncementController)
 local ResultController = require(script.Parent.ResultController)
 local ToastController = require(script.Parent.ToastController)
+local TycoonController = require(script.Parent.TycoonController)
+local GoalMarkerController = require(script.Parent.GoalMarkerController)
+local EventInfoCard = require(script.Parent.Parent.UI.EventInfoCard)
 
 local EventController = {}
 
@@ -112,9 +115,13 @@ local CHIP_Y = 12
 local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44) }
 local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
 local CARD_GAP = 10
-local CARD_WIDTH = 330
-local CARD_ROW_HEIGHT = 40
 local LINEUP_COUNT = 3
+-- The info card opens by itself once per event type (Tips "event_<Id>"),
+-- this long after the start banner has gone.
+local AUTO_INFO_AFTER_BANNER = 1
+local GUIDE_SECONDS = 0.5 -- event arrows and pad pills refresh
+local ON_PAD_RADIUS = 6 -- standing on your Gacha Pad: the arrow moves to the machine
+local EVENT_PILL_MAX_DISTANCE = 120
 
 -- Baseline Lighting, captured before the first change and restored exactly.
 type Baseline = {
@@ -514,6 +521,10 @@ end
 
 --[[ Event changes -------------------------------------------------------------------- ]]
 
+-- Defined with the HUD below (it needs the chip's ScreenGui).
+local autoOpenInfo: (id: string, myGeneration: number) -> ()
+local refreshGuidance: () -> ()
+
 local function onEventChanged(live: boolean)
 	local id = EventState.GetActive()
 	if id == currentId then
@@ -542,8 +553,11 @@ local function onEventChanged(live: boolean)
 	end)
 	if live then
 		showStartBanner(id, myGeneration)
+		-- After the banner (countdown + hold), the first time ever: the card.
+		task.delay(COUNTDOWN_STEP * 3 + BANNER_HOLD_SECONDS + AUTO_INFO_AFTER_BANNER, autoOpenInfo, id, myGeneration)
 		if id == "RainbowStorm" then
-			AnnouncementController.ShowEventHype("🌈 RAINBOW STORM! Every mutation chance x5")
+			local info = EventConfig.GetInfo(id)
+			AnnouncementController.ShowEventHype("🌈 RAINBOW STORM! " .. (if info then info.Happening[1] else ""))
 		end
 	end
 end
@@ -693,9 +707,9 @@ local hudGui: ScreenGui
 local chip: TextButton
 local chipHolder: Frame
 local chipStyle: string? = nil
-local cardHolder: Frame
-local cardRows: { { Tag: TextLabel, Name: TextLabel, Timer: TextLabel } } = {}
-local cardAdminLabel: TextLabel
+local function cardTop(): number
+	return CHIP_Y + CHIP_SIZE.Desktop.Y + CARD_GAP
+end
 
 local function eventTitle(id: string): string
 	return ("%s %s"):format(EventConfig.Icons[id] or "", EventConfig.Names[id] or id)
@@ -736,18 +750,6 @@ local function refreshChip(lineup: { EventState.LineupEntry })
 	chipStyle = style
 end
 
-local function refreshCard(lineup: { EventState.LineupEntry })
-	local tags = lineupTags(lineup)
-	for index, row in cardRows do
-		local entry = lineup[index]
-		row.Tag.Text = tags[index] or ""
-		row.Name.Text = if entry then eventTitle(entry.Id) else ""
-		row.Name.TextColor3 = if entry then UITheme.GetEventGradient(entry.Id).Top else Colors.Text
-		row.Timer.Text = if entry then lineupTimer(entry) else ""
-	end
-	cardAdminLabel.Text = EventState.GetAdminAbuseText()
-end
-
 local function refreshBoards(lineup: { EventState.LineupEntry })
 	local world = Workspace:FindFirstChild("World")
 	local boards = world and world:FindFirstChild("EventBoards")
@@ -775,81 +777,48 @@ end
 local function refreshSchedule()
 	local lineup = EventState.GetLineup(LINEUP_COUNT)
 	refreshChip(lineup)
-	if cardHolder.Visible then
-		refreshCard(lineup)
+	-- The open card follows the chip: a new event (or the next one once it
+	-- ends) replaces what it explains.
+	local shownId, shownNow = EventInfoCard.GetShown()
+	local first = lineup[1]
+	if shownId and first and (first.Id ~= shownId or first.Now ~= shownNow) then
+		EventInfoCard.Show(hudGui, cardTop(), first.Id, first.Now)
 	end
+	EventInfoCard.Refresh()
 	refreshBoards(lineup)
 end
 
-local function buildCard()
-	local height = 44 + LINEUP_COUNT * CARD_ROW_HEIGHT + 34
-	local body, holder = UIKit.Panel({
-		Name = "ScheduleCard",
-		Parent = hudGui,
-		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, CHIP_Y + CHIP_SIZE.Desktop.Y + CARD_GAP),
-		Size = UDim2.fromOffset(CARD_WIDTH, height),
-		Radius = 18,
-	})
-	cardHolder = holder
-	holder.Visible = false
-	local z = body.ZIndex + 1
-	UIKit.Label({
-		Name = "Title",
-		Text = "LAB WEATHER",
-		Font = Fonts.Display,
-		TextSize = 20,
-		TextColor3 = Colors.VioletLight,
-		Position = UDim2.fromOffset(16, 10),
-		Size = UDim2.new(1, -32, 0, 26),
-		ZIndex = z,
-		Stroke = UITheme.Stroke.Text,
-		Parent = body,
-	})
-	for index = 1, LINEUP_COUNT do
-		local y = 44 + (index - 1) * CARD_ROW_HEIGHT
-		local function cell(name: string, x: number, width: number, font: Font, size: number, align: Enum.TextXAlignment): TextLabel
-			return UIKit.Label({
-				Name = name .. index,
-				Text = "",
-				Font = font,
-				TextSize = size,
-				Position = UDim2.new(x, if x == 0 then 16 else 0, 0, y),
-				Size = UDim2.new(width, -16, 0, CARD_ROW_HEIGHT - 6),
-				TextXAlignment = align,
-				ZIndex = z,
-				Stroke = UITheme.Stroke.Text,
-				Parent = body,
-			})
-		end
-		local tag = cell("Tag", 0, 0.2, Fonts.BodyHeavy, 13, Enum.TextXAlignment.Left)
-		tag.TextColor3 = Colors.Muted
-		table.insert(cardRows, {
-			Tag = tag,
-			Name = cell("Name", 0.2, 0.5, Fonts.Display, 17, Enum.TextXAlignment.Left),
-			Timer = cell("Timer", 0.7, 0.3, Fonts.Display, 16, Enum.TextXAlignment.Right),
-		})
+-- The running event, else the next one: what the info card explains.
+local function cardSubject(): (string?, boolean)
+	local first = EventState.GetLineup(1)[1]
+	if not first then
+		return nil, false
 	end
-	cardAdminLabel = UIKit.Label({
-		Name = "AdminAbuse",
-		Text = "",
-		Font = Fonts.Body,
-		TextSize = 14,
-		TextColor3 = Colors.GoldLabel,
-		Position = UDim2.new(0, 16, 1, -32),
-		Size = UDim2.new(1, -32, 0, 22),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		ZIndex = z,
-		Parent = body,
-	})
+	return first.Id, first.Now
 end
 
 local function toggleCard()
-	cardHolder.Visible = not cardHolder.Visible
-	if cardHolder.Visible then
-		refreshCard(EventState.GetLineup(LINEUP_COUNT))
-		UIKit.PopIn(cardHolder)
+	if EventInfoCard.IsOpen() then
+		EventInfoCard.Hide()
+		return
 	end
+	local id, now = cardSubject()
+	if id then
+		EventInfoCard.Show(hudGui, cardTop(), id, now)
+	end
+end
+
+-- The first time this account sees `id`: open its info card once.
+autoOpenInfo = function(id: string, myGeneration: number)
+	local tip = "event_" .. id
+	if not TycoonController.HasSynced() or TycoonController.HasSeenTip(tip) then
+		return
+	end
+	if generation ~= myGeneration or EventState.GetActive() ~= id then
+		return
+	end
+	TycoonController.MarkTipSeen(tip)
+	EventInfoCard.Show(hudGui, cardTop(), id, true)
 end
 
 local function applyLayout(isPhone: boolean)
@@ -876,9 +845,137 @@ local function buildHud()
 		Radius = 22,
 		OnClick = toggleCard,
 	})
-	buildCard()
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)
+end
+
+--[[ Point the way: event arrows and pad pills -------------------------------------------- ]]
+
+local function myRoot(): BasePart?
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	return if root and root:IsA("BasePart") then root else nil
+end
+
+local function flatDistance(a: Vector3, b: Vector3): number
+	return Vector3.new(a.X - b.X, 0, a.Z - b.Z).Magnitude
+end
+
+local function boundsOf(target: Instance): (CFrame?, Vector3?)
+	if target:IsA("Model") then
+		return target:GetBoundingBox()
+	elseif target:IsA("BasePart") then
+		return target.CFrame, target.Size
+	end
+	return nil, nil
+end
+
+-- The nearest child of the event's folder (or its `sub` folder) that
+-- `pick` accepts, as the part to point at.
+local function nearestIn(id: string, sub: string?, pick: (Instance) -> BasePart?): BasePart?
+	local folder = EventState.GetObjectsFolder(id)
+	local container = if folder and sub then folder:FindFirstChild(sub) else folder
+	local root = myRoot()
+	if not container or not root then
+		return nil
+	end
+	local best: BasePart? = nil
+	local bestDistance = math.huge
+	for _, child in container:GetChildren() do
+		local part = pick(child)
+		if part then
+			local distance = flatDistance(part.Position, root.Position)
+			if distance < bestDistance then
+				best, bestDistance = part, distance
+			end
+		end
+	end
+	return best
+end
+
+-- An unclaimed crater's core (its prompt is still on).
+local function craterCore(child: Instance): BasePart?
+	if not child:IsA("Model") then
+		return nil
+	end
+	local core = child:FindFirstChild("Core")
+	local prompt = core and core:FindFirstChild("MeteorPrompt")
+	if core and core:IsA("BasePart") and prompt and prompt:IsA("ProximityPrompt") and prompt.Enabled then
+		return core
+	end
+	return nil
+end
+
+-- A street coin (Golden Rain, EventObjects.GoldenRain.Street).
+local function streetCoin(child: Instance): BasePart?
+	return if child:IsA("BasePart") and child:GetAttribute("Collected") ~= true then child else nil
+end
+
+-- A pill over one of your own stations, in the event's folder (so the
+-- event's end removes it).
+local function ensureStationPill(id: string, station: Instance, text: string)
+	local folder = EventState.GetObjectsFolder(id)
+	if not folder or folder:FindFirstChild("StationPill_" .. station.Name) then
+		return
+	end
+	local center, size = boundsOf(station)
+	if not center or not size then
+		return
+	end
+	local anchor = anchorPart(folder, center.Position + Vector3.new(0, size.Y / 2 + 3, 0), "StationPill_" .. station.Name)
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "EventPill"
+	gui.Adornee = anchor
+	gui.Size = UDim2.fromOffset(320, 40)
+	gui.LightInfluence = 0
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = EVENT_PILL_MAX_DISTANCE
+	gui.Parent = anchor
+	UIKit.Pill({
+		Name = "Text",
+		Parent = gui,
+		Text = text,
+		Gradient = UITheme.GetEventGradient(id),
+		Font = Fonts.Display,
+		TextSize = 18,
+		Height = 34,
+		TextStroke = 1.5,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+	})
+end
+
+refreshGuidance = function()
+	local id, strength = EventState.GetActive()
+	local target: Instance? = nil
+	local text = ""
+	local root = myRoot()
+	if id == "RainbowStorm" then
+		local pad = GoalMarkerController.ResolvePlotTarget("GachaStation")
+		local machine = GoalMarkerController.ResolvePlotTarget("FusionMachine")
+		if pad then
+			local odds = EventConfig.GetMutationOddsMultiplier(id, strength, "Diamond", "Pull")
+			ensureStationPill(id, pad, ("🌈 MUTATIONS ×%d · PULL NOW"):format(odds))
+		end
+		local padCenter = if pad then boundsOf(pad) else nil
+		local onPad = padCenter ~= nil and root ~= nil and flatDistance(padCenter.Position, root.Position) <= ON_PAD_RADIUS
+		if onPad and machine then
+			target, text = machine, "THEN FUSE"
+		else
+			target, text = pad, "PULL HERE"
+		end
+	elseif id == "Night" or id == "VoidMoon" then
+		local machine = GoalMarkerController.ResolvePlotTarget("FusionMachine")
+		if machine then
+			ensureStationPill(id, machine, "🌙 FUSE NOW")
+		end
+		target, text = machine, "FUSE NOW"
+	elseif id == "MeteorShower" then
+		target, text = nearestIn(id, nil, craterCore), "GRAB THE CORE"
+	elseif id == "GoldenRain" then
+		target, text = nearestIn(id, "Street", streetCoin), "GRAB THE COIN"
+	end
+	GoalMarkerController.SetEventOverride(target, text)
 end
 
 --[[ Public ------------------------------------------------------------------------------ ]]
@@ -904,6 +1001,12 @@ function EventController.Init()
 			task.wait(1)
 			onEventChanged(true)
 			refreshSchedule()
+		end
+	end)
+	task.spawn(function()
+		while true do
+			task.wait(GUIDE_SECONDS)
+			refreshGuidance()
 		end
 	end)
 	RemoteEvents.EventFx.OnClientEvent:Connect(onEventFx)

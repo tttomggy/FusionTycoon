@@ -7,6 +7,8 @@
 	marks one with MarkTipSeen { Id }, and the server only accepts ids
 	listed here. /tips reset (Studio) clears them all.
 ]]
+local EventConfig = require(script.Parent.EventConfig)
+
 local TipConfig = {}
 
 TipConfig.Ids = {
@@ -17,6 +19,12 @@ TipConfig.Ids = {
 	catch = true, -- your first time as a victim: "TOUCH THEM!"
 	lockAfterLoss = true, -- after your first real loss
 } :: { [string]: boolean }
+
+-- "event_<EventId>": the event info card auto-opened the first time you see
+-- that event (EventController).
+for _, eventId in EventConfig.Order do
+	TipConfig.Ids["event_" .. eventId] = true
+end
 
 function TipConfig.IsValid(id: unknown): boolean
 	return typeof(id) == "string" and TipConfig.Ids[id] == true
