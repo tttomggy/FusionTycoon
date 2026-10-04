@@ -36,9 +36,13 @@ TycoonController.TycoonChanged = tycoonChanged.Event
 -- Fires only once the server has validated the purchase attempt.
 local upgradeResolved = Instance.new("BindableEvent")
 TycoonController.UpgradeResolved = upgradeResolved.Event
+local upgradeMaxResolved = Instance.new("BindableEvent")
+-- Fires (result) for every UpgradeMaxResult (MAX ×N and MAX ALL).
+TycoonController.UpgradeMaxResolved = upgradeMaxResolved.Event
 
 -- Guards per-generator so a pending purchase on one doesn't block clicks on another.
 local pendingUpgrades: { [string]: boolean } = {}
+local pendingMax = false -- one MAX request in flight at a time
 
 function TycoonController.GetCash(): number
 	return cash
@@ -179,6 +183,17 @@ function TycoonController.RequestUpgrade(generatorId: string): boolean
 	return true
 end
 
+-- MAX ×N (`generatorId`) or MAX ALL (nil). Fire-and-forget; false while a
+-- previous MAX hasn't answered yet.
+function TycoonController.RequestUpgradeMax(generatorId: string?): boolean
+	if pendingMax then
+		return false
+	end
+	pendingMax = true
+	RemoteEvents.RequestUpgradeMax:FireServer(if generatorId then { GeneratorId = generatorId } else { All = true })
+	return true
+end
+
 local function onSyncTycoon(snapshot: any)
 	cash = snapshot.Cash
 	generatorLevels = snapshot.Generators or {}
@@ -255,6 +270,10 @@ end
 function TycoonController.Init()
 	RemoteEvents.SyncTycoon.OnClientEvent:Connect(onSyncTycoon)
 	RemoteEvents.UpgradeResult.OnClientEvent:Connect(onUpgradeResult)
+	RemoteEvents.UpgradeMaxResult.OnClientEvent:Connect(function(result: any)
+		pendingMax = false
+		upgradeMaxResolved:Fire(result)
+	end)
 end
 
 return TycoonController

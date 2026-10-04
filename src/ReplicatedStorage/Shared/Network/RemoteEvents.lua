@@ -9,6 +9,8 @@ local REMOTE_EVENT_NAMES = {
 	"SyncInventory", -- server -> client: authoritative full inventory snapshot
 	"RequestUpgrade", -- client -> server: attempt to upgrade a generator
 	"UpgradeResult", -- server -> client: validated outcome of an upgrade attempt
+	"RequestUpgradeMax", -- client -> server: { GeneratorId } or { All = true }: buy every level cash allows
+	"UpgradeMaxResult", -- server -> client: { Success, Levels, Spent, PerGenerator, NewLevels, Reason?, NextCost? }
 	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
 	"RequestPlaceItem", -- client -> server: attempt to display an owned item (by Uid) on one of the player's own pedestals
 	"PlaceItemResult", -- server -> client: validated outcome of a place-item or remove-item attempt

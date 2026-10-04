@@ -7,6 +7,12 @@
 
 	Purchasing is unchanged: TycoonController.RequestUpgrade, server-validated
 	by TycoonService. The client-side checks here only decide what to show.
+
+	MAX: each row's gold "MAX ×N / $104M" (muted "MAX / need $321M" when not
+	one level is affordable, hidden when maxed or locked) and "⚡ MAX ALL ·
+	$X" under the list send RequestUpgradeMax. N and the totals come from
+	TycoonConfig.GetMaxAffordable / GetMaxAllPlan, the functions the
+	server's loop agrees with. Labels refresh with cash, at most 4×/s.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -25,11 +31,16 @@ local UpgradesPanel = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local MAX_SIZE = Vector2.new(520, 620)
+local MAX_SIZE = Vector2.new(600, 620)
 local ROW_HEIGHT = 84
 local ROW_GAP = 10
 local FOOTER_HEIGHT = 56
-local BUTTON_SIZE = Vector2.new(132, 52)
+local BUTTON_SIZE = Vector2.new(120, 52)
+local MAX_BUTTON_SIZE = Vector2.new(104, 52)
+local MAX_BUTTON_GAP = 8
+local TEXT_RIGHT_INSET = BUTTON_SIZE.X + MAX_BUTTON_SIZE.X + MAX_BUTTON_GAP + 26
+local MAX_ALL_HEIGHT = 52
+local REFRESH_INTERVAL = 0.25 -- labels refresh at most 4×/s
 local INTRO_HEIGHT = 36 -- the "Generators earn every second" line above the tabs
 local INTRO_INCOME_WIDTH = 96
 local TABS_TOP = INTRO_HEIGHT + 8
@@ -48,6 +59,8 @@ type Row = {
 	Detail: TextLabel,
 	Progress: Frame,
 	Button: TextButton,
+	MaxButton: TextButton,
+	MaxHolder: Frame,
 	Opacity: number?,
 }
 
@@ -56,6 +69,10 @@ local cashLabel: TextLabel
 local footerPill: TextLabel
 local introIncomeLabel: TextLabel
 local rows: { [string]: Row } = {}
+local maxAllButton: TextButton
+local maxAllHolder: Frame
+local lastRefresh = -math.huge
+local refreshQueued = false
 
 local function tierColor(tier: string): Color3
 	return FusionConfig.TierAccentColors[tier] or Colors.Text
@@ -122,9 +139,26 @@ local function refreshRow(generator: TycoonConfig.GeneratorDef, cash: number, le
 				UIKit.Colored("+" .. NumberFormat.Money(perLevel) .. "/s", Colors.Cash)
 			)
 
+		row.MaxHolder.Visible = not maxed
 		if maxed then
 			UIKit.SetButton(row.Button, { Style = "Disabled", Text = "MAXED", SubText = "", TextColor3 = Colors.Muted })
 		else
+			local count, total, nextCost = TycoonConfig.GetMaxAffordable(generator, level, cash)
+			if count > 0 then
+				UIKit.SetButton(row.MaxButton, {
+					Style = "Gold",
+					Text = ("MAX ×%d"):format(count),
+					SubText = NumberFormat.Money(total),
+					TextColor3 = Colors.Text,
+				})
+			else
+				UIKit.SetButton(row.MaxButton, {
+					Style = "Disabled",
+					Text = "MAX",
+					SubText = "need " .. NumberFormat.Money(nextCost or 0),
+					TextColor3 = Colors.Muted,
+				})
+			end
 			local cost = TycoonConfig.GetUpgradeCost(generator, level)
 			local affordable = cash >= cost
 			UIKit.SetButton(row.Button, {
@@ -142,6 +176,7 @@ local function refreshRow(generator: TycoonConfig.GeneratorDef, cash: number, le
 	local required = TycoonConfig.GetGeneratorById(requirement.GeneratorId)
 	local requiredName = if required then required.Name else "?"
 	UIKit.SetButton(row.Button, { Style = "Disabled", Text = "LOCKED", SubText = "", TextColor3 = Colors.Muted })
+	row.MaxHolder.Visible = false
 
 	if lockState == "locked" then
 		row.Name.Text = generator.Name
@@ -175,11 +210,41 @@ local function refresh()
 	for _, generator in TycoonConfig.Generators do
 		refreshRow(generator, cash, levels, multiplier)
 	end
+	local plan = TycoonConfig.GetMaxAllPlan(levels, cash)
+	maxAllHolder.Visible = plan.Levels > 0 or plan.NextCost ~= nil
+	if plan.Levels > 0 then
+		UIKit.SetButton(maxAllButton, {
+			Style = "Gold",
+			Text = ("⚡ MAX ALL · %s"):format(NumberFormat.Money(plan.Spent)),
+			SubText = ("+%d %s"):format(plan.Levels, if plan.Levels == 1 then "level" else "levels"),
+			TextColor3 = Colors.Text,
+		})
+	else
+		UIKit.SetButton(maxAllButton, {
+			Style = "Disabled",
+			Text = "⚡ MAX ALL",
+			SubText = "need " .. NumberFormat.Money(plan.NextCost or 0),
+			TextColor3 = Colors.Muted,
+		})
+	end
 	local generatorIncome = TycoonConfig.GetGeneratorIncome(TycoonController.GetIncomeInputs())
 	introIncomeLabel.Text = ("%s/s"):format(NumberFormat.Money(generatorIncome))
 end
 
 --[[ Build -------------------------------------------------------------------- ]]
+
+local function bounceHolder(holder: Frame)
+	local scale = holder:FindFirstChild("BuyBounce") :: UIScale?
+	if not scale then
+		local newScale = Instance.new("UIScale")
+		newScale.Name = "BuyBounce"
+		newScale.Parent = holder
+		scale = newScale
+	end
+	local bounce = scale :: UIScale
+	bounce.Scale = 0.92
+	TweenService:Create(bounce, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+end
 
 local function onBuyClicked(generator: TycoonConfig.GeneratorDef, row: Row)
 	local levels = TycoonController.GetGeneratorLevels()
@@ -194,17 +259,36 @@ local function onBuyClicked(generator: TycoonConfig.GeneratorDef, row: Row)
 	end
 	if TycoonController.RequestUpgrade(generator.Id) then
 		-- Tiny bounce so the purchase feels like it registered.
-		local holder = row.Button.Parent :: Frame
-		local scale = holder:FindFirstChild("BuyBounce") :: UIScale?
-		if not scale then
-			local newScale = Instance.new("UIScale")
-			newScale.Name = "BuyBounce"
-			newScale.Parent = holder
-			scale = newScale
+		bounceHolder(row.Button.Parent :: Frame)
+	end
+end
+
+local function onMaxClicked(generator: TycoonConfig.GeneratorDef, row: Row)
+	local levels = TycoonController.GetGeneratorLevels()
+	local current = levels[generator.Id] or 0
+	if current >= generator.MaxLevel or not TycoonConfig.IsUnlocked(generator, levels) then
+		return
+	end
+	local count, _, nextCost = TycoonConfig.GetMaxAffordable(generator, current, TycoonController.GetCash())
+	if count == 0 then
+		ToastController.Show(("Need %s"):format(NumberFormat.Money(nextCost or 0)), "Error")
+		return
+	end
+	if TycoonController.RequestUpgradeMax(generator.Id) then
+		bounceHolder(row.MaxHolder)
+	end
+end
+
+local function onMaxAllClicked()
+	local plan = TycoonConfig.GetMaxAllPlan(TycoonController.GetGeneratorLevels(), TycoonController.GetCash())
+	if plan.Levels == 0 then
+		if plan.NextCost then
+			ToastController.Show(("Need %s"):format(NumberFormat.Money(plan.NextCost)), "Error")
 		end
-		local bounce = scale :: UIScale
-		bounce.Scale = 0.92
-		TweenService:Create(bounce, TweenInfo.new(0.18, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+		return
+	end
+	if TycoonController.RequestUpgradeMax(nil) then
+		bounceHolder(maxAllHolder)
 	end
 end
 
@@ -273,7 +357,7 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 	titleRow.Name = "TitleRow"
 	titleRow.BackgroundTransparency = 1
 	titleRow.Position = UDim2.fromOffset(94, 12)
-	titleRow.Size = UDim2.new(1, -(94 + BUTTON_SIZE.X + 20), 0, 26)
+	titleRow.Size = UDim2.new(1, -(94 + TEXT_RIGHT_INSET), 0, 26)
 	titleRow.ZIndex = z
 	titleRow.Parent = body
 	local titleLayout = Instance.new("UIListLayout")
@@ -315,7 +399,7 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		TextColor3 = Colors.Muted,
 		RichText = true,
 		Position = UDim2.fromOffset(94, 40),
-		Size = UDim2.new(1, -(94 + BUTTON_SIZE.X + 20), 0, 18),
+		Size = UDim2.new(1, -(94 + TEXT_RIGHT_INSET), 0, 18),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		ZIndex = z,
 		Parent = body,
@@ -349,6 +433,23 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		end,
 	})
 
+	local maxButton, maxHolder = UIKit.Button({
+		Name = "Max",
+		Parent = body,
+		Style = "Gold",
+		Text = "MAX",
+		SubText = "",
+		TextSize = 16,
+		Size = UDim2.fromOffset(MAX_BUTTON_SIZE.X, MAX_BUTTON_SIZE.Y),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -(14 + BUTTON_SIZE.X + MAX_BUTTON_GAP), 0.5, -2),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = z,
+		OnClick = function()
+			onMaxClicked(generator, row)
+		end,
+	})
+
 	row = {
 		Holder = holder,
 		Body = body,
@@ -360,6 +461,8 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		Detail = detail,
 		Progress = progress,
 		Button = button,
+		MaxButton = maxButton,
+		MaxHolder = maxHolder,
 	}
 	rows[generator.Id] = row
 end
@@ -541,6 +644,19 @@ local function build()
 	for index, generator in TycoonConfig.Generators do
 		buildRow(list, generator, index)
 	end
+	maxAllButton, maxAllHolder = UIKit.Button({
+		Name = "MaxAll",
+		Parent = list,
+		Style = "Gold",
+		Text = "⚡ MAX ALL",
+		SubText = "",
+		TextSize = 18,
+		Size = UDim2.new(1, -8, 0, MAX_ALL_HEIGHT),
+		LayoutOrder = #TycoonConfig.Generators + 1,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = 4,
+		OnClick = onMaxAllClicked,
+	})
 
 	buildFooter(content)
 end
@@ -560,10 +676,26 @@ function UpgradesPanel.Toggle()
 	end
 end
 
+-- Throttled to REFRESH_INTERVAL: a burst of syncs refreshes once now and
+-- once at the end of the window.
 function UpgradesPanel.Refresh()
-	if modal and modal.IsOpen() then
-		refresh()
+	if not modal or not modal.IsOpen() or refreshQueued then
+		return
 	end
+	local wait = lastRefresh + REFRESH_INTERVAL - os.clock()
+	if wait <= 0 then
+		lastRefresh = os.clock()
+		refresh()
+		return
+	end
+	refreshQueued = true
+	task.delay(wait, function()
+		refreshQueued = false
+		lastRefresh = os.clock()
+		if modal.IsOpen() then
+			refresh()
+		end
+	end)
 end
 
 -- `_hud` is accepted for compatibility with the HUD's call; the panel has
