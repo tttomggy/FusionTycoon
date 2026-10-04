@@ -30,6 +30,7 @@ local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
 local ResultController = require(script.Parent.ResultController)
 local ToastController = require(script.Parent.ToastController)
+local ShopController = require(script.Parent.ShopController)
 
 local AnnouncementController = {}
 
@@ -467,6 +468,7 @@ local function onMultiplierUpgraded(payload: any)
 	if payload.Success == false then
 		if payload.Reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
 			ToastController.Show(("Need %s"):format(NumberFormat.Money(payload.Cost)), "Error")
+			ShopController.OfferForShortfall("Multiplier Pad", payload.Cost)
 		end
 		return
 	end
@@ -493,6 +495,7 @@ local function onGachaPullResult(payload: any)
 	-- Successful pulls are ResultController's pull/result cards.
 	if typeof(payload) == "table" and not payload.Success and payload.Reason == "InsufficientCash" and payload.Cost then
 		ToastController.Show(("Need %s for a pull"):format(NumberFormat.Money(payload.Cost)), "Error")
+		ShopController.OfferForShortfall("Gacha pull", payload.Cost)
 	end
 end
 
@@ -588,6 +591,12 @@ function AnnouncementController.Init()
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(onGoalCompleted)
 	RemoteEvents.RebirthAnnouncement.OnClientEvent:Connect(onRebirthAnnouncement)
 	RemoteEvents.HeistFeed.OnClientEvent:Connect(onHeistFeed)
+	RemoteEvents.ShopAnnouncement.OnClientEvent:Connect(function(payload: any)
+		if typeof(payload) == "table" and payload.Kind == "Overclock" and typeof(payload.PlayerName) == "string" then
+			local seconds = if typeof(payload.Seconds) == "number" then payload.Seconds else ShopConfig.OverclockSeconds
+			AnnouncementController.ShowOverclock(payload.PlayerName, seconds)
+		end
+	end)
 end
 
 return AnnouncementController

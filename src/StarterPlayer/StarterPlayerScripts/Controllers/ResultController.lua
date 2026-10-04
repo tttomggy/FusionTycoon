@@ -51,6 +51,7 @@ local TycoonController = require(script.Parent.TycoonController)
 local ItemController = require(script.Parent.ItemController)
 local HudController = require(script.Parent.HudController)
 local ToastController = require(script.Parent.ToastController)
+local ShopController = require(script.Parent.ShopController)
 
 local ResultController = {}
 
@@ -97,6 +98,7 @@ local function closeBigCard()
 	end
 	local holder = bigHolder
 	bigHolder = nil
+	UIKit.SetOverlay("ResultCard", false)
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -207,6 +209,7 @@ local function showBigCard(info: BigCardInfo)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	local z = body.ZIndex + 3
 
@@ -417,6 +420,7 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	UIKit.MutationCardStroke(body, mutation)
 	local z = body.ZIndex + 3
@@ -552,6 +556,7 @@ local multiHolder: Frame? = nil
 local function closeMultiCard()
 	local holder = multiHolder
 	multiHolder = nil
+	UIKit.SetOverlay("MultiPull", false)
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -657,6 +662,7 @@ local function showMultiCard(items: { any })
 		ZIndex = 1, -- under the big card the best pull may also get
 	})
 	multiHolder = holder
+	UIKit.SetOverlay("MultiPull", true)
 	local z = body.ZIndex + 1
 
 	UIKit.Label({
@@ -735,6 +741,7 @@ local function onGachaMultiPullResult(payload: any)
 	if payload.Success ~= true then
 		if payload.Reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
 			ToastController.Show(("Need %s for 10 pulls"):format(NumberFormat.Money(payload.Cost)), "Error")
+			ShopController.OfferForShortfall("Pull ×10", payload.Cost)
 		end
 		return
 	end
@@ -774,6 +781,7 @@ local function showRebirthCard(rebirths: number)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	local z = body.ZIndex + 3
 
@@ -895,6 +903,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	UIKit.MutationCardStroke(body, item.Mutation)
 	local z = body.ZIndex + 3
 	UIKit.Label({
@@ -1065,6 +1074,7 @@ local function showFuseAllCard(result: any)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	local z = body.ZIndex + 1
 	UIKit.Padding(body, 18, 20, 18, 20)
 	local layout = Instance.new("UIListLayout")

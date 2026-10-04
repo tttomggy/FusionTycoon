@@ -28,6 +28,7 @@ local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
+local ShopController = require(script.Parent.ShopController)
 
 local GeneratorController = {}
 
@@ -85,6 +86,7 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	local cost = TycoonConfig.GetUpgradeCost(generator, level)
 	if TycoonController.GetCash() < cost then
 		ToastController.Show(("Need %s"):format(NumberFormat.Money(cost)), "Error")
+		ShopController.OfferForShortfall(("%s LV %d"):format(generator.Name, level + 1), cost)
 		return
 	end
 	TycoonController.RequestUpgrade(id)
