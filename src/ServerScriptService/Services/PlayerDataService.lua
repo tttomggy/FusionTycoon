@@ -23,6 +23,8 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
+local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -32,7 +34,7 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
-	-- MutationConfig name ("Golden", "Diamond", "Rainbow"); nil = normal.
+	-- MutationConfig name ("Golden", "Charged", ...); nil = normal.
 	Mutation: string?,
 }
 
@@ -57,6 +59,12 @@ export type PlayerData = {
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
+	-- Heist: items delivered home, and shields raised with LOCK (the console)
+	-- (drive the first_steal / first_shield goals).
+	TotalSteals: number,
+	ShieldRaises: number,
+	-- One-time tips/cards already shown (TipConfig ids -> true).
+	Tips: { [string]: boolean },
 	-- How many times the player has rebirthed (RebirthConfig).
 	Rebirths: number,
 	-- Index entries found ("<itemId>|<Mutation or Normal>" -> true). Kept
@@ -104,6 +112,8 @@ export type TycoonSnapshot = {
 	-- Uids of this player's displayed items a thief is carrying right now:
 	-- they earn nothing until back (the client's income skips them too).
 	CarriedUids: { string },
+	-- One-time tips already seen (TipConfig ids), as a dense list.
+	TipKeys: { string },
 }
 
 type State = {
@@ -153,6 +163,9 @@ local DEFAULT_DATA: PlayerData = {
 	HasDropper2 = false,
 	GoalIndex = 1,
 	TotalFusions = 0,
+	TotalSteals = 0,
+	ShieldRaises = 0,
+	Tips = {},
 	Rebirths = 0,
 	Index = {},
 }
@@ -250,6 +263,19 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.TotalFusions) == "number" then
 		data.TotalFusions = raw.TotalFusions
+	end
+	if typeof(raw.TotalSteals) == "number" then
+		data.TotalSteals = raw.TotalSteals
+	end
+	if typeof(raw.ShieldRaises) == "number" then
+		data.ShieldRaises = raw.ShieldRaises
+	end
+	if typeof(raw.Tips) == "table" then
+		for id, seen in raw.Tips do
+			if seen == true and TipConfig.IsValid(id) then
+				data.Tips[id] = true
+			end
+		end
 	end
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
@@ -668,6 +694,54 @@ function PlayerDataService.IncrementTotalFusions(player: Player)
 	end
 end
 
+-- Changes an owned item's mutation in place (same Uid; Power Surge
+-- lightning Charging a displayed item) and marks its Index entry. Returns
+-- whether that Index entry is new. The caller re-syncs and restyles.
+function PlayerDataService.SetItemMutation(player: Player, uid: string, mutation: string?): boolean
+	local data = state.sessionCache[player.UserId]
+	local item = PlayerDataService.GetItemByUid(player, uid)
+	if not data or not item or (mutation ~= nil and not MutationConfig.IsValid(mutation)) then
+		return false
+	end
+	item.Mutation = mutation
+	local key = IndexConfig.GetKey(item.ItemId, mutation)
+	local isNew = data.Index[key] ~= true
+	data.Index[key] = true
+	return isNew
+end
+
+-- Marks a one-time tip seen (TipConfig ids only).
+function PlayerDataService.MarkTipSeen(player: Player, id: string)
+	local data = state.sessionCache[player.UserId]
+	if data and TipConfig.IsValid(id) then
+		data.Tips[id] = true
+	end
+end
+
+-- Studio /tips reset.
+function PlayerDataService.ResetTips(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Tips = {}
+	end
+end
+
+-- A heist delivered (HeistService).
+function PlayerDataService.IncrementTotalSteals(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.TotalSteals += 1
+	end
+end
+
+-- A shield raised with LOCK (HeistService.TryLock).
+function PlayerDataService.IncrementShieldRaises(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.ShieldRaises += 1
+	end
+end
+
 -- Session-only progress readout for the current goal (nil once every goal is
 -- done). Not saved: GoalService recomputes it on every sync.
 function PlayerDataService.SetGoalProgress(player: Player, progress: GoalProgress?)
@@ -706,6 +780,7 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 		CashMultiplierLevel = data.CashMultiplierLevel,
 		Rebirths = data.Rebirths,
 		IndexMultiplier = IndexConfig.GetMultiplier(data.Index),
+		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
 	}
 end
 
@@ -731,6 +806,7 @@ end
 
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 	local pending = state.pendingOffline[player.UserId]
+	local data = state.sessionCache[player.UserId]
 	return {
 		Cash = PlayerDataService.GetCash(player),
 		Generators = PlayerDataService.GetGenerators(player) or {},
@@ -744,6 +820,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		PendingOffline = if pending then pending.Amount else 0,
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
+		TipKeys = indexKeys(data and data.Tips or {}),
 	}
 end
 
@@ -958,6 +1035,17 @@ function PlayerDataService:Init()
 	table.insert(state.connections, Players.PlayerAdded:Connect(onPlayerAdded))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(state.connections, RemoteEvents.RequestSync.OnServerEvent:Connect(onRequestSync))
+	-- MarkTipSeen { Id }: only TipConfig ids are stored; no reply needed (the
+	-- client marks it locally too, and the next snapshot carries it).
+	table.insert(
+		state.connections,
+		RemoteEvents.MarkTipSeen.OnServerEvent:Connect(function(player: Player, payload: unknown)
+			local id = typeof(payload) == "table" and (payload :: any).Id or nil
+			if TipConfig.IsValid(id) then
+				PlayerDataService.MarkTipSeen(player, id :: string)
+			end
+		end)
+	)
 
 	-- Covers anyone who joined before this service finished initialising.
 	for _, player in Players:GetPlayers() do

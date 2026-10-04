@@ -4,6 +4,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -23,6 +24,10 @@ local indexMultiplier = 1
 local pendingOffline = 0
 -- Uids of displayed items a thief is carrying: they earn nothing meanwhile.
 local carriedUids: { [string]: boolean } = {}
+-- One-time tips/cards already seen (saved; TipConfig ids).
+local tipsSeen: { [string]: boolean } = {}
+-- Marked here but not yet echoed back by a snapshot.
+local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
 
 local tycoonChanged = Instance.new("BindableEvent")
@@ -107,6 +112,22 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 	return pedestalDisplays[pedestalIndex]
 end
 
+-- A one-time tip/card was already shown to this account.
+function TycoonController.HasSeenTip(id: string): boolean
+	return tipsSeen[id] == true
+end
+
+-- Marks a one-time tip seen: locally at once (so it can't show twice before
+-- the next snapshot) and on the server (saved in PlayerData.Tips).
+function TycoonController.MarkTipSeen(id: string)
+	if tipsSeen[id] then
+		return
+	end
+	tipsSeen[id] = true
+	pendingTipMarks[id] = true
+	RemoteEvents.MarkTipSeen:FireServer({ Id = id })
+end
+
 -- One of this player's displayed items is being carried off by a thief.
 function TycoonController.IsItemCarried(uid: string): boolean
 	return carriedUids[uid] == true
@@ -137,6 +158,7 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		CashMultiplierLevel = cashMultiplierLevel,
 		Rebirths = rebirths,
 		IndexMultiplier = indexMultiplier,
+		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
 	}
 end
 
@@ -190,6 +212,25 @@ local function onSyncTycoon(snapshot: any)
 		end
 	end
 	InventoryController.SetDisplayedUids(displayedUids)
+	if typeof(snapshot.TipKeys) == "table" then
+		-- The server's set, plus marks it hasn't echoed yet (so a snapshot
+		-- already in flight can't make a tip show twice). /tips reset sends
+		-- an empty set, which clears everything already confirmed.
+		local fresh: { [string]: boolean } = {}
+		for _, id in snapshot.TipKeys do
+			if typeof(id) == "string" then
+				fresh[id] = true
+			end
+		end
+		for id in pendingTipMarks do
+			if fresh[id] then
+				pendingTipMarks[id] = nil
+			else
+				fresh[id] = true
+			end
+		end
+		tipsSeen = fresh
+	end
 	carriedUids = {}
 	if typeof(snapshot.CarriedUids) == "table" then
 		for _, uid in snapshot.CarriedUids do

@@ -1,4 +1,8 @@
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Controllers = script.Parent.Controllers
+
+-- Preload every sound slot (SoundConfig); a bad id warns once, then is silent.
+require(ReplicatedStorage.Shared.Modules.SoundKit).Preload()
 
 local InventoryController = require(Controllers.InventoryController)
 local FusionController = require(Controllers.FusionController)
@@ -15,6 +19,8 @@ local BeltController = require(Controllers.BeltController)
 local GeneratorController = require(Controllers.GeneratorController)
 local FactoryController = require(Controllers.FactoryController)
 local HeistController = require(Controllers.HeistController)
+local EventController = require(Controllers.EventController)
+local AdminController = require(Controllers.AdminController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -29,6 +35,8 @@ GoalMarkerController.Init()
 BeltController.Init()
 GeneratorController.Init()
 HeistController.Init()
+EventController.Init()
+AdminController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

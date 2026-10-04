@@ -75,6 +75,9 @@ PlotLayout.ShieldFence = {
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
 PlotLayout.CLAIM_STATION = v3(0, 0, 24)
+-- The heist LOCK console: inside the gate, right of the walkway, between the
+-- claim pad and the Gacha Pad, facing +Z (the gate) so you see it walking in.
+PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
@@ -83,7 +86,7 @@ PlotLayout.PEDESTAL_Z = -2
 PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17 } -- face +Z (the gate)
 
 PlotLayout.FUSION_MACHINE = v3(0, 0, -19)
-PlotLayout.ODDS_BOARD = v3(13, 0, -19)
+PlotLayout.ODDS_BOARD = v3(14, 0, -19) -- Events 2: 13 -> 14 for the 9-wide board (clear of the machine and the portal)
 -- Faces the gate (+Z), yawed this far toward the walkway (-X from here).
 PlotLayout.ODDS_BOARD_YAW_TOWARD_WALKWAY_DEGREES = 30
 
@@ -302,7 +305,36 @@ PlotLayout.Pedestal = {
 	OrbBobPeriod = 2.4,
 	LabelOffsetY = 8.5, -- filled label, above the pedestal's bottom
 	EmptyLabelOffsetY = 5, -- the small EMPTY pill, above the pedestal's bottom
+	StealMarkerOffsetY = 11.5, -- the heist's red hand marker, above the filled label
+	GuardedChipOffsetY = 13.5, -- the heist's 🛡 GUARDED chip, above the label and marker
 	PromptDistance = 6,
+}
+
+--[[ LOCK console (heist shield button) ---------------------------------------------- ]]
+
+PlotLayout.LockConsole = {
+	Footprint = 3, -- square, for the overlap check
+	PostSize = v3(2, 4.5, 2),
+	TopSize = v3(3.5, 0.6, 2.5),
+	TopTiltDegrees = 25, -- the top leans toward +Z (the gate)
+	ButtonDiameter = 1.5, -- a SurfaceGui disc on the top (no flat Neon disc)
+	ButtonGap = 0.03, -- the disc's face part sits this far above the top
+	PromptDistance = 8,
+	LabelOffsetY = 7, -- above the post's bottom
+	LabelMaxDistance = 60,
+}
+
+--[[ Golden Rain coins (EventService) ------------------------------------------------- ]]
+
+PlotLayout.EventCoin = {
+	Size = v3(0.3, 2, 2), -- a Neon cylinder on its edge (seen from the side)
+	CenterY = 1.6, -- above the floor top
+	SpawnMargin = 1.5, -- clear of walls and every footprint by this much
+	SpawnTries = 12, -- random points tried per coin
+	SpinDegPerSec = 120,
+	Bob = 0.35,
+	BobPeriod = 1.2,
+	BigScale = 2, -- a BIG coin is this many times the size
 }
 
 --[[ Fusion Machine ---------------------------------------------------------------- ]]
@@ -327,7 +359,8 @@ PlotLayout.Machine = {
 	PromptDistance = 10,
 
 	OddsPostSize = v3(0.6, 6, 0.6),
-	OddsBoardSize = v3(7, 5, 0.4),
+	OddsBoardSize = v3(9, 6, 0.4), -- Events 2: a real table (was 7 x 5)
+	OddsPixelsPerStud = 60,
 	SurfacePixelsPerStud = 40,
 }
 
@@ -420,7 +453,10 @@ local function boxFootprint(name: string, position: Vector3, sizeX: number, size
 	return rect(name, position.X - sizeX / 2, position.X + sizeX / 2, position.Z - sizeZ / 2, position.Z + sizeZ / 2)
 end
 
-local function checkLayout()
+-- Every footprint on the plan: (stations, machine, board, console and
+-- pedestals; the factory line; the walkway). The one list, shared by the
+-- assertions and IsFloorPointFree.
+local function collectFootprints(): ({ Footprint }, { Footprint }, Footprint)
 	local stationRadius = PlotLayout.Station.RimDiameter / 2
 	local footprints: { Footprint } = {
 		circle("ClaimStation", PlotLayout.CLAIM_STATION, stationRadius),
@@ -428,6 +464,7 @@ local function checkLayout()
 		circle("MultiplierStation", PlotLayout.MULTIPLIER_STATION, stationRadius),
 		circle("FusionMachine", PlotLayout.FUSION_MACHINE, PlotLayout.Machine.RimDiameter / 2),
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
+		boxFootprint("LockConsole", PlotLayout.LOCK_CONSOLE, PlotLayout.LockConsole.Footprint, PlotLayout.LockConsole.Footprint),
 	}
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
 		local cap = PlotLayout.Pedestal.CapSize
@@ -458,6 +495,34 @@ local function checkLayout()
 		PlotLayout.WALKWAY_Z_MIN,
 		PlotLayout.WALKWAY_Z_MAX
 	)
+	return footprints, factory, walkway
+end
+
+-- True when a point on the floor (plot-local x, z) is inside the walls by
+-- `margin` and at least `margin` from every station, pedestal, machine and
+-- factory footprint (the walkway is fine). Golden Rain drops coins here.
+function PlotLayout.IsFloorPointFree(x: number, z: number, margin: number): boolean
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS - margin
+	if math.abs(x) > inner or math.abs(z) > inner then
+		return false
+	end
+	local footprints, factory = collectFootprints()
+	local probe = circle("Probe", v3(x, 0, z), margin)
+	for _, list in { footprints, factory } do
+		for _, footprint in list do
+			if overlaps(probe, footprint) then
+				return false
+			end
+		end
+	end
+	return true
+end
+
+local function checkLayout()
+	local footprints, factory, walkway = collectFootprints()
+	local belt = PlotLayout.FactoryBelt
+	local collector = PlotLayout.Collector
+	local portal = PlotLayout.RebirthPortal
 	for _, footprint in factory do
 		assert(not overlaps(footprint, walkway), ("PlotLayout: %s overlaps the walkway"):format(footprint.Name))
 		table.insert(footprints, footprint)

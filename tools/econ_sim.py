@@ -20,6 +20,11 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # away between: Rebirth 1-3
                                                 # in played time, with vs.
                                                 # without offline earnings
+        python3 tools/econ_sim.py 30 12 --events
+                                                # the lab-weather clock on
+                                                # (EventConfig), then Rebirth
+                                                # 1-3 vs. the same seeds
+                                                # without events
 """
 import random, sys
 
@@ -62,7 +67,10 @@ FUSE_SECONDS = 4.0
 PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # Mutations: (name, income mult, gacha chance, fusion-success chance)
 MUTATIONS = [("Rainbow", 12, 0.001, 0.0005), ("Diamond", 5, 0.008, 0.004), ("Golden", 2, 0.04, 0.02)]
-MUT_MULT = {"None": 1, "Golden": 2, "Diamond": 5, "Rainbow": 12}
+MUT_MULT = {"None": 1, "Golden": 2, "Charged": 3, "Diamond": 5, "Void": 8, "Rainbow": 12, "Celestial": 20}
+# Index variants per item: Normal + all six mutations (event-only included),
+# so a full page needs the event mutations too (IndexConfig: 17 x 7 = 119).
+INDEX_VARIANTS = 7
 # Rebirth costs REBIRTH_BASE * REBIRTH_GROWTH ** rebirths cash. The player
 # stops spending once the rebirth is within SAVE_SECONDS of income.
 REBIRTH_BASE = 1.5e7
@@ -84,6 +92,37 @@ OFFLINE_MIN_SECONDS = 120
 SESSION_SECONDS = 45 * 60
 AWAY_SECONDS = 8 * 3600
 
+# Events (EventConfig.lua), only with --events. The game picks each slot's
+# event from Random.new(slotStart); the sim draws the same distribution
+# from its own seeded RNG per slot.
+EVENTS = False
+EV_SLOT = 15 * 60
+EV_VOID_MOON_CHANCE = 0.15
+EV_DURATION = {"GoldenRain": 300, "PowerSurge": 300, "MeteorShower": 180, "RainbowStorm": 300,
+               "Night": 600, "VoidMoon": 600}
+EV_WEATHER = [("GoldenRain", 40), ("PowerSurge", 35), ("MeteorShower", 20), ("RainbowStorm", 5)]
+COIN_INTERVAL = 10         # a coin per plot every 10 s
+COIN_INCOME_SECONDS = 3    # each worth 3 s of income
+COIN_PICKUP = 0.70         # share of lab coins the player actually collects
+BIG_COIN_CHANCE = 8        # 1 in 8 lab coins is BIG ...
+BIG_COIN_INCOME_SECONDS = 20  # ... and worth this many seconds instead
+STREET_COIN_INTERVAL = 15  # a street coin every 15 s ...
+STREET_COIN_INCOME_SECONDS = 6  # ... paying the grabber 6 s of income
+# street coins are a race: the player gets 1 in SERVER_PLAYERS of them
+GOLDEN_RAIN_GOLDEN_ODDS = 3
+SURGE_GENERATOR_MULT = 1.25
+LIGHTNING_INTERVAL = 20
+LIGHTNING_CHARGE_CHANCE = 0.25
+SERVER_PLAYERS = 6         # lightning picks one displayed item in the server;
+                           # meteors are raced by this many players
+METEOR_COUNT = 6
+METEOR_CORE_TIERS = [("Epic", 60), ("Legendary", 30), ("Mythic", 9), ("Secret", 1)]
+METEOR_CELESTIAL = 0.15
+NIGHT_FUSION_MUT_ODDS = 2
+VOID_MOON_FUSION_BONUS = 0.05
+VOID_CHANCE = 0.05
+RAINBOW_STORM_ODDS = 5
+
 
 def run(seed, horizon=10 * 3600, sessions=0, offline=True):
     """t is played time. With sessions > 0 the player plays that many
@@ -93,6 +132,32 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
         horizon = sessions * SESSION_SECONDS
     next_break = SESSION_SECONDS if sessions else horizon + 1
     rng = random.Random(seed)
+    # Events: the clock starts at a random minute; one cached pick per slot.
+    ev_offset = random.Random(seed * 31 + 7).uniform(0, 3600)
+    ev_slots = {}
+    ev_last = [None, -1]  # (id, slot) seen last step: meteor cores on a start
+
+    def event_at(time):
+        if not EVENTS:
+            return None
+        clock = time + ev_offset
+        slot = int(clock // EV_SLOT)
+        if slot not in ev_slots:
+            r = random.Random(slot * 104729 + 13)
+            if slot % 4 == 0:
+                ev = "VoidMoon" if r.random() < EV_VOID_MOON_CHANCE else "Night"
+            else:
+                roll = r.random() * sum(w for _, w in EV_WEATHER)
+                ev = EV_WEATHER[-1][0]
+                for name, w in EV_WEATHER:
+                    roll -= w
+                    if roll < 0:
+                        ev = name
+                        break
+            ev_slots[slot] = ev
+        ev = ev_slots[slot]
+        return (ev, slot) if clock - slot * EV_SLOT < EV_DURATION[ev] else None
+
     cash = 0.0
     t = 0.0
     rebirths = 0
@@ -118,7 +183,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
     def index_bonus():
         b = INDEX_PER_ENTRY * len(index)
         for tr in TIERS:
-            if sum(1 for e in index if e[0] == tr) == ITEMS_PER_TIER[tr] * 4:
+            if sum(1 for e in index if e[0] == tr) == ITEMS_PER_TIER[tr] * INDEX_VARIANTS:
                 b += INDEX_PER_PAGE
         return 1 + b
 
@@ -132,8 +197,10 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
         items.sort(reverse=True)
         return items[:PEDESTALS]
 
-    def cps():
+    def cps(ev=None):
         g = sum(b * GEN_TIER_MULT[tr] * gen[i] for i, tr, b, *_ in GENS)
+        if ev == "PowerSurge":
+            g *= SURGE_GENERATOR_MULT
         p = sum(v for v, *_ in ped_items())
         return (g + p) * global_mult()
 
@@ -155,15 +222,48 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
                 return tr
         return "Common"
 
-    def roll_mut(fusion):
+    def odds_mult(ev, name, fusion):
+        if ev == "GoldenRain" and name == "Golden":
+            return GOLDEN_RAIN_GOLDEN_ODDS
+        if ev == "RainbowStorm":
+            return RAINBOW_STORM_ODDS
+        if ev in ("Night", "VoidMoon") and fusion:
+            return NIGHT_FUSION_MUT_ODDS
+        return 1
+
+    def roll_mut(fusion, ev=None):
         if not DEPTH:
             return "None"
+        if fusion and ev == "VoidMoon" and rng.random() < VOID_CHANCE:
+            return "Void"  # replaces the normal fusion roll
         r = rng.random(); acc = 0
         for name, _, g, f in MUTATIONS:
-            acc += (f if fusion else g) * luck()
+            acc += (f if fusion else g) * luck() * odds_mult(ev, name, fusion)
             if r <= acc:
                 return name
         return "None"
+
+    def meteor_core():
+        roll = rng.random() * sum(w for _, w in METEOR_CORE_TIERS)
+        tier = METEOR_CORE_TIERS[0][0]
+        for tr, w in METEOR_CORE_TIERS:
+            roll -= w
+            if roll < 0:
+                tier = tr
+                break
+        add(tier, "Celestial" if rng.random() < METEOR_CELESTIAL else "None")
+
+    def lightning():
+        # One strike on a random displayed item in a SERVER_PLAYERS server.
+        if rng.random() >= 1 / SERVER_PLAYERS:
+            return
+        shown = ped_items()
+        if not shown:
+            return
+        _, tr, mu = rng.choice(shown)
+        if mu == "None" and rng.random() < LIGHTNING_CHARGE_CHANCE:
+            inv[(tr, "None")] -= 1
+            add(tr, "Charged")
 
     step = 1.0
     while t < horizon:
@@ -172,8 +272,22 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
             next_break += SESSION_SECONDS
             if offline and AWAY_SECONDS >= OFFLINE_MIN_SECONDS:
                 cash += cps() * OFFLINE_RATE * min(AWAY_SECONDS, OFFLINE_MAX_SECONDS)
-        income = cps()
+        cur = event_at(t)
+        ev = cur[0] if cur else None
+        if cur and (ev_last[0], ev_last[1]) != cur:
+            if ev == "MeteorShower":
+                # METEOR_COUNT cores, SERVER_PLAYERS racing: about one each.
+                for _ in range(round(METEOR_COUNT / SERVER_PLAYERS)):
+                    meteor_core()
+        ev_last[0], ev_last[1] = (cur if cur else (None, -1))
+        income = cps(ev)
         cash += income * step
+        if ev == "GoldenRain":
+            lab_seconds = ((BIG_COIN_CHANCE - 1) * COIN_INCOME_SECONDS + BIG_COIN_INCOME_SECONDS) / BIG_COIN_CHANCE
+            cash += income * COIN_PICKUP * lab_seconds / COIN_INTERVAL * step
+            cash += income * (1 / SERVER_PLAYERS) * STREET_COIN_INCOME_SECONDS / STREET_COIN_INTERVAL * step
+        if ev == "PowerSurge" and int(t) % LIGHTNING_INTERVAL == 0:
+            lightning()
         t += step
         # rebirth as soon as affordable
         rebirth_cost = REBIRTH_BASE * REBIRTH_GROWTH ** rebirths
@@ -201,7 +315,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
             if gcost <= max(income, 1) * PULL_BUDGET_SECONDS and cash >= gcost:
                 cash -= gcost
                 pulls += 1
-                add(roll_tier(), roll_mut(False))
+                add(roll_tier(), roll_mut(False, ev))
                 bought = True
             if opts:
                 best = min(opts, key=lambda o: o[0] / max(o[1], 1e-9))
@@ -220,8 +334,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
             while inv.get((tr, "None"), 0) - keep() >= FUSE_COUNT:
                 t += FUSE_SECONDS
                 inv[(tr, "None")] -= FUSE_COUNT
-                if rng.random() < FUSE_CHANCE[tr][FUSE_COUNT]:
-                    add(TIERS[TIERS.index(tr) + 1], roll_mut(True))
+                bonus = VOID_MOON_FUSION_BONUS if ev == "VoidMoon" else 0
+                if rng.random() < min(1, FUSE_CHANCE[tr][FUSE_COUNT] + bonus):
+                    add(TIERS[TIERS.index(tr) + 1], roll_mut(True, ev))
                 else:
                     inv[(tr, "None")] += 1
         if pulls >= 1: mark("first_pull")
@@ -272,6 +387,8 @@ if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--no-depth" in sys.argv:
         DEPTH = False
+    if "--events" in sys.argv:
+        EVENTS = True
     sessions = 0
     for a in sys.argv:
         if a.startswith("--fuse="):
@@ -285,7 +402,7 @@ if __name__ == "__main__":
     hours = float(args[1]) if len(args) > 1 else 10
     keys = ["first_pull", "gen_ember", "first_Rare", "first_Epic", "mult1", "first_Golden", "gen_flare",
             "first_Legendary", "first_Diamond", "gen_core", "first_Mythic", "rebirth1", "gen_sing", "rebirth2",
-            "rebirth3", "first_Rainbow", "rebirth4", "sing_lv10", "rebirth5", "first_Secret", "rebirth6",
+            "rebirth3", "first_Rainbow", "first_Charged", "first_Void", "first_Celestial", "rebirth4", "sing_lv10", "rebirth5", "first_Secret", "rebirth6",
             "rebirth7", "rebirth8", "mult_max"]
     runs = [run(s, hours * 3600) for s in range(seeds)]
     lo, mid, hi = seeds // 10, seeds // 2, seeds - 1 - seeds // 10
@@ -294,5 +411,18 @@ if __name__ == "__main__":
         f = lambda v: fmt(v if v < 1e12 else None)
         print(f"{k:16s} median {f(vals[mid])}   p10 {f(vals[lo])}  p90 {f(vals[hi])}")
     print(f"after {hours:g} h: rebirths median", sorted(r[2] for r in runs)[mid],
-          " index entries median", sorted(r[3] for r in runs)[mid], "/ 68",
+          " index entries median", sorted(r[3] for r in runs)[mid], "/", sum(ITEMS_PER_TIER.values()) * INDEX_VARIANTS,
           " cps median", f"{sorted(r[1] for r in runs)[mid]:.3g}")
+    if EVENTS:
+        # The same seeds without events: how much the clock speeds Rebirth
+        # 1-3 (target: at most 15% sooner).
+        EVENTS = False
+        base = [run(s, hours * 3600) for s in range(seeds)]
+        print("events vs. none (same seeds), median:")
+        for k in ["rebirth1", "rebirth2", "rebirth3"]:
+            a = sorted(r[0].get(k, 1e12) for r in base)[mid]
+            b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
+            if a < 1e12 and b < 1e12:
+                print(f"  {k:10s} none {fmt(a)}  events {fmt(b)}  {(a - b) / a:+.1%} sooner")
+            else:
+                print(f"  {k:10s} none {fmt(a if a < 1e12 else None)}  events {fmt(b if b < 1e12 else None)}")

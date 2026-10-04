@@ -25,10 +25,18 @@ local REMOTE_EVENT_NAMES = {
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
 	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
 	"ClaimOffline", -- client -> server: collect the pending offline earnings (no args; the server knows the amount)
+	"EventFx", -- server -> clients: an event's world moment; { Kind = "StrikeWarning", Pedestal, Position, Seconds } | { Kind = "Lightning", Position, Result = "Charged"|"Missed" } | { Kind = "Meteor", From, To, Seconds } | { Kind = "Coin", Position, Amount, Big } (coin: the collector only)
+	"EventNotice", -- server -> client: an event toast for one player; { Text, Big? } ("⚡ Your <item> got CHARGED!", "Too slow!")
+	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
+	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
-	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt (server time) }
+	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }
 	"HeistEnded", -- server -> thief and victim: a carry ended; { Role, Outcome = "Delivered"|"Saved"|"Timeout"|"Left"|"Died", Item, OtherName }
 	"HeistFeed", -- server -> all clients: Legendary+ heist banner; { Kind = "Grab"|"Stole"|"Caught", Thief, Victim, Tier, Mutation?, ItemName, ItemId }
+	"AdminOpen", -- server -> one admin: open the Admin panel (sent only after AdminService re-checked AdminConfig; non-admins never get it)
+	"AdminAction", -- client -> server: an Admin panel action; { Action, Args, Scope = "Server"|"All" } (AdminService validates the sender and every arg)
+	"AdminResult", -- server -> one admin: outcome of an AdminAction; { Ok, Text }
+	"AdminBroadcast", -- server -> all clients: a filtered admin banner; { Text }
 }
 
 local function getOrCreateFolder(): Folder

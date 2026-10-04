@@ -22,6 +22,10 @@ local Colors = UITheme.Colors
 
 local TOAST_HEIGHT = 44
 local HOLD_SECONDS = 2
+-- Big toasts: the one-time heist tips (bigger text, held longer).
+local BIG_TOAST_HEIGHT = 56
+local BIG_HOLD_SECONDS = 4
+local BIG_TEXT_SIZE = 20
 local MAX_VISIBLE = 2
 -- Sits above the bottom buttons and the REBIRTH! slot (UITheme). Raised
 -- while a bottom result card (fail / pull row) is showing.
@@ -42,7 +46,7 @@ local function ensureBuilt(): Frame
 	frame.BackgroundTransparency = 1
 	frame.AnchorPoint = Vector2.new(0.5, 1)
 	frame.Position = UDim2.new(0.5, 0, 1, -BASE_BOTTOM_OFFSET)
-	frame.Size = UDim2.fromOffset(600, (TOAST_HEIGHT + 12) * MAX_VISIBLE)
+	frame.Size = UDim2.fromOffset(720, (BIG_TOAST_HEIGHT + 12) * MAX_VISIBLE)
 	frame.Parent = gui
 
 	local layout = Instance.new("UIListLayout")
@@ -70,9 +74,13 @@ end
 
 local order = 0
 
-function ToastController.Show(text: string, kind: ToastKind?)
+export type ToastOptions = { Big: boolean? }
+
+function ToastController.Show(text: string, kind: ToastKind?, options: ToastOptions?)
 	local parent = ensureBuilt()
 	order += 1
+	local big = options ~= nil and options.Big == true
+	local height = if big then BIG_TOAST_HEIGHT else TOAST_HEIGHT
 
 	-- Holder sized to the toast + its 4 px shadow so the list layout spaces
 	-- them correctly.
@@ -80,7 +88,7 @@ function ToastController.Show(text: string, kind: ToastKind?)
 	holder.Name = "Toast"
 	holder.BackgroundTransparency = 1
 	holder.AutomaticSize = Enum.AutomaticSize.X
-	holder.Size = UDim2.fromOffset(0, TOAST_HEIGHT + UITheme.SmallShadowOffset)
+	holder.Size = UDim2.fromOffset(0, height + UITheme.SmallShadowOffset)
 	holder.LayoutOrder = order
 
 	-- The gradient lives on a background Frame and the words on a child
@@ -89,7 +97,7 @@ function ToastController.Show(text: string, kind: ToastKind?)
 	local body = Instance.new("Frame")
 	body.Name = "Body"
 	body.AutomaticSize = Enum.AutomaticSize.X
-	body.Size = UDim2.fromOffset(0, TOAST_HEIGHT)
+	body.Size = UDim2.fromOffset(0, height)
 	body.BackgroundColor3 = Colors.White
 	body.ZIndex = 2
 	body.Parent = holder
@@ -100,8 +108,8 @@ function ToastController.Show(text: string, kind: ToastKind?)
 	UIKit.Label({
 		Name = "Text",
 		Text = text,
-		Font = UITheme.Fonts.Body,
-		TextSize = 16,
+		Font = if big then UITheme.Fonts.BodyHeavy else UITheme.Fonts.Body,
+		TextSize = if big then BIG_TEXT_SIZE else 16,
 		TextColor3 = Colors.Text,
 		AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromScale(0, 1),
@@ -119,7 +127,7 @@ function ToastController.Show(text: string, kind: ToastKind?)
 		dismiss(visible[1])
 	end
 
-	task.delay(HOLD_SECONDS, function()
+	task.delay(if big then BIG_HOLD_SECONDS else HOLD_SECONDS, function()
 		dismiss(holder)
 	end)
 end

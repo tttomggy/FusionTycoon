@@ -39,6 +39,8 @@ type PlayerData = {
 	GoalIndex: number,
 	TotalFusions: number,
 	Rebirths: number,
+	TotalSteals: number,
+	ShieldRaises: number,
 }
 
 -- (done, current, target)
@@ -131,6 +133,12 @@ local EVALUATORS: { [string]: Evaluator } = {
 	own_mythic = ownTierGoal("Mythic", "Legendary", 2),
 	first_rebirth = function(_player, data)
 		return yesNo(data.Rebirths >= 1)
+	end,
+	first_shield = function(_player, data)
+		return yesNo(data.ShieldRaises >= 1)
+	end,
+	first_steal = function(_player, data)
+		return yesNo(data.TotalSteals >= 1)
 	end,
 }
 

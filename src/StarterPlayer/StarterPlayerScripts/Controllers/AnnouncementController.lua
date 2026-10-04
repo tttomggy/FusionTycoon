@@ -15,9 +15,9 @@
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -44,8 +44,6 @@ local HOLD_SECONDS = 3.5
 local MYTHIC_HOLD_SECONDS = 5
 local MYTHIC_SHAKE_MAGNITUDE_STUDS = 0.35
 local MYTHIC_SHAKE_DURATION_SECONDS = 0.5
--- The one sound id proven to load in this project (see RevealEffects).
-local SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
 -- How often a hold re-checks for a newer instant banner preempting it.
 local HOLD_POLL_SECONDS = 0.1
 
@@ -273,12 +271,7 @@ local function processQueue()
 			local banner = buildBanner(announcement)
 			currentBanner = banner
 
-			local sound = Instance.new("Sound")
-			sound.SoundId = SOUND_ID
-			sound.Volume = if big then 1 else 0.7
-			sound.Parent = banner
-			sound:Play()
-			Debris:AddItem(sound, 3)
+			SoundKit.Play("Toast", banner, { Volume = if big then 1.4 else 1 })
 
 			TweenService:Create(
 				banner,
@@ -345,18 +338,48 @@ local function onRareFusionAnnouncement(payload: any)
 		return
 	end
 	local tier = payload.Tier :: string
-	local mutation = if payload.Mutation == "Rainbow" or payload.Mutation == "Golden" or payload.Mutation == "Diamond"
-		then payload.Mutation :: string
-		else nil
+	local mutation = if MutationConfig.IsValid(payload.Mutation) then payload.Mutation :: string else nil
 	local verb = if payload.Verb == "displayed"
 		then "just displayed"
 		elseif payload.Verb == "pulled" then "pulled"
+		elseif payload.Verb == "grabbed" then "grabbed"
 		else "fused"
 	local text: string
 	if typeof(payload.PlayerName) == "string" and typeof(payload.ItemName) == "string" then
 		local who = UIKit.EscapeRichText(payload.PlayerName)
 		local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(payload.ItemName, mutation))
-		if mutation == "Rainbow" then
+		local mutationColor = UITheme.GetMutationColor(mutation)
+		if payload.Verb == "event" and mutation then
+			-- An event-only mutation: a SERVER banner at any tier, in its colour.
+			local word = UIKit.Colored(mutation:upper(), mutationColor or Colors.Text)
+			local item = UIKit.EscapeRichText(payload.ItemName)
+			local line = if payload.Source == "VoidMoon"
+				then ("%s got a %s %s under the Void Moon!"):format(who, word, item)
+				elseif payload.Source == "Lightning" then ("%s's %s got %s by lightning!"):format(who, item, word)
+				elseif payload.Source == "Meteor" then ("%s found a %s %s in a meteor!"):format(who, word, item)
+				else ("%s got a %s %s!"):format(who, word, item)
+			enqueue({
+				Text = line,
+				AccentColor = mutationColor or Colors.Text,
+				Big = {
+					Caption = "SERVER · EVENT MUTATION",
+					CaptionColor = mutationColor or Colors.White,
+					Left = UITheme.TowardInk(mutationColor or Colors.Panel, 0.55),
+					Right = Colors.Panel,
+					Emblem = function()
+						return UIKit.TierOrb(tier, 50, nil, mutation)
+					end,
+					Shake = false,
+				},
+			})
+			return
+		elseif payload.Verb == "charged" then
+			-- "Har's Charged Rift Engine got CHARGED!" (Power Surge lightning)
+			text = ("%s's %s got %s!"):format(who, UIKit.Colored(name, UITheme.GetTierLight(tier)), UIKit.Colored("CHARGED", mutationColor or Colors.Text))
+		elseif payload.Verb == "grabbed" then
+			-- "Har grabbed a Celestial Star Core from a meteor!"
+			text = ("%s grabbed a %s from a meteor!"):format(who, UIKit.Colored(name, mutationColor or UITheme.GetTierLight(tier)))
+		elseif mutation == "Rainbow" then
 			-- "Har pulled a Rainbow Star Core!"
 			text = ("%s %s a %s!"):format(who, verb, name)
 		elseif tier == "Secret" and payload.Verb ~= "displayed" then
@@ -480,6 +503,41 @@ local function onFusionResolved(result: any)
 			UIKit.EscapeRichText(def and def.Name or tostring(newItem.ItemId))
 		),
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
+	})
+end
+
+-- Rainbow Storm's server-wide hype banner (every client sees the event at
+-- once; this is the big rainbow kit on top of the event's own banner).
+function AnnouncementController.ShowEventHype(text: string)
+	enqueue({
+		Text = UIKit.EscapeRichText(text),
+		AccentColor = UITheme.Mutation.RainbowStops[1],
+		Big = {
+			Caption = "SERVER · EVENT",
+			CaptionColor = Colors.White,
+			Left = RAINBOW_STYLE.Left,
+			Right = RAINBOW_STYLE.Right,
+			Stops = RAINBOW_STYLE.Stops,
+			Emblem = rainbowEmblem,
+			Shake = false,
+		},
+	})
+end
+
+-- An admin's broadcast (already filtered on the server): the big banner
+-- in the Heist red, "SERVER · ADMIN".
+function AnnouncementController.ShowAdminBroadcast(text: string)
+	enqueue({
+		Text = "📣 " .. UIKit.EscapeRichText(text),
+		AccentColor = Colors.Danger,
+		Big = {
+			Caption = "SERVER · ADMIN",
+			CaptionColor = Colors.MythicBannerLabel,
+			Left = UITheme.Gradients.Heist.Bottom,
+			Right = Colors.Panel,
+			Emblem = rainbowEmblem,
+			Shake = false,
+		},
 	})
 end
 

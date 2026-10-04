@@ -11,6 +11,7 @@ local Debris = game:GetService("Debris")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
@@ -53,13 +54,7 @@ local MAJOR_SHAKE_DURATION_SECONDS = 0.5
 local MAJOR_EXPLOSION_SCALE = 0.5
 local MAJOR_EXPLOSION_BURST_SECONDS = 0.25
 
-local MINOR_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
--- TODO(asset gap, not a code bug): rbxasset://sounds/bell.wav fails to load
--- in this project ("Temp read failed"), so this deliberately reuses
--- MINOR_SOUND_ID for now - accepted tradeoff until a distinct "big reveal"
--- sound is sourced/uploaded. Major/minor reveals sound identical in the
--- meantime (Volume still differs).
-local MAJOR_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+-- Reveal sounds: SoundConfig slots RevealMajor / RevealMinor (SoundKit).
 
 -- Randomized, decaying screen shake via small Camera CFrame offsets. Safe to
 -- call for any "impactful moment," not just a fusion reveal.
@@ -158,11 +153,7 @@ function RevealEffects.PlayReveal(handles: EffectHandles, options: RevealOptions
 	burst.Parent = core
 	burst:Emit(if isMajor then MAJOR_BURST_COUNT else MINOR_BURST_COUNT)
 
-	local sound = Instance.new("Sound")
-	sound.SoundId = if isMajor then MAJOR_SOUND_ID else MINOR_SOUND_ID
-	sound.Volume = if isMajor then 1 else 0.55
-	sound.Parent = core
-	sound:Play()
+	SoundKit.Play(if isMajor then "RevealMajor" else "RevealMinor", core)
 
 	if isMajor then
 		RevealEffects.ShakeCamera(MAJOR_SHAKE_MAGNITUDE_STUDS, MAJOR_SHAKE_DURATION_SECONDS)
@@ -182,7 +173,6 @@ function RevealEffects.PlayReveal(handles: EffectHandles, options: RevealOptions
 	task.wait(if isMajor then MAJOR_PAUSE_SECONDS else MINOR_PAUSE_SECONDS)
 
 	flash:Destroy()
-	Debris:AddItem(sound, 3)
 	Debris:AddItem(burst, 3)
 end
 
