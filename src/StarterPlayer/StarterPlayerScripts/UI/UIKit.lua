@@ -535,6 +535,7 @@ function UIKit.Pill(props: PillProps): TextLabel
 	UIKit.PairGradient(fill, props.Gradient)
 
 	pill.Name = "Text"
+	pill:SetAttribute("PillFill", true)
 	pill.BackgroundTransparency = 1
 	pill.Position = UDim2.new()
 	pill.AnchorPoint = Vector2.zero
@@ -543,6 +544,18 @@ function UIKit.Pill(props: PillProps): TextLabel
 	pill.Parent = fill
 	fill.Parent = props.Parent
 	return pill
+end
+
+-- Shows / hides a pill from UIKit.Pill. A gradient pill's label sits in a
+-- fill Frame (hide that); a plain one IS the label. Never hide `.Parent`
+-- blindly: for a plain pill that is whatever it was parented to.
+function UIKit.SetPillVisible(pill: TextLabel, visible: boolean)
+	local fill = pill.Parent
+	if pill:GetAttribute("PillFill") == true and fill and fill:IsA("GuiObject") then
+		fill.Visible = visible
+	else
+		pill.Visible = visible
+	end
 end
 
 --[[ Mutation marks ------------------------------------------------------------
@@ -1001,6 +1014,11 @@ function UIKit.SetOverlay(name: string, open: boolean)
 end
 
 -- Is any overlay other than `except` open?
+-- Is the overlay called `name` open right now?
+function UIKit.IsOverlayNamed(name: string): boolean
+	return openOverlays[name] == true
+end
+
 function UIKit.IsOverlayOpen(except: string?): boolean
 	for name, open in openOverlays do
 		if open and name ~= except then

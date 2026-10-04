@@ -1242,3 +1242,14 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   the Starter Pack card; any grant: `Purchase [Key]`; daily claim:
   `DailyClaimed = 3`; gift: `GiftClaimed = 2`; a grab:
   `StealStarted [Epic]`, then `StealDelivered` or (owner tags) `StealSaved`.
+
+## 27. Launch 1 playtest fixes
+
+- [ ] **Reward items reveal (bug 1).** `/daily day 7` and CLAIM: the daily
+  card shows the reveal line, closes itself, and THEN the item reveals
+  through the normal pull path: the big card ("🎁 DAY 7 REWARD", the item's
+  tier and mutation) when your ⚙ reveal rule shows that tier/mutation,
+  else the small skipped line above the bottom bar. Set the Epic rule to
+  "Always" to see the big card every time. Same for the 60-min gift
+  (`/gifts time 60`, open the last box: the panel closes, then "🎁
+  PLAYTIME GIFT"), and for free pulls (Day 3, the 10-min gift).

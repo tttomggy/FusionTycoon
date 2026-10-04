@@ -650,6 +650,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				NewIndex = #newIndexItems > 0,
 				IndexTierComplete = tiersCompleted[1],
 				Caption = caption,
+				Reward = true, -- revealed once the daily card / Gifts panel close
 			})
 		else
 			RemoteEvents.GachaMultiPullResult:FireClient(player, {
@@ -658,6 +659,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				NewIndexItems = newIndexItems,
 				IndexTiersCompleted = tiersCompleted,
 				Title = caption,
+				Reward = true,
 			})
 		end
 		for _, item in items do

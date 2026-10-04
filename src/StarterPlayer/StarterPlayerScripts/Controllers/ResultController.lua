@@ -1594,6 +1594,38 @@ local function onFusionResolved(result: any)
 	end
 end
 
+-- Daily / gift rewards (payload.Reward) reveal only once the daily card
+-- and the Gifts panel have closed (they close themselves for pull and item
+-- rewards), so the big card or the skipped line is never hidden under or
+-- beside them. Anything else runs at once.
+local REWARD_CARD_OVERLAYS = { "DailyReward", "Gifts" }
+local REWARD_REVEAL_WAIT_SECONDS = 4
+local REWARD_REVEAL_SETTLE_SECONDS = 0.25
+
+local function afterRewardCards(payload: any, handler: (any) -> ())
+	if typeof(payload) ~= "table" or payload.Reward ~= true then
+		handler(payload)
+		return
+	end
+	task.spawn(function()
+		local started = os.clock()
+		local function cardOpen(): boolean
+			for _, name in REWARD_CARD_OVERLAYS do
+				if UIKit.IsOverlayNamed(name) then
+					return true
+				end
+			end
+			return false
+		end
+		while cardOpen() and os.clock() - started < REWARD_REVEAL_WAIT_SECONDS do
+			task.wait(0.1)
+		end
+		-- Let the card's pop-out finish first.
+		task.wait(REWARD_REVEAL_SETTLE_SECONDS)
+		handler(payload)
+	end)
+end
+
 local function onGachaPullResult(payload: any)
 	if typeof(payload) ~= "table" or not payload.Success or not payload.NewItem then
 		return
@@ -1819,9 +1851,13 @@ function ResultController.Init()
 	end
 	FusionController.FusionResolved:Connect(onFusionResolved)
 	FusionController.FuseAllResolved:Connect(onFuseAllResolved)
-	RemoteEvents.GachaPullResult.OnClientEvent:Connect(onGachaPullResult)
+	RemoteEvents.GachaPullResult.OnClientEvent:Connect(function(payload: any)
+		afterRewardCards(payload, onGachaPullResult)
+	end)
 	RemoteEvents.RebirthResult.OnClientEvent:Connect(onRebirthResult)
-	RemoteEvents.GachaMultiPullResult.OnClientEvent:Connect(onGachaMultiPullResult)
+	RemoteEvents.GachaMultiPullResult.OnClientEvent:Connect(function(payload: any)
+		afterRewardCards(payload, onGachaMultiPullResult)
+	end)
 end
 
 return ResultController
