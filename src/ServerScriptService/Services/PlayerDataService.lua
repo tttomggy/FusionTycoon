@@ -37,6 +37,8 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
+local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
@@ -103,6 +105,8 @@ export type PlayerData = {
 	Cosmetics: { [string]: boolean },
 	-- Times this profile has loaded (the Starter Pack offer: session 2).
 	Sessions: number,
+	-- The daily reward streak (DailyConfig; RewardService claims it).
+	Daily: DailyConfig.State,
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -150,6 +154,9 @@ export type TycoonSnapshot = {
 	Settings: SettingsConfig.Settings,
 	-- The shop's view of this player (MonetizationService).
 	Shop: ShopSnapshot,
+	-- The daily reward: what the next claim gives (DailyConfig.GetStatus at
+	-- the server's UTC day) and the cycle day of the last claim.
+	Daily: DailyConfig.Status & { LastDay: number },
 }
 
 export type ShopSnapshot = {
@@ -257,6 +264,7 @@ local DEFAULT_DATA: PlayerData = {
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
+	Daily = DailyConfig.Default(),
 	Version = DATA_VERSION,
 }
 
@@ -413,6 +421,7 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
 	end
+	data.Daily = DailyConfig.Sanitize(raw.Daily)
 	-- Version 1 is the first FT_Live_1 format; later versions migrate here
 	-- (raw.Version < DATA_VERSION) before the stamp below.
 	data.Version = DATA_VERSION
@@ -1194,6 +1203,20 @@ local function indexKeys(index: { [string]: boolean }): { string }
 	return keys
 end
 
+local function dailySnapshot(data: PlayerData?): DailyConfig.Status & { LastDay: number }
+	local daily = if data then data.Daily else DailyConfig.Default()
+	local status = DailyConfig.GetStatus(daily, RewardConfig.GetUtcDay(os.time()))
+	return {
+		CanClaim = status.CanClaim and data ~= nil,
+		Day = status.Day,
+		Streak = status.Streak,
+		Skips = status.Skips,
+		UsesSkip = status.UsesSkip,
+		Resets = status.Resets,
+		LastDay = daily.Day,
+	}
+end
+
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 	local pending = state.pendingOffline[player.UserId]
 	local data = state.sessionCache[player.UserId]
@@ -1223,6 +1246,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 			Sessions = if data then data.Sessions else 0,
 			OfflineDoubleAmount = PlayerDataService.GetOfflineDoubleAmount(player),
 		},
+		Daily = dailySnapshot(data),
 	}
 end
 

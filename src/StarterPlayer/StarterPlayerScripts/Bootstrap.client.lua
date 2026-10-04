@@ -22,6 +22,7 @@ local HeistController = require(Controllers.HeistController)
 local EventController = require(Controllers.EventController)
 local AdminController = require(Controllers.AdminController)
 local ShopController = require(Controllers.ShopController)
+local DailyController = require(Controllers.DailyController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -39,6 +40,7 @@ HeistController.Init()
 EventController.Init()
 AdminController.Init()
 ShopController.Init()
+DailyController.Init()
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

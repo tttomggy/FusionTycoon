@@ -1134,3 +1134,36 @@ published place.
   Console shows no repeat grant on rejoin. A purchase while the profile is
   not active (the brief window while server 2 waits for the lock) is
   granted only after the profile loads (Roblox retries the receipt).
+
+## 23. Daily rewards (DailyConfig)
+
+- [ ] **First join.** Fresh Studio profile: about 2 s after the first sync
+  the DAILY REWARD card opens (never over the welcome-back card: run
+  `/offline 60`, rejoin, and the daily card waits until COLLECT closes it).
+  7 tiles: Day 1 gold, glowing, "TODAY"; Day 7 purple; the rest dark.
+  "🔥 1-day streak" pill, "1 free skip" chip, "Day 1 · 10 min of income
+  +$X", the green "CLAIM DAY 1" button and the footer (skip rule + "Day 7:
+  Epic 70% · Legendary 25% · Mythic 5%").
+- [ ] **Claim.** CLAIM: Day 1's tile pops a green ✓ and dims, the line turns
+  green ("💰 +$2.5K"), cash goes up, the button reads NICE. A second
+  `ClaimDaily` (e.g. a fast double tap) is refused: "Already claimed
+  today". Rejoin: no card.
+- [ ] **Every day's reward.** `/daily day <n>` (the card reopens) then
+  CLAIM for each n:
+  1: cash · 2: "⚡ ×2 income · 15 min banked" and the HUD boost chip ·
+  3: the card closes and the "🎁 DAY 3 · FREE PULLS" pull card shows 3
+  pulls (pad price unchanged) · 4: "🍀 ×2 luck", the pad odds rise ·
+  5: Safe Fusion tokens +1 in the Fuse panel · 6: ×2 income 60 min ·
+  7: the "🎁 DAY 7 REWARD" reveal of an Epic / Legendary / Mythic item
+  (can be mutated), RevealMajor.
+- [ ] **Skip rule.** Claim, then `/daily miss 1`: the card reopens with
+  "You missed a day: your free skip kept the streak going!", the next day
+  in the cycle, the streak +1, and after CLAIM the chip reads "0 free
+  skips". `/daily miss 1` again (no skip left): Day 1, "Your streak
+  ended…", streak 1, the skip back. `/daily miss 3` with a skip: Day 1
+  too (more than one missed day). After Day 7 the next claim is Day 1 and
+  the streak keeps counting (8, 9, …).
+- [ ] **Restricted accounts** (PolicyService paid random items restricted;
+  in Studio force `Restricted`): the card and every reward still work.
+- [ ] **Phone.** Device emulator: the card fits at 92% width, the 7 tiles
+  stay in one row, CLAIM ≥ 44 px.

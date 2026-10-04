@@ -59,6 +59,17 @@ local shop: ShopView = {
 	OfflineDoubleAmount = 0,
 	ReceivedAt = 0,
 }
+-- The daily reward (snapshot Daily: DailyConfig.GetStatus on the server).
+export type DailyView = {
+	CanClaim: boolean,
+	Day: number,
+	Streak: number,
+	Skips: number,
+	UsesSkip: boolean,
+	Resets: boolean,
+	LastDay: number,
+}
+local daily: DailyView = { CanClaim = false, Day = 1, Streak = 0, Skips = 1, UsesSkip = false, Resets = false, LastDay = 0 }
 -- Settings (SettingsConfig): the server's copy plus local changes it hasn't
 -- echoed yet (optimistic: they apply at once).
 local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
@@ -276,6 +287,10 @@ function TycoonController.GetShop(): ShopView
 	return shop
 end
 
+function TycoonController.GetDaily(): DailyView
+	return daily
+end
+
 function TycoonController.OwnsPass(key: string): boolean
 	return shop.OwnedPasses[key] == true
 end
@@ -447,6 +462,21 @@ local function onSyncTycoon(snapshot: any)
 			Sessions = number(rawShop.Sessions),
 			OfflineDoubleAmount = number(rawShop.OfflineDoubleAmount),
 			ReceivedAt = os.clock(),
+		}
+	end
+	local rawDaily = snapshot.Daily
+	if typeof(rawDaily) == "table" then
+		local function int(value: any, fallback: number): number
+			return if typeof(value) == "number" then value else fallback
+		end
+		daily = {
+			CanClaim = rawDaily.CanClaim == true,
+			Day = int(rawDaily.Day, 1),
+			Streak = int(rawDaily.Streak, 0),
+			Skips = int(rawDaily.Skips, 0),
+			UsesSkip = rawDaily.UsesSkip == true,
+			Resets = rawDaily.Resets == true,
+			LastDay = int(rawDaily.LastDay, 0),
 		}
 	end
 	hasSynced = true

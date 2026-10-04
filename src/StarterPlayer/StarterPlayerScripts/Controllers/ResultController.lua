@@ -632,7 +632,8 @@ local function buildMiniCard(parent: Instance, item: any, order: number, isBest:
 	return holder
 end
 
-local function showMultiCard(items: { any })
+-- `title`: a reward's caption ("🎁 DAY 3 · FREE PULLS") instead of "10 PULLS".
+local function showMultiCard(items: { any }, title: string?)
 	if multiHolder then
 		(multiHolder :: Frame):Destroy()
 		multiHolder = nil
@@ -667,7 +668,7 @@ local function showMultiCard(items: { any })
 
 	UIKit.Label({
 		Name = "Title",
-		Text = ("%d PULLS"):format(#items),
+		Text = title or ("%d PULLS"):format(#items),
 		Font = Fonts.Display,
 		TextSize = 30,
 		TextColor3 = Colors.GoldLabel,
@@ -724,7 +725,7 @@ local function showMultiCard(items: { any })
 		-- qualifies on its own.
 		if multiHolder == holder and ResultController.ShowsBigCardFor(best.Tier, best.Mutation) then
 			showBigCard({
-				Caption = "BEST OF 10",
+				Caption = ("BEST OF %d"):format(#items),
 				Item = best,
 				Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(best))),
 			})
@@ -746,7 +747,7 @@ local function onGachaMultiPullResult(payload: any)
 		return
 	end
 	if typeof(payload.Items) == "table" and #payload.Items > 0 then
-		showMultiCard(payload.Items)
+		showMultiCard(payload.Items, if typeof(payload.Title) == "string" then payload.Title else nil)
 	end
 end
 
@@ -1604,7 +1605,8 @@ local function onGachaPullResult(payload: any)
 	end
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
-			Caption = "YOU PULLED",
+			-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").
+			Caption = if typeof(payload.Caption) == "string" then payload.Caption else "YOU PULLED",
 			Item = newItem,
 			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
 		})

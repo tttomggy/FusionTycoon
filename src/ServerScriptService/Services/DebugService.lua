@@ -16,6 +16,8 @@ local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
+local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
@@ -88,6 +90,11 @@ local OFFLINE_COMMAND = "/offline"
 -- "/shop grant boost" runs the real grant path (MonetizationService) for a
 -- ShopConfig key without Robux; "/shop" lists the keys.
 local SHOP_COMMAND = "/shop"
+-- "/daily day 4" makes your next claim Day 4 (claimable now); "/daily miss
+-- 2" pretends your last claim was 2 missed days before yesterday (miss 1 =
+-- the free skip, miss 2+ = back to Day 1);
+-- "/daily reset" starts a fresh streak.
+local DAILY_COMMAND = "/daily"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -203,6 +210,35 @@ local function onPlayerChatted(player: Player, message: string)
 		PlayerDataService.SetPendingOffline(player, amount, awaySeconds)
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: %s away %d min -> pending %s"):format(player.Name, math.floor(minutes), tostring(amount)))
+	elseif command == DAILY_COMMAND then
+		local data = PlayerDataService.GetData(player)
+		if not data then
+			return
+		end
+		local verb, rawNumber = argument:match("^(%S+)%s*(%S*)$")
+		local number = tonumber(rawNumber)
+		local today = RewardConfig.GetUtcDay(os.time())
+		local daily = data.Daily
+		if verb == "day" and number then
+			local day = math.clamp(math.floor(number), 1, DailyConfig.Cycle)
+			daily.Day = day - 1
+			daily.Streak = day - 1
+			daily.LastClaimUtcDay = if day == 1 then -1 else today - 1
+		elseif verb == "miss" and number then
+			daily.Day = math.max(1, daily.Day)
+			daily.Streak = math.max(1, daily.Streak)
+			daily.LastClaimUtcDay = today - 1 - math.max(0, math.floor(number))
+		elseif verb == "reset" then
+			data.Daily = DailyConfig.Default()
+		else
+			warn("DebugService: /daily day <1-7> | /daily miss <days> | /daily reset")
+			return
+		end
+		PlayerDataService.SyncTycoon(player)
+		local status = DailyConfig.GetStatus(data.Daily, today)
+		print(("DebugService: %s daily -> next Day %d, can claim %s, uses skip %s, resets %s, skips %d"):format(
+			player.Name, status.Day, tostring(status.CanClaim), tostring(status.UsesSkip), tostring(status.Resets), data.Daily.Skips
+		))
 	elseif command == SHOP_COMMAND then
 		local verb, rawKey = argument:match("^(%S+)%s*(%S*)$")
 		-- Chat is lowercased: match the ShopConfig key case-insensitively.
