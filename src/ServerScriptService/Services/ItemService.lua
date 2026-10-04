@@ -22,6 +22,7 @@ local Config = ReplicatedStorage.Shared.Config
 local ItemConfig = require(Config.ItemConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -150,6 +151,7 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 		PedestalIndex = pedestalIndex,
 		Item = item,
 	})
+	AnalyticsKit.Funnel(player, "FirstDisplay")
 
 	local visualConfig = RarityVisuals.Tiers[item.Tier]
 	if visualConfig and visualConfig.AnnounceServerWide then

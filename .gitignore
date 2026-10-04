@@ -18,8 +18,8 @@
 # Rojo sourcemap
 sourcemap.json
 
-# Wally packages
-Packages/
+# Wally packages (the vendored server Packages folder is tracked)
+/Packages/
 wally.lock
 DevPackages/
 

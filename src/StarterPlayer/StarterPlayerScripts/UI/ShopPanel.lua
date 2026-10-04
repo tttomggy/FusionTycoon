@@ -686,6 +686,7 @@ function ShopPanel.Open(tab: string?)
 	rebuild()
 	if not modal.IsOpen() then
 		modal.Open()
+		ShopController.Track("ShopOpened")
 	end
 	startTicking()
 end

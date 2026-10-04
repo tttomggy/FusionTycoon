@@ -50,12 +50,15 @@ local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
 type WorldServiceModule = typeof(require(script.Parent.WorldService))
 -- Resolved in :Start().
 local FusionMachineService: FusionMachineServiceModule
 local WorldService: WorldServiceModule
+
+type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
 
 -- Run after every successful pull (FusionService: Auto-Fuse). A plain list
 -- so FusionService can subscribe without this service referencing it.
@@ -66,6 +69,12 @@ local function runPullHooks(player: Player)
 		task.spawn(hook, player)
 	end
 end
+
+-- Each claimed plot's free-pull handler (RewardService's daily / gift
+-- pulls and items go through the plot's real pull path: VFX, Index,
+-- banners, the reveal card).
+type RewardPuller = (pulls: { PulledItem }, caption: string) -> boolean
+local rewardPullersByUserId: { [number]: RewardPuller } = {}
 
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
@@ -115,7 +124,9 @@ local function onPassiveIncomeTick()
 			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
-				PlayerDataService.AddCash(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
+				local earned = cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds
+				PlayerDataService.AddCash(player, earned)
+				AnalyticsKit.AddIncome(player, earned)
 				syncTycoon(player)
 			end
 		end
@@ -171,6 +182,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		return
 	end
 	RemoteEvents.UpgradeResult:FireClient(player, { Success = true, GeneratorId = generatorId, NewLevel = newLevel })
+	local upgraded = TycoonConfig.GetGeneratorById(generatorId)
+	if upgraded and newLevel then
+		AnalyticsKit.Sink(player, TycoonConfig.GetUpgradeCost(upgraded, newLevel - 1), Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Upgrade")
+	end
+	AnalyticsKit.Funnel(player, "FirstUpgrade")
 	syncTycoon(player)
 end
 
@@ -251,6 +267,9 @@ local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
 		PerGenerator = perGenerator,
 		NewLevels = newLevels,
 	})
+	-- One sink for the whole MAX (never one event per level).
+	AnalyticsKit.Sink(player, spent, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "UpgradeMax")
+	AnalyticsKit.Funnel(player, "FirstUpgrade")
 	syncTycoon(player)
 end
 
@@ -454,8 +473,6 @@ local function announcePull(player: Player, item: PlayerDataService.InventoryIte
 	})
 end
 
-type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
-
 -- Rolls `count` pulls (tier, then mutation, then item) at `luck` WITHOUT
 -- touching cash or the inventory, so a config gap can never charge for
 -- nothing. nil if any roll has no item to give.
@@ -477,14 +494,18 @@ local function rollPulls(count: number, luck: number): { PulledItem }?
 end
 
 -- Adds already-paid-for pulls: each item, its Index entry and the pull
--- count. Returns (items, newIndexItems, tiersCompleted).
+-- count (`free` rewards don't count, so they never raise the pad price).
+-- Returns (items, newIndexItems, tiersCompleted).
 local function grantPulls(
 	player: Player,
-	pulls: { PulledItem }
+	pulls: { PulledItem },
+	free: boolean?
 ): ({ PlayerDataService.InventoryItem }, { PlayerDataService.InventoryItem }, { string })
 	local items, newIndexItems, tiersCompleted = {}, {}, {}
 	for _, pull in pulls do
-		PlayerDataService.IncrementGachaPulls(player)
+		if not free then
+			PlayerDataService.IncrementGachaPulls(player)
+		end
 		local entry, isNew = PlayerDataService.AddItem(player, pull.Def.Id, pull.Def.Tier, pull.Mutation)
 		if entry then
 			table.insert(items, entry)
@@ -586,6 +607,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull")
+		AnalyticsKit.Funnel(player, "FirstPull")
 		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
 		local newEntry = items[1]
 		-- After AddItem, so the snapshot's Index (and income) include it.
@@ -605,6 +628,44 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		task.wait(STATION_DEBOUNCE_SECONDS)
 		debounce = false
 	end)
+
+	-- Free pulls / reward items (RewardService): the same result path as a
+	-- paid pull, with the reward's caption on the card.
+	rewardPullersByUserId[player.UserId] = function(pulls: { PulledItem }, caption: string): boolean
+		if not pad.Parent then
+			return false
+		end
+		local items, newIndexItems, tiersCompleted = grantPulls(player, pulls, true)
+		if #items == 0 then
+			return false
+		end
+		syncTycoon(player)
+		refreshLabel()
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+		celebrate(bestTier(items))
+		if #items == 1 then
+			RemoteEvents.GachaPullResult:FireClient(player, {
+				Success = true,
+				NewItem = items[1],
+				NewIndex = #newIndexItems > 0,
+				IndexTierComplete = tiersCompleted[1],
+				Caption = caption,
+			})
+		else
+			RemoteEvents.GachaMultiPullResult:FireClient(player, {
+				Success = true,
+				Items = items,
+				NewIndexItems = newIndexItems,
+				IndexTiersCompleted = tiersCompleted,
+				Title = caption,
+			})
+		end
+		for _, item in items do
+			announcePull(player, item)
+		end
+		runPullHooks(player)
+		return true
+	end
 
 	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
@@ -627,6 +688,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull10")
+		AnalyticsKit.Funnel(player, "FirstPull")
 		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
 		syncTycoon(player) -- once, for all ten
 		refreshLabel()
@@ -718,6 +781,8 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "MultiplierPad")
+		AnalyticsKit.Funnel(player, "FirstMultiplier")
 		local oldMultiplier = TycoonConfig.GetCashMultiplierValue(level)
 		local newMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
 		PlayerDataService.SetCashMultiplierLevel(player, level + 1)
@@ -981,6 +1046,38 @@ function TycoonService.ApplyLabLook(player: Player)
 	PlotKit.ApplyLabLook(plot, pink, vip)
 end
 
+-- `count` free pulls at the player's luck (daily / gift rewards): the real
+-- pull path and reveal, paid by the game, not raising the pad price. False
+-- if the player has no plot yet (nothing is given).
+function TycoonService.GrantFreePulls(player: Player, count: number, caption: string): boolean
+	local puller = rewardPullersByUserId[player.UserId]
+	local pulls = math.max(1, math.floor(count))
+	local rolled = puller and rollPulls(pulls, getLuck(player))
+	if not puller or not rolled then
+		return false
+	end
+	-- Before the puller's sync, so the first-pull goal pays in that snapshot.
+	PlayerDataService.IncrementFreePulls(player, pulls)
+	if not puller(rolled, caption) then
+		PlayerDataService.IncrementFreePulls(player, -pulls)
+		return false
+	end
+	AnalyticsKit.Funnel(player, "FirstPull")
+	return true
+end
+
+-- One item of `tier` with the normal pull mutation roll (the Day 7 / gift
+-- item), shown like a pull. False if it can't be given.
+function TycoonService.GrantRewardItem(player: Player, tier: string, caption: string): boolean
+	local puller = rewardPullersByUserId[player.UserId]
+	local def = ItemConfig.PickRandomOfTier(tier, gachaRng)
+	if not puller or not def then
+		return false
+	end
+	local mutation = MutationConfig.Roll(gachaRng, getLuck(player), "Pull", EventState.GetMutationMultipliers("Pull"))
+	return puller({ { Def = def, Mutation = mutation } }, caption)
+end
+
 -- Registers `callback(player)` to run after every successful pull (Pull
 -- or Pull x10), on its own thread.
 function TycoonService.OnPull(callback: (Player) -> ())
@@ -1144,6 +1241,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
 			task.wait(0.25)
 		end
+		AnalyticsKit.Funnel(player, "ClaimLab")
 		if not player.Parent or not plot.Parent then
 			return
 		end
@@ -1221,6 +1319,7 @@ local function removePlotForPlayer(player: Player)
 	plotSignByUserId[player.UserId] = nil
 	collectorLabelByUserId[player.UserId] = nil
 	stationRefreshesByUserId[player.UserId] = nil
+	rewardPullersByUserId[player.UserId] = nil
 	portalByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then

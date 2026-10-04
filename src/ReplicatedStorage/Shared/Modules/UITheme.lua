@@ -43,6 +43,11 @@ UITheme.Colors = {
 	ResultMid = hex("#2A1550"), -- big result card gradient mid
 	FuseAllTop = hex("#3A1F6E"), -- Fuse All summary card gradient top
 	WelcomeTop = hex("#1B5A3A"), -- welcome-back (offline earnings) card gradient top
+	DailyTop = hex("#6A4A0E"), -- the daily reward card's header (gold)
+	GiftsTop = hex("#6E1F5A"), -- the GIFTS panel's header (pink)
+	RankGold = hex("#8A6A12"), -- leaderboard row tint: rank 1
+	RankSilver = hex("#5E6378"), -- rank 2
+	RankBronze = hex("#7A4A26"), -- rank 3
 	ShopTop = hex("#4A1F8E"), -- the SHOP panel header (violet)
 	ShopGlow = hex("#A47BFF"), -- the SHOP header's radial glow
 	Sale = hex("#FF3355"), -- the red SALE tag on the HUD SHOP button
@@ -93,6 +98,7 @@ UITheme.Gradients = {
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 	ShopFeatured = { Top = hex("#FFB347"), Bottom = hex("#E0306E") }, -- the shop's featured banner (warm)
+	Pink = { Top = hex("#FF8AD8"), Bottom = hex("#E02F9E") }, -- the HUD GIFTS button
 	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
 	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.
 	GoldRain = { Top = hex("#FFD566"), Bottom = hex("#C98A00") },

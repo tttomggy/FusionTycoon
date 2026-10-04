@@ -34,6 +34,11 @@ local REMOTE_EVENT_NAMES = {
 	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)
 	"RequestShopPurchase", -- client -> server: { Key } (ShopConfig key; the server checks policy, sale window, one-time, then prompts)
 	"ShopPurchased", -- server -> client: { Key, Result = "Granted" | "Refused", Reason?, Lines?, Test? } (the THANK YOU card / a refusal toast)
+	"ShopAnalytics", -- client -> server: { Event = "ShopOpened" | "OfferShown" | "OfferAccepted" | "OfferDismissed", Key? } (analytics only; whitelisted, rate-limited)
+	"ClaimDaily", -- client -> server: no payload (RewardService decides the day and the reward)
+	"DailyResult", -- server -> client: { Result = "Granted" | "Refused", Day?, Streak?, UsedSkip?, Kind?, Lines?, Reason? } (the daily card's reveal)
+	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks today's play time and that it isn't claimed)
+	"GiftResult", -- server -> client: { Result = "Granted" | "Refused", Index?, Kind?, Lines?, Reason? } (the Gifts panel's reveal)
 	"ShopAnnouncement", -- server -> all: { Kind = "Overclock", PlayerName, Seconds } (the Server Overclock banner)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }

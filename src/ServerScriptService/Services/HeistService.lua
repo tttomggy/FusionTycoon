@@ -68,6 +68,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -407,7 +408,13 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 	end
 
 	if outcome == "Delivered" then
-		if thief and victim and transferItem(thief, victim, carry) then
+		-- Both sessions must still be this server's (ProfileStore lock), so
+		-- both writes go through their own profiles; otherwise it goes back.
+		local bothActive = thief ~= nil
+			and victim ~= nil
+			and PlayerDataService.IsProfileActive(thief)
+			and PlayerDataService.IsProfileActive(victim)
+		if thief and victim and bothActive and transferItem(thief, victim, carry) then
 			PlayerDataService.IncrementTotalSteals(thief) -- first_steal goal (paid by the sync below)
 			local losses = state.recentLosses[victim.UserId] or {}
 			table.insert(losses, os.clock())
@@ -449,6 +456,12 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 			Item = carry.Item,
 			OtherName = carry.ThiefName,
 		})
+	end
+	if outcome == "Delivered" and thief then
+		AnalyticsKit.Funnel(thief, "FirstSteal")
+		AnalyticsKit.Custom(thief, "StealDelivered", nil, carry.Item.Tier)
+	elseif outcome == "Saved" and victim then
+		AnalyticsKit.Custom(victim, "StealSaved", nil, carry.Item.Tier)
 	end
 	if isFeedTier(carry.Item.Tier) and (outcome == "Delivered" or outcome == "Saved") then
 		RemoteEvents.HeistFeed:FireAllClients({
@@ -637,6 +650,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	PedestalVisuals.SetStolen(pedestal)
 	TycoonService.RefreshPedestalLabels(victim)
 	syncBoth(thief, victim, false) -- the victim's income drops the pedestal
+	AnalyticsKit.Custom(thief, "StealStarted", nil, carry.Item.Tier)
 
 	RemoteEvents.HeistStarted:FireClient(thief, {
 		Role = "Thief",

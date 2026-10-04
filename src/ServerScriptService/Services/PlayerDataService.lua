@@ -7,16 +7,26 @@
 	service reads and mutates player state exclusively through the public API
 	below - nothing else may touch the session cache.
 
+	Backend: ProfileStore (Packages/ProfileStore, session-locked), store
+	FT_Live_1. A profile is held by ONE server: a second server waits for the
+	lock and steals it after ProfileStore's timeout, after which the first
+	server's writes are refused and that player is kicked ("Your save was
+	opened in another server, please rejoin"). The session cache keeps the
+	in-memory shape (numeric pedestal keys); every save hands ProfileStore a
+	fresh disk copy (string keys, LastOnline, Version) from OnSave /
+	OnLastSave. Studio plays on ProfileStore's mock store: a blank profile
+	that is never saved.
+
 	Follows the ServiceTemplate contract: :Init() is self-contained (it
 	connects only to Players and its own remotes), so it has no :Start().
 ]]
 
-local DataStoreService = game:GetService("DataStoreService")
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RunService = game:GetService("RunService")
+local ServerScriptService = game:GetService("ServerScriptService")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
@@ -27,8 +37,13 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
+local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
+local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -92,6 +107,21 @@ export type PlayerData = {
 	Cosmetics: { [string]: boolean },
 	-- Times this profile has loaded (the Starter Pack offer: session 2).
 	Sessions: number,
+	-- The daily reward streak (DailyConfig; RewardService claims it).
+	Daily: DailyConfig.State,
+	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
+	Gifts: GiftConfig.State,
+	-- The highest base income ($/s, no timed boosts) this save has reached:
+	-- the street's BEST INCOME board (LeaderboardService).
+	BestIncome: number,
+	-- Free pulls taken (daily / gift rewards). Kept apart from GachaPulls,
+	-- which sets the pad price; both count for the first-pull goal.
+	FreePulls: number,
+	-- Onboarding funnel steps already logged (AnalyticsKit.FunnelSteps), so
+	-- each is sent once per player ever.
+	Funnel: { [string]: boolean },
+	-- Save format version (DATA_VERSION); migrations key off it.
+	Version: number,
 }
 
 -- Offline earnings waiting to be collected (session only, never saved).
@@ -137,6 +167,12 @@ export type TycoonSnapshot = {
 	Settings: SettingsConfig.Settings,
 	-- The shop's view of this player (MonetizationService).
 	Shop: ShopSnapshot,
+	-- The daily reward: what the next claim gives (DailyConfig.GetStatus at
+	-- the server's UTC day) and the cycle day of the last claim.
+	Daily: DailyConfig.Status & { LastDay: number },
+	-- Today's playtime gifts (GiftConfig): the client counts PlaySeconds on
+	-- from when the snapshot arrived.
+	Gifts: { PlaySeconds: number, Claimed: { number } },
 }
 
 export type ShopSnapshot = {
@@ -162,9 +198,11 @@ type State = {
 	-- In-memory cache keyed by UserId; the source of truth while a player is
 	-- in-session. Private: never exposed on the service table.
 	sessionCache: { [number]: PlayerData },
-	-- UserIds whose data must NEVER be written back (load failed in Studio and
-	-- we fell back to a blank profile). See loadData.
-	noSave: { [number]: boolean },
+	-- The ProfileStore profile behind each session (session-locked).
+	profiles: { [number]: any },
+	-- Players being released on purpose (leaving): their session ending is
+	-- expected, not a lost lock.
+	releasing: { [number]: boolean },
 	-- Session-only: GoalService's latest progress readout per UserId.
 	goalProgress: { [number]: GoalProgress? },
 	-- Session-only: offline earnings computed on load, until claimed.
@@ -193,15 +231,32 @@ type State = {
 
 --[[ Constants ------------------------------------------------------------ ]]
 
-local DATASTORE_NAME = "PlayerData_v1"
-local SAVE_RETRY_ATTEMPTS = 3
-local LOAD_RETRY_ATTEMPTS = 3
-local LOAD_RETRY_DELAY_SECONDS = 2
-local AUTOSAVE_INTERVAL_SECONDS = 120
+-- The live store. A NEW name on purpose: it is also the save wipe. The old
+-- store "PlayerData_v1" (plain GetAsync / SetAsync, no session lock) is
+-- abandoned with every Studio and test save in it, and never read again.
+local STORE_NAME = "FT_Live_1"
+-- Studio's opt-in real store (ServerScriptService attribute
+-- FT_StudioSaves = true + "Enable Studio Access to API Services"): lets
+-- Studio test that saves persist (a /shop grant then an instant leave)
+-- without ever touching the live store.
+local STUDIO_STORE_NAME = "FT_StudioTest_1"
+local STUDIO_SAVES_ATTRIBUTE = "FT_StudioSaves"
+local PROFILE_KEY_PREFIX = "Player_"
+local DATA_VERSION = 1
+local AUTOSAVE_INTERVAL_SECONDS = 120 -- ProfileStore's AUTO_SAVE_PERIOD
+-- A load that can't get the profile (DataStore down, or the lock never
+-- frees) gives up after this long and kicks; nothing is overwritten.
+local LOAD_TIMEOUT_SECONDS = 90
+-- SaveNowAsync waits this long for the save to land (ProcessReceipt).
+local SAVE_WAIT_TIMEOUT_SECONDS = 20
+local RELEASE_FLAG_SECONDS = 15
+local LOST_LOCK_MESSAGE = "Your save was opened in another server, please rejoin"
+local LOAD_FAILED_MESSAGE =
+	"Couldn't load your save (Roblox data servers are having trouble). Your progress is safe - please rejoin in a minute."
 local SYNC_REQUEST_COOLDOWN_SECONDS = 2
 local SETTINGS_SYNC_DELAY_SECONDS = 0.25 -- a burst of SetSettings syncs once
 
-local dataStore = DataStoreService:GetDataStore(DATASTORE_NAME)
+ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTOSAVE_INTERVAL_SECONDS)
 
 local DEFAULT_DATA: PlayerData = {
 	Cash = 0,
@@ -225,13 +280,20 @@ local DEFAULT_DATA: PlayerData = {
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
+	Daily = DailyConfig.Default(),
+	Gifts = GiftConfig.Default(-1),
+	BestIncome = 0,
+	FreePulls = 0,
+	Funnel = {},
+	Version = DATA_VERSION,
 }
 
 --[[ Private state -------------------------------------------------------- ]]
 
 local state: State = {
 	sessionCache = {},
-	noSave = {},
+	profiles = {},
+	releasing = {},
 	goalProgress = {},
 	pendingOffline = {},
 	carriedUids = {},
@@ -379,6 +441,24 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
 	end
+	data.Daily = DailyConfig.Sanitize(raw.Daily)
+	if typeof(raw.FreePulls) == "number" and raw.FreePulls >= 0 then
+		data.FreePulls = math.floor(raw.FreePulls)
+	end
+	if typeof(raw.Funnel) == "table" then
+		for step, done in raw.Funnel do
+			if done == true and table.find(AnalyticsKit.FunnelSteps, step) then
+				data.Funnel[step] = true
+			end
+		end
+	end
+	if typeof(raw.BestIncome) == "number" and raw.BestIncome == raw.BestIncome and raw.BestIncome >= 0 then
+		data.BestIncome = raw.BestIncome
+	end
+	data.Gifts = GiftConfig.Sanitize(raw.Gifts, RewardConfig.GetUtcDay(os.time()))
+	-- Version 1 is the first FT_Live_1 format; later versions migrate here
+	-- (raw.Version < DATA_VERSION) before the stamp below.
+	data.Version = DATA_VERSION
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
 	-- happened mid-change) would be stuck forever: unfusable and undisplayable.
@@ -401,115 +481,151 @@ local function reconcile(raw: any): PlayerData
 	return data
 end
 
--- Returns true if the player's data is ready. On a DataStore failure this
--- used to fall back to a BLANK profile and then autosave it over the real
--- one - one Roblox outage and a player's whole save was wiped. Now: retry,
--- and if it still fails, kick in a live game (nothing gets overwritten), or
--- in Studio play on a blank profile that is never saved.
-local function loadData(player: Player): boolean
-	local key = "Player_" .. player.UserId
-	local result: any = nil
-	local success = false
-	local lastError: any = nil
-
-	for attempt = 1, LOAD_RETRY_ATTEMPTS do
-		local ok, value = pcall(function()
-			return dataStore:GetAsync(key)
-		end)
-		if ok then
-			success = true
-			result = value
-			break
-		end
-		lastError = value
-		warn(("PlayerDataService: load attempt %d/%d failed for %s (%d): %s"):format(
-			attempt,
-			LOAD_RETRY_ATTEMPTS,
-			player.Name,
-			player.UserId,
-			tostring(value)
-		))
-		if attempt < LOAD_RETRY_ATTEMPTS then
-			task.wait(LOAD_RETRY_DELAY_SECONDS)
-		end
-	end
-
-	if not player.Parent then
-		return false
-	end
-
-	if success then
-		local data = reconcile(result)
-		data.Sessions += 1
-		state.sessionCache[player.UserId] = data
-		return true
-	end
-
-	if RunService:IsStudio() then
-		warn(("PlayerDataService: using a blank, UNSAVED profile for %s in Studio (%s). "
-			.. "Enable Studio API access in Game Settings > Security to test saving."):format(player.Name, tostring(lastError)))
-		local blank = deepCopy(DEFAULT_DATA)
-		blank.Sessions = 1
-		state.sessionCache[player.UserId] = blank
-		state.noSave[player.UserId] = true
-		return true
-	end
-
-	player:Kick("Couldn't load your save (Roblox data servers are having trouble). Your progress is safe - please rejoin in a minute.")
-	return false
+-- The template ProfileStore reconciles new profiles against (disk shape).
+local function toDisk(data: PlayerData): any
+	local copy = deepCopy(data) :: any
+	copy.PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays)
+	copy.LastOnline = os.time()
+	copy.Version = DATA_VERSION
+	return copy
 end
 
-local function saveData(userId: number, data: PlayerData?): boolean
-	if not data or state.noSave[userId] then
-		return false
-	end
-	data.LastOnline = os.time()
+-- Live games: FT_Live_1. Studio: ProfileStore's mock store (in memory,
+-- never written), a blank profile every Play as before, unless the
+-- FT_StudioSaves opt-in picks the separate Studio test store.
+local isStudio = RunService:IsStudio()
+local studioSaves = isStudio and ServerScriptService:GetAttribute(STUDIO_SAVES_ATTRIBUTE) == true
+local profileStore = ProfileStore.New(if studioSaves then STUDIO_STORE_NAME else STORE_NAME, toDisk(DEFAULT_DATA))
+local store = if isStudio and not studioSaves then profileStore.Mock else profileStore
 
-	local toSave = deepCopy(data) :: any
-	toSave.PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays)
-
-	local key = "Player_" .. userId
-	local attempt = 0
-	local success, err
-
-	repeat
-		attempt += 1
-		success, err = pcall(function()
-			dataStore:SetAsync(key, toSave)
-		end)
-		if not success then
-			warn(("PlayerDataService: save attempt %d/%d failed for %d: %s"):format(attempt, SAVE_RETRY_ATTEMPTS, userId, tostring(err)))
-		end
-	until success or attempt >= SAVE_RETRY_ATTEMPTS
-
-	return success
-end
-
--- Saves `player`'s data now, on its own thread (never yields the caller).
--- RebirthService calls it so a rebirth can't be lost to a crash.
-function PlayerDataService.SaveNow(player: Player)
-	local userId = player.UserId
+-- Pays offline earnings still pending into the save (leaving, shutdown):
+-- never lost.
+local function payPendingOffline(userId: number)
 	local data = state.sessionCache[userId]
-	if data then
-		task.spawn(saveData, userId, data)
+	local pending = state.pendingOffline[userId]
+	if data and pending then
+		data.Cash += pending.Amount
 	end
+	state.pendingOffline[userId] = nil
 end
 
--- Saves `player`'s data and WAITS for the result (yields). ProcessReceipt
--- grants, then calls this, and only returns PurchaseGranted on true. A
--- Studio blank profile (never saved) counts as saved.
-function PlayerDataService.SaveNowAsync(player: Player): boolean
+local runReleaseHooks: (player: Player) -> ()
+
+-- Starts the player's session (yields; waits for another server's lock up to
+-- ProfileStore's steal timeout). Returns true once the data is ready; on
+-- failure kicks in a live game (nothing is overwritten).
+local function loadData(player: Player): boolean
 	local userId = player.UserId
-	if state.noSave[userId] then
-		return state.sessionCache[userId] ~= nil
+	local started = os.clock()
+	local profile = store:StartSessionAsync(PROFILE_KEY_PREFIX .. userId, {
+		Cancel = function()
+			return player.Parent ~= Players or os.clock() - started > LOAD_TIMEOUT_SECONDS
+		end,
+	})
+	if not profile then
+		if player.Parent == Players then
+			warn(("PlayerDataService: couldn't start %s's session (%d)"):format(player.Name, userId))
+			player:Kick(LOAD_FAILED_MESSAGE)
+		end
+		return false
 	end
-	return saveData(userId, state.sessionCache[userId])
+	if player.Parent ~= Players then
+		-- Left while the profile was loading.
+		profile:EndSession()
+		return false
+	end
+	profile:AddUserId(userId) -- GDPR: ties the key to the user
+	profile:Reconcile()
+	local data = reconcile(profile.Data)
+	data.Sessions += 1
+	state.sessionCache[userId] = data
+	state.profiles[userId] = profile
+
+	-- Every save writes a fresh disk copy of the session cache.
+	profile.OnSave:Connect(function()
+		local current = state.sessionCache[userId]
+		if current and state.profiles[userId] == profile then
+			profile.Data = toDisk(current)
+		end
+	end)
+	-- The server is closing: steals resolve and pending offline cash is paid
+	-- BEFORE the final copy is taken.
+	profile.OnLastSave:Connect(function(reason: string)
+		if reason ~= "Shutdown" or state.releasing[userId] then
+			return
+		end
+		local inGame = Players:GetPlayerByUserId(userId)
+		if inGame then
+			runReleaseHooks(inGame)
+		end
+		payPendingOffline(userId)
+		local current = state.sessionCache[userId]
+		if current then
+			profile.Data = toDisk(current)
+		end
+	end)
+	-- The session ended without us asking: another server took the lock.
+	-- This server's copy is no longer saved, so the player must rejoin.
+	profile.OnSessionEnd:Connect(function()
+		if state.profiles[userId] == profile then
+			state.profiles[userId] = nil
+		end
+		if state.releasing[userId] or ProfileStore.IsClosing then
+			return
+		end
+		state.sessionCache[userId] = nil
+		if player.Parent == Players then
+			warn(("PlayerDataService: lost %s's session lock (%d)"):format(player.Name, userId))
+			player:Kick(LOST_LOCK_MESSAGE)
+		end
+	end)
+	return true
 end
 
-local function saveAll()
-	for userId, data in state.sessionCache do
-		saveData(userId, data)
+-- Saves `player`'s data now (ProfileStore's save, on its own thread; never
+-- yields the caller). RebirthService and heist delivery call it.
+function PlayerDataService.SaveNow(player: Player)
+	local profile = state.profiles[player.UserId]
+	if profile and profile:IsActive() then
+		profile:Save()
 	end
+end
+
+-- Saves `player`'s data and WAITS until the write lands (yields). True only
+-- if a save completed while the profile was still this server's.
+-- ProcessReceipt grants and records the receipt, then calls this.
+function PlayerDataService.SaveNowAsync(player: Player): boolean
+	local profile = state.profiles[player.UserId]
+	if not profile or not profile:IsActive() then
+		return false
+	end
+	local saved = false
+	local connection = profile.OnAfterSave:Connect(function()
+		-- OnAfterSave also fires when the save found another server's lock.
+		saved = profile:IsActive()
+	end)
+	profile:Save()
+	local started = os.clock()
+	while not saved and profile:IsActive() and os.clock() - started < SAVE_WAIT_TIMEOUT_SECONDS do
+		task.wait(0.1)
+	end
+	connection:Disconnect()
+	return saved
+end
+
+-- The profile is held by this server right now (ProcessReceipt only grants
+-- while it is).
+function PlayerDataService.IsProfileActive(player: Player): boolean
+	local profile = state.profiles[player.UserId]
+	return profile ~= nil and profile:IsActive() == true
+end
+
+-- `purchaseId` is in the last successfully SAVED copy (not just in memory).
+function PlayerDataService.IsReceiptSaved(player: Player, purchaseId: string): boolean
+	local profile = state.profiles[player.UserId]
+	local saved = profile and profile.LastSavedData
+	local receipts = saved and saved.Receipts
+	return typeof(receipts) == "table" and table.find(receipts, purchaseId) ~= nil
 end
 
 --[[ Public API: data ----------------------------------------------------- ]]
@@ -726,6 +842,15 @@ end
 function PlayerDataService.GetGachaPulls(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.GachaPulls else 0
+end
+
+-- A free pull (daily / gift): counts for the first-pull goal, never for
+-- the pad price.
+function PlayerDataService.IncrementFreePulls(player: Player, count: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.FreePulls += count
+	end
 end
 
 function PlayerDataService.IncrementGachaPulls(player: Player)
@@ -1016,6 +1141,18 @@ function PlayerDataService.TickBoosts(player: Player, dt: number): boolean
 	return ended
 end
 
+-- Raises BestIncome to `income` if higher; returns the best so far.
+function PlayerDataService.RecordBestIncome(player: Player, income: number): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	if income == income and income > data.BestIncome and income < math.huge then
+		data.BestIncome = income
+	end
+	return data.BestIncome
+end
+
 function PlayerDataService.GetSafeFusionTokens(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.SafeFusionTokens else 0
@@ -1121,6 +1258,20 @@ local function indexKeys(index: { [string]: boolean }): { string }
 	return keys
 end
 
+local function dailySnapshot(data: PlayerData?): DailyConfig.Status & { LastDay: number }
+	local daily = if data then data.Daily else DailyConfig.Default()
+	local status = DailyConfig.GetStatus(daily, RewardConfig.GetUtcDay(os.time()))
+	return {
+		CanClaim = status.CanClaim and data ~= nil,
+		Day = status.Day,
+		Streak = status.Streak,
+		Skips = status.Skips,
+		UsesSkip = status.UsesSkip,
+		Resets = status.Resets,
+		LastDay = daily.Day,
+	}
+end
+
 function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 	local pending = state.pendingOffline[player.UserId]
 	local data = state.sessionCache[player.UserId]
@@ -1149,6 +1300,11 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 			Cosmetics = indexKeys(if data then data.Cosmetics else {}),
 			Sessions = if data then data.Sessions else 0,
 			OfflineDoubleAmount = PlayerDataService.GetOfflineDoubleAmount(player),
+		},
+		Daily = dailySnapshot(data),
+		Gifts = {
+			PlaySeconds = if data then data.Gifts.PlaySeconds else 0,
+			Claimed = if data then table.clone(data.Gifts.Claimed) else {},
 		},
 	}
 end
@@ -1206,7 +1362,7 @@ function PlayerDataService.OnRelease(callback: (Player) -> ())
 	table.insert(state.releaseHooks, callback)
 end
 
-local function runReleaseHooks(player: Player)
+runReleaseHooks = function(player: Player)
 	for _, hook in state.releaseHooks do
 		xpcall(hook, function(err)
 			warn(("PlayerDataService: OnRelease hook failed for %s: %s"):format(player.Name, tostring(err)))
@@ -1325,31 +1481,40 @@ local function onPlayerAdded(player: Player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
+	AnalyticsKit.Funnel(player, "Join")
 	dataLoaded:Fire(player)
 end
 
 local function onPlayerRemoving(player: Player)
 	local userId = player.UserId
+	state.releasing[userId] = true
 	-- Before anything is saved: active steals on either side resolve first.
 	runReleaseHooks(player)
+	AnalyticsKit.Release(player)
 	state.carriedUids[userId] = nil
 	state.carrying[userId] = nil
-	local data = state.sessionCache[userId]
 	-- Left before collecting (or before the auto-claim): pay it, never lose it.
-	local pending = state.pendingOffline[userId]
-	if data and pending then
-		data.Cash += pending.Amount
+	payPendingOffline(userId)
+	local profile = state.profiles[userId]
+	local data = state.sessionCache[userId]
+	if profile and profile:IsActive() then
+		-- The final copy, then release the lock (ProfileStore writes it).
+		if data then
+			profile.Data = toDisk(data)
+		end
+		profile:EndSession()
 	end
-	state.pendingOffline[userId] = nil
 	state.sessionCache[userId] = nil
-	if data then
-		saveData(userId, data)
-	end
-	state.noSave[userId] = nil
+	state.profiles[userId] = nil
 	state.goalProgress[userId] = nil
 	state.lastSyncRequest[userId] = nil
 	state.shop[userId] = nil
 	state.lastOfflinePaid[userId] = nil
+	task.delay(RELEASE_FLAG_SECONDS, function()
+		if not Players:GetPlayerByUserId(userId) then
+			state.releasing[userId] = nil
+		end
+	end)
 end
 
 -- A client asking for a fresh snapshot (it just had a request rejected and
@@ -1369,6 +1534,21 @@ end
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function PlayerDataService:Init()
+	-- Funnel steps are saved in the profile; the cash balance rides along
+	-- on economy events.
+	AnalyticsKit.SetFunnelStore({
+		Mark = function(player: Player, step: string): boolean
+			local data = state.sessionCache[player.UserId]
+			if not data or data.Funnel[step] then
+				return false
+			end
+			data.Funnel[step] = true
+			return true
+		end,
+		GetBalance = function(player: Player): number
+			return PlayerDataService.GetCash(player)
+		end,
+	})
 	table.insert(state.connections, Players.PlayerAdded:Connect(onPlayerAdded))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(state.connections, RemoteEvents.RequestSync.OnServerEvent:Connect(onRequestSync))
@@ -1429,22 +1609,8 @@ function PlayerDataService:Init()
 		task.spawn(onPlayerAdded, player)
 	end
 
-	-- Release hooks (active steals fail and return) run before any save.
-	game:BindToClose(function()
-		for _, player in Players:GetPlayers() do
-			if state.sessionCache[player.UserId] then
-				runReleaseHooks(player)
-			end
-		end
-		saveAll()
-	end)
-
-	task.spawn(function()
-		while true do
-			task.wait(AUTOSAVE_INTERVAL_SECONDS)
-			saveAll()
-		end
-	end)
+	-- Autosave (AUTO_SAVE_PERIOD) and the shutdown save are ProfileStore's;
+	-- each profile's OnLastSave runs the release hooks first (loadData).
 end
 
 return PlayerDataService

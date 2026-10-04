@@ -1088,3 +1088,157 @@ grant path for free. Live-game checks need real ids (docs/SHOP_SETUP.md).
   per row; every button is easy to tap; the side cards don't cover the
   bottom buttons.
 
+
+## 22. Save safety (ProfileStore, Launch 1)
+
+Saves now go through ProfileStore (`Packages/ProfileStore.lua`) in the store
+`FT_Live_1`, with a session lock: one server holds a profile at a time.
+Plain Studio Play uses the mock store (a blank profile every Play, never
+saved). To test persistence in Studio, set the attribute
+**`FT_StudioSaves = true`** on ServerScriptService (edit mode) and turn on
+Game Settings → Security → **Enable Studio Access to API Services**: saves
+then go to the separate store `FT_StudioTest_1`, never the live one.
+Two Studio test servers can't share a profile, so the lock is tested in a
+published place.
+
+- [ ] **Blank Studio profile.** No attribute: Play, earn cash, Stop, Play:
+  a fresh save every time, no errors in Output.
+- [ ] **Data version.** With `FT_StudioSaves`, Play once, then in the
+  command bar (server) read the profile: `Version = 1`; every template
+  field is present (Reconcile fills fields added later).
+- [ ] **A grant survives an instant leave.** With `FT_StudioSaves`: Play,
+  `/shop grant boost` (or `safefusion5`), then Stop straight away (within a
+  second). Play again: the boost / tokens are still there.
+- [ ] **A steal survives a shutdown.** Published place, 2 players at
+  Rebirth 1+. A steals from B and delivers. Straight away shut the server
+  down (Creator Dashboard → Shut down all servers, or the place's Server
+  menu). Rejoin both: the item is in A's inventory and gone from B's (never
+  in both, never in neither). Repeat, shutting down DURING the carry: the
+  item is back on B's pedestal and A has nothing.
+- [ ] **The session lock (2 servers).** Published place with Max Players
+  low enough that a second server starts (or a private server + a public
+  one). Join server 1, pull a few items, note your cash. Without leaving,
+  join the same place's server 2 from a second device/session on the same
+  account (or teleport there). Server 2 waits for the lock (up to
+  ProfileStore's steal timeout, ~40 s if server 1 doesn't let go) and then
+  loads the SAME items and cash; server 1 kicks you with "Your save was
+  opened in another server, please rejoin". Anything done in server 1
+  after the kick never shows up in a later join.
+- [ ] **Quick server hop.** Leave server 1 and join server 2 at once:
+  server 2 loads the data you left with (it waits for server 1's final
+  save instead of loading stale data).
+- [ ] **Failed load.** In a live game, a DataStore outage kicks the player
+  with the "couldn't load your save" message; the save is never
+  overwritten.
+- [ ] **Receipts.** Live purchase of a cash pack: granted once; Developer
+  Console shows no repeat grant on rejoin. A purchase while the profile is
+  not active (the brief window while server 2 waits for the lock) is
+  granted only after the profile loads (Roblox retries the receipt).
+
+## 23. Daily rewards (DailyConfig)
+
+- [ ] **First join.** Fresh Studio profile: about 2 s after the first sync
+  the DAILY REWARD card opens (never over the welcome-back card: run
+  `/offline 60`, rejoin, and the daily card waits until COLLECT closes it).
+  7 tiles: Day 1 gold, glowing, "TODAY"; Day 7 purple; the rest dark.
+  "🔥 1-day streak" pill, "1 free skip" chip, "Day 1 · 10 min of income
+  +$X", the green "CLAIM DAY 1" button and the footer (skip rule + "Day 7:
+  Epic 70% · Legendary 25% · Mythic 5%").
+- [ ] **Claim.** CLAIM: Day 1's tile pops a green ✓ and dims, the line turns
+  green ("💰 +$2.5K"), cash goes up, the button reads NICE. A second
+  `ClaimDaily` (e.g. a fast double tap) is refused: "Already claimed
+  today". Rejoin: no card.
+- [ ] **Every day's reward.** `/daily day <n>` (the card reopens) then
+  CLAIM for each n:
+  1: cash · 2: "⚡ ×2 income · 15 min banked" and the HUD boost chip ·
+  3: the card closes and the "🎁 DAY 3 · FREE PULLS" pull card shows 3
+  pulls (pad price unchanged; on a fresh profile the "Pull from the Gacha
+  Pad" goal completes and Output prints `funnel 4 FirstPull`) · 4: "🍀 ×2 luck", the pad odds rise ·
+  5: Safe Fusion tokens +1 in the Fuse panel · 6: ×2 income 60 min ·
+  7: the "🎁 DAY 7 REWARD" reveal of an Epic / Legendary / Mythic item
+  (can be mutated), RevealMajor.
+- [ ] **Skip rule.** Claim, then `/daily miss 1`: the card reopens with
+  "You missed a day: your free skip kept the streak going!", the next day
+  in the cycle, the streak +1, and after CLAIM the chip reads "0 free
+  skips". `/daily miss 1` again (no skip left): Day 1, "Your streak
+  ended…", streak 1, the skip back. `/daily miss 3` with a skip: Day 1
+  too (more than one missed day). After Day 7 the next claim is Day 1 and
+  the streak keeps counting (8, 9, …).
+- [ ] **Restricted accounts** (PolicyService paid random items restricted;
+  in Studio force `Restricted`): the card and every reward still work.
+- [ ] **Phone.** Device emulator: the card fits at 92% width, the 7 tiles
+  stay in one row, CLAIM ≥ 44 px.
+
+## 24. Playtime gifts (GiftConfig)
+
+- [ ] **HUD.** A pink "🎁 GIFTS" button sits right of SHOP. On a fresh
+  profile a small "next in 4:59" pill sits beside it and counts down.
+  At 5:00 the pill goes, a green "1" badge appears and the button bounces.
+- [ ] **Panel.** GIFTS opens the panel: the daily strip on top ("📅 Daily
+  reward ready · Day N" + OPEN, which closes this and opens the daily
+  card; once claimed "next in 7:12:03" to 00:00 UTC), "Played today:
+  5:02", six boxes: ready = green with a pulsing glow and "OPEN!",
+  locked = "10 min" etc. with a thin progress bar, claimed = dim with ✓.
+  Footer: "Rare 60% · Epic 35% · Legendary 5%".
+- [ ] **Every gift.** `/gifts time 60` (all six ready, badge 6). Open each:
+  5 min: the box shows "💰 +$X" for a moment then ✓; 10 min: the panel
+  closes and the "🎁 GIFT · FREE PULL" card shows one pull; 15 min: ×2
+  income 10 min (HUD boost pill); 25 min: cash; 40 min: ×2 luck 10 min;
+  60 min: the "🎁 PLAYTIME GIFT" item reveal (Rare / Epic / Legendary).
+  The badge counts down and the bounce stops at 0; with all six open the
+  next pill stays hidden.
+- [ ] **Server checks.** `/gifts time 7`: only the first gift is ready; a
+  forged `ClaimGift { Index = 3 }` (command bar) is refused "Not open
+  yet"; a second claim of gift 1 is refused "Already opened".
+- [ ] **Sums across sessions.** With `FT_StudioSaves`: play 6 min, leave,
+  rejoin: "Played today" carries on from ~6:00 and gift 1 is still ready
+  (or still claimed). `/gifts reset` locks them all again.
+- [ ] **Phone.** Device emulator: SHOP and GIFTS fit beside the cash card
+  without covering the top-centre event chip; the panel's boxes stay 3 per
+  row and each is easy to tap.
+
+## 25. Street leaderboards
+
+- [ ] **Placement.** Play in Studio and walk to each end of the street:
+  at the west end the 💰 BEST INCOME /s board stands left of the LAB
+  WEATHER Event Board and 🏆 MOST REBIRTHS right of it; at the east end
+  📖 INDEX FOUND stands on the Event Board's -z side. Each faces down the
+  street, on two posts with a gold strip on top; none touches a belt, a
+  gate, a plot wall or an Event Board, and each is readable from the
+  middle of the street.
+- [ ] **Studio fake rows.** Every board shows ten rows "TestPlayer1…10":
+  #1 gold, #2 silver, #3 bronze tints, the rest dark; a blank round
+  headshot well, the name, and the value (income "$1T/s"…, rebirths,
+  "112 / 119"…). No DataStore warnings in Output.
+- [ ] **Live (published place).** Play a few minutes with 2 accounts,
+  wait ≥ 2 min: both appear on the boards with their headshot and display
+  name; BEST INCOME is your highest base income (a running Boost doesn't
+  raise it). Rebirth, wait ≤ 2 min more: MOST REBIRTHS updates. Leave and
+  rejoin a fresh server: your rows are still there. Shut a server down:
+  the last values written on close show in the next server.
+
+## 26. Analytics (AnalyticsKit, Studio prints)
+
+In Studio nothing is sent: every call prints `[Analytics] …` in Output.
+
+- [ ] **Funnel, in order, once each.** Fresh profile: `funnel 1 Join`;
+  step on CLAIM: `funnel 2 ClaimLab`; buy an upgrade: `funnel 3
+  FirstUpgrade`; pull: `funnel 4 FirstPull`; display an item: `funnel 5
+  FirstDisplay`; fuse: `funnel 6 FirstFuse`; Multiplier Pad: `funnel 7
+  FirstMultiplier`; `/event goldenrain`: `funnel 8 FirstEvent`;
+  `/rebirthready` + rebirth: `funnel 9 FirstRebirth`; deliver a steal:
+  `funnel 10 FirstSteal`. Doing any of them again prints no funnel line
+  (with `FT_StudioSaves`, not even after a rejoin).
+- [ ] **Economy.** Sinks print on an upgrade (`Upgrade`), a MAX
+  (`UpgradeMax`, ONE line for all levels), a pull / ×10 (`Pull` /
+  `Pull10`), the pad (`MultiplierPad`) and a rebirth (`Rebirth`, the cash
+  held). Sources: `PassiveIncome` once a minute (and on leave), Golden
+  Rain coins (`Coin` / `BigCoin`), a cash pack (`/shop grant pocketcash`:
+  IAP `PocketCash`), the daily / gift cash days (TimedReward `Daily` /
+  `Gift`).
+- [ ] **Custom events.** Open the shop: `ShopOpened`; a contextual offer
+  (tap an upgrade you can't afford, after the quiet period): `OfferShown
+  [PocketCash]`, then `OfferAccepted` or `OfferDismissed`; the same for
+  the Starter Pack card; any grant: `Purchase [Key]`; daily claim:
+  `DailyClaimed = 3`; gift: `GiftClaimed = 2`; a grab:
+  `StealStarted [Epic]`, then `StealDelivered` or (owner tags) `StealSaved`.

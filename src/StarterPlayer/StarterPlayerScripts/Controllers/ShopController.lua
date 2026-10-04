@@ -130,6 +130,12 @@ function ShopController.Buy(key: string)
 	RemoteEvents.RequestShopPurchase:FireServer({ Key = key })
 end
 
+-- Analytics only (the server whitelists and rate-limits): "ShopOpened",
+-- "OfferShown" / "OfferAccepted" / "OfferDismissed" with the offer's key.
+function ShopController.Track(event: string, key: string?)
+	RemoteEvents.ShopAnalytics:FireServer({ Event = event, Key = key })
+end
+
 --[[ Contextual offer --------------------------------------------------------------------- ]]
 
 -- "~4 min", "~2 h": how long your income takes to cover `gap`.
@@ -203,8 +209,12 @@ function ShopController.OfferForShortfall(label: string, cost: number, fromOverl
 		BuyText = ShopController.GetPriceText(offerKey),
 		DismissText = "Not now",
 	}, function()
+		ShopController.Track("OfferAccepted", offerKey)
 		ShopController.Buy(offerKey)
+	end, function()
+		ShopController.Track("OfferDismissed", offerKey)
 	end)
+	ShopController.Track("OfferShown", offerKey)
 end
 
 --[[ Starter Pack (session 2) --------------------------------------------------------------- ]]
@@ -236,8 +246,12 @@ local function maybeShowStarter()
 		BuyText = ShopController.GetPriceText("StarterPack"),
 		DismissText = "No thanks",
 	}, function()
+		ShopController.Track("OfferAccepted", "StarterPack")
 		ShopController.Buy("StarterPack")
-	end, function() end)
+	end, function()
+		ShopController.Track("OfferDismissed", "StarterPack")
+	end)
+	ShopController.Track("OfferShown", "StarterPack")
 end
 
 --[[ Remotes ---------------------------------------------------------------------------- ]]

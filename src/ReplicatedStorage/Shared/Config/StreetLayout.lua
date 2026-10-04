@@ -12,6 +12,8 @@
 
 	The assertion block at the bottom runs at require time.
 ]]
+local PlotLayout = require(script.Parent.PlotLayout)
+
 local StreetLayout = {}
 
 local v3 = Vector3.new
@@ -118,6 +120,45 @@ function StreetLayout.GetEventBoardCFrames(): { CFrame }
 	return list
 end
 
+-- The three street leaderboards (LeaderboardService): on the grass past the
+-- street's ends, flanking the Event Boards (one each side of the west board,
+-- one on the east board's -z side), facing down the street like them. Past
+-- the street's end and the last plot column, so no belt, gate or plot is
+-- behind one; clear of the Event Boards in z (asserted below).
+export type LeaderboardSpot = { Key: string, SideX: number, SideZ: number }
+
+StreetLayout.Leaderboard = {
+	CenterAbsX = 276, -- in line with the Event Boards
+	Width = 26, -- along z
+	Height = 20,
+	Thickness = 1,
+	BottomY = 2, -- above the street top
+	PostWidth = 1.2,
+	EventBoardGap = 4, -- clear z between an Event Board's edge and a leaderboard's
+	PlotClearance = 6, -- clear x past the outermost plot's floor
+	PixelsPerStud = 24,
+	MaxDistance = 420,
+	Spots = {
+		{ Key = "Income", SideX = -1, SideZ = -1 },
+		{ Key = "Rebirths", SideX = -1, SideZ = 1 },
+		{ Key = "Index", SideX = 1, SideZ = -1 },
+	} :: { LeaderboardSpot },
+}
+
+-- A leaderboard's centre z distance from the street's centre line.
+function StreetLayout.GetLeaderboardAbsZ(): number
+	local l = StreetLayout.Leaderboard
+	return StreetLayout.EventBoard.Width / 2 + l.EventBoardGap + l.Width / 2
+end
+
+-- Each spot's centre CFrame, its Front face looking along the street.
+function StreetLayout.GetLeaderboardCFrame(spot: LeaderboardSpot): CFrame
+	local l = StreetLayout.Leaderboard
+	local y = StreetLayout.STREET_TOP_Y + l.BottomY + l.Height / 2
+	local position = Vector3.new(spot.SideX * l.CenterAbsX, y, spot.SideZ * StreetLayout.GetLeaderboardAbsZ())
+	return CFrame.lookAt(position, position + Vector3.new(-spot.SideX, 0, 0))
+end
+
 function StreetLayout.GetBeltLength(): number
 	return StreetLayout.STREET_SIZE.X - StreetLayout.BELT_END_INSET
 end
@@ -170,6 +211,28 @@ do
 		"StreetLayout: an Event Board stands on the street"
 	)
 	assert(boardInnerX > StreetLayout.GetBeltLength() / 2, "StreetLayout: an Event Board blocks a belt")
+
+	-- Leaderboards: past the street's end, past the outermost plot, clear of
+	-- the Event Boards, on the ground, and never two on one spot.
+	local lb = StreetLayout.Leaderboard
+	local lbInnerX = lb.CenterAbsX - lb.Thickness / 2
+	assert(lbInnerX - StreetLayout.STREET_SIZE.X / 2 >= board.EndMargin, "StreetLayout: a leaderboard stands on the street")
+	local outermostPlotX = (PlotLayout.MAX_PLOT_SLOTS / 2 - 1 - PlotLayout.SLOT_COLUMN_CENTER) * PlotLayout.SLOT_COLUMN_SPACING
+		+ PlotLayout.FLOOR_SIZE.X / 2
+	assert(lbInnerX - outermostPlotX >= lb.PlotClearance, "StreetLayout: a leaderboard stands in a plot")
+	local lbAbsZ = StreetLayout.GetLeaderboardAbsZ()
+	assert(lbAbsZ - lb.Width / 2 - board.Width / 2 >= lb.EventBoardGap - 1e-6, "StreetLayout: a leaderboard overlaps an Event Board")
+	assert(
+		lb.CenterAbsX + lb.Thickness / 2 + lb.PostWidth * 2 < PlotLayout.GROUND_SIZE.X / 2
+			and lbAbsZ + lb.Width / 2 < PlotLayout.GROUND_SIZE.Z / 2,
+		"StreetLayout: a leaderboard stands off the ground"
+	)
+	local taken: { [string]: boolean } = {}
+	for _, spot in lb.Spots do
+		local key = ("%d,%d"):format(spot.SideX, spot.SideZ)
+		assert(not taken[key], "StreetLayout: two leaderboards share a spot")
+		taken[key] = true
+	end
 end
 
 return StreetLayout
