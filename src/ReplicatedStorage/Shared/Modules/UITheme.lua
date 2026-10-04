@@ -85,7 +85,7 @@ UITheme.Gradients = {
 	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
 	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
-	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK LAB (ready): HUD button, console pill
+	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
 	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.

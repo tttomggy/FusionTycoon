@@ -639,21 +639,26 @@ function HudController.FloatPop(position: Vector3, text: string, color: Color3):
 	return label
 end
 
---[[ LOCK LAB button --------------------------------------------------------
-	Under the cash card (beside it on a phone), in the old shield chip's
-	slot. Pink "🔒 LOCK LAB" when ready, teal "🛡 LOCKED · 42s", muted
-	"RECHARGING · 12s" (still tappable: the server toasts why). Tapping fires
-	RequestLock; HeistService.TryLock decides (outside your walls: "Get back
-	to your lab to lock it!"). Hidden under HeistConfig.MinRebirths (the sign
-	says PROTECTED) and before you claim. Pulses while it's ready AND a
-	non-owner is inside your walls: the moment it matters. State comes from
-	the plot's published attributes (ShieldState), no remote.
+--[[ LOCK status chip ------------------------------------------------------
+	Under the cash card (beside it on a phone). It is NOT a lock button:
+	locking only happens at your LOCK console (HeistService.TryLock checks
+	you're there). It shows the state from the plot's published attributes
+	(ShieldState):
+	  Unlocked    muted, amber text   "🔓 UNLOCKED"
+	  Locked      teal                "🛡 LOCKED · 42s"
+	  Recharging  muted               "RECHARGING · 12s"
+	  Alarm       red, pulsing        "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+	              (lock ready AND a non-owner's root inside your walls)
+	Tapping it calls the handler HeistController registers
+	(SetLockChipHandler): the goal arrow points at your console for a few
+	seconds. Hidden under HeistConfig.MinRebirths and before you claim.
 ]]
-local LOCK_BUTTON_SIZE = Vector2.new(200, 52)
+local LOCK_CHIP_SIZE = Vector2.new(330, 48)
+local LOCK_CHIP_TEXT_SIZE = 15
 local LOCK_BUTTON_GAP = 8
 local LOCK_REFRESH_SECONDS = 0.25
 
-local lockButton: TextButton
+local lockChip: TextButton
 local lockHolder: Frame
 -- The round "?" beside it: opens HOW TO HEIST (visible from Rebirth 1).
 local HELP_BUTTON_SIZE = 52 -- >= 44 px after the phone UIScale
@@ -661,17 +666,20 @@ local helpHolder: Frame
 local lockScale: UIScale
 local lockPulse: Tween? = nil
 local lockStyle: string? = nil
+local lockChipHandler: (() -> ())? = nil
 
-local function buildLockButton()
-	lockButton, lockHolder = UIKit.Button({
-		Name = "LockButton",
+local function buildLockChip()
+	lockChip, lockHolder = UIKit.Button({
+		Name = "LockChip",
 		Parent = screenGui,
-		Style = "Shield",
-		Text = "🔒 LOCK LAB",
-		TextSize = 18,
-		Size = UDim2.fromOffset(LOCK_BUTTON_SIZE.X, LOCK_BUTTON_SIZE.Y),
+		Style = "Disabled",
+		Text = "🔓 UNLOCKED",
+		TextSize = LOCK_CHIP_TEXT_SIZE,
+		Size = UDim2.fromOffset(LOCK_CHIP_SIZE.X, LOCK_CHIP_SIZE.Y),
 		OnClick = function()
-			RemoteEvents.RequestLock:FireServer()
+			if lockChipHandler then
+				lockChipHandler()
+			end
 		end,
 	})
 	lockHolder.Visible = false
@@ -690,6 +698,11 @@ local function buildLockButton()
 	})
 	helpHolder = help
 	helpHolder.Visible = false
+end
+
+-- HeistController's tap handler (it owns the goal-arrow override).
+function HudController.SetLockChipHandler(handler: () -> ())
+	lockChipHandler = handler
 end
 
 local function setLockPulse(on: boolean)
@@ -731,13 +744,13 @@ local function hasIntruder(plot: Instance): boolean
 	return false
 end
 
--- True while LOCK is ready and someone else is in your lab (HeistController's
--- intruder tip reads it too).
+-- True while LOCK is ready and someone else is in your lab (the alarm
+-- state; HeistController's intruder tip reads it too).
 function HudController.IsLockUrgent(): boolean
 	return lockPulse ~= nil
 end
 
-local function refreshLockButton()
+local function refreshLockChip()
 	local plot = getOwnPlot()
 	local eligible = TycoonController.GetRebirths() >= HeistConfig.MinRebirths
 	helpHolder.Visible = eligible
@@ -753,18 +766,23 @@ local function refreshLockButton()
 		return
 	end
 	lockHolder.Visible = true
-	local style = if state == "Locked" then "Teal" elseif state == "Recharging" then "Disabled" else "Shield"
-	local text = if state == "Locked"
-		then ("🛡 LOCKED · %ds"):format(seconds)
+	local alarm = state == "Ready" and hasIntruder(plot)
+	local style = if alarm then "Red" elseif state == "Locked" then "Teal" else "Disabled"
+	local text = if alarm
+		then "🚨 SOMEONE'S IN YOUR LAB · RUN TO LOCK"
+		elseif state == "Locked" then ("🛡 LOCKED · %ds"):format(seconds)
 		elseif state == "Recharging" then ("RECHARGING · %ds"):format(seconds)
-		else "🔒 LOCK LAB"
-	UIKit.SetButton(lockButton, {
+		else "🔓 UNLOCKED"
+	UIKit.SetButton(lockChip, {
 		Style = if style ~= lockStyle then style else nil,
 		Text = text,
-		TextColor3 = if state == "Recharging" then Colors.Muted else Colors.Text,
+		TextColor3 = if state == "Recharging" and not alarm
+			then Colors.Muted
+			elseif state == "Ready" and not alarm then Colors.ShieldAmber
+			else Colors.Text,
 	})
 	lockStyle = style
-	setLockPulse(state == "Ready" and hasIntruder(plot))
+	setLockPulse(alarm)
 end
 
 --[[ Layout ---------------------------------------------------------------- ]]
@@ -779,7 +797,7 @@ local function applyLayout(isPhone: boolean)
 	lockHolder.Position = if isPhone
 		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
-	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_BUTTON_SIZE.X + LOCK_BUTTON_GAP, 0)
+	helpHolder.Position = lockHolder.Position + UDim2.fromOffset(LOCK_CHIP_SIZE.X + LOCK_BUTTON_GAP, 0)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -834,7 +852,7 @@ function HudController.Init()
 	cashHolder = buildCashCard()
 	buildButtonRow()
 	buildRebirthReadyButton()
-	buildLockButton()
+	buildLockChip()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
@@ -848,7 +866,7 @@ function HudController.Init()
 	task.spawn(runUpgradesPulse)
 	task.spawn(function()
 		while true do
-			refreshLockButton()
+			refreshLockChip()
 			task.wait(LOCK_REFRESH_SECONDS)
 		end
 	end)

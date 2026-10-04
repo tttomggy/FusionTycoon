@@ -187,7 +187,7 @@ local function buildSlides(): { Slide }
 		},
 		{
 			Title = "LOCK",
-			Line = ("Press LOCK LAB. Nobody gets in for %ds. Then it recharges."):format(HeistConfig.ShieldSeconds),
+			Line = ("Run to the LOCK button inside your gate. Nobody gets in for %ds."):format(HeistConfig.ShieldSeconds),
 			Picture = function(parent)
 				local fence = Instance.new("Frame")
 				fence.Name = "Fence"
