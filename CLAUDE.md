@@ -105,8 +105,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   see the server-wide banner). The client applies a change at once
   (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
   UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
-  wide, one scrolling list of sections; only "Big reveal card" so far:
-  one 5-segment row per tier + a locked Secret row).
+  wide, one scrolling list of sections: "Big reveal card" (one 5-segment
+  row per tier + a locked Secret row) and "Sound effects" (see Sounds)).
 - Saves: a failed DataStore load kicks the player in live games (never
   overwrites the real save); in Studio it plays on a blank profile that is
   never saved. PedestalDisplays are stored with string keys on disk.
@@ -256,8 +256,19 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   bump per changed generator; the panel refreshes at most 4×/s.
 - **Sounds** (`SoundConfig` slots + `SoundKit.Play(slot, parent?)`): every
   sound goes through a slot; an empty Id is silent, a failed Id warns once
-  (client `SoundKit.Preload` at boot). No looping ambient sounds (the
-  pedestal bell loop is gone). `docs/SOUNDS.md` lists every slot.
+  (client `SoundKit.Preload` at boot). Every slot holds a Roblox-owned
+  (creator id 1) Creator Store SFX, no two alike. **Volume:**
+  `PlayerData.Settings.SfxVolume` (0–1, default 0.8, server-clamped) and
+  `SfxMuted`, via `SetSetting { Key = "SfxVolume" | "SfxMuted", Value }`;
+  every sound plays through the `SFX` SoundGroup, whose Volume each client
+  sets locally (`SoundKit.SetVolume`, from TycoonController), so it covers
+  server-played sounds too. SettingsPanel's "Sound effects" row: slider
+  (saves on release) + mute toggle. **Play cap:** at most
+  `SoundConfig.MaxConcurrentPerSlot` (6) of one slot at once; extra plays
+  are dropped. Per slot: `SpeedJitter` (CoinPickup 0.95–1.1) and
+  `RollOffMaxDistance` (Thunder 150, MeteorImpact 200 via
+  `SoundKit.PlayAt`). No looping ambient sounds (the pedestal bell loop is
+  gone). `docs/SOUNDS.md` lists every slot with its id and name.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
   owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
@@ -559,7 +570,8 @@ stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
-prompt only), `SetSetting` (C→S `{ Key, Tier, Value }`, SettingsConfig),
+prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
+SfxVolume, SfxMuted; SettingsConfig),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

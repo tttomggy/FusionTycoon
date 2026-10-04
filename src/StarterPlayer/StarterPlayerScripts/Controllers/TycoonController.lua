@@ -6,6 +6,7 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -34,6 +35,16 @@ local awaySeconds = 0
 -- echoed yet (optimistic: they apply at once).
 local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
 local pendingReveal: { [string]: string } = {}
+local sfxVolume = SettingsConfig.DefaultSfxVolume
+local sfxMuted = false
+-- Local sound changes not echoed yet (nil = none pending).
+local pendingSfxVolume: number? = nil
+local pendingSfxMuted: boolean? = nil
+
+local function applySfx()
+	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
+end
+applySfx()
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -150,6 +161,34 @@ function TycoonController.SetRevealRule(tier: string, value: string)
 	revealRule[tier] = value
 	pendingReveal[tier] = value
 	RemoteEvents.SetSetting:FireServer({ Key = "RevealRule", Tier = tier, Value = value })
+end
+
+-- Sound effects volume (0..1) and mute (SettingsConfig).
+function TycoonController.GetSfxVolume(): number
+	return sfxVolume
+end
+
+function TycoonController.IsSfxMuted(): boolean
+	return sfxMuted
+end
+
+-- Applies at once. `save` false while dragging the slider (local only);
+-- true on release sends it to the server.
+function TycoonController.SetSfxVolume(volume: number, save: boolean)
+	sfxVolume = SettingsConfig.SanitizeSfxVolume(volume)
+	-- Pending even mid-drag, so a snapshot can't snap the slider back.
+	pendingSfxVolume = sfxVolume
+	applySfx()
+	if save then
+		RemoteEvents.SetSetting:FireServer({ Key = "SfxVolume", Value = sfxVolume })
+	end
+end
+
+function TycoonController.SetSfxMuted(muted: boolean)
+	sfxMuted = muted
+	pendingSfxMuted = muted
+	applySfx()
+	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
 end
 
 -- One of this player's displayed items is being carried off by a thief.
@@ -274,8 +313,8 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 	end
-	local settings = snapshot.Settings
-	local rule = SettingsConfig.SanitizeRevealRule(if typeof(settings) == "table" then settings.RevealRule else nil)
+	local settings = SettingsConfig.Sanitize(snapshot.Settings)
+	local rule = settings.RevealRule
 	for tier, value in pendingReveal do
 		if rule[tier] == value then
 			pendingReveal[tier] = nil
@@ -284,6 +323,20 @@ local function onSyncTycoon(snapshot: any)
 		end
 	end
 	revealRule = rule
+	-- Sound: keep a local change until the snapshot echoes it.
+	if pendingSfxVolume ~= nil and math.abs(settings.SfxVolume - pendingSfxVolume) < 1e-4 then
+		pendingSfxVolume = nil
+	end
+	if pendingSfxMuted ~= nil and settings.SfxMuted == pendingSfxMuted then
+		pendingSfxMuted = nil
+	end
+	sfxVolume = if pendingSfxVolume ~= nil then pendingSfxVolume else settings.SfxVolume
+	if pendingSfxMuted ~= nil then
+		sfxMuted = pendingSfxMuted
+	else
+		sfxMuted = settings.SfxMuted
+	end
+	applySfx()
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	hasSynced = true

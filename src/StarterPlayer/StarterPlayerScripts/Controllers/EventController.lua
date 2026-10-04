@@ -490,7 +490,7 @@ local function showStartBanner(id: string, myGeneration: number)
 		Stroke = UITheme.Stroke.Text,
 		Parent = body,
 	})
-	SoundKit.Play("EventStart", nil, { PlaybackSpeed = 1.2 })
+	SoundKit.Play("EventStart", nil)
 	UIKit.PopIn(holder)
 	task.delay(BANNER_HOLD_SECONDS, function()
 		if bannerHolder == holder and generation == myGeneration then
@@ -614,7 +614,7 @@ local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
 	TweenService:Create(rock, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { CFrame = CFrame.new(to) }):Play()
 	task.delay(seconds, function()
 		rock:Destroy()
-		SoundKit.Play("MeteorImpact", nil)
+		SoundKit.PlayAt("MeteorImpact", to)
 		local character = localPlayer.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") and (root.Position - to).Magnitude < METEOR_SHAKE_RADIUS then

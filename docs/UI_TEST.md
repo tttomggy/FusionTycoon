@@ -968,3 +968,34 @@ the chip's ⓘ and first-time pulse, the card closing) live in §16 / §17b.
   only Golden Rares are added. Empty chamber + AUTO-FILL: plain Rares only.
 - [ ] **Fail card.** A failed fusion with a Golden in: "Kept your Golden
   Rare (Golden …), lost N".
+
+## 20. Sounds (every slot filled, volume, play cap)
+
+- [ ] **Preload.** Play in Studio and check the Output: no "SoundKit: <slot>
+  failed to load …" warning. Any that appears names a slot to re-pick.
+- [ ] **Every slot audible once.** Each should be clearly different:
+  - EventStart: `/event GoldenRain` (once, as the banner shows).
+  - EventEnd: `/event off`.
+  - CoinPickup / BigCoin: grab Golden Rain coins.
+  - Thunder: `/event PowerSurge`, wait for a strike; it's louder near the
+    target and fades by ~150 studs.
+  - MeteorImpact: `/event MeteorShower`; it plays at the crater and fades
+    with distance.
+  - EventReveal: `/eventmut void`.
+  - Grab / Alarm: a two-player heist (thief / victim; the alarm is three
+    quick high blips).
+  - RevealMajor / RevealMinor: fuse to Epic / to Rare.
+  - Toast: any top banner.
+  - Station: buy on the Multiplier Pad or the Gacha Pad.
+- [ ] **Volume slider.** ⚙ → Sound effects: it starts at 80%. Drag it to
+  20%: the number follows the knob and a click plays at the new level on
+  release; every sound above, and the other player's Station purchases near
+  you, are quieter. 0% is silent. The value survives a rejoin in a live
+  test place (Studio profiles never save).
+- [ ] **Mute.** Tap 🔊: it turns red 🔇, the slider greys, and nothing plays,
+  including server sounds (Station). Tap again: sound returns at the slider
+  level.
+- [ ] **No stacking on a coin streak.** `/event GoldenRain` and run through a
+  line of coins fast (or Pull ×10 for RevealMinor): at most 6 of one sound
+  overlap, and the coin pitch varies slightly from coin to coin.
+

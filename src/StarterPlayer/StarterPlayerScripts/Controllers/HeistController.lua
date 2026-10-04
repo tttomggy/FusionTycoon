@@ -52,8 +52,8 @@
 	    while guarded). Client-only; no light, no Highlight; skipped for
 	    protected (Rebirth 0) labs.
 
-	The alarm reuses the project's one proven sound id (AnnouncementController,
-	RevealEffects): rbxasset://sounds/electronicpingshort.wav, three low pings.
+	Sounds: SoundConfig slots Grab (the whoosh) and Alarm (three quick
+	blips at PlaybackSpeed 1.3).
 ]]
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -98,7 +98,6 @@ local FOV_PUNCH = 8
 local FOV_PUNCH_SECONDS = 0.3
 -- The project's one sound id proven to load (a free library whoosh can't
 -- be verified to load from here), pitched up into a quick pickup blip.
-local GRAB_SOUND_SPEED = 1.6
 local PILL_MAX_DISTANCE = 200
 local BANNER_SIZE = Vector2.new(480, 92)
 local BANNER_TOP = 118 -- under the server banners (AnnouncementController)
@@ -609,7 +608,7 @@ local function playGrabMoment(itemName: string)
 	})
 	UIKit.PopIn(holder)
 
-	SoundKit.Play("Grab", nil, { PlaybackSpeed = GRAB_SOUND_SPEED })
+	SoundKit.Play("Grab", nil)
 
 	local camera = Workspace.CurrentCamera
 	if camera then
@@ -628,7 +627,7 @@ end
 local function playAlarm()
 	task.spawn(function()
 		for _ = 1, ALARM_PINGS do
-			SoundKit.Play("Alarm", nil, { PlaybackSpeed = 0.7 })
+			SoundKit.Play("Alarm", nil, { PlaybackSpeed = 1.3 })
 			task.wait(ALARM_GAP_SECONDS)
 		end
 	end)

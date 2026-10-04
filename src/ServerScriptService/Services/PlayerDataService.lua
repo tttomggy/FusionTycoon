@@ -288,9 +288,7 @@ local function reconcile(raw: any): PlayerData
 			end
 		end
 	end
-	data.Settings = {
-		RevealRule = SettingsConfig.SanitizeRevealRule(typeof(raw.Settings) == "table" and raw.Settings.RevealRule or nil),
-	}
+	data.Settings = SettingsConfig.Sanitize(raw.Settings)
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
 	end
@@ -742,6 +740,21 @@ function PlayerDataService.SetRevealRule(player: Player, tier: string, value: st
 	return true
 end
 
+-- SetSetting SfxVolume / SfxMuted (clamped / coerced server-side).
+function PlayerDataService.SetSfx(player: Player, volume: number?, muted: boolean?): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	if volume ~= nil then
+		data.Settings.SfxVolume = SettingsConfig.SanitizeSfxVolume(volume)
+	end
+	if muted ~= nil then
+		data.Settings.SfxMuted = muted
+	end
+	return true
+end
+
 -- Studio /tips reset.
 function PlayerDataService.ResetTips(player: Player)
 	local data = state.sessionCache[player.UserId]
@@ -845,9 +858,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
-		Settings = {
-			RevealRule = SettingsConfig.SanitizeRevealRule(data and data.Settings.RevealRule or nil),
-		},
+		Settings = SettingsConfig.Sanitize(data and data.Settings or nil),
 	}
 end
 
@@ -1074,8 +1085,9 @@ function PlayerDataService:Init()
 		end)
 	)
 
-	-- SetSetting { Key = "RevealRule", Tier, Value }: tier and value
-	-- whitelisted (SettingsConfig); stored in the saved profile, then one
+	-- SetSetting { Key = "RevealRule", Tier, Value } (tier and value
+	-- whitelisted), { Key = "SfxVolume", Value } (clamped 0..1) or
+	-- { Key = "SfxMuted", Value } (a boolean) (SettingsConfig); stored in the saved profile, then one
 	-- (coalesced) sync carries Settings back.
 	table.insert(
 		state.connections,
@@ -1084,10 +1096,15 @@ function PlayerDataService:Init()
 				return
 			end
 			local request = payload :: any
-			if request.Key ~= "RevealRule" then
-				return
+			local changed = false
+			if request.Key == "RevealRule" then
+				changed = PlayerDataService.SetRevealRule(player, request.Tier, request.Value)
+			elseif request.Key == "SfxVolume" and typeof(request.Value) == "number" then
+				changed = PlayerDataService.SetSfx(player, request.Value, nil)
+			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
+				changed = PlayerDataService.SetSfx(player, nil, request.Value)
 			end
-			if not PlayerDataService.SetRevealRule(player, request.Tier, request.Value) then
+			if not changed then
 				return
 			end
 			if not state.settingsSyncQueued[player.UserId] then
