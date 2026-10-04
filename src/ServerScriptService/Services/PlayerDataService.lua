@@ -110,6 +110,9 @@ export type PlayerData = {
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
 	Gifts: GiftConfig.State,
+	-- The highest base income ($/s, no timed boosts) this save has reached:
+	-- the street's BEST INCOME board (LeaderboardService).
+	BestIncome: number,
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -272,6 +275,7 @@ local DEFAULT_DATA: PlayerData = {
 	Sessions = 0,
 	Daily = DailyConfig.Default(),
 	Gifts = GiftConfig.Default(-1),
+	BestIncome = 0,
 	Version = DATA_VERSION,
 }
 
@@ -429,6 +433,9 @@ local function reconcile(raw: any): PlayerData
 		data.Sessions = math.floor(raw.Sessions)
 	end
 	data.Daily = DailyConfig.Sanitize(raw.Daily)
+	if typeof(raw.BestIncome) == "number" and raw.BestIncome == raw.BestIncome and raw.BestIncome >= 0 then
+		data.BestIncome = raw.BestIncome
+	end
 	data.Gifts = GiftConfig.Sanitize(raw.Gifts, RewardConfig.GetUtcDay(os.time()))
 	-- Version 1 is the first FT_Live_1 format; later versions migrate here
 	-- (raw.Version < DATA_VERSION) before the stamp below.
@@ -1104,6 +1111,18 @@ function PlayerDataService.TickBoosts(player: Player, dt: number): boolean
 		end
 	end
 	return ended
+end
+
+-- Raises BestIncome to `income` if higher; returns the best so far.
+function PlayerDataService.RecordBestIncome(player: Player, income: number): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	if income == income and income > data.BestIncome and income < math.huge then
+		data.BestIncome = income
+	end
+	return data.BestIncome
 end
 
 function PlayerDataService.GetSafeFusionTokens(player: Player): number

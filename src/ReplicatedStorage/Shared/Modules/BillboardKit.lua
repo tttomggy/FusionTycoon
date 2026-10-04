@@ -920,6 +920,112 @@ function BillboardKit.SetEventBoard(gui: SurfaceGui, rows: { EventBoardRow }, ad
 	end
 end
 
+--[[ Street leaderboards ---------------------------------------------------- ]]
+
+local LEADERBOARD_ROWS = 10
+local RANK_TINTS = { Colors.RankGold, Colors.RankSilver, Colors.RankBronze }
+
+export type LeaderboardRow = {
+	Rank: number,
+	Name: string,
+	Value: string, -- already formatted (NumberFormat)
+	Image: string, -- headshot content id ("" = a blank circle)
+}
+
+-- A leaderboard's face: the title ("💰 BEST INCOME /s") and ten rows (rank,
+-- headshot, display name, value); rows 1-3 tinted gold / silver / bronze.
+function BillboardKit.LeaderboardSurface(board: BasePart, title: string, titleColor: Color3, pixelsPerStud: number, maxDistance: number): SurfaceGui
+	local gui = newSurface(board, "LeaderboardSurface", Enum.NormalId.Front, pixelsPerStud)
+	gui.MaxDistance = maxDistance
+	local panel = Instance.new("Frame")
+	panel.Name = "Panel"
+	panel.BackgroundColor3 = Colors.Panel
+	panel.Size = UDim2.fromScale(1, 1)
+	panel.Parent = gui
+	borderStroke(panel, 8)
+
+	local heading = scaledLabel(panel, "Title", Fonts.Display, titleColor, 0.02, 0.1)
+	heading.Text = title
+	textStroke(heading, 3)
+	local top, rowHeight, rowGap = 0.135, 0.078, 0.008
+	for index = 1, LEADERBOARD_ROWS do
+		local row = Instance.new("Frame")
+		row.Name = "Row" .. index
+		row.BackgroundColor3 = RANK_TINTS[index] or Colors.Panel2
+		row.Position = UDim2.fromScale(0.03, top + (index - 1) * (rowHeight + rowGap))
+		row.Size = UDim2.fromScale(0.94, rowHeight)
+		row.Visible = false
+		row.Parent = panel
+		corner(row, UDim.new(0.25, 0))
+		borderStroke(row, 3)
+		local rank = scaledLabel(row, "Rank", Fonts.Display, Colors.Text, 0.12, 0.76)
+		rank.Position = UDim2.fromScale(0.01, 0.12)
+		rank.Size = UDim2.fromScale(0.09, 0.76)
+		textStroke(rank, 2)
+		local head = Instance.new("ImageLabel")
+		head.Name = "Head"
+		head.BackgroundColor3 = Colors.Panel3
+		head.AnchorPoint = Vector2.new(0, 0.5)
+		head.Position = UDim2.fromScale(0.11, 0.5)
+		head.Size = UDim2.fromScale(0.86, 0.86)
+		head.SizeConstraint = Enum.SizeConstraint.RelativeYY
+		head.Parent = row
+		corner(head, UDim.new(0.5, 0))
+		local name = scaledLabel(row, "Name", Fonts.BodyHeavy, Colors.Text, 0.16, 0.68)
+		name.Position = UDim2.fromScale(0.2, 0.16)
+		name.Size = UDim2.fromScale(0.46, 0.68)
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		name.TextTruncate = Enum.TextTruncate.AtEnd
+		textStroke(name, 2)
+		local value = scaledLabel(row, "Value", Fonts.Display, Colors.Cash, 0.14, 0.72)
+		value.Position = UDim2.fromScale(0.67, 0.14)
+		value.Size = UDim2.fromScale(0.31, 0.72)
+		value.TextXAlignment = Enum.TextXAlignment.Right
+		textStroke(value, 2)
+	end
+	local empty = scaledLabel(panel, "Empty", Fonts.Body, Colors.Muted, 0.45, 0.07)
+	empty.Text = "Loading…"
+	return gui
+end
+
+-- Fills a leaderboard (up to ten rows; the rest hide).
+function BillboardKit.SetLeaderboard(gui: SurfaceGui, rows: { LeaderboardRow })
+	local panel = gui:FindFirstChild("Panel")
+	if not panel then
+		return
+	end
+	for index = 1, LEADERBOARD_ROWS do
+		local row = panel:FindFirstChild("Row" .. index)
+		local data = rows[index]
+		if row and row:IsA("Frame") then
+			row.Visible = data ~= nil
+			if data then
+				local rank = row:FindFirstChild("Rank") :: TextLabel?
+				local name = row:FindFirstChild("Name") :: TextLabel?
+				local value = row:FindFirstChild("Value") :: TextLabel?
+				local head = row:FindFirstChild("Head") :: ImageLabel?
+				if rank then
+					rank.Text = "#" .. data.Rank
+				end
+				if name then
+					name.Text = data.Name
+				end
+				if value then
+					value.Text = data.Value
+				end
+				if head then
+					head.Image = data.Image
+				end
+			end
+		end
+	end
+	local empty = panel:FindFirstChild("Empty")
+	if empty and empty:IsA("TextLabel") then
+		empty.Visible = #rows == 0
+		empty.Text = "No scores yet"
+	end
+end
+
 export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
 	-- A teal pill between title and detail ("🛡 PROTECTED · NEW LAB"); nil hides it.

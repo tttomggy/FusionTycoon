@@ -1195,3 +1195,23 @@ published place.
 - [ ] **Phone.** Device emulator: SHOP and GIFTS fit beside the cash card
   without covering the top-centre event chip; the panel's boxes stay 3 per
   row and each is easy to tap.
+
+## 25. Street leaderboards
+
+- [ ] **Placement.** Play in Studio and walk to each end of the street:
+  at the west end the 💰 BEST INCOME /s board stands left of the LAB
+  WEATHER Event Board and 🏆 MOST REBIRTHS right of it; at the east end
+  📖 INDEX FOUND stands on the Event Board's -z side. Each faces down the
+  street, on two posts with a gold strip on top; none touches a belt, a
+  gate, a plot wall or an Event Board, and each is readable from the
+  middle of the street.
+- [ ] **Studio fake rows.** Every board shows ten rows "TestPlayer1…10":
+  #1 gold, #2 silver, #3 bronze tints, the rest dark; a blank round
+  headshot well, the name, and the value (income "$1T/s"…, rebirths,
+  "112 / 119"…). No DataStore warnings in Output.
+- [ ] **Live (published place).** Play a few minutes with 2 accounts,
+  wait ≥ 2 min: both appear on the boards with their headshot and display
+  name; BEST INCOME is your highest base income (a running Boost doesn't
+  raise it). Rebirth, wait ≤ 2 min more: MOST REBIRTHS updates. Leave and
+  rejoin a fresh server: your rows are still there. Shut a server down:
+  the last values written on close show in the next server.
