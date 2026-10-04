@@ -14,9 +14,8 @@
 	  NEXT        the next 2 events with timers, and the Admin Abuse line
 
 	400 px wide under the chip; on a phone 90% of the width (capped at 400).
-	Between events it explains the NEXT one. EventController also opens it
-	once per event type per account (Tips "event_<Id>") after the start
-	banner.
+	Between events it explains the NEXT one. It only opens on a tap of the
+	chip (EventController); it never opens itself.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 

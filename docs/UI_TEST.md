@@ -443,8 +443,8 @@ testable without luck.
     and the **SERVER · SECRET** banner.
 - [ ] **Index.** Press **INDEX** (the teal button; the three bottom buttons
   fit at 844 × 390).
-  - [ ] The header pill shows the bonus, and the count line reads **n / 68
-    found · +1% each · +5% per full tier page**.
+  - [ ] The header pill shows the bonus, and the line under INDEX reads
+    **n / 119 found · every find +1% income · a full page +5%**.
   - [ ] The tabs show per-tier counts (Secret x/8).
   - [ ] Pull or `/give` something new: the toast **NEW IN INDEX · Golden
     Star Core · +1%** shows, and the cell fills.
@@ -771,7 +771,8 @@ failed").
   rainbow banner plays once.
 - [ ] **Index.** The Index shows 7 variant columns (Normal + Golden,
   Charged, Diamond, Void, Rainbow, Celestial); unfound Charged / Void /
-  Celestial cells show a 🕐. It fits on a phone (the page scrolls).
+  Celestial cells show their event icon (⚡ 🌙 ☄), never a clock. It fits
+  on a phone (the page scrolls).
 - [ ] **`/eventclock`.** `/eventclock 0`, then step `/eventclock 15`, `30`,
   `45`, `60`: hh:00 is always Night or Void Moon, the others a weather; the
   HUD chip, the info card's NEXT rows and both street Event Boards agree at
@@ -857,11 +858,11 @@ failed").
   EVENT MUTATION banner ("… got a VOID … under the Void Moon!", "…got
   CHARGED by lightning!", "…found a CELESTIAL … in a meteor!"). A meteor
   core that rolls Celestial and a Void Moon Void fusion use the same card.
-- [ ] **Index headers.** In the Index, tap the VOID ⓘ heading: a box under
-  the header row reads "VOID ×8" in purple, "Only from fusing during a
-  Void Moon (1 in 20 fusions). …", "You have X / 17". Tap it again (or
-  change tier) to close. Golden / Diamond / Rainbow mention Rainbow Storm
-  ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
+- [ ] **Index how-to-get.** (Polish 7: the headings are no longer tap
+  targets; the info strip replaced the boxes, see §18.) Tap any Void orb:
+  the strip reads "<Item> · Void ×8" in purple, "Only from fusing during a
+  Void Moon (1 in 20 fusions). …". Golden / Diamond / Rainbow mention
+  Rainbow Storm ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
 - [ ] **Odds board.** At desktop distance from the machine the board reads
   as a table: "FUSE → TIER UP", "more orbs = better odds", ORBS IN 2–6,
   one row per recipe with an orb dot, every % in its own cell, 100% cells
@@ -875,3 +876,47 @@ failed").
   shows one "SoundKit: <slot> failed to load …" warning at start and that
   sound is simply silent afterwards; empty slots (Thunder, CoinPickup, …)
   play nothing with no errors.
+
+## 18. Polish 7 (Index book, MAX upgrades, smaller HUD)
+
+The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up and
+the TAP tag, the card closing) live in §16 / §17b.
+
+- [ ] **Index orbs.** Open INDEX on a fresh save, `/give` a few items with
+  `[mutation]`. Found cells are the real orb in that variant: Normal the
+  tier orb, Golden gold, Charged cyan with a glow, Diamond pale with a
+  faceted sweep, Void deep purple, Rainbow hue-cycling, Celestial
+  white-blue with a soft glow. Missing cells are dark dashed circles with a
+  muted "?". No check marks or clocks anywhere.
+- [ ] **Event icons.** The CHARGED / VOID / CELESTIAL headings carry ⚡ 🌙 ☄
+  and their missing cells show the same icon instead of "?". Tapping a
+  heading does nothing.
+- [ ] **Tabs.** Every tab shows its tier name in the tier colour, "x / N"
+  and a thin bar; only the selected one shows "+5% at N".
+- [ ] **Complete row.** `/give` one item in all 7 variants: its row card
+  gets a gold stroke and a soft gold glow, the sub-line reads "★ COMPLETE
+  7/7 · $X/s" in gold. The tab count and the header line go up.
+- [ ] **Info strip.** Tap a found Golden orb: the strip reads "<Item> ·
+  Golden ×2", the how-to-get line and "✦ found". Tap a missing one: "not
+  found yet". Tap a Normal orb: "Any pull, or a fusion without a mutation."
+- [ ] **Phone scroll.** Device emulator (iPhone 14 landscape): the rows
+  scroll, orbs are ~40 px, every orb is still easy to tap (the cell is the
+  target), the info strip stays visible at the bottom.
+- [ ] **MAX ×N exact.** `/cash 5000000`, open UPGRADES. Note a row's "MAX ×N
+  / $X" and your cash. Press it: the generator goes up exactly N levels,
+  cash drops by exactly $X, one toast "+N levels · <Generator> LV L" and
+  one bump on that generator.
+- [ ] **MAX ALL.** "⚡ MAX ALL · $X / +N levels" under the list: press it.
+  Exactly N levels across the generators, $X spent, toast "+N levels
+  across K generators", one bump per generator that changed. A generator
+  that unlocks during the run gets levels too.
+- [ ] **need $X.** With too little cash for even one level, the row's button
+  is muted "MAX / need $X" (X = that generator's next price) and MAX ALL
+  reads "need $X" (the cheapest next level). Pressing either toasts "Need
+  $X" and buys nothing. A maxed generator shows MAXED and no MAX button.
+- [ ] **MAX while carrying.** Steal an item (two players, Rebirth 1) and
+  press MAX / MAX ALL while carrying (or fire
+  `RequestUpgradeMax:FireServer({ All = true })` from the command bar):
+  "Get home with that item first!", no level, no cash spent.
+- [ ] **Refresh rate.** With UPGRADES open and income ticking, the MAX labels
+  follow your cash (N and $X grow) without flicker.
