@@ -24,6 +24,7 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local Controllers = script.Parent.Parent.Controllers
@@ -192,6 +193,120 @@ end
 
 --[[ Build -------------------------------------------------------------------- ]]
 
+--[[ "How to get it" (tap a mutation heading) --------------------------------------- ]]
+
+local howToBox: Frame
+local howToTitle: TextLabel
+local howToLine: TextLabel
+local howToCount: TextLabel
+local howToShown: string? = nil
+local buildHowToBox: (content: Frame, top: number) -> ()
+local toggleHowTo: (mutation: string) -> ()
+
+local function pct(chance: number): string
+	return ("%d"):format(math.floor(chance * 100 + 0.5))
+end
+
+-- One line on how `mutation` is obtained, numbers from EventConfig.
+local function howToGet(mutation: string): string
+	if mutation == "Charged" then
+		return "Only from lightning during a Power Surge."
+	elseif mutation == "Void" then
+		return ("Only from fusing during a Void Moon (1 in %d fusions). Void Moons come at :00 some hours, and on Admin Abuse Saturdays."):format(
+			math.floor(1 / EventConfig.VoidChance + 0.5)
+		)
+	elseif mutation == "Celestial" then
+		return ("Only from meteor cores (%s%%)."):format(pct(EventConfig.MeteorCelestialChance))
+	end
+	return ("Any pull or fusion. Rainbow Storm makes it ×%d more likely (Golden Rain: Golden ×%d)."):format(
+		EventConfig.RainbowStormOdds,
+		EventConfig.GoldenRainGoldenOdds
+	)
+end
+
+local function foundCount(mutation: string): number
+	local suffix = "|" .. mutation
+	local found = 0
+	for key, on in TycoonController.GetIndex() do
+		if on and key:sub(-#suffix) == suffix then
+			found += 1
+		end
+	end
+	return found
+end
+
+buildHowToBox = function(content: Frame, top: number)
+	local box = Instance.new("Frame")
+	box.Name = "HowToGet"
+	box.BackgroundColor3 = Colors.Panel2
+	box.Position = UDim2.fromOffset(0, top)
+	box.Size = UDim2.new(1, 0, 0, 0)
+	box.AutomaticSize = Enum.AutomaticSize.Y
+	box.ZIndex = content.ZIndex + 5
+	box.Visible = false
+	box.Parent = content
+	UIKit.Corner(box, UITheme.Radius.Row)
+	local stroke = UIKit.Stroke(box, 3)
+	stroke.Name = "Outline"
+	UIKit.Padding(box, 10, 14, 10, 14)
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 4)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = box
+	howToTitle = UIKit.Label({
+		Name = "Title",
+		Font = Fonts.Display,
+		TextSize = 20,
+		Size = UDim2.new(1, -UITheme.MinTapSize, 0, 24),
+		LayoutOrder = 1,
+		ZIndex = box.ZIndex + 1,
+		Stroke = UITheme.Stroke.Text,
+		Parent = box,
+	})
+	howToLine = UIKit.Label({
+		Name = "Line",
+		Font = Fonts.Body,
+		TextSize = 15,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 18),
+		LayoutOrder = 2,
+		ZIndex = box.ZIndex + 1,
+		Parent = box,
+	})
+	howToCount = UIKit.Label({
+		Name = "Count",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = Colors.GoldLabel,
+		Size = UDim2.new(1, 0, 0, 18),
+		LayoutOrder = 3,
+		ZIndex = box.ZIndex + 1,
+		Parent = box,
+	})
+	-- Tapping the same heading again (or another tier tab) closes it.
+	howToBox = box
+end
+
+toggleHowTo = function(mutation: string)
+	if howToShown == mutation and howToBox.Visible then
+		howToShown = nil
+		howToBox.Visible = false
+		return
+	end
+	howToShown = mutation
+	local color = UITheme.GetMutationColor(mutation) or Colors.Text
+	howToTitle.Text = ("%s ×%d"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation))
+	howToTitle.TextColor3 = color
+	howToLine.Text = howToGet(mutation)
+	howToCount.Text = ("You have %d / %d"):format(foundCount(mutation), #ItemConfig.Items)
+	local outline = howToBox:FindFirstChild("Outline")
+	if outline and outline:IsA("UIStroke") then
+		outline.Color = color
+	end
+	howToBox.Visible = true
+end
+
 local function build()
 	modal = UIKit.Modal({
 		Name = "IndexPanel",
@@ -257,6 +372,8 @@ local function build()
 			ZIndex = tabsFrame.ZIndex + 1,
 			OnClick = function()
 				selectedTier = tier
+				howToShown = nil
+				howToBox.Visible = false
 				refresh()
 			end,
 		})
@@ -264,23 +381,39 @@ local function build()
 
 	local headerY = 24 + TAB_SIZE.Y + UITheme.SmallShadowOffset + 14
 	local columnWidth = (1 - NAME_COLUMN) / #IndexConfig.Variants
+	local pageY = headerY + 20
 	for index, variant in IndexConfig.Variants do
-		UIKit.Label({
+		local isMutation = variant ~= IndexConfig.NORMAL
+		local heading = UIKit.Label({
 			Name = variant .. "Heading",
-			Text = variant:upper(),
+			Text = variant:upper() .. (if isMutation then " ⓘ" else ""),
 			Font = Fonts.BodyHeavy,
 			TextSize = HEADING_TEXT_SIZE,
-			TextColor3 = UITheme.GetMutationColor(if variant == IndexConfig.NORMAL then nil else variant)
-				or Colors.Muted,
+			TextColor3 = UITheme.GetMutationColor(if isMutation then variant else nil) or Colors.Muted,
 			Position = UDim2.new(NAME_COLUMN + (index - 1) * columnWidth, 0, 0, headerY),
 			Size = UDim2.new(columnWidth, 0, 0, 16),
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = content.ZIndex,
 			Parent = content,
 		})
+		if isMutation then
+			-- A 44 px tall invisible tap target centred on the heading.
+			local tap = Instance.new("TextButton")
+			tap.Name = variant .. "HeadingTap"
+			tap.Text = ""
+			tap.BackgroundTransparency = 1
+			tap.AnchorPoint = Vector2.new(0, 0.5)
+			tap.Position = UDim2.new(heading.Position.X.Scale, 0, 0, headerY + 8)
+			tap.Size = UDim2.new(columnWidth, 0, 0, UITheme.MinTapSize)
+			tap.ZIndex = content.ZIndex
+			tap.Parent = content
+			tap.Activated:Connect(function()
+				toggleHowTo(variant)
+			end)
+		end
 	end
+	buildHowToBox(content, pageY)
 
-	local pageY = headerY + 20
 	page = Instance.new("ScrollingFrame")
 	page.Name = "Page"
 	page.BackgroundTransparency = 1
