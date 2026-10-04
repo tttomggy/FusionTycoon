@@ -334,6 +334,7 @@ PlotLayout.EventCoin = {
 	SpinDegPerSec = 120,
 	Bob = 0.35,
 	BobPeriod = 1.2,
+	BigScale = 2, -- a BIG coin is this many times the size
 }
 
 --[[ Fusion Machine ---------------------------------------------------------------- ]]

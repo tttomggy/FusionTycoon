@@ -109,6 +109,52 @@ local function newBillboard(parent: Instance, name: string, studs: Vector2, offs
 	return billboard
 end
 
+--[[ Chip ---------------------------------------------------------------------- ]]
+
+export type ChipProps = {
+	Name: string?,
+	Text: string,
+	Gradient: UITheme.GradientPair?, -- fill (default Panel)
+	TextColor: Color3?,
+	Studs: Vector2?, -- billboard size in studs (default 6 x 1.4)
+	StudsOffset: Vector3?,
+	MaxDistance: number?,
+}
+
+export type Chip = { Gui: BillboardGui, Label: TextLabel }
+
+-- A rounded world pill (event chips: "⚡ ×1.25" over a generator,
+-- "⚡ STRIKE IN 3", "Hold E · free item"): AlwaysOnTop false,
+-- LightInfluence 0, a MaxDistance. Built on the server or a client.
+function BillboardKit.Chip(parent: Instance, props: ChipProps): Chip
+	local gui = newBillboard(
+		parent,
+		props.Name or "Chip",
+		props.Studs or Vector2.new(6, 1.4),
+		props.StudsOffset or Vector3.zero,
+		props.MaxDistance or 80
+	)
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.fromScale(1, 1)
+	fill.BackgroundColor3 = Colors.White
+	fill.Parent = gui
+	corner(fill, UDim.new(0.5, 0))
+	borderStroke(fill, 3)
+	local pair = props.Gradient
+	if pair then
+		gradient(fill, pair.Top, pair.Bottom)
+	else
+		fill.BackgroundColor3 = Colors.Panel
+	end
+	local label = scaledLabel(fill, "Text", Fonts.Display, props.TextColor or Colors.Text, 0.12, 0.76)
+	label.Position = UDim2.fromScale(0.06, 0.12)
+	label.Size = UDim2.fromScale(0.88, 0.76)
+	label.Text = props.Text
+	textStroke(label, 2)
+	return { Gui = gui, Label = label }
+end
+
 --[[ Pad label --------------------------------------------------------------- ]]
 
 export type PadProps = {

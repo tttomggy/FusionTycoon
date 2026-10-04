@@ -92,7 +92,7 @@ EventConfig.Strengths = { 1, 2, 3 } -- what the admin panel offers
 
 -- Golden Rain: a coin per claimed plot every CoinIntervalSeconds / strength,
 -- each worth CoinIncomeSeconds x strength of the owner's passive income.
-EventConfig.CoinIntervalSeconds = 4
+EventConfig.CoinIntervalSeconds = 10 -- Events 2: 4 -> 10 with BIG + street coins (15% target; fewer, bigger coins)
 EventConfig.CoinIncomeSeconds = 3
 EventConfig.CoinMaxIncomeSeconds = 15 -- clamp
 EventConfig.CoinMaxLive = 30 -- per plot
@@ -106,7 +106,7 @@ EventConfig.BigCoinIncomeSeconds = 20
 -- Street coins: one every StreetCoinIntervalSeconds on the street (inside
 -- StreetLayout.MeteorBounds), at most StreetCoinMaxLive; anyone can grab
 -- one and it pays the GRABBER StreetCoinIncomeSeconds of their income.
-EventConfig.StreetCoinIntervalSeconds = 6
+EventConfig.StreetCoinIntervalSeconds = 15 -- spec 6; spaced out with the lab coins for the 15% target
 EventConfig.StreetCoinMaxLive = 8
 EventConfig.StreetCoinIncomeSeconds = 6
 
@@ -116,6 +116,10 @@ EventConfig.SurgeGeneratorBonus = 0.25 -- was 0.5; cut with the Void Moon halvin
 EventConfig.MaxGeneratorMultiplier = 3 -- clamp
 EventConfig.LightningIntervalSeconds = 20
 EventConfig.LightningChargeChance = 0.25
+-- The target is picked (and marked: pedestal attribute LightningTarget,
+-- "⚡ STRIKE IN 3·2·1" on every client) this long before the bolt. The pick
+-- is by plot, then by pedestal, so one rich lab doesn't hog the strikes.
+EventConfig.LightningWarningSeconds = 3
 
 -- Meteor Shower: MeteorCount x strength meteors at random times; a core
 -- gives one item of a tier by weight, ChanceCelestial of it Celestial.
@@ -124,6 +128,7 @@ EventConfig.MeteorGrabSeconds = 2
 EventConfig.MeteorPromptDistance = 8
 EventConfig.MeteorCraterLifetime = 60
 EventConfig.MeteorFallSeconds = 2.5
+EventConfig.MeteorWarningSeconds = 2 -- the red "☄ INCOMING" ring shows this long before impact
 EventConfig.MeteorCoreTiers = {
 	{ Tier = "Epic", Weight = 60 },
 	{ Tier = "Legendary", Weight = 30 },

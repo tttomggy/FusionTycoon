@@ -101,9 +101,14 @@ EV_VOID_MOON_CHANCE = 0.15
 EV_DURATION = {"GoldenRain": 300, "PowerSurge": 300, "MeteorShower": 180, "RainbowStorm": 300,
                "Night": 600, "VoidMoon": 600}
 EV_WEATHER = [("GoldenRain", 40), ("PowerSurge", 35), ("MeteorShower", 20), ("RainbowStorm", 5)]
-COIN_INTERVAL = 4          # a coin per plot every 4 s
+COIN_INTERVAL = 10         # a coin per plot every 10 s
 COIN_INCOME_SECONDS = 3    # each worth 3 s of income
-COIN_PICKUP = 0.70         # share of coins the player actually collects
+COIN_PICKUP = 0.70         # share of lab coins the player actually collects
+BIG_COIN_CHANCE = 8        # 1 in 8 lab coins is BIG ...
+BIG_COIN_INCOME_SECONDS = 20  # ... and worth this many seconds instead
+STREET_COIN_INTERVAL = 15  # a street coin every 15 s ...
+STREET_COIN_INCOME_SECONDS = 6  # ... paying the grabber 6 s of income
+# street coins are a race: the player gets 1 in SERVER_PLAYERS of them
 GOLDEN_RAIN_GOLDEN_ODDS = 3
 SURGE_GENERATOR_MULT = 1.25
 LIGHTNING_INTERVAL = 20
@@ -278,7 +283,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
         income = cps(ev)
         cash += income * step
         if ev == "GoldenRain":
-            cash += income * COIN_PICKUP * COIN_INCOME_SECONDS / COIN_INTERVAL * step
+            lab_seconds = ((BIG_COIN_CHANCE - 1) * COIN_INCOME_SECONDS + BIG_COIN_INCOME_SECONDS) / BIG_COIN_CHANCE
+            cash += income * COIN_PICKUP * lab_seconds / COIN_INTERVAL * step
+            cash += income * (1 / SERVER_PLAYERS) * STREET_COIN_INCOME_SECONDS / STREET_COIN_INTERVAL * step
         if ev == "PowerSurge" and int(t) % LIGHTNING_INTERVAL == 0:
             lightning()
         t += step

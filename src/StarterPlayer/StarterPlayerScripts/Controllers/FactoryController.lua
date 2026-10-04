@@ -41,6 +41,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
 local HudController = require(script.Parent.HudController)
@@ -53,6 +54,7 @@ local ARC_SECONDS = 0.35
 local DROP_SECONDS = 0.2
 local POP_WINDOW = 0.5
 local MAX_BALLS_PER_PLOT = 60
+local SURGE_BALL_WHITEN = 0.35 -- Power Surge: balls this far toward white
 local ACTIVE_RADIUS = 120
 local PARKED = CFrame.new(0, -1000, 0) -- where pooled balls wait, out of sight
 local PEDESTAL_POP_SECONDS = 2
@@ -122,7 +124,8 @@ local function acquireBall(tier: string): (BasePart, number)
 	local ball = part :: BasePart
 	local color = FusionConfig.TierAccentColors[tier] or UITheme.World.AccentGold
 	ball.Size = Vector3.one * diameter
-	ball.Color = color
+	-- Power Surge: brighter balls (toward white; no light is raised).
+	ball.Color = if EventState.GetGeneratorMultiplier() > 1 then color:Lerp(UITheme.Colors.White, SURGE_BALL_WHITEN) else color
 	local light = ball:FindFirstChild("BallLight") :: PointLight?
 	if light then
 		light.Color = color
@@ -206,7 +209,8 @@ local function spawnBall(state: PlotState, generator: TycoonConfig.GeneratorDef,
 		RideEnd = origin:PointToWorldSpace(FactoryKit.GetBeltPoint(belt.EndZ) + Vector3.new(0, radius, 0)),
 		DropEnd = origin:PointToWorldSpace(collectorTop),
 		SpawnedAt = os.clock(),
-		RideSeconds = (spot.Position.Z - belt.EndZ) / belt.Speed,
+		-- Power Surge: the belt runs faster by the generator multiplier.
+		RideSeconds = (spot.Position.Z - belt.EndZ) / (belt.Speed * EventState.GetGeneratorMultiplier()),
 		Value = value,
 		Tier = generator.Tier,
 	})
@@ -217,19 +221,22 @@ local function spawnDue(state: PlotState, now: number)
 	local multiplier = if state.IsOwn
 		then TycoonController.GetIncomeMultiplier()
 		else 0
+	-- Power Surge: balls drop more often and the line carries the boosted
+	-- generator income (the HUD's figure, IncomeInputs.EventGeneratorMultiplier).
+	local surge = EventState.GetGeneratorMultiplier()
 	for _, generator in TycoonConfig.Generators do
 		local spot = PlotLayout.GENERATORS[generator.Id]
 		local model = state.Model:FindFirstChild(GeneratorKit.GetModelName(generator.Id))
 		local level = model and model:GetAttribute("Level")
 		if spot and typeof(level) == "number" and level >= 1 then
-			local interval = getInterval(level)
+			local interval = getInterval(level) / surge
 			local due = state.NextSpawn[generator.Id]
 			if not due then
 				-- First sight: stagger generators so they don't drop in step.
 				state.NextSpawn[generator.Id] = now + interval * math.random()
 			elseif now >= due then
 				state.NextSpawn[generator.Id] = math.max(due + interval, now)
-				local value = TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier * interval
+				local value = TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier * surge * interval
 				if #state.Balls < MAX_BALLS_PER_PLOT then
 					spawnBall(state, generator, spot, value)
 				elseif state.IsOwn then

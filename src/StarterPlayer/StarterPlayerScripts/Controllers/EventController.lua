@@ -107,6 +107,12 @@ local FLASH_SECONDS = 0.18
 local METEOR_SHAKE_RADIUS = 60
 
 local POP_TEXT_SIZE = 24
+local BIG_POP_TEXT_SIZE = 36
+local RESULT_POP_SECONDS = 1.5
+local WARNING_RING_DIAMETER = 6
+local INCOMING_RING_DIAMETER = 8
+local SURGE_CHIP_MAX_DISTANCE = 80
+local SURGE_CHIP_RESCAN_SECONDS = 2
 local POP_SECONDS = 1.2
 local POP_RISE_STUDS = 4
 local POP_MAX_DISTANCE = 150
@@ -538,7 +544,12 @@ local function onEventChanged(live: boolean)
 		clearFx(old)
 		restoreSky(myGeneration)
 		if live then
-			ToastController.Show(("%s %s is over"):format(EventConfig.Icons[old] or "", EventConfig.Names[old] or old), "Neutral")
+			local text = ("%s %s is over"):format(EventConfig.Icons[old] or "", EventConfig.Names[old] or old)
+			local tally = localPlayer:GetAttribute("GoldenRainTally")
+			if old == "GoldenRain" and typeof(tally) == "number" and tally > 0 then
+				text ..= (" · you earned +%s"):format(NumberFormat.Money(tally))
+			end
+			ToastController.Show(text, "Neutral")
 		end
 	end
 	if not id then
@@ -640,7 +651,8 @@ end
 
 -- "+$X" rising and fading over `position`, parented into the event's folder
 -- (so the event's end takes any still on screen).
-local function floatPop(parent: Instance, position: Vector3, text: string, color: Color3, textSize: number)
+local function floatPop(parent: Instance, position: Vector3, text: string, color: Color3, textSize: number, seconds: number?)
+	local lifetime = seconds or POP_SECONDS
 	local anchor = anchorPart(parent, position, "Pop")
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "Pop"
@@ -661,22 +673,90 @@ local function floatPop(parent: Instance, position: Vector3, text: string, color
 		Stroke = UITheme.Stroke.Text,
 		Parent = gui,
 	})
-	local info = TweenInfo.new(POP_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local info = TweenInfo.new(lifetime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, POP_RISE_STUDS, 0) }):Play()
 	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
 	local stroke = label:FindFirstChildOfClass("UIStroke")
 	if stroke then
 		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
 	end
-	Debris:AddItem(anchor, POP_SECONDS)
+	Debris:AddItem(anchor, lifetime)
+end
+
+-- A flat ring on the floor (a SurfaceGui face, never a Neon disc), no light.
+local function floorRing(parent: Instance, position: Vector3, diameter: number, color: Color3, word: string?): BasePart
+	local face = BillboardKit.BuildPadFace(parent, CFrame.new(position), diameter, color, word)
+	local light = face:FindFirstChild("FaceLight")
+	if light then
+		light:Destroy()
+	end
+	return face
+end
+
+-- 3 s before a bolt: a cyan ring under the target pedestal and a red
+-- "⚡ STRIKE IN 3·2·1" over it, on every client.
+local function strikeWarning(pedestal: Instance?, position: Vector3, seconds: number)
+	local parent = fxParent("PowerSurge")
+	local base = position
+	if pedestal and pedestal:IsA("BasePart") then
+		base = pedestal.Position - Vector3.new(0, pedestal.Size.Y / 2 - 0.05, 0)
+	end
+	local ring = floorRing(parent, base, WARNING_RING_DIAMETER, UITheme.Mutation.Charged, nil)
+	local anchor = anchorPart(parent, position + Vector3.new(0, 6, 0), "StrikeWarning")
+	local chip = BillboardKit.Chip(anchor, {
+		Name = "StrikeWarning",
+		Text = "⚡ STRIKE IN 3",
+		Gradient = UITheme.Gradients.Red,
+		Studs = Vector2.new(6.5, 1.5),
+		MaxDistance = 150,
+	})
+	chip.Gui.Adornee = anchor
+	task.spawn(function()
+		local endsAt = os.clock() + seconds
+		while anchor.Parent and os.clock() < endsAt do
+			chip.Label.Text = ("⚡ STRIKE IN %d"):format(math.max(1, math.ceil(endsAt - os.clock())))
+			task.wait(0.1)
+		end
+		anchor:Destroy()
+		ring:Destroy()
+	end)
+end
+
+-- 2 s before a meteor lands: a red "☄ INCOMING" ring where it will hit.
+local function incomingRing(at: Vector3, seconds: number)
+	local parent = fxParent("MeteorShower")
+	local ring = floorRing(parent, at + Vector3.new(0, 0.06, 0), INCOMING_RING_DIAMETER, Colors.Danger, nil)
+	local anchor = anchorPart(parent, at + Vector3.new(0, 4, 0), "Incoming")
+	local chip = BillboardKit.Chip(anchor, {
+		Name = "Incoming",
+		Text = "☄ INCOMING",
+		Gradient = UITheme.Gradients.Red,
+		Studs = Vector2.new(5.5, 1.4),
+		MaxDistance = 200,
+	})
+	chip.Gui.Adornee = anchor
+	Debris:AddItem(ring, seconds)
+	Debris:AddItem(anchor, seconds)
 end
 
 local function onEventFx(payload: any)
 	if typeof(payload) ~= "table" then
 		return
 	end
-	if payload.Kind == "Lightning" and typeof(payload.Position) == "Vector3" then
+	if payload.Kind == "StrikeWarning" and typeof(payload.Position) == "Vector3" and typeof(payload.Seconds) == "number" then
+		local pedestal = if typeof(payload.Pedestal) == "Instance" then payload.Pedestal else nil
+		strikeWarning(pedestal, payload.Position, payload.Seconds)
+	elseif payload.Kind == "Lightning" and typeof(payload.Position) == "Vector3" then
 		strikeLightning(payload.Position)
+		local charged = payload.Result == "Charged"
+		floatPop(
+			fxParent("PowerSurge"),
+			payload.Position + Vector3.new(0, 4, 0),
+			if charged then "CHARGED!" else "MISSED",
+			if charged then UITheme.Mutation.Charged else Colors.Muted,
+			if charged then BIG_POP_TEXT_SIZE else POP_TEXT_SIZE,
+			RESULT_POP_SECONDS
+		)
 	elseif
 		payload.Kind == "Meteor"
 		and typeof(payload.From) == "Vector3"
@@ -684,8 +764,17 @@ local function onEventFx(payload: any)
 		and typeof(payload.Seconds) == "number"
 	then
 		dropMeteor(payload.From, payload.To, payload.Seconds)
+		local warning = math.min(EventConfig.MeteorWarningSeconds, payload.Seconds)
+		task.delay(payload.Seconds - warning, incomingRing, payload.To, warning)
 	elseif payload.Kind == "Coin" and typeof(payload.Position) == "Vector3" and typeof(payload.Amount) == "number" then
-		floatPop(fxParent("GoldenRain"), payload.Position, "+" .. NumberFormat.Money(payload.Amount), Colors.Cash, POP_TEXT_SIZE)
+		local big = payload.Big == true
+		floatPop(
+			fxParent("GoldenRain"),
+			payload.Position,
+			(if big then "BIG +" else "+") .. NumberFormat.Money(payload.Amount),
+			if big then Colors.GoldLabel else Colors.Cash,
+			if big then BIG_POP_TEXT_SIZE else POP_TEXT_SIZE
+		)
 	end
 end
 
@@ -737,16 +826,27 @@ end
 local function refreshChip(lineup: { EventState.LineupEntry })
 	local first = lineup[1]
 	local style, text, color
+	local subText = ""
 	if first and first.Now then
 		style = UITheme.EventGradient[first.Id] or "Disabled"
 		text = ("%s · %s"):format(eventTitle(first.Id), EventState.FormatTimer(first.Seconds))
 		color = Colors.Text
+		-- Golden Rain: a running tally of what you've earned this rain.
+		local tally = localPlayer:GetAttribute("GoldenRainTally")
+		if first.Id == "GoldenRain" and typeof(tally) == "number" and tally > 0 then
+			subText = ("💰 +%s this rain"):format(NumberFormat.Money(tally))
+		end
 	else
 		style = "Disabled"
 		text = if first then ("NEXT · %s in %s"):format(eventTitle(first.Id), EventState.FormatTimer(first.Seconds)) else ""
 		color = Colors.Muted
 	end
-	UIKit.SetButton(chip, { Style = if style ~= chipStyle then style else nil, Text = text, TextColor3 = color })
+	UIKit.SetButton(chip, {
+		Style = if style ~= chipStyle then style else nil,
+		Text = text,
+		SubText = subText,
+		TextColor3 = color,
+	})
 	chipStyle = style
 end
 
@@ -945,8 +1045,54 @@ local function ensureStationPill(id: string, station: Instance, text: string)
 	})
 end
 
+-- Power Surge: "⚡ ×1.25" over every running generator in every lab
+-- (client, in the event's folder; rescanned for new labs and upgrades).
+local surgeScan = 0
+local function refreshSurgeChips()
+	if os.clock() - surgeScan < SURGE_CHIP_RESCAN_SECONDS then
+		return
+	end
+	surgeScan = os.clock()
+	local folder = EventState.GetObjectsFolder("PowerSurge")
+	local plots = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	if not folder or not plots then
+		return
+	end
+	local text = "⚡ " .. NumberFormat.Multiplier(EventState.GetGeneratorMultiplier())
+	for _, plot in plots:GetChildren() do
+		for _, model in plot:GetChildren() do
+			local level = model:GetAttribute("Level")
+			local body = model:FindFirstChild("Body")
+			local name = "SurgeChip_" .. plot.Name .. "_" .. model.Name
+			if
+				model.Name:sub(1, #GeneratorKit.MODEL_PREFIX) == GeneratorKit.MODEL_PREFIX
+				and typeof(level) == "number"
+				and level >= 1
+				and body
+				and body:IsA("BasePart")
+				and not folder:FindFirstChild(name)
+			then
+				local anchor = anchorPart(folder, body.Position + Vector3.new(0, body.Size.Y / 2 + 2.6, 0), name)
+				local chip = BillboardKit.Chip(anchor, {
+					Name = "SurgeChip",
+					Text = text,
+					Gradient = UITheme.Gradients.Surge,
+					Studs = Vector2.new(3.6, 1.2),
+					MaxDistance = SURGE_CHIP_MAX_DISTANCE,
+				})
+				chip.Gui.Adornee = anchor
+			end
+		end
+	end
+end
+
 refreshGuidance = function()
 	local id, strength = EventState.GetActive()
+	if id == "PowerSurge" then
+		refreshSurgeChips()
+	else
+		surgeScan = 0
+	end
 	local target: Instance? = nil
 	local text = ""
 	local root = myRoot()

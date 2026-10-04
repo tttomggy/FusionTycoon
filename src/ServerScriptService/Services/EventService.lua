@@ -54,6 +54,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -87,6 +88,7 @@ local state: State = {
 
 local TICK_SECONDS = 1
 local EFFECT_FEED_MIN_TIER = "Legendary"
+local CRATER_PILL_MAX_DISTANCE = 120
 
 -- Resolved in :Start(), never at module scope.
 local PlayerDataService: PlayerDataServiceModule
@@ -291,23 +293,83 @@ local function labCoinFolderName(owner: Player): string
 	return "Lab" .. owner.UserId
 end
 
-local function collectCoin(owner: Player, coin: BasePart, strength: number)
-	if coin:GetAttribute("Collected") then
-		return
+local STREET_COIN_FOLDER = "Street"
+
+-- This rain's earnings per player (session-only; the chip and the end toast
+-- read the Player attribute GoldenRainTally). Reset when a rain starts.
+local tallies: { [number]: number } = {}
+
+local function resetTallies()
+	tallies = {}
+	for _, player in Players:GetPlayers() do
+		player:SetAttribute("GoldenRainTally", nil)
 	end
-	coin:SetAttribute("Collected", true)
-	local position = coin.Position
-	coin:Destroy()
-	local seconds = math.min(EventConfig.CoinIncomeSeconds * strength, EventConfig.CoinMaxIncomeSeconds)
-	local amount = math.floor(PlayerDataService.GetPassiveCashPerSecond(owner) * seconds)
+end
+
+-- Pays `player` `seconds` of their income for a coin, adds it to the tally
+-- and pops "+$X" (BIG: gold and larger) where it was.
+local function payCoin(player: Player, seconds: number, position: Vector3, big: boolean)
+	local amount = math.floor(PlayerDataService.GetPassiveCashPerSecond(player) * seconds)
 	if amount <= 0 then
 		return
 	end
-	PlayerDataService.AddCash(owner, amount)
-	PlayerDataService.SyncTycoon(owner)
-	RemoteEvents.EventFx:FireClient(owner, { Kind = "Coin", Position = position, Amount = amount })
+	PlayerDataService.AddCash(player, amount)
+	PlayerDataService.SyncTycoon(player)
+	local tally = (tallies[player.UserId] or 0) + amount
+	tallies[player.UserId] = tally
+	player:SetAttribute("GoldenRainTally", tally)
+	RemoteEvents.EventFx:FireClient(player, { Kind = "Coin", Position = position, Amount = amount, Big = big })
 end
 
+-- A Neon gold coin on its edge, spinning and bobbing (FT_Hover). `canTake`
+-- decides who may collect it (re-checked by distance on the server);
+-- `onTake` pays them.
+local function buildCoin(
+	parent: Instance,
+	cframe: CFrame,
+	big: boolean,
+	canTake: (Player) -> boolean,
+	onTake: (Player, Vector3) -> ()
+)
+	local c = PlotLayout.EventCoin
+	local coin = PartKit.Part({
+		Name = if big then "BigCoin" else "Coin",
+		Shape = Enum.PartType.Cylinder,
+		Size = if big then c.Size * c.BigScale else c.Size,
+		CFrame = cframe,
+		Color = UITheme.World.AccentGold,
+		Material = Enum.Material.Neon,
+		CanCollide = false,
+		Parent = parent,
+	})
+	coin.CanQuery = false
+	coin.CanTouch = true
+	coin:SetAttribute("Big", big)
+	PartKit.SetHover(coin, c.SpinDegPerSec, c.Bob, c.BobPeriod, "Bob")
+	local reach = EventConfig.CoinCollectDistance + (if big then c.Size.Y * (c.BigScale - 1) else 0)
+	coin.Touched:Connect(function(hit: BasePart)
+		if coin:GetAttribute("Collected") then
+			return
+		end
+		local character = hit:FindFirstAncestorWhichIsA("Model")
+		local toucher = character and Players:GetPlayerFromCharacter(character)
+		local root = toucher and getRoot(toucher)
+		if not toucher or not root or not canTake(toucher) or not PlayerDataService.IsDataLoaded(toucher) then
+			return
+		end
+		if (root.Position - coin.Position).Magnitude > reach then
+			return
+		end
+		-- First valid touch wins (street coins are a race).
+		coin:SetAttribute("Collected", true)
+		local position = coin.Position
+		coin:Destroy()
+		onTake(toucher, position)
+	end)
+	Debris:AddItem(coin, EventConfig.CoinLifetimeSeconds)
+end
+
+-- A lab coin: only the owner collects. 1 in BigCoinChance is BIG.
 local function spawnCoin(owner: Player, plot: Model, strength: number)
 	local coinFolder = subFolder("GoldenRain", labCoinFolderName(owner))
 	if #coinFolder:GetChildren() >= EventConfig.CoinMaxLive then
@@ -316,47 +378,60 @@ local function spawnCoin(owner: Player, plot: Model, strength: number)
 	local c = PlotLayout.EventCoin
 	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
 	local origin = (plot.PrimaryPart :: BasePart).CFrame
+	local big = rng:NextInteger(1, EventConfig.BigCoinChance) == 1
+	-- Normal coins scale with an admin's strength (clamped); BIG ones don't.
+	local seconds = if big
+		then EventConfig.BigCoinIncomeSeconds
+		else math.min(EventConfig.CoinIncomeSeconds * strength, EventConfig.CoinMaxIncomeSeconds)
 	for _ = 1, c.SpawnTries do
 		local x, z = rng:NextNumber(-inner, inner), rng:NextNumber(-inner, inner)
-		if PlotLayout.IsFloorPointFree(x, z, c.SpawnMargin) then
-			local coin = PartKit.Part({
-				Name = "Coin",
-				Shape = Enum.PartType.Cylinder,
-				Size = c.Size,
-				CFrame = PartKit.At(origin, Vector3.new(x, 0, z), c.CenterY),
-				Color = UITheme.World.AccentGold,
-				Material = Enum.Material.Neon,
-				CanCollide = false,
-				Parent = coinFolder,
-			})
-			coin.CanQuery = false
-			coin.CanTouch = true
-			PartKit.SetHover(coin, c.SpinDegPerSec, c.Bob, c.BobPeriod, "Bob")
-			-- Only the owner collects; the touch is re-checked by distance.
-			coin.Touched:Connect(function(hit: BasePart)
-				local character = hit:FindFirstAncestorWhichIsA("Model")
-				local toucher = character and Players:GetPlayerFromCharacter(character)
-				local root = toucher and getRoot(toucher)
-				if toucher == owner and root and (root.Position - coin.Position).Magnitude <= EventConfig.CoinCollectDistance then
-					collectCoin(owner, coin, strength)
-				end
+		if PlotLayout.IsFloorPointFree(x, z, c.SpawnMargin * (if big then c.BigScale else 1)) then
+			local centerY = if big then c.CenterY * c.BigScale else c.CenterY
+			buildCoin(coinFolder, PartKit.At(origin, Vector3.new(x, 0, z), centerY), big, function(player)
+				return player == owner
+			end, function(player, position)
+				payCoin(player, seconds, position, big)
 			end)
-			Debris:AddItem(coin, EventConfig.CoinLifetimeSeconds)
 			return
 		end
 	end
 end
 
+-- A street coin: anyone, first come; it pays the GRABBER's income.
+local function spawnStreetCoin()
+	local folder = subFolder("GoldenRain", STREET_COIN_FOLDER)
+	if #folder:GetChildren() >= EventConfig.StreetCoinMaxLive then
+		return
+	end
+	local point = StreetLayout.GetRandomMeteorPoint(rng)
+	local cframe = CFrame.new(point + Vector3.new(0, PlotLayout.EventCoin.CenterY, 0))
+	buildCoin(folder, cframe, false, function()
+		return true
+	end, function(player, position)
+		payCoin(player, EventConfig.StreetCoinIncomeSeconds, position, false)
+	end)
+end
+
 local function runGoldenRain(myGeneration: number, strength: number)
-	local interval = EventConfig.CoinIntervalSeconds / strength
+	local labInterval = EventConfig.CoinIntervalSeconds / strength
+	local streetInterval = EventConfig.StreetCoinIntervalSeconds / strength
+	local nextLab, nextStreet = 0, os.clock() + streetInterval
 	while generation == myGeneration do
-		for _, player in Players:GetPlayers() do
-			local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
-			if plot then
-				spawnCoin(player, plot, strength)
+		local now = os.clock()
+		if now >= nextLab then
+			nextLab = now + labInterval
+			for _, player in Players:GetPlayers() do
+				local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
+				if plot then
+					spawnCoin(player, plot, strength)
+				end
 			end
 		end
-		task.wait(interval)
+		if now >= nextStreet then
+			nextStreet = now + streetInterval
+			spawnStreetCoin()
+		end
+		task.wait(math.max(0.1, math.min(nextLab, nextStreet) - os.clock()))
 	end
 end
 
@@ -364,34 +439,65 @@ end
 
 type Target = { Owner: Player, Uid: string, Index: number, Pedestal: BasePart }
 
--- Every displayed item in the server that isn't being carried in a heist.
-local function displayedTargets(): { Target }
+local LIGHTNING_TARGET_ATTRIBUTE = "LightningTarget"
+-- Pedestals currently marked, so an event end can unmark them.
+local markedPedestals: { [BasePart]: boolean } = {}
+
+local function unmark(pedestal: BasePart)
+	markedPedestals[pedestal] = nil
+	pedestal:SetAttribute(LIGHTNING_TARGET_ATTRIBUTE, nil)
+end
+
+local function unmarkAll()
+	for pedestal in markedPedestals do
+		unmark(pedestal)
+	end
+end
+
+-- Every displayed item of `player` that isn't being carried in a heist.
+local function playerTargets(player: Player): { Target }
 	local targets = {}
-	for _, player in Players:GetPlayers() do
-		local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
-		local pedestals = plot and plot:FindFirstChild("Pedestals")
-		if pedestals then
-			for index, uid in PlayerDataService.GetPedestalDisplays(player) do
-				local pedestal = pedestals:FindFirstChild("Pedestal" .. index)
-				if uid and pedestal and pedestal:IsA("BasePart") and not PlayerDataService.IsItemCarried(player, uid) then
-					table.insert(targets, { Owner = player, Uid = uid, Index = index, Pedestal = pedestal })
-				end
+	local plot = if PlayerDataService.IsDataLoaded(player) then claimedPlot(player) else nil
+	local pedestals = plot and plot:FindFirstChild("Pedestals")
+	if pedestals then
+		for index, uid in PlayerDataService.GetPedestalDisplays(player) do
+			local pedestal = pedestals:FindFirstChild("Pedestal" .. index)
+			if uid and pedestal and pedestal:IsA("BasePart") and not PlayerDataService.IsItemCarried(player, uid) then
+				table.insert(targets, { Owner = player, Uid = uid, Index = index, Pedestal = pedestal })
 			end
 		end
 	end
 	return targets
 end
 
-local function strikeLightning()
-	local targets = displayedTargets()
-	if #targets == 0 then
-		return
+-- A plot first (every lab with a displayed item equally likely), then one of
+-- its pedestals: one rich lab can't hog the strikes.
+local function pickTarget(): Target?
+	local labs: { { Target } } = {}
+	for _, player in Players:GetPlayers() do
+		local targets = playerTargets(player)
+		if #targets > 0 then
+			table.insert(labs, targets)
+		end
 	end
-	local target = targets[rng:NextInteger(1, #targets)]
-	RemoteEvents.EventFx:FireAllClients({ Kind = "Lightning", Position = target.Pedestal.Position })
+	if #labs == 0 then
+		return nil
+	end
+	local lab = labs[rng:NextInteger(1, #labs)]
+	return lab[rng:NextInteger(1, #lab)]
+end
+
+-- The bolt on a marked target: it may turn a plain item Charged. Returns
+-- whether it did.
+local function strike(target: Target): boolean
+	-- Still the same item on that pedestal, and not carried off meanwhile.
+	local displays = PlayerDataService.GetPedestalDisplays(target.Owner)
+	if displays[target.Index] ~= target.Uid or PlayerDataService.IsItemCarried(target.Owner, target.Uid) then
+		return false
+	end
 	local item = PlayerDataService.GetItemByUid(target.Owner, target.Uid)
 	if not item or item.Mutation ~= nil or rng:NextNumber() >= EventConfig.LightningChargeChance then
-		return
+		return false
 	end
 	-- Charged: inventory, Index, pedestal visuals and labels, then the syncs.
 	PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
@@ -412,14 +518,41 @@ local function strikeLightning()
 			ItemName = def and def.Name or item.ItemId,
 		})
 	end
+	return true
 end
 
 local function runPowerSurge(myGeneration: number, strength: number)
 	local interval = EventConfig.LightningIntervalSeconds / strength
+	local warning = math.min(EventConfig.LightningWarningSeconds, interval)
 	while generation == myGeneration do
-		task.wait(interval)
-		if generation == myGeneration then
-			strikeLightning()
+		task.wait(interval - warning)
+		if generation ~= myGeneration then
+			return
+		end
+		local target = pickTarget()
+		if target then
+			-- Mark it: every client shows the cyan ring and "STRIKE IN 3·2·1".
+			markedPedestals[target.Pedestal] = true
+			target.Pedestal:SetAttribute(LIGHTNING_TARGET_ATTRIBUTE, true)
+			RemoteEvents.EventFx:FireAllClients({
+				Kind = "StrikeWarning",
+				Pedestal = target.Pedestal,
+				Position = target.Pedestal.Position,
+				Seconds = warning,
+			})
+			task.wait(warning)
+			unmark(target.Pedestal)
+			if generation ~= myGeneration then
+				return
+			end
+			local charged = strike(target)
+			RemoteEvents.EventFx:FireAllClients({
+				Kind = "Lightning",
+				Position = target.Pedestal.Position,
+				Result = if charged then "Charged" else "Missed",
+			})
+		else
+			task.wait(warning)
 		end
 	end
 end
@@ -522,6 +655,14 @@ local function buildCrater(point: Vector3)
 	prompt.RequiresLineOfSight = false
 	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
 	prompt.Parent = core
+	BillboardKit.Chip(core, {
+		Name = "CraterPill",
+		Text = "Hold E · free item",
+		Gradient = UITheme.Gradients.Meteor,
+		Studs = Vector2.new(6.5, 1.4),
+		StudsOffset = Vector3.new(0, 3, 0),
+		MaxDistance = CRATER_PILL_MAX_DISTANCE,
+	})
 	-- First valid completion wins; everyone after gets "Too slow!".
 	local claimed = false
 	prompt.Triggered:Connect(function(player: Player)
@@ -591,7 +732,9 @@ local function startWorldEffects(event: ActiveEvent, old: ActiveEvent?)
 		clearEventObjects(old.Id)
 	end
 	clearEventObjects(event.Id)
+	unmarkAll()
 	if event.Id == "GoldenRain" then
+		resetTallies()
 		task.spawn(runGoldenRain, myGeneration, event.Strength)
 	elseif event.Id == "PowerSurge" then
 		task.spawn(runPowerSurge, myGeneration, event.Strength)
