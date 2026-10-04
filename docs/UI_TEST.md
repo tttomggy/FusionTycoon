@@ -934,7 +934,11 @@ the TAP tag, the card closing) live in §16 / §17b.
   every Rare gets the big card. The choice sticks across a rejoin in a
   live test place (Studio profiles never save).
 - [ ] **Every option, fusion.** Set Epic to Never and fuse Rares → Epic:
-  no big card, a small line ("+ … EPIC +$X/s"). Set Always: the big card.
+  no big card and **no small line**, only the top banner "FUSION SUCCESS!
+  → EPIC …" (a Golden result adds "· GOLDEN kept / rolled!"; a long line
+  shrinks to fit instead of cutting off). Set Always: the big card and no
+  banner. A second player sees only the server-wide banner, for
+  Legendary+ / Rainbow results.
   Pull ×10 with Epic Never: the grid shows, no BEST OF 10 card, a small
   line for the best. Fail cards and the Fuse All summary are unchanged.
 - [ ] **Always shown.** Set every tier to Never: a Secret (`/give` won't
