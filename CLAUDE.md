@@ -518,6 +518,9 @@ src/ReplicatedStorage/Shared/
 src/ServerScriptService/
     Bootstrap.server.lua   entry point; hands Services/ to ServiceManager
     ServiceManager.lua     loading + Init/Start lifecycle
+    Packages/ProfileStore.lua  vendored MadStudioRoblox/ProfileStore (commit
+                           45c9847, Apache 2.0, unmodified, `--!nocheck`);
+                           only PlayerDataService requires it
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
                            WorldService builds ground, street, Event Boards

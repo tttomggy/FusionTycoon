@@ -407,7 +407,13 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 	end
 
 	if outcome == "Delivered" then
-		if thief and victim and transferItem(thief, victim, carry) then
+		-- Both sessions must still be this server's (ProfileStore lock), so
+		-- both writes go through their own profiles; otherwise it goes back.
+		local bothActive = thief ~= nil
+			and victim ~= nil
+			and PlayerDataService.IsProfileActive(thief)
+			and PlayerDataService.IsProfileActive(victim)
+		if thief and victim and bothActive and transferItem(thief, victim, carry) then
 			PlayerDataService.IncrementTotalSteals(thief) -- first_steal goal (paid by the sync below)
 			local losses = state.recentLosses[victim.UserId] or {}
 			table.insert(losses, os.clock())

@@ -1088,3 +1088,49 @@ grant path for free. Live-game checks need real ids (docs/SHOP_SETUP.md).
   per row; every button is easy to tap; the side cards don't cover the
   bottom buttons.
 
+
+## 22. Save safety (ProfileStore, Launch 1)
+
+Saves now go through ProfileStore (`Packages/ProfileStore.lua`) in the store
+`FT_Live_1`, with a session lock: one server holds a profile at a time.
+Plain Studio Play uses the mock store (a blank profile every Play, never
+saved). To test persistence in Studio, set the attribute
+**`FT_StudioSaves = true`** on ServerScriptService (edit mode) and turn on
+Game Settings → Security → **Enable Studio Access to API Services**: saves
+then go to the separate store `FT_StudioTest_1`, never the live one.
+Two Studio test servers can't share a profile, so the lock is tested in a
+published place.
+
+- [ ] **Blank Studio profile.** No attribute: Play, earn cash, Stop, Play:
+  a fresh save every time, no errors in Output.
+- [ ] **Data version.** With `FT_StudioSaves`, Play once, then in the
+  command bar (server) read the profile: `Version = 1`; every template
+  field is present (Reconcile fills fields added later).
+- [ ] **A grant survives an instant leave.** With `FT_StudioSaves`: Play,
+  `/shop grant boost` (or `safefusion5`), then Stop straight away (within a
+  second). Play again: the boost / tokens are still there.
+- [ ] **A steal survives a shutdown.** Published place, 2 players at
+  Rebirth 1+. A steals from B and delivers. Straight away shut the server
+  down (Creator Dashboard → Shut down all servers, or the place's Server
+  menu). Rejoin both: the item is in A's inventory and gone from B's (never
+  in both, never in neither). Repeat, shutting down DURING the carry: the
+  item is back on B's pedestal and A has nothing.
+- [ ] **The session lock (2 servers).** Published place with Max Players
+  low enough that a second server starts (or a private server + a public
+  one). Join server 1, pull a few items, note your cash. Without leaving,
+  join the same place's server 2 from a second device/session on the same
+  account (or teleport there). Server 2 waits for the lock (up to
+  ProfileStore's steal timeout, ~40 s if server 1 doesn't let go) and then
+  loads the SAME items and cash; server 1 kicks you with "Your save was
+  opened in another server, please rejoin". Anything done in server 1
+  after the kick never shows up in a later join.
+- [ ] **Quick server hop.** Leave server 1 and join server 2 at once:
+  server 2 loads the data you left with (it waits for server 1's final
+  save instead of loading stale data).
+- [ ] **Failed load.** In a live game, a DataStore outage kicks the player
+  with the "couldn't load your save" message; the save is never
+  overwritten.
+- [ ] **Receipts.** Live purchase of a cash pack: granted once; Developer
+  Console shows no repeat grant on rejoin. A purchase while the profile is
+  not active (the brief window while server 2 waits for the lock) is
+  granted only after the profile loads (Roblox retries the receipt).

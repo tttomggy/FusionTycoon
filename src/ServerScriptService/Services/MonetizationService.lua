@@ -306,14 +306,25 @@ end
 
 --[[ Purchases -------------------------------------------------------------- ]]
 
+-- Grants only while this server holds the player's profile (ProfileStore
+-- session), and answers PurchaseGranted only once the receipt is in a SAVED
+-- copy: the grant and its receipt land in the same write, so a lost lock or
+-- a crash before that write makes Roblox retry, and the retry finds (or
+-- doesn't find) the receipt in the save, never both a grant and a retry.
 local function processReceipt(receipt: { [string]: any }): Enum.ProductPurchaseDecision
 	local player = Players:GetPlayerByUserId(receipt.PlayerId)
-	if not player or not PlayerDataService.IsDataLoaded(player) then
+	if not player or not PlayerDataService.IsDataLoaded(player) or not PlayerDataService.IsProfileActive(player) then
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	local purchaseId = tostring(receipt.PurchaseId)
 	if PlayerDataService.HasReceipt(player, purchaseId) then
-		return Enum.ProductPurchaseDecision.PurchaseGranted
+		-- Already granted this session: done once that write has landed.
+		if PlayerDataService.IsReceiptSaved(player, purchaseId)
+			or (PlayerDataService.SaveNowAsync(player) and PlayerDataService.IsReceiptSaved(player, purchaseId))
+		then
+			return Enum.ProductPurchaseDecision.PurchaseGranted
+		end
+		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
 	local item = ShopConfig.GetItemById("Product", receipt.ProductId)
 	if not item then
@@ -328,7 +339,7 @@ local function processReceipt(receipt: { [string]: any }): Enum.ProductPurchaseD
 	-- Grant and record together (no yield between them), then save.
 	grant(player, item.Key)
 	PlayerDataService.AddReceipt(player, purchaseId)
-	if not PlayerDataService.SaveNowAsync(player) then
+	if not PlayerDataService.SaveNowAsync(player) or not PlayerDataService.IsReceiptSaved(player, purchaseId) then
 		-- The grant stays in the session; the retry finds the receipt.
 		return Enum.ProductPurchaseDecision.NotProcessedYet
 	end
