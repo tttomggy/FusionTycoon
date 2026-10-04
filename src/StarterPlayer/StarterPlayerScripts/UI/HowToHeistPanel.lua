@@ -1,47 +1,56 @@
 --[[
 	HowToHeistPanel
 	---------------
-	The HOW TO HEIST card: a UIKit Modal with four slides, one at a time
-	(◀ ▶, dots, GOT IT on the last). Each slide is a picture built from UIKit
-	pieces (TierOrb, rounded frames as players, UITheme colours; no image
-	assets), a title and one line:
+	The HOW TO HEIST card: a UIKit Modal (640 x 480) with four slides, one
+	at a time (◀ ▶, dots, GOT IT on the last). Each slide is a live 3D scene
+	(UI/HeistScenes: a ViewportFrame + WorldModel built from the game's own
+	pedestal, orb, LOCK console and your own avatar, looping a ~3 s clip of
+	its rule), then a pink number badge with the title (Display 26) and one
+	16 px line:
 
-	  1 GRAB   orb over a player, an arrow to a house
-	  2 GUARD  orb on a pedestal, the owner beside it, the teal GUARDED pill
-	  3 CATCH  two players and CAUGHT!
-	  4 LOCK   a pink fence outline with 🔒
+	  1 GRAB   2 GUARD   3 CATCH   4 LOCK
 
-	Numbers come from HeistConfig (CarrySeconds, ShieldSeconds). The picture
-	always sits over the text, so the same layout fits a phone (390 px tall
-	after the UIScale).
+	Numbers come from HeistConfig (CarrySeconds, ShieldSeconds). The scene
+	takes up to 600 x 250 and shrinks first, so the card fits a phone
+	(390 px tall after the UIScale).
+
+	The scenes are built when the card opens and destroyed when it closes;
+	only the slide on screen ticks.
 
 	Opened automatically once per account right after the first-rebirth
 	result card closes (ResultController; TipConfig id "howToHeist"), and
 	any time from the HUD's "?" button.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.UIKit)
+local HeistScenes = require(script.Parent.HeistScenes)
 
 local HowToHeistPanel = {}
 
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local MAX_SIZE = Vector2.new(560, 420)
+local MAX_SIZE = Vector2.new(640, 480)
 local DISPLAY_ORDER = 118 -- over the HUD and Fuse panel, under Toasts (120)
-local PICTURE_HEIGHT = 160
+local SCENE_MAX = Vector2.new(600, 250)
+local TITLE_HEIGHT = 36
+local LINE_HEIGHT = 40
 local NAV_HEIGHT = 52
+local TEXT_GAP = 6
+local BADGE_SIZE = 32
 local ARROW_SIZE = 52
 local DOT_SIZE = 12
 
-type Slide = { Title: string, Line: string, Picture: (parent: Frame) -> () }
+type Slide = { Title: string, Line: string }
 
 local modal: UIKit.Modal
-local pictureFrame: Frame
+local sceneArea: Frame
 local titleLabel: TextLabel
+local badgeLabel: TextLabel
 local lineLabel: TextLabel
 local dots: { Frame } = {}
 local prevButton: TextButton
@@ -51,94 +60,9 @@ local nextHolder: Frame
 local slides: { Slide }
 local index = 1
 
---[[ Picture pieces ----------------------------------------------------------- ]]
-
--- A little player: a round head over a rounded body.
-local function player(parent: Instance, x: number, color: Color3): Frame
-	local holder = Instance.new("Frame")
-	holder.Name = "Player"
-	holder.BackgroundTransparency = 1
-	holder.AnchorPoint = Vector2.new(0.5, 1)
-	holder.Position = UDim2.new(x, 0, 1, -8)
-	holder.Size = UDim2.fromOffset(40, 76)
-	holder.Parent = parent
-	local head = Instance.new("Frame")
-	head.Name = "Head"
-	head.AnchorPoint = Vector2.new(0.5, 0)
-	head.Position = UDim2.fromScale(0.5, 0)
-	head.Size = UDim2.fromOffset(26, 26)
-	head.BackgroundColor3 = color
-	head.Parent = holder
-	UIKit.Corner(head, 999)
-	UIKit.Stroke(head, 3)
-	local body = Instance.new("Frame")
-	body.Name = "Body"
-	body.AnchorPoint = Vector2.new(0.5, 1)
-	body.Position = UDim2.fromScale(0.5, 1)
-	body.Size = UDim2.fromOffset(36, 46)
-	body.BackgroundColor3 = color
-	body.Parent = holder
-	UIKit.Corner(body, 12)
-	UIKit.Stroke(body, 3)
-	return holder
-end
-
-local function orbAt(parent: Instance, position: UDim2, size: number)
-	local orb = UIKit.TierOrb("Mythic", size, nil, "Golden")
-	orb.AnchorPoint = Vector2.new(0.5, 0.5)
-	orb.Position = position
-	orb.Parent = parent
-end
-
-local function word(parent: Instance, text: string, position: UDim2, size: number, color: Color3)
-	UIKit.Label({
-		Name = "Word",
-		Text = text,
-		Font = Fonts.Display,
-		TextSize = size,
-		TextColor3 = color,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = position,
-		Size = UDim2.fromOffset(220, size + 8),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		Stroke = UITheme.Stroke.Text,
-		Parent = parent,
-	})
-end
-
--- A house: a square body and a square roof turned 45 degrees.
-local function house(parent: Instance, x: number)
-	local roof = Instance.new("Frame")
-	roof.Name = "Roof"
-	roof.AnchorPoint = Vector2.new(0.5, 0.5)
-	roof.Position = UDim2.new(x, 0, 1, -66)
-	roof.Size = UDim2.fromOffset(46, 46)
-	roof.Rotation = 45
-	roof.BackgroundColor3 = UITheme.World.AccentViolet
-	roof.Parent = parent
-	UIKit.Stroke(roof, 3)
-	local body = Instance.new("Frame")
-	body.Name = "House"
-	body.AnchorPoint = Vector2.new(0.5, 1)
-	body.Position = UDim2.new(x, 0, 1, -8)
-	body.Size = UDim2.fromOffset(64, 52)
-	body.BackgroundColor3 = UITheme.World.Structure
-	body.Parent = parent
-	UIKit.Corner(body, 6)
-	UIKit.Stroke(body, 3)
-end
-
-local function pedestal(parent: Instance, x: number)
-	local column = Instance.new("Frame")
-	column.Name = "Pedestal"
-	column.AnchorPoint = Vector2.new(0.5, 1)
-	column.Position = UDim2.new(x, 0, 1, -8)
-	column.Size = UDim2.fromOffset(40, 46)
-	column.BackgroundColor3 = UITheme.World.StructureLight
-	column.Parent = parent
-	UIKit.Corner(column, 6)
-	UIKit.Stroke(column, 3)
-end
+local scenes: { HeistScenes.Scene } = {}
+local sceneClock = 0
+local tickConnection: RBXScriptConnection? = nil
 
 --[[ Slides --------------------------------------------------------------------- ]]
 
@@ -147,75 +71,79 @@ local function buildSlides(): { Slide }
 		{
 			Title = "GRAB",
 			Line = ("Hold E on someone's pedestal. Run it home in %ds and it's yours."):format(HeistConfig.CarrySeconds),
-			Picture = function(parent)
-				player(parent, 0.3, Colors.Rebirth)
-				orbAt(parent, UDim2.new(0.3, 0, 1, -112), 36)
-				word(parent, "→", UDim2.new(0.5, 0, 1, -48), 44, Colors.Text)
-				house(parent, 0.72)
-			end,
 		},
 		{
 			Title = "GUARD",
 			Line = "Stand next to your item. Nobody can steal it while you're there.",
-			Picture = function(parent)
-				pedestal(parent, 0.42)
-				orbAt(parent, UDim2.new(0.42, 0, 1, -82), 34)
-				player(parent, 0.62, Colors.ShieldTeal)
-				UIKit.Pill({
-					Name = "Guarded",
-					Parent = parent,
-					Text = "🛡 GUARDED",
-					Color = Colors.ShieldTeal,
-					Font = Fonts.Display,
-					TextSize = 16,
-					Height = 30,
-					TextStroke = 1.5,
-					AnchorPoint = Vector2.new(0.5, 0),
-					Position = UDim2.new(0.5, 0, 0, 10),
-				})
-			end,
 		},
 		{
 			Title = "CATCH",
 			Line = "A thief has your item? Touch them and it flies back.",
-			Picture = function(parent)
-				player(parent, 0.4, Colors.Rebirth)
-				orbAt(parent, UDim2.new(0.4, 0, 1, -112), 30)
-				player(parent, 0.58, Colors.ShieldTeal)
-				word(parent, "CAUGHT!", UDim2.new(0.5, 0, 0, 24), 30, Colors.Danger)
-			end,
 		},
 		{
 			Title = "LOCK",
 			Line = ("Run to the LOCK button inside your gate. Nobody gets in for %ds."):format(HeistConfig.ShieldSeconds),
-			Picture = function(parent)
-				local fence = Instance.new("Frame")
-				fence.Name = "Fence"
-				fence.AnchorPoint = Vector2.new(0.5, 0.5)
-				fence.Position = UDim2.fromScale(0.5, 0.5)
-				fence.Size = UDim2.fromOffset(200, 120)
-				fence.BackgroundColor3 = UITheme.World.Shield
-				fence.BackgroundTransparency = 0.85
-				fence.Parent = parent
-				UIKit.Corner(fence, 16)
-				UIKit.Stroke(fence, 4, UITheme.World.Shield)
-				word(parent, "🔒", UDim2.fromScale(0.5, 0.5), 52, Colors.Text)
-			end,
 		},
 	}
+end
+
+--[[ Scenes ----------------------------------------------------------------------- ]]
+
+local function destroyScenes()
+	if tickConnection then
+		tickConnection:Disconnect()
+		tickConnection = nil
+	end
+	for _, scene in scenes do
+		scene.Destroy()
+	end
+	scenes = {}
+end
+
+-- One ViewportFrame per slide; only the one on screen is visible and ticks.
+local function buildScenes()
+	destroyScenes()
+	for i = 1, #slides do
+		local holder = Instance.new("Frame")
+		holder.Name = "Slide" .. i
+		holder.BackgroundTransparency = 1
+		holder.Size = UDim2.fromScale(1, 1)
+		holder.ZIndex = sceneArea.ZIndex
+		holder.Visible = false
+		holder.Parent = sceneArea
+		local scene = HeistScenes.Build(i, holder)
+		local destroy = scene.Destroy
+		scenes[i] = {
+			Frame = scene.Frame,
+			Step = scene.Step,
+			Destroy = function()
+				destroy()
+				holder:Destroy()
+			end,
+		}
+	end
+	tickConnection = RunService.RenderStepped:Connect(function(dt: number)
+		sceneClock += dt
+		local scene = scenes[index]
+		if scene then
+			scene.Step(sceneClock)
+		end
+	end)
 end
 
 --[[ Paging --------------------------------------------------------------------- ]]
 
 local function show(newIndex: number)
 	index = math.clamp(newIndex, 1, #slides)
-	local slide = slides[index]
-	for _, child in pictureFrame:GetChildren() do
-		if child:IsA("GuiObject") then
-			child:Destroy()
+	sceneClock = 0
+	for i, scene in scenes do
+		local holder = scene.Frame.Parent
+		if holder and holder:IsA("GuiObject") then
+			holder.Visible = i == index
 		end
 	end
-	slide.Picture(pictureFrame)
+	local slide = slides[index]
+	badgeLabel.Text = tostring(index)
 	titleLabel.Text = slide.Title
 	lineLabel.Text = slide.Line
 	for i, dot in dots do
@@ -240,37 +168,83 @@ local function build()
 		DisplayOrder = DISPLAY_ORDER,
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.MythicBannerLeft,
+		OnClose = destroyScenes,
 	})
 	local content = modal.Content
+	local textBlock = TITLE_HEIGHT + LINE_HEIGHT + NAV_HEIGHT + TEXT_GAP * 3 + UITheme.ShadowOffset
 
-	pictureFrame = Instance.new("Frame")
-	pictureFrame.Name = "Picture"
-	pictureFrame.Size = UDim2.new(1, 0, 0, PICTURE_HEIGHT)
-	pictureFrame.BackgroundColor3 = Colors.Panel2
-	pictureFrame.ClipsDescendants = true
-	pictureFrame.ZIndex = content.ZIndex + 1
-	pictureFrame.Parent = content
-	UIKit.Corner(pictureFrame, UITheme.Radius.Row)
-	UIKit.Stroke(pictureFrame, 2)
+	-- The scene: up to 600 x 250, shrinking first on a short screen.
+	sceneArea = Instance.new("Frame")
+	sceneArea.Name = "SceneArea"
+	sceneArea.AnchorPoint = Vector2.new(0.5, 0)
+	sceneArea.Position = UDim2.fromScale(0.5, 0)
+	sceneArea.Size = UDim2.new(1, 0, 1, -textBlock)
+	sceneArea.BackgroundColor3 = Colors.Panel2
+	sceneArea.ZIndex = content.ZIndex + 1
+	sceneArea.Parent = content
+	UIKit.Corner(sceneArea, UITheme.Radius.Row)
+	UIKit.Stroke(sceneArea, 2)
+	local constraint = Instance.new("UISizeConstraint")
+	constraint.MaxSize = SCENE_MAX
+	constraint.Parent = sceneArea
 
+	-- Pink number badge + title, centred under the scene.
+	local titleRow = Instance.new("Frame")
+	titleRow.Name = "TitleRow"
+	titleRow.BackgroundTransparency = 1
+	titleRow.AnchorPoint = Vector2.new(0, 1)
+	titleRow.Position = UDim2.new(0, 0, 1, -(LINE_HEIGHT + NAV_HEIGHT + TEXT_GAP * 2 + UITheme.ShadowOffset))
+	titleRow.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT)
+	titleRow.ZIndex = content.ZIndex + 1
+	titleRow.Parent = content
+	local rowLayout = Instance.new("UIListLayout")
+	rowLayout.FillDirection = Enum.FillDirection.Horizontal
+	rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	rowLayout.Padding = UDim.new(0, 10)
+	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowLayout.Parent = titleRow
+
+	local badge = Instance.new("Frame")
+	badge.Name = "Badge"
+	badge.Size = UDim2.fromOffset(BADGE_SIZE, BADGE_SIZE)
+	badge.BackgroundColor3 = Colors.White
+	badge.LayoutOrder = 1
+	badge.ZIndex = titleRow.ZIndex
+	badge.Parent = titleRow
+	UIKit.Corner(badge, 999)
+	UIKit.Stroke(badge, 3)
+	UIKit.PairGradient(badge, UITheme.Gradients.Shield)
+	badgeLabel = UIKit.Label({
+		Name = "Number",
+		Text = "1",
+		Font = Fonts.Display,
+		TextSize = 20,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		ZIndex = badge.ZIndex + 1,
+		Parent = badge,
+	})
 	titleLabel = UIKit.Label({
 		Name = "SlideTitle",
 		Font = Fonts.Display,
-		TextSize = 30,
-		Position = UDim2.fromOffset(0, PICTURE_HEIGHT + 6),
-		Size = UDim2.new(1, 0, 0, 34),
-		TextXAlignment = Enum.TextXAlignment.Center,
+		TextSize = 26,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, TITLE_HEIGHT),
+		LayoutOrder = 2,
 		Stroke = UITheme.Stroke.Text,
-		ZIndex = content.ZIndex + 1,
-		Parent = content,
+		ZIndex = titleRow.ZIndex,
+		Parent = titleRow,
 	})
 	lineLabel = UIKit.Label({
 		Name = "SlideLine",
 		Font = Fonts.Body,
 		TextSize = 16,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, PICTURE_HEIGHT + 42),
-		Size = UDim2.new(1, -16, 0, 42),
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 8, 1, -(NAV_HEIGHT + TEXT_GAP + UITheme.ShadowOffset)),
+		Size = UDim2.new(1, -16, 0, LINE_HEIGHT),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = content.ZIndex + 1,
 		Parent = content,
@@ -328,11 +302,11 @@ local function build()
 		Name = "Next",
 		Parent = nav,
 		Style = "Blue",
-		Text = "▶",
-		TextSize = 22,
+		Text = "NEXT ▶",
+		TextSize = 20,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.fromOffset(ARROW_SIZE, ARROW_SIZE),
+		Size = UDim2.fromOffset(120, ARROW_SIZE),
 		ZIndex = nav.ZIndex,
 		OnClick = function()
 			show(index + 1)
@@ -359,17 +333,21 @@ end
 
 --[[ Public --------------------------------------------------------------------- ]]
 
--- Opens on the first slide.
+-- Opens on the first slide, building the four scenes.
 function HowToHeistPanel.Open()
 	if not modal then
 		return
 	end
+	buildScenes()
 	show(1)
 	modal.Open()
 end
 
 function HowToHeistPanel.Init()
 	build()
+	-- The rigs are built from HumanoidDescriptions (network); start now so
+	-- the first open has them.
+	HeistScenes.Preload()
 end
 
 return HowToHeistPanel

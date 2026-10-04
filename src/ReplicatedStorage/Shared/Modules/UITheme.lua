@@ -97,6 +97,21 @@ UITheme.Gradients = {
 	Rainbow = { Top = hex("#FF5470"), Bottom = hex("#A47BFF") },
 } :: { [string]: GradientPair }
 
+-- HOW TO HEIST's 3D scenes (UI/HeistScenes, ViewportFrames). Viewports
+-- ignore lights, so the look comes from these: tuned to read like the lab
+-- at golden hour (LightingService) without its post effects.
+UITheme.HeistScene = {
+	Background = hex("#2A2552"), -- behind the set (PanelTop: the lab's violet haze)
+	Ambient = hex("#9C94C8"),
+	LightColor = hex("#FFE9D2"),
+	LightDirection = Vector3.new(-0.45, -1, -0.35),
+	ThiefBody = hex("#E0304E"), -- the other player's body colours (red)
+	HomeGate = hex("#4FB3FF"), -- the "🏠 YOUR LAB" gate (AccentBlue)
+	Beam = hex("#FF5470"), -- the carried orb's red beam (Danger)
+	GuardRing = hex("#1FB49A"), -- the owner's guard ring (ShieldTeal)
+	LockedButton = hex("#1FB49A"), -- the console button once locked
+}
+
 -- Event id -> its gradient key above.
 UITheme.EventGradient = {
 	GoldenRain = "GoldRain",
