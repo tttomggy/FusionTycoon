@@ -46,6 +46,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
@@ -173,6 +174,7 @@ end
 local function grantCash(player: Player, packKey: string): string
 	local amount = ShopConfig.GetCashPackAmount(packKey, PlayerDataService.GetBasePassiveCashPerSecond(player))
 	PlayerDataService.AddCash(player, amount)
+	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.IAP.Name, packKey)
 	return ("💰 +%s cash"):format(NumberFormat.Money(amount))
 end
 
@@ -261,6 +263,7 @@ local function grant(player: Player, key: string, test: boolean?): { string }
 		lines = if handler then handler(player) else {}
 	end
 	warn(("MonetizationService: granted %s to %s (%d)%s"):format(key, player.Name, player.UserId, if test then " [STUDIO TEST]" else ""))
+	AnalyticsKit.Custom(player, "Purchase", nil, key)
 	runPassHooks(player)
 	syncPlayer(player)
 	RemoteEvents.ShopPurchased:FireClient(player, { Key = key, Result = "Granted", Lines = lines, Test = test == true })
@@ -492,17 +495,50 @@ function MonetizationService.OnPassesChanged(callback: (Player) -> ())
 	table.insert(state.passHooks, callback)
 end
 
+-- Client-side shop moments, for analytics only (AnalyticsKit custom
+-- events). Names and keys are whitelisted; one per name per player per
+-- SHOP_ANALYTICS_SECONDS.
+local SHOP_ANALYTICS_EVENTS = { ShopOpened = true, OfferShown = true, OfferAccepted = true, OfferDismissed = true }
+local SHOP_ANALYTICS_SECONDS = 2
+local lastShopAnalytics: { [number]: { [string]: number } } = {}
+
+local function onShopAnalytics(player: Player, payload: unknown)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local event = (payload :: any).Event
+	local key = (payload :: any).Key
+	if typeof(event) ~= "string" or not SHOP_ANALYTICS_EVENTS[event] then
+		return
+	end
+	if key ~= nil and (typeof(key) ~= "string" or not ShopConfig.GetItem(key)) then
+		return
+	end
+	local now = os.clock()
+	local seen = lastShopAnalytics[player.UserId] or {}
+	lastShopAnalytics[player.UserId] = seen
+	if seen[event] and now - seen[event] < SHOP_ANALYTICS_SECONDS then
+		return
+	end
+	seen[event] = now
+	AnalyticsKit.Custom(player, event, nil, key)
+end
+
 --[[ Lifecycle ---------------------------------------------------------------- ]]
 
 function MonetizationService:Init()
 	MarketplaceService.ProcessReceipt = processReceipt
 	table.insert(state.connections, MarketplaceService.PromptGamePassPurchaseFinished:Connect(onPassPurchaseFinished))
 	table.insert(state.connections, RemoteEvents.RequestShopPurchase.OnServerEvent:Connect(onRequestShopPurchase))
+	table.insert(state.connections, RemoteEvents.ShopAnalytics.OnServerEvent:Connect(onShopAnalytics))
 	table.insert(state.connections, Players.PlayerAdded:Connect(function(player: Player)
 		task.spawn(checkPlayer, player)
 		watchCharacter(player)
 	end))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
+	table.insert(state.connections, Players.PlayerRemoving:Connect(function(player: Player)
+		lastShopAnalytics[player.UserId] = nil
+	end))
 	table.insert(state.connections, RunService.Heartbeat:Connect(onHeartbeat))
 	Workspace:SetAttribute("OverclockUntil", 0)
 	Workspace:SetAttribute("OverclockBy", "")

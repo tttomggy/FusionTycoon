@@ -50,6 +50,7 @@ local SparkleEmitter = require(ReplicatedStorage.Shared.VFX.SparkleEmitter)
 local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
 type WorldServiceModule = typeof(require(script.Parent.WorldService))
@@ -123,7 +124,9 @@ local function onPassiveIncomeTick()
 			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
-				PlayerDataService.AddCash(player, cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds)
+				local earned = cashPerSecond * TycoonConfig.PassiveIncomeIntervalSeconds
+				PlayerDataService.AddCash(player, earned)
+				AnalyticsKit.AddIncome(player, earned)
 				syncTycoon(player)
 			end
 		end
@@ -179,6 +182,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		return
 	end
 	RemoteEvents.UpgradeResult:FireClient(player, { Success = true, GeneratorId = generatorId, NewLevel = newLevel })
+	local upgraded = TycoonConfig.GetGeneratorById(generatorId)
+	if upgraded and newLevel then
+		AnalyticsKit.Sink(player, TycoonConfig.GetUpgradeCost(upgraded, newLevel - 1), Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Upgrade")
+	end
+	AnalyticsKit.Funnel(player, "FirstUpgrade")
 	syncTycoon(player)
 end
 
@@ -259,6 +267,9 @@ local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
 		PerGenerator = perGenerator,
 		NewLevels = newLevels,
 	})
+	-- One sink for the whole MAX (never one event per level).
+	AnalyticsKit.Sink(player, spent, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "UpgradeMax")
+	AnalyticsKit.Funnel(player, "FirstUpgrade")
 	syncTycoon(player)
 end
 
@@ -596,6 +607,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull")
+		AnalyticsKit.Funnel(player, "FirstPull")
 		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
 		local newEntry = items[1]
 		-- After AddItem, so the snapshot's Index (and income) include it.
@@ -675,6 +688,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull10")
+		AnalyticsKit.Funnel(player, "FirstPull")
 		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
 		syncTycoon(player) -- once, for all ten
 		refreshLabel()
@@ -766,6 +781,8 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		end
 
 		debounce = true
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "MultiplierPad")
+		AnalyticsKit.Funnel(player, "FirstMultiplier")
 		local oldMultiplier = TycoonConfig.GetCashMultiplierValue(level)
 		local newMultiplier = TycoonConfig.GetCashMultiplierValue(level + 1)
 		PlayerDataService.SetCashMultiplierLevel(player, level + 1)
@@ -1213,6 +1230,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
 			task.wait(0.25)
 		end
+		AnalyticsKit.Funnel(player, "ClaimLab")
 		if not player.Parent or not plot.Parent then
 			return
 		end

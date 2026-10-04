@@ -24,6 +24,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 
@@ -96,6 +97,9 @@ local function onRequestRebirth(player: Player)
 	end
 
 	-- No yields from the checks above to the last write in ApplyRebirth.
+	-- The cash going to 0 is the price paid.
+	AnalyticsKit.Sink(player, PlayerDataService.GetCash(player), Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Rebirth")
+	AnalyticsKit.Funnel(player, "FirstRebirth")
 	local rebirths = PlayerDataService.ApplyRebirth(player, TycoonConfig.StartingBasicGeneratorLevel)
 
 	-- The OnSync hooks restyle the plot and pay first_rebirth.

@@ -43,6 +43,7 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -113,6 +114,9 @@ export type PlayerData = {
 	-- The highest base income ($/s, no timed boosts) this save has reached:
 	-- the street's BEST INCOME board (LeaderboardService).
 	BestIncome: number,
+	-- Onboarding funnel steps already logged (AnalyticsKit.FunnelSteps), so
+	-- each is sent once per player ever.
+	Funnel: { [string]: boolean },
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -276,6 +280,7 @@ local DEFAULT_DATA: PlayerData = {
 	Daily = DailyConfig.Default(),
 	Gifts = GiftConfig.Default(-1),
 	BestIncome = 0,
+	Funnel = {},
 	Version = DATA_VERSION,
 }
 
@@ -433,6 +438,13 @@ local function reconcile(raw: any): PlayerData
 		data.Sessions = math.floor(raw.Sessions)
 	end
 	data.Daily = DailyConfig.Sanitize(raw.Daily)
+	if typeof(raw.Funnel) == "table" then
+		for step, done in raw.Funnel do
+			if done == true and table.find(AnalyticsKit.FunnelSteps, step) then
+				data.Funnel[step] = true
+			end
+		end
+	end
 	if typeof(raw.BestIncome) == "number" and raw.BestIncome == raw.BestIncome and raw.BestIncome >= 0 then
 		data.BestIncome = raw.BestIncome
 	end
@@ -1453,6 +1465,7 @@ local function onPlayerAdded(player: Player)
 
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
+	AnalyticsKit.Funnel(player, "Join")
 	dataLoaded:Fire(player)
 end
 
@@ -1461,6 +1474,7 @@ local function onPlayerRemoving(player: Player)
 	state.releasing[userId] = true
 	-- Before anything is saved: active steals on either side resolve first.
 	runReleaseHooks(player)
+	AnalyticsKit.Release(player)
 	state.carriedUids[userId] = nil
 	state.carrying[userId] = nil
 	-- Left before collecting (or before the auto-claim): pay it, never lose it.
@@ -1504,6 +1518,21 @@ end
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function PlayerDataService:Init()
+	-- Funnel steps are saved in the profile; the cash balance rides along
+	-- on economy events.
+	AnalyticsKit.SetFunnelStore({
+		Mark = function(player: Player, step: string): boolean
+			local data = state.sessionCache[player.UserId]
+			if not data or data.Funnel[step] then
+				return false
+			end
+			data.Funnel[step] = true
+			return true
+		end,
+		GetBalance = function(player: Player): number
+			return PlayerDataService.GetCash(player)
+		end,
+	})
 	table.insert(state.connections, Players.PlayerAdded:Connect(onPlayerAdded))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(state.connections, RemoteEvents.RequestSync.OnServerEvent:Connect(onRequestSync))

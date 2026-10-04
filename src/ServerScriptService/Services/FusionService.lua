@@ -26,6 +26,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -151,6 +152,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 			return nil, "ItemNotOwned"
 		end
 		PlayerDataService.IncrementTotalFusions(player)
+		AnalyticsKit.Funnel(player, "FirstFuse")
 		return {
 			Upgraded = false,
 			Entry = keep,
@@ -201,6 +203,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		return nil, "DataNotLoaded"
 	end
 	PlayerDataService.IncrementTotalFusions(player)
+	AnalyticsKit.Funnel(player, "FirstFuse")
 	return {
 		Upgraded = true,
 		Entry = newEntry,

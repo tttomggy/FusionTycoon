@@ -34,6 +34,7 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -91,13 +92,14 @@ local function canGrant(player: Player, reward: RewardConfig.Reward): boolean
 end
 
 -- Grants `reward` (checked with canGrant first). `caption` names it on a
--- pull card. Returns the lines the client shows. Synchronous except that
+-- pull card; `source` ("Daily" / "Gift") tags its analytics. Returns the lines the client shows. Synchronous except that
 -- the pull path fires its own result remote.
-local function grant(player: Player, reward: RewardConfig.Reward, caption: string): { string }
+local function grant(player: Player, reward: RewardConfig.Reward, caption: string, source: string): { string }
 	local kind = reward.Kind
 	if kind == "Cash" then
 		local amount = RewardConfig.GetCashAmount(reward, PlayerDataService.GetBasePassiveCashPerSecond(player))
 		PlayerDataService.AddCash(player, amount)
+		AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.TimedReward.Name, source)
 		return { ("💰 +%s"):format(NumberFormat.Money(amount)) }
 	elseif kind == "IncomeBoost" then
 		PlayerDataService.AddBoostSeconds(player, "Income", reward.Seconds or 0)
@@ -152,7 +154,8 @@ local function onClaimDaily(player: Player)
 	local day = DailyConfig.Apply(data.Daily, today)
 	local isPull = reward.Kind == "Pulls" or reward.Kind == "Item"
 	local caption = if reward.Kind == "Item" then ("🎁 DAY %d REWARD"):format(day) else ("🎁 DAY %d · FREE PULLS"):format(day)
-	local lines = grant(player, reward, caption)
+	local lines = grant(player, reward, caption, "Daily")
+	AnalyticsKit.Custom(player, "DailyClaimed", day)
 	if not isPull then
 		-- The pull path syncs itself.
 		PlayerDataService.SyncTycoon(player)
@@ -237,7 +240,8 @@ local function onClaimGift(player: Player, payload: unknown)
 	table.insert(gifts.Claimed, index)
 	local isPull = reward.Kind == "Pulls" or reward.Kind == "Item"
 	local caption = if reward.Kind == "Item" then "🎁 PLAYTIME GIFT" else "🎁 GIFT · FREE PULL"
-	local lines = grant(player, reward, caption)
+	local lines = grant(player, reward, caption, "Gift")
+	AnalyticsKit.Custom(player, "GiftClaimed", index)
 	if not isPull then
 		PlayerDataService.SyncTycoon(player)
 	end

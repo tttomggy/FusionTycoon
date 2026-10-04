@@ -1215,3 +1215,29 @@ published place.
   raise it). Rebirth, wait ≤ 2 min more: MOST REBIRTHS updates. Leave and
   rejoin a fresh server: your rows are still there. Shut a server down:
   the last values written on close show in the next server.
+
+## 26. Analytics (AnalyticsKit, Studio prints)
+
+In Studio nothing is sent: every call prints `[Analytics] …` in Output.
+
+- [ ] **Funnel, in order, once each.** Fresh profile: `funnel 1 Join`;
+  step on CLAIM: `funnel 2 ClaimLab`; buy an upgrade: `funnel 3
+  FirstUpgrade`; pull: `funnel 4 FirstPull`; display an item: `funnel 5
+  FirstDisplay`; fuse: `funnel 6 FirstFuse`; Multiplier Pad: `funnel 7
+  FirstMultiplier`; `/event goldenrain`: `funnel 8 FirstEvent`;
+  `/rebirthready` + rebirth: `funnel 9 FirstRebirth`; deliver a steal:
+  `funnel 10 FirstSteal`. Doing any of them again prints no funnel line
+  (with `FT_StudioSaves`, not even after a rejoin).
+- [ ] **Economy.** Sinks print on an upgrade (`Upgrade`), a MAX
+  (`UpgradeMax`, ONE line for all levels), a pull / ×10 (`Pull` /
+  `Pull10`), the pad (`MultiplierPad`) and a rebirth (`Rebirth`, the cash
+  held). Sources: `PassiveIncome` once a minute (and on leave), Golden
+  Rain coins (`Coin` / `BigCoin`), a cash pack (`/shop grant pocketcash`:
+  IAP `PocketCash`), the daily / gift cash days (TimedReward `Daily` /
+  `Gift`).
+- [ ] **Custom events.** Open the shop: `ShopOpened`; a contextual offer
+  (tap an upgrade you can't afford, after the quiet period): `OfferShown
+  [PocketCash]`, then `OfferAccepted` or `OfferDismissed`; the same for
+  the Starter Pack card; any grant: `Purchase [Key]`; daily claim:
+  `DailyClaimed = 3`; gift: `GiftClaimed = 2`; a grab:
+  `StealStarted [Epic]`, then `StealDelivered` or (owner tags) `StealSaved`.

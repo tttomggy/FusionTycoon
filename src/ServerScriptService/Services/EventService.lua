@@ -58,6 +58,7 @@ local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
@@ -113,6 +114,11 @@ local function publish(event: ActiveEvent)
 	Workspace:SetAttribute("EventEndsAt", event.EndsAt)
 	Workspace:SetAttribute("EventStrength", event.Strength)
 	Workspace:SetAttribute("EventId", event.Id or "")
+	if event.Id then
+		for _, player in Players:GetPlayers() do
+			AnalyticsKit.Funnel(player, "FirstEvent")
+		end
+	end
 end
 
 -- What should be on right now: the override if it's live, else the clock.
@@ -334,6 +340,7 @@ local function payCoin(player: Player, seconds: number, position: Vector3, big: 
 		return
 	end
 	PlayerDataService.AddCash(player, amount)
+	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, if big then "BigCoin" else "Coin")
 	PlayerDataService.SyncTycoon(player)
 	local tally = (tallies[player.UserId] or 0) + amount
 	tallies[player.UserId] = tally

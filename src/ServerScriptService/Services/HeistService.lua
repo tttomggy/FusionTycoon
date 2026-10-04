@@ -68,6 +68,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -456,6 +457,12 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 			OtherName = carry.ThiefName,
 		})
 	end
+	if outcome == "Delivered" and thief then
+		AnalyticsKit.Funnel(thief, "FirstSteal")
+		AnalyticsKit.Custom(thief, "StealDelivered", nil, carry.Item.Tier)
+	elseif outcome == "Saved" and victim then
+		AnalyticsKit.Custom(victim, "StealSaved", nil, carry.Item.Tier)
+	end
 	if isFeedTier(carry.Item.Tier) and (outcome == "Delivered" or outcome == "Saved") then
 		RemoteEvents.HeistFeed:FireAllClients({
 			Kind = if outcome == "Delivered" then "Stole" else "Caught",
@@ -643,6 +650,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	PedestalVisuals.SetStolen(pedestal)
 	TycoonService.RefreshPedestalLabels(victim)
 	syncBoth(thief, victim, false) -- the victim's income drops the pedestal
+	AnalyticsKit.Custom(thief, "StealStarted", nil, carry.Item.Tier)
 
 	RemoteEvents.HeistStarted:FireClient(thief, {
 		Role = "Thief",

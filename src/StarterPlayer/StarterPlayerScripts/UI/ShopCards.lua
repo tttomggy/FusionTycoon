@@ -285,8 +285,8 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
 	end
 end
 
-function ShopCards.ShowOffer(card: SideCard, onBuy: () -> ())
-	sideCard(card, onBuy, nil)
+function ShopCards.ShowOffer(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
+	sideCard(card, onBuy, onDismiss)
 end
 
 function ShopCards.ShowStarter(card: SideCard, onBuy: () -> (), onDismiss: () -> ())
