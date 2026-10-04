@@ -951,8 +951,7 @@ local function buildShopRow()
 		ZIndex = 10,
 		TextStroke = 1.5,
 	})
-	local saleFill = saleTag.Parent :: Frame
-	saleFill.Visible = false
+	UIKit.SetPillVisible(saleTag, false)
 
 	local gifts, giftsHolder = UIKit.Button({
 		Name = "GiftsButton",
@@ -980,8 +979,7 @@ local function buildShopRow()
 		LayoutOrder = 3,
 		TextStroke = 1.5,
 	})
-	local nextFill = giftsNextPill.Parent :: Frame
-	nextFill.Visible = false
+	UIKit.SetPillVisible(giftsNextPill, false)
 
 	local pills = Instance.new("Frame")
 	pills.Name = "Effects"
@@ -1048,16 +1046,14 @@ local function refreshShopRow()
 			saleLive = true
 		end
 	end
-	local saleFill = saleTag.Parent :: Frame
-	saleFill.Visible = saleLive
+	UIKit.SetPillVisible(saleTag, saleLive)
 
 	-- GIFTS: the ready count (green badge + bounce) or "next in 3:12".
 	local ready, nextIn = GiftsPanel.GetStatus()
 	local badge = UIKit.Badge(giftsButton, if TycoonController.HasSynced() then ready else 0)
 	badge.BackgroundColor3 = Colors.Cash
 	badge.TextColor3 = Colors.CoinText
-	local nextFill = giftsNextPill.Parent :: Frame
-	nextFill.Visible = TycoonController.HasSynced() and ready == 0 and nextIn ~= nil
+	UIKit.SetPillVisible(giftsNextPill, TycoonController.HasSynced() and ready == 0 and nextIn ~= nil)
 	if nextIn then
 		giftsNextPill.Text = ("next in %s"):format(EventState.FormatTimer(nextIn))
 	end

@@ -1253,3 +1253,9 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   "Always" to see the big card every time. Same for the 60-min gift
   (`/gifts time 60`, open the last box: the panel closes, then "🎁
   PLAYTIME GIFT"), and for free pulls (Day 3, the 10-min gift).
+- [ ] **GIFTS button stays (bug 2).** `/gifts time 15`: SHOP and GIFTS both
+  stay visible; GIFTS bounces with a green "3" badge and the "next in"
+  pill hides. Open all three: the bounce stops, the badge hides, the
+  "next in 9:59" pill comes back. No sale live: SHOP stays visible with no
+  SALE tag (a solid-colour pill's `.Parent` used to be hidden, which was
+  the whole row / the SHOP button).
