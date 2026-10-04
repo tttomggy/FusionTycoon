@@ -10,14 +10,21 @@
 	                    colour + a 5-option segmented control (Never / Golden+
 	                    / Diamond+ / Rainbow+ / Always); a locked Secret row.
 
-	Changes apply at once (TycoonController.SetRevealRule, optimistic) and
-	save on the server (SetSetting). 620 wide; on a phone the list scrolls.
+	  Sound effects     a 0–100% slider (default 80%) and a mute toggle
+	                    beside it; every SoundKit slot scales with it.
+
+	Changes apply at once (TycoonController.SetRevealRule / SetSfxVolume /
+	SetSfxMuted, optimistic) and save on the server (SetSetting); the slider
+	saves on release and plays a click at the new level. 620 wide; on a
+	phone the list scrolls.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local TycoonController = require(script.Parent.Parent.Controllers.TycoonController)
 local UIKit = require(script.Parent.UIKit)
 
@@ -30,6 +37,10 @@ local MAX_SIZE = Vector2.new(620, 560)
 local ROW_HEIGHT = UITheme.MinTapSize + 12
 local TIER_COLUMN = 110
 local SEGMENT_GAP = 4
+local SLIDER_LABEL_WIDTH = 64 -- "80%"
+local SLIDER_TRACK_HEIGHT = 10
+local SLIDER_KNOB = 28
+local MUTE_SIZE = UITheme.MinTapSize
 
 type Segment = { Button: TextButton, Label: TextLabel, Stroke: UIStroke }
 
@@ -37,13 +48,34 @@ local modal: UIKit.Modal
 local list: ScrollingFrame
 local segments: { [string]: { [string]: Segment } } = {}
 local order = 0
+local sliderTrack: Frame
+local sliderFill: Frame
+local sliderKnob: Frame
+local sliderLabel: TextLabel
+local muteButton: TextButton
+local dragging = false
 
 local function nextOrder(): number
 	order += 1
 	return order
 end
 
+local function refreshSound()
+	local volume = TycoonController.GetSfxVolume()
+	local muted = TycoonController.IsSfxMuted()
+	sliderFill.Size = UDim2.fromScale(volume, 1)
+	sliderKnob.Position = UDim2.fromScale(volume, 0.5)
+	sliderLabel.Text = ("%d%%"):format(math.floor(volume * 100 + 0.5))
+	sliderLabel.TextColor3 = if muted then Colors.Faint else Colors.Text
+	sliderFill.BackgroundColor3 = if muted then Colors.Faint else Colors.ShieldTeal
+	UIKit.SetButton(muteButton, {
+		Style = if muted then "Red" else "Disabled",
+		Text = if muted then "🔇" else "🔊",
+	})
+end
+
 local function refresh()
+	refreshSound()
 	local rule = TycoonController.GetRevealRule()
 	for tier, row in segments do
 		for value, segment in row do
@@ -205,6 +237,130 @@ local function lockedRow()
 	})
 end
 
+-- The volume at a screen x on the track (0..1).
+local function volumeAt(x: number): number
+	local left = sliderTrack.AbsolutePosition.X
+	local width = math.max(sliderTrack.AbsoluteSize.X, 1)
+	return math.clamp((x - left) / width, 0, 1)
+end
+
+local function isPointer(input: InputObject): boolean
+	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
+end
+
+local function soundRow()
+	local z = list.ZIndex + 1
+	local row = Instance.new("Frame")
+	row.Name = "SoundRow"
+	row.BackgroundColor3 = Colors.Panel2
+	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
+	row.LayoutOrder = nextOrder()
+	row.ZIndex = z
+	row.Parent = list
+	UIKit.Corner(row, UITheme.Radius.Row)
+	UIKit.Stroke(row, 2)
+	UIKit.Label({
+		Name = "Title",
+		Text = "Volume",
+		Font = Fonts.Display,
+		TextSize = 17,
+		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(0, TIER_COLUMN - 12, 1, 0),
+		ZIndex = z + 1,
+		Stroke = UITheme.Stroke.Text,
+		Parent = row,
+	})
+	-- The whole strip is the drag target (>= 44 px tall); the track is the
+	-- thin bar inside it.
+	local hit = Instance.new("TextButton")
+	hit.Name = "Slider"
+	hit.Text = ""
+	hit.AutoButtonColor = false
+	hit.BackgroundTransparency = 1
+	hit.Position = UDim2.new(0, TIER_COLUMN, 0.5, -UITheme.MinTapSize / 2)
+	hit.Size = UDim2.new(1, -(TIER_COLUMN + SLIDER_LABEL_WIDTH + MUTE_SIZE + 30), 0, UITheme.MinTapSize)
+	hit.ZIndex = z + 1
+	hit.Parent = row
+	sliderTrack = Instance.new("Frame")
+	sliderTrack.Name = "Track"
+	sliderTrack.AnchorPoint = Vector2.new(0, 0.5)
+	sliderTrack.Position = UDim2.new(0, SLIDER_KNOB / 2, 0.5, 0)
+	sliderTrack.Size = UDim2.new(1, -SLIDER_KNOB, 0, SLIDER_TRACK_HEIGHT)
+	sliderTrack.BackgroundColor3 = Colors.Ink
+	sliderTrack.ZIndex = z + 2
+	sliderTrack.Parent = hit
+	UIKit.Corner(sliderTrack, 999)
+	sliderFill = Instance.new("Frame")
+	sliderFill.Name = "Fill"
+	sliderFill.BackgroundColor3 = Colors.ShieldTeal
+	sliderFill.BorderSizePixel = 0
+	sliderFill.ZIndex = z + 3
+	sliderFill.Parent = sliderTrack
+	UIKit.Corner(sliderFill, 999)
+	sliderKnob = Instance.new("Frame")
+	sliderKnob.Name = "Knob"
+	sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+	sliderKnob.Size = UDim2.fromOffset(SLIDER_KNOB, SLIDER_KNOB)
+	sliderKnob.BackgroundColor3 = Colors.White
+	sliderKnob.ZIndex = z + 4
+	sliderKnob.Parent = sliderTrack
+	UIKit.Corner(sliderKnob, 999)
+	UIKit.Stroke(sliderKnob, 3)
+	sliderLabel = UIKit.Label({
+		Name = "Percent",
+		Font = Fonts.Display,
+		TextSize = 17,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -(MUTE_SIZE + 18), 0.5, 0),
+		Size = UDim2.fromOffset(SLIDER_LABEL_WIDTH, 24),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = z + 1,
+		Stroke = UITheme.Stroke.Text,
+		Parent = row,
+	})
+	muteButton = UIKit.Button({
+		Name = "Mute",
+		Parent = row,
+		Style = "Disabled",
+		Text = "🔊",
+		TextSize = 20,
+		Size = UDim2.fromOffset(MUTE_SIZE, MUTE_SIZE),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, -2),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = z + 1,
+		OnClick = function()
+			TycoonController.SetSfxMuted(not TycoonController.IsSfxMuted())
+			refreshSound()
+			SoundKit.Play("Toast", nil)
+		end,
+	})
+
+	hit.InputBegan:Connect(function(input: InputObject)
+		if isPointer(input) then
+			dragging = true
+			TycoonController.SetSfxVolume(volumeAt(input.Position.X), false)
+			refreshSound()
+		end
+	end)
+	UserInputService.InputChanged:Connect(function(input: InputObject)
+		local moved = input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch
+		if dragging and moved then
+			TycoonController.SetSfxVolume(volumeAt(input.Position.X), false)
+			refreshSound()
+		end
+	end)
+	UserInputService.InputEnded:Connect(function(input: InputObject)
+		if dragging and isPointer(input) then
+			dragging = false
+			-- Save on release, and let them hear the new level.
+			TycoonController.SetSfxVolume(TycoonController.GetSfxVolume(), true)
+			SoundKit.Play("Toast", nil)
+		end
+	end)
+end
+
 local function build()
 	modal = UIKit.Modal({
 		Name = "SettingsPanel",
@@ -239,6 +395,11 @@ local function build()
 		tierRow(tier)
 	end
 	lockedRow()
+
+	-- Section: Sound effects.
+	sectionTitle("Sound effects")
+	note("Every sound in the game. Music isn't in yet.")
+	soundRow()
 end
 
 --[[ Public ------------------------------------------------------------------- ]]
@@ -255,7 +416,7 @@ end
 function SettingsPanel.Init()
 	build()
 	TycoonController.TycoonChanged:Connect(function()
-		if modal.IsOpen() then
+		if modal.IsOpen() and not dragging then
 			refresh()
 		end
 	end)

@@ -87,6 +87,13 @@ local chanceLabel: TextLabel
 local recipeLabel: TextLabel
 local chipsRow: Frame
 local predictionBox: Frame
+local optionsRow: Frame
+local safeButton: TextButton
+local safeHolder: Frame
+local autoButton: TextButton
+local autoHolder: Frame
+-- Safe Fusion armed for the next FUSE (one token; disarms after use).
+local safeArmed = false
 local predictionLabel: TextLabel
 local tabsFrame: Frame
 local grid: ScrollingFrame
@@ -342,6 +349,30 @@ local function refreshChamber()
 		boxStroke.Enabled = warning
 	end
 
+	-- Shop options: Safe Fusion (only with tokens) and Auto-Fuse (only with
+	-- the pass).
+	local tokens = TycoonController.GetShop().SafeFusionTokens
+	if tokens <= 0 then
+		safeArmed = false
+	end
+	safeHolder.Visible = tokens > 0
+	UIKit.SetButton(safeButton, {
+		Style = if safeArmed then "Teal" else "Disabled",
+		Text = ("🛡 Safe Fusion (%d)"):format(tokens),
+		SubText = if safeArmed then "ON · a fail keeps every orb" else "OFF",
+		TextColor3 = if safeArmed then Colors.Text else Colors.Muted,
+	})
+	local ownsAuto = TycoonController.OwnsPass("AutoFuse")
+	autoHolder.Visible = ownsAuto
+	local autoOn = TycoonController.IsAutoFuseOn()
+	UIKit.SetButton(autoButton, {
+		Style = if autoOn then "Teal" else "Disabled",
+		Text = "🔁 Auto-Fuse",
+		SubText = if autoOn then "ON · Fuse All when items arrive" else "OFF",
+		TextColor3 = if autoOn then Colors.Text else Colors.Muted,
+	})
+	optionsRow.Visible = tokens > 0 or ownsAuto
+
 	local pending = FusionController.IsRequestPending() or flying
 	local canFuse = count >= FusionConfig.MinFusionInputs and not pending and rebirthsNeeded(selectedTier) == nil
 	UIKit.SetButton(fuseButton, {
@@ -567,7 +598,9 @@ local function fuse()
 		flying = false
 		table.clear(selected)
 		refreshAll()
-		task.spawn(FusionController.RequestFusion, uids)
+		local safe = safeArmed
+		safeArmed = false -- one token per arming
+		task.spawn(FusionController.RequestFusion, uids, safe)
 		task.defer(refreshChamber) -- shows the pending state
 	end)
 end
@@ -687,6 +720,55 @@ local function buildChamber(column: ScrollingFrame)
 		LayoutOrder = 6,
 		ZIndex = column.ZIndex + 1,
 		Parent = column,
+	})
+	-- Shop options (hidden unless you own a token / the pass).
+	optionsRow = Instance.new("Frame")
+	optionsRow.Name = "ShopOptions"
+	optionsRow.BackgroundTransparency = 1
+	optionsRow.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize + UITheme.SmallShadowOffset)
+	optionsRow.LayoutOrder = 7
+	optionsRow.ZIndex = column.ZIndex + 1
+	optionsRow.Visible = false
+	optionsRow.Parent = column
+	local optionsLayout = Instance.new("UIListLayout")
+	optionsLayout.FillDirection = Enum.FillDirection.Horizontal
+	optionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	optionsLayout.Padding = UDim.new(0, 8)
+	optionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	optionsLayout.Parent = optionsRow
+	safeButton, safeHolder = UIKit.Button({
+		Name = "SafeFusion",
+		Parent = optionsRow,
+		Style = "Disabled",
+		Text = "🛡 Safe Fusion",
+		SubText = "OFF",
+		TextSize = 14,
+		SubTextSize = 11,
+		Size = UDim2.new(0.5, -4, 0, UITheme.MinTapSize),
+		LayoutOrder = 1,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = optionsRow.ZIndex,
+		OnClick = function()
+			safeArmed = not safeArmed and TycoonController.GetShop().SafeFusionTokens > 0
+			refreshChamber()
+		end,
+	})
+	autoButton, autoHolder = UIKit.Button({
+		Name = "AutoFuse",
+		Parent = optionsRow,
+		Style = "Disabled",
+		Text = "🔁 Auto-Fuse",
+		SubText = "OFF",
+		TextSize = 14,
+		SubTextSize = 11,
+		Size = UDim2.new(0.5, -4, 0, UITheme.MinTapSize),
+		LayoutOrder = 2,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = optionsRow.ZIndex,
+		OnClick = function()
+			TycoonController.SetAutoFuse(not TycoonController.IsAutoFuseOn())
+			refreshChamber()
+		end,
 	})
 	layoutHex()
 end

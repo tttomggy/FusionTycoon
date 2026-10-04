@@ -11,6 +11,8 @@
 	  EventClockOffset  seconds added to the clock (Studio /eventclock)
 	  AdminLuck         admin luck multiplier (1 = none) ...
 	  AdminLuckUntil    ... until this server time
+	  AdminAbuseUntil   an admin's panel event / luck runs until this server
+	                    time (the shop's Admin Abuse sale window)
 	  NextAdminAbuse    unix seconds (UTC) of the next Admin Abuse, 0 = unset
 
 	Server code that can't reference EventService (PlayerDataService is a
@@ -131,6 +133,25 @@ function EventState.GetAdminAbuseText(): string
 		else EventState.FormatTimer(left)
 	local when = DateTime.fromUnixTimestamp(math.floor(at)):FormatLocalTime("ddd HH:mm", "en-us")
 	return ("ADMIN ABUSE · %s · in %s"):format(when, inText)
+end
+
+-- When Admin Abuse ends (server time) if it's running right now, else nil:
+-- an admin's event or luck from the panel (AdminService publishes
+-- AdminAbuseUntil), or the scheduled Admin Abuse hour (NextAdminAbuse ..
+-- + ADMIN_ABUSE_LIVE_SECONDS). The shop's real sales use this window.
+function EventState.GetAdminAbuseWindowEnd(): number?
+	local now = Workspace:GetServerTimeNow()
+	local best: number? = nil
+	local untilTime = Workspace:GetAttribute("AdminAbuseUntil")
+	if typeof(untilTime) == "number" and untilTime > now then
+		best = untilTime
+	end
+	local at = Workspace:GetAttribute("NextAdminAbuse")
+	if typeof(at) == "number" and at > 0 and now >= at and now < at + ADMIN_ABUSE_LIVE_SECONDS then
+		local ends = at + ADMIN_ABUSE_LIVE_SECONDS
+		best = if best then math.max(best, ends) else ends
+	end
+	return best
 end
 
 -- Workspace.EventObjects.<eventId> (EventService builds one per event at

@@ -3,8 +3,13 @@
 	SettingsConfig
 	--------------
 	Player settings (PlayerData.Settings, saved; sent as Settings in the
-	snapshot; changed with SetSetting { Key, Tier, Value }). One section so
-	far: which pulls and fusions get the big reveal card.
+	snapshot; changed with SetSetting { Key, Tier?, Value }). Sections:
+	which pulls and fusions get the big reveal card, and the sound-effects
+	volume.
+
+	SfxVolume 0..1 (default 0.8; the server clamps it) and SfxMuted: every
+	SoundKit slot plays at its Volume x SfxVolume (0 when muted), through
+	the client's SFX SoundGroup.
 
 	RevealRule = { [tier] = "Never" | "Golden" | "Diamond" | "Rainbow" |
 	"Always" } for Common → Mythic. "Golden" means Golden or any mutation
@@ -22,7 +27,36 @@ local MutationConfig = require(script.Parent.MutationConfig)
 local SettingsConfig = {}
 
 export type RevealRule = { [string]: string }
-export type Settings = { RevealRule: RevealRule }
+export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean, AutoFuse: boolean }
+
+SettingsConfig.DefaultSfxVolume = 0.8
+
+-- A volume from untrusted data: a finite number clamped to 0..1, else the
+-- default.
+function SettingsConfig.SanitizeSfxVolume(raw: unknown): number
+	if typeof(raw) ~= "number" or raw ~= raw or raw == math.huge or raw == -math.huge then
+		return SettingsConfig.DefaultSfxVolume
+	end
+	return math.clamp(raw, 0, 1)
+end
+
+-- A complete, valid Settings table from untrusted data (an old save, a
+-- snapshot).
+function SettingsConfig.Sanitize(raw: unknown): Settings
+	local source = if typeof(raw) == "table" then raw :: any else {}
+	return {
+		RevealRule = SettingsConfig.SanitizeRevealRule(source.RevealRule),
+		SfxVolume = SettingsConfig.SanitizeSfxVolume(source.SfxVolume),
+		SfxMuted = source.SfxMuted == true,
+		-- The Auto-Fuse pass's toggle (Fuse panel); off until switched on.
+		AutoFuse = source.AutoFuse == true,
+	}
+end
+
+-- What SoundKit plays at: 0 when muted, else the volume.
+function SettingsConfig.GetEffectiveSfxVolume(settings: Settings): number
+	return if settings.SfxMuted then 0 else settings.SfxVolume
+end
 
 -- Segmented-control order, and the label each value shows.
 SettingsConfig.RevealValues = { "Never", "Golden", "Diamond", "Rainbow", "Always" }
@@ -99,7 +133,12 @@ function SettingsConfig.SanitizeRevealRule(raw: unknown): RevealRule
 end
 
 function SettingsConfig.GetDefaultSettings(): Settings
-	return { RevealRule = SettingsConfig.GetDefaultRevealRule() }
+	return {
+		RevealRule = SettingsConfig.GetDefaultRevealRule(),
+		SfxVolume = SettingsConfig.DefaultSfxVolume,
+		SfxMuted = false,
+		AutoFuse = false,
+	}
 end
 
 -- Does a `tier` item with `mutation` get the big card under `rule`?

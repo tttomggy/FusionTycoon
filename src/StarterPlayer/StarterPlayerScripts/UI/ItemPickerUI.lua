@@ -20,7 +20,6 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TycoonController = require(script.Parent.Parent.Controllers.TycoonController)
@@ -153,7 +152,7 @@ local function refreshFooter()
 		child:Destroy()
 	end
 	local card = selectedCard
-	local pedestals = ("Pedestals %d / %d used"):format(pedestalsUsed(), PlotLayout.PEDESTAL_COUNT)
+	local pedestals = ("Pedestals %d / %d used"):format(pedestalsUsed(), TycoonController.GetPedestalCount())
 	if not card then
 		footerName.Text = "Tap an item"
 		footerDetail.Text = pedestals

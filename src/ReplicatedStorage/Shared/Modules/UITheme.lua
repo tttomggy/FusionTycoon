@@ -43,6 +43,9 @@ UITheme.Colors = {
 	ResultMid = hex("#2A1550"), -- big result card gradient mid
 	FuseAllTop = hex("#3A1F6E"), -- Fuse All summary card gradient top
 	WelcomeTop = hex("#1B5A3A"), -- welcome-back (offline earnings) card gradient top
+	ShopTop = hex("#4A1F8E"), -- the SHOP panel header (violet)
+	ShopGlow = hex("#A47BFF"), -- the SHOP header's radial glow
+	Sale = hex("#FF3355"), -- the red SALE tag on the HUD SHOP button
 	MythicBannerLeft = hex("#6E0F24"), -- server Mythic banner gradient left
 	MythicBannerLabel = hex("#FF8FA0"), -- "SERVER · MYTHIC"
 	Rebirth = hex("#FF8A3D"), -- REBIRTH titles, HUD rebirth pill, banner right
@@ -70,6 +73,8 @@ UITheme.World = {
 	Belt = hex("#1B1834"), -- speed belt surface
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
+	AccentPink = hex("#FF5CC8"), -- the Neon Pink Lab (LabStyle): wall + sign strips, cash balls
+	VipGold = hex("#FFD23F"), -- the VIP pass: sign border, wall trims, head tag
 	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
 }
 
@@ -87,6 +92,7 @@ UITheme.Gradients = {
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
+	ShopFeatured = { Top = hex("#FFB347"), Bottom = hex("#E0306E") }, -- the shop's featured banner (warm)
 	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
 	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.
 	GoldRain = { Top = hex("#FFD566"), Bottom = hex("#C98A00") },

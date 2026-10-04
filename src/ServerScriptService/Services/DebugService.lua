@@ -15,6 +15,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 
@@ -23,6 +24,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
+type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -39,6 +41,7 @@ local state: State = {
 local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
 local EventService: EventServiceModule
+local MonetizationService: MonetizationServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -82,6 +85,9 @@ local TIPS_COMMAND = "/tips"
 -- offline earnings and re-sends the snapshot, so the welcome-back card can
 -- be tested (Studio profiles never save, so a real absence can't be).
 local OFFLINE_COMMAND = "/offline"
+-- "/shop grant boost" runs the real grant path (MonetizationService) for a
+-- ShopConfig key without Robux; "/shop" lists the keys.
+local SHOP_COMMAND = "/shop"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -197,6 +203,29 @@ local function onPlayerChatted(player: Player, message: string)
 		PlayerDataService.SetPendingOffline(player, amount, awaySeconds)
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: %s away %d min -> pending %s"):format(player.Name, math.floor(minutes), tostring(amount)))
+	elseif command == SHOP_COMMAND then
+		local verb, rawKey = argument:match("^(%S+)%s*(%S*)$")
+		-- Chat is lowercased: match the ShopConfig key case-insensitively.
+		local key: string? = nil
+		for candidate in ShopConfig.Items do
+			if candidate:lower() == rawKey then
+				key = candidate
+			end
+		end
+		if verb ~= "grant" or not key then
+			local keys = {}
+			for _, candidate in ShopConfig.Order do
+				table.insert(keys, candidate)
+			end
+			warn(("DebugService: /shop grant <key> (%s)"):format(table.concat(keys, ", ")))
+			return
+		end
+		local ok, reason = MonetizationService.GrantForTest(player, key)
+		if ok then
+			print(("DebugService: granted %s to %s"):format(key, player.Name))
+		else
+			warn(("DebugService: /shop grant %s refused (%s)"):format(key, tostring(reason)))
+		end
 	elseif command == WIPE_COMMAND then
 		-- Any steal this player is part of resolves (returns) before the wipe.
 		HeistService.FailCarriesFor(player, "Left")
@@ -216,6 +245,10 @@ local function onPlayerChatted(player: Player, message: string)
 			data.Rebirths = 0
 			data.Index = {}
 			data.LastOnline = nil
+			data.Boosts = { Income = 0, Luck = 0 }
+			data.SafeFusionTokens = 0
+			data.StarterPackBought = false
+			data.Cosmetics = {}
 		end
 		PlayerDataService.SetPendingOffline(player, 0, 0)
 		player:Kick("Profile wiped (Studio debug). Press Play again.")
@@ -241,13 +274,14 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /wipe")
 end
 
 function DebugService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	HeistService = require(script.Parent.HeistService)
 	EventService = require(script.Parent.EventService)
+	MonetizationService = require(script.Parent.MonetizationService)
 end
 
 return DebugService

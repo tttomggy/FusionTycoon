@@ -81,9 +81,16 @@ PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
-PlotLayout.PEDESTAL_COUNT = 4
-PlotLayout.PEDESTAL_Z = -2
-PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17 } -- face +Z (the gate)
+-- Every lab builds all 6; spots 5-6 (a second row behind the first, between
+-- its pairs) only work with the +2 Pedestals pass (ShopConfig: 4 base,
+-- 6 with the pass). Without it they're a dim plinth with a locked label.
+PlotLayout.PEDESTAL_COUNT = 6
+PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17, -11.5, 11.5 } -- face +Z (the gate)
+PlotLayout.PEDESTAL_ZS = { -2, -2, -2, -2, -10, -10 }
+PlotLayout.LockedPedestalTransparency = 0.55 -- the dim plinth (column + cap)
+-- The VIP pass's gold band along the top of each wall's outer face.
+PlotLayout.VipTrimHeight = 0.35
+PlotLayout.VipTrimDepth = 0.12
 
 PlotLayout.FUSION_MACHINE = v3(0, 0, -19)
 PlotLayout.ODDS_BOARD = v3(14, 0, -19) -- Events 2: 13 -> 14 for the 9-wide board (clear of the machine and the portal)
@@ -211,7 +218,7 @@ function PlotLayout.GetBeltLength(): number
 end
 
 function PlotLayout.GetPedestalPosition(index: number): Vector3
-	return v3(PlotLayout.PEDESTAL_XS[index], 0, PlotLayout.PEDESTAL_Z)
+	return v3(PlotLayout.PEDESTAL_XS[index], 0, PlotLayout.PEDESTAL_ZS[index])
 end
 
 --[[ Station pads (StationKit) ---------------------------------------------- ]]
@@ -584,6 +591,7 @@ local function checkLayout()
 		)
 	end
 	assert(#PlotLayout.PEDESTAL_XS == PlotLayout.PEDESTAL_COUNT, "PlotLayout: PEDESTAL_XS must list every pedestal")
+	assert(#PlotLayout.PEDESTAL_ZS == PlotLayout.PEDESTAL_COUNT, "PlotLayout: PEDESTAL_ZS must list every pedestal")
 
 	-- The gate gap must fit inside the sign posts, and the slots must not
 	-- overlap each other.

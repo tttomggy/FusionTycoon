@@ -7,9 +7,9 @@
 	Rewards are all server-side; nothing here pays.
 
 	On a live start (the attribute flips while you're in the game):
-	  * a start banner: 3-2-1 countdown, then the icon, name and blurb on the
-	    event's gradient, with a sound. Rainbow Storm also gets the big
-	    SERVER · EVENT banner (AnnouncementController).
+	  * a start banner straight away for 2.5 s: the icon, name and blurb
+	    on the event's gradient, with a sound (no countdown). Rainbow Storm
+	    also gets the big SERVER · EVENT banner (AnnouncementController).
 	  * the sky (below). On the end: a toast, and the sky goes back.
 
 	Sky: the baseline Lighting values (what LightingService set) are taken
@@ -26,8 +26,10 @@
 
 	HUD chip (top-centre, clear of the top bar and the goal tracker): the
 	running event on its gradient with a live timer ("⚡ POWER SURGE ·
-	3:12"), else a muted "NEXT · ☄ METEOR SHOWER in 8:40". Tapping it opens
-	the schedule card (NOW / NEXT / THEN and the Admin Abuse line). The two
+	3:12"), else a muted "NEXT · ☄ METEOR SHOWER in 8:40", with a small ⓘ
+	inside its right end. A tap anywhere on it opens the info card
+	(EventInfoCard); the first time you see an event type it pulses until
+	that first tap. The two
 	street Event Boards (WorldService) are filled from the same lineup
 	(EventState.GetLineup) every second.
 
@@ -84,8 +86,7 @@ local RAINBOW_CYCLE_SECONDS = 12
 
 local BANNER_SIZE = Vector2.new(460, 120)
 local BANNER_Y = 96 -- under the top bar and the goal tracker's row
-local COUNTDOWN_STEP = 0.6
-local BANNER_HOLD_SECONDS = 4
+local BANNER_HOLD_SECONDS = 2.5
 
 local PARTICLE_HEIGHT = 30
 local PARTICLE_AREA = 80
@@ -122,13 +123,15 @@ local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44)
 local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
 local CARD_GAP = 10
 local LINEUP_COUNT = 3
--- The first time you see an event type (Tips "event_<Id>" unseen) the chip
--- gets a bouncing gold "ⓘ TAP" tag until you tap it once. The card never
--- opens by itself.
-local TAP_TAG_SIZE = Vector2.new(64, 26)
-local TAP_TAG_GAP = 8
-local TAP_TAG_BOUNCE_PIXELS = 4
-local TAP_TAG_BOUNCE_SECONDS = 0.45
+-- A small ⓘ sits inside the chip's right end. The first time you see an
+-- event type (Tips "event_<Id>" unseen) the chip itself pulses (a scale
+-- bounce + a gold glow) until you tap it once. The card never opens by
+-- itself.
+local CHIP_ICON_WIDTH = 26 -- the ⓘ, and the matching inset on both sides
+local PULSE_SCALE = 1.06
+local PULSE_SECONDS = 0.5
+local PULSE_GLOW_SPREAD = 8 -- px the glow shows past the chip
+local PULSE_GLOW_TRANSPARENCY = { From = 0.85, To = 0.4 }
 local GUIDE_SECONDS = 0.5 -- event arrows and pad pills refresh
 local ON_PAD_RADIUS = 6 -- standing on your Gacha Pad: the arrow moves to the machine
 local EVENT_PILL_MAX_DISTANCE = 120
@@ -437,8 +440,8 @@ local function closeBanner()
 	end
 end
 
--- 3-2-1 in a big numeral, then the icon + name + blurb, on the event's
--- gradient. A newer event's banner replaces it.
+-- The icon + name + blurb on the event's gradient, straight away, for
+-- BANNER_HOLD_SECONDS. A newer event's banner replaces it.
 local function showStartBanner(id: string, myGeneration: number)
 	closeBanner()
 	local body, holder = UIKit.Panel({
@@ -461,61 +464,36 @@ local function showStartBanner(id: string, myGeneration: number)
 		UIKit.PairGradient(body, UITheme.GetEventGradient(id))
 	end
 	local z = body.ZIndex + 1
-	local numeral = UIKit.Label({
-		Name = "Countdown",
-		Text = "3",
+	UIKit.Label({
+		Name = "Title",
+		Text = ("%s %s"):format(EventConfig.Icons[id] or "", EventConfig.Names[id] or id),
 		Font = Fonts.Display,
-		TextSize = 72,
-		Size = UDim2.fromScale(1, 1),
+		TextSize = 40,
+		Position = UDim2.fromOffset(16, 14),
+		Size = UDim2.new(1, -32, 0, 48),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = z,
-		Stroke = 4,
+		Stroke = 3,
 		Parent = body,
 	})
+	local _, strength = EventState.GetActive()
+	UIKit.Label({
+		Name = "Blurb",
+		Text = (EventConfig.Blurbs[id] or "") .. (if strength > 1 then (" · ADMIN x%d"):format(strength) else ""),
+		Font = Fonts.Body,
+		TextSize = 18,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(16, 64),
+		Size = UDim2.new(1, -32, 0, 44),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z,
+		Stroke = UITheme.Stroke.Text,
+		Parent = body,
+	})
+	SoundKit.Play("EventStart", nil)
 	UIKit.PopIn(holder)
-	task.spawn(function()
-		for count = 3, 1, -1 do
-			if bannerHolder ~= holder or generation ~= myGeneration then
-				return
-			end
-			numeral.Text = tostring(count)
-			SoundKit.Play("EventStart", nil, { PlaybackSpeed = 0.8 + (3 - count) * 0.1, Volume = 0.8 })
-			task.wait(COUNTDOWN_STEP)
-		end
-		if bannerHolder ~= holder or generation ~= myGeneration then
-			return
-		end
-		numeral:Destroy()
-		UIKit.Label({
-			Name = "Title",
-			Text = ("%s %s"):format(EventConfig.Icons[id] or "", EventConfig.Names[id] or id),
-			Font = Fonts.Display,
-			TextSize = 40,
-			Position = UDim2.fromOffset(16, 14),
-			Size = UDim2.new(1, -32, 0, 48),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = z,
-			Stroke = 3,
-			Parent = body,
-		})
-		local _, strength = EventState.GetActive()
-		UIKit.Label({
-			Name = "Blurb",
-			Text = (EventConfig.Blurbs[id] or "") .. (if strength > 1 then (" · ADMIN x%d"):format(strength) else ""),
-			Font = Fonts.Body,
-			TextSize = 18,
-			TextWrapped = true,
-			Position = UDim2.fromOffset(16, 64),
-			Size = UDim2.new(1, -32, 0, 44),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = z,
-			Stroke = UITheme.Stroke.Text,
-			Parent = body,
-		})
-		SoundKit.Play("EventStart", nil, { PlaybackSpeed = 1.2 })
-		UIKit.PopIn(holder)
-		task.wait(BANNER_HOLD_SECONDS)
-		if bannerHolder == holder then
+	task.delay(BANNER_HOLD_SECONDS, function()
+		if bannerHolder == holder and generation == myGeneration then
 			closeBanner()
 		end
 	end)
@@ -525,8 +503,7 @@ end
 
 -- Defined with the HUD below.
 local refreshGuidance: () -> ()
-local refreshTapTag: () -> ()
-local placeTapTag: () -> ()
+local refreshChipPulse: () -> ()
 
 local function onEventChanged(live: boolean)
 	local id = EventState.GetActive()
@@ -637,7 +614,7 @@ local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
 	TweenService:Create(rock, TweenInfo.new(seconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { CFrame = CFrame.new(to) }):Play()
 	task.delay(seconds, function()
 		rock:Destroy()
-		SoundKit.Play("MeteorImpact", nil)
+		SoundKit.PlayAt("MeteorImpact", to)
 		local character = localPlayer.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if root and root:IsA("BasePart") and (root.Position - to).Magnitude < METEOR_SHAKE_RADIUS then
@@ -793,33 +770,41 @@ end
 local hudGui: ScreenGui
 local chip: TextButton
 local chipHolder: Frame
-local tapTagFrame: GuiObject? = nil
-local tapBounce: Tween? = nil
+local chipIcon: TextLabel
+local chipScale: UIScale
+local chipGlow: Frame
+local pulseTweens: { Tween } = {}
 
--- The gold "ⓘ TAP" tag beside the chip: shown while the running event's
--- type is unseen (Tips "event_<Id>"), bouncing gently.
-refreshTapTag = function()
-	local frame = tapTagFrame
-	if not frame then
+local function stopPulse()
+	for _, tween in pulseTweens do
+		tween:Cancel()
+	end
+	table.clear(pulseTweens)
+	chipScale.Scale = 1
+	chipGlow.Visible = false
+end
+
+-- The chip pulses (scale bounce + gold glow) while the running event's type
+-- is unseen (Tips "event_<Id>"); one tap stops it for good.
+refreshChipPulse = function()
+	if not chipScale then
 		return
 	end
 	local running = EventState.GetActive()
 	local show = running ~= nil
 		and TycoonController.HasSynced()
 		and not TycoonController.HasSeenTip("event_" .. running)
-	frame.Visible = show
-	if show and not tapBounce then
-		local tween = TweenService:Create(
-			frame,
-			TweenInfo.new(TAP_TAG_BOUNCE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-			{ Position = frame.Position - UDim2.fromOffset(0, TAP_TAG_BOUNCE_PIXELS) }
-		)
-		tween:Play()
-		tapBounce = tween
-	elseif not show and tapBounce then
-		tapBounce:Cancel()
-		tapBounce = nil
-		placeTapTag()
+	if show and #pulseTweens == 0 then
+		local info = TweenInfo.new(PULSE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true)
+		chipGlow.Visible = true
+		chipGlow.BackgroundTransparency = PULSE_GLOW_TRANSPARENCY.From
+		local bounce = TweenService:Create(chipScale, info, { Scale = PULSE_SCALE })
+		local glow = TweenService:Create(chipGlow, info, { BackgroundTransparency = PULSE_GLOW_TRANSPARENCY.To })
+		bounce:Play()
+		glow:Play()
+		pulseTweens = { bounce, glow }
+	elseif not show and #pulseTweens > 0 then
+		stopPulse()
 	end
 end
 local chipStyle: string? = nil
@@ -874,6 +859,7 @@ local function refreshChip(lineup: { EventState.LineupEntry })
 		SubText = subText,
 		TextColor3 = color,
 	})
+	chipIcon.TextColor3 = color
 	chipStyle = style
 end
 
@@ -915,7 +901,7 @@ local function refreshSchedule()
 			EventInfoCard.Show(hudGui, cardTop(), first.Id, first.Now)
 		end
 	end
-	refreshTapTag()
+	refreshChipPulse()
 	EventInfoCard.Refresh()
 	refreshBoards(lineup)
 end
@@ -931,11 +917,11 @@ end
 
 local function toggleCard()
 	-- Tapping the chip during an event you haven't tapped before marks it
-	-- seen (the TAP tag goes for good).
+	-- seen (the pulse stops for good).
 	local running = EventState.GetActive()
 	if running and TycoonController.HasSynced() and not TycoonController.HasSeenTip("event_" .. running) then
 		TycoonController.MarkTipSeen("event_" .. running)
-		refreshTapTag()
+		refreshChipPulse()
 	end
 	if EventInfoCard.IsOpen() then
 		EventInfoCard.Hide()
@@ -969,25 +955,9 @@ local function onInputBegan(input: InputObject)
 	EventInfoCard.Hide()
 end
 
--- The tag sits right of the chip (the chip is centred, so half its width
--- plus a gap from the screen's centre).
-placeTapTag = function()
-	local frame = tapTagFrame
-	if frame then
-		local width = chipHolder.Size.X.Offset
-		frame.Position = UDim2.new(0.5, width / 2 + TAP_TAG_GAP, 0, CHIP_Y + (CHIP_SIZE.Desktop.Y - TAP_TAG_SIZE.Y) / 2)
-	end
-end
-
 local function applyLayout(isPhone: boolean)
 	local size = if isPhone then CHIP_SIZE.Phone else CHIP_SIZE.Desktop
 	chipHolder.Size = UDim2.fromOffset(size.X, size.Y)
-	if tapBounce then
-		tapBounce:Cancel()
-		tapBounce = nil
-	end
-	placeTapTag()
-	refreshTapTag()
 	local column = chip:FindFirstChild("Content") and (chip :: any).Content:FindFirstChild("TextColumn")
 	local label = column and column:FindFirstChild("Label")
 	if label and label:IsA("TextLabel") then
@@ -1009,19 +979,43 @@ local function buildHud()
 		Radius = 22,
 		OnClick = toggleCard,
 	})
-	local tag = UIKit.Pill({
-		Name = "TapTag",
-		Parent = hudGui,
-		Text = "ⓘ TAP",
-		Gradient = UITheme.Gradients.Gold,
-		TextColor3 = Colors.GoldText,
+	-- The ⓘ inside the right end (the whole chip is the tap target). The
+	-- text column is inset by the same width on both sides so it stays
+	-- centred and never runs under the icon.
+	local content = chip:FindFirstChild("Content")
+	if content then
+		UIKit.Padding(content, 0, CHIP_ICON_WIDTH, 0, CHIP_ICON_WIDTH)
+	end
+	chipIcon = UIKit.Label({
+		Name = "InfoIcon",
+		Text = "ⓘ",
 		Font = Fonts.Display,
-		TextSize = 14,
-		Height = TAP_TAG_SIZE.Y,
+		TextSize = 18,
+		TextColor3 = Colors.Muted,
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		Size = UDim2.new(0, CHIP_ICON_WIDTH - 6, 1, 0),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = chip.ZIndex + 2,
+		Stroke = UITheme.Stroke.Text,
+		Parent = chip,
 	})
-	local tagFrame = tag.Parent :: GuiObject
-	tapTagFrame = tagFrame
-	tagFrame.Visible = false
+	-- The first-time pulse: a UIScale on the holder (body + shadow bounce
+	-- together) and a gold glow behind them.
+	chipScale = Instance.new("UIScale")
+	chipScale.Name = "PulseScale"
+	chipScale.Parent = chipHolder
+	chipGlow = Instance.new("Frame")
+	chipGlow.Name = "PulseGlow"
+	chipGlow.AnchorPoint = Vector2.new(0.5, 0.5)
+	chipGlow.Position = UDim2.fromScale(0.5, 0.5)
+	chipGlow.Size = UDim2.new(1, PULSE_GLOW_SPREAD * 2, 1, PULSE_GLOW_SPREAD * 2)
+	chipGlow.BackgroundColor3 = Colors.GoldLabel
+	chipGlow.BorderSizePixel = 0
+	chipGlow.ZIndex = 0
+	chipGlow.Visible = false
+	chipGlow.Parent = chipHolder
+	UIKit.Corner(chipGlow, 999)
 	applyLayout(UIKit.IsPhone())
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UIKit.LayoutChanged:Connect(applyLayout)

@@ -33,6 +33,11 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
+local ShopPanel = require(script.Parent.Parent.UI.ShopPanel)
+local ShopController = require(script.Parent.ShopController)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local SettingsPanel = require(script.Parent.Parent.UI.SettingsPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
 local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
@@ -80,6 +85,10 @@ local displayedCash = 0
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
 local multiplierPill: TextLabel
+local breakdownHolder: Frame
+local breakdownLabel: TextLabel
+local breakdownToken = 0
+local BREAKDOWN_SECONDS = 5
 local rebirthPill: TextLabel
 
 local goalHolder: Frame
@@ -361,6 +370,46 @@ local function buildCashCard(): Frame
 		LayoutOrder = 2,
 		ZIndex = z,
 	})
+	-- Tap the total for its breakdown (pad, rebirths, Index, passes, boost,
+	-- Overclock); a >= 44 px clear hit area like the rebirth pill's.
+	local multiplierHit = Instance.new("TextButton")
+	multiplierHit.Name = "Hit"
+	multiplierHit.Text = ""
+	multiplierHit.BackgroundTransparency = 1
+	multiplierHit.AnchorPoint = Vector2.new(0.5, 0.5)
+	multiplierHit.Position = UDim2.fromScale(0.5, 0.5)
+	multiplierHit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
+	multiplierHit.ZIndex = z + 2
+	multiplierHit.Parent = multiplierPill.Parent
+	multiplierHit.Activated:Connect(function()
+		HudController.ToggleIncomeBreakdown()
+	end)
+
+	local breakdown, breakdownFrame = UIKit.Panel({
+		Name = "IncomeBreakdown",
+		Parent = holder,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 0, 1, 8),
+		Size = UDim2.fromOffset(220, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Color = Colors.Panel,
+		Radius = UITheme.Radius.Row,
+		ZIndex = z + 5,
+	})
+	UIKit.Padding(breakdown, 8, 12, 8, 12)
+	breakdownLabel = UIKit.Label({
+		Name = "Lines",
+		Font = Fonts.Body,
+		TextSize = 14,
+		RichText = true,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 18),
+		ZIndex = z + 6,
+		Parent = breakdown,
+	})
+	breakdownFrame.Visible = false
+	breakdownHolder = breakdownFrame
 
 	return holder
 end
@@ -834,14 +883,148 @@ end
 
 local cashHolder: Frame
 
+--[[ SHOP button + timed-effect pills -------------------------------------------------
+	A big gold "🛒 SHOP" on the left edge, above the LOCK chip (>= 56 px
+	tall), wiggling gently every SHOP_WIGGLE_SECONDS; a red SALE tag only
+	while a real sale is live (ShopState); and a pill per active timed
+	effect: "⚡ 2× · 12:41", "🍀 2× luck · 3:10", "⚡ SERVER 2× · 8:02".
+]]
+local SHOP_BUTTON_SIZE = Vector2.new(132, 56)
+local SHOP_ROW_GAP = 8
+local SHOP_WIGGLE_SECONDS = 20
+local SHOP_WIGGLE_DEGREES = 7
+local EFFECT_PILL_HEIGHT = 28
+
+local shopRow: Frame
+local shopHolder: Frame
+local saleTag: TextLabel
+local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
+
+local function buildShopRow()
+	shopRow = Instance.new("Frame")
+	shopRow.Name = "ShopRow"
+	shopRow.BackgroundTransparency = 1
+	shopRow.AutomaticSize = Enum.AutomaticSize.X
+	shopRow.Size = UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset)
+	shopRow.Parent = screenGui
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Top
+	layout.Padding = UDim.new(0, SHOP_ROW_GAP)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = shopRow
+
+	local _, holder = UIKit.Button({
+		Name = "ShopButton",
+		Parent = shopRow,
+		Style = "Gold",
+		Text = "🛒 SHOP",
+		TextColor3 = Colors.GoldText,
+		TextSize = 22,
+		Size = UDim2.fromOffset(SHOP_BUTTON_SIZE.X, SHOP_BUTTON_SIZE.Y),
+		LayoutOrder = 1,
+		OnClick = function()
+			ShopPanel.Toggle()
+		end,
+	})
+	shopHolder = holder
+	saleTag = UIKit.Pill({
+		Name = "Sale",
+		Parent = holder,
+		Text = "SALE",
+		Color = Colors.Sale,
+		Font = Fonts.Display,
+		TextSize = 12,
+		Height = 20,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, 8, 0, -8),
+		ZIndex = 10,
+		TextStroke = 1.5,
+	})
+	local saleFill = saleTag.Parent :: Frame
+	saleFill.Visible = false
+
+	local pills = Instance.new("Frame")
+	pills.Name = "Effects"
+	pills.BackgroundTransparency = 1
+	pills.AutomaticSize = Enum.AutomaticSize.XY
+	pills.Size = UDim2.new()
+	pills.LayoutOrder = 2
+	pills.Parent = shopRow
+	local pillLayout = Instance.new("UIListLayout")
+	pillLayout.Padding = UDim.new(0, 4)
+	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	pillLayout.Parent = pills
+	local function pill(name: string, order: number, pair: UITheme.GradientPair): TextLabel
+		local label = UIKit.Pill({
+			Name = name,
+			Parent = pills,
+			Text = "",
+			Gradient = pair,
+			Font = Fonts.BodyHeavy,
+			TextSize = 13,
+			Height = EFFECT_PILL_HEIGHT - 4,
+			LayoutOrder = order,
+			TextStroke = 1.5,
+		})
+		local fill = label.Parent :: Frame
+		fill.Visible = false
+		return label
+	end
+	effectPills = {
+		Income = pill("IncomeBoost", 1, UITheme.Gradients.Violet),
+		Luck = pill("LuckBoost", 2, UITheme.Gradients.Teal),
+		Server = pill("Overclock", 3, UITheme.Gradients.Gold),
+	}
+
+	-- A gentle wiggle every SHOP_WIGGLE_SECONDS.
+	task.spawn(function()
+		while shopHolder.Parent do
+			task.wait(SHOP_WIGGLE_SECONDS)
+			local info = TweenInfo.new(0.09, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+			for _, angle in { SHOP_WIGGLE_DEGREES, -SHOP_WIGGLE_DEGREES, SHOP_WIGGLE_DEGREES * 0.5, 0 } do
+				local tween = TweenService:Create(shopHolder, info, { Rotation = angle })
+				tween:Play()
+				tween.Completed:Wait()
+			end
+		end
+	end)
+end
+
+-- Once a second: the effect pills' timers and the SALE tag.
+local function refreshShopRow()
+	local function setPill(label: TextLabel, seconds: number, format: string)
+		local fill = label.Parent :: Frame
+		fill.Visible = seconds > 0
+		if seconds > 0 then
+			label.Text = format:format(EventState.FormatTimer(seconds))
+		end
+	end
+	setPill(effectPills.Income, TycoonController.GetBoostSecondsLeft("Income"), ("⚡ %d× · %%s"):format(ShopConfig.BoostMultiplier))
+	setPill(effectPills.Luck, TycoonController.GetBoostSecondsLeft("Luck"), ("🍀 %d× luck · %%s"):format(ShopConfig.LuckPotionMultiplier))
+	setPill(effectPills.Server, ShopState.GetOverclockSeconds(), ("⚡ SERVER %d× · %%s"):format(ShopConfig.OverclockMultiplier))
+	local saleLive = false
+	for _, sale in ShopConfig.Sales do
+		if ShopController.IsAvailable(sale.SaleKey) then
+			saleLive = true
+		end
+	end
+	local saleFill = saleTag.Parent :: Frame
+	saleFill.Visible = saleLive
+end
+
 local function applyLayout(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
 	-- Under the cash card on desktop; beside it on a phone (the goal
 	-- tracker sits under it there).
-	lockRow.Position = if isPhone
+	-- The SHOP row on the left, above the LOCK row: under the cash card on
+	-- desktop; beside it on a phone (the goal tracker sits under it there).
+	local shopTop = if isPhone
 		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
+	shopRow.Position = shopTop
+	lockRow.Position = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	goalHolder.Position = layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -875,10 +1058,12 @@ local function refreshAll()
 		NumberFormat.Money(getIncomePerSecond()),
 		UIKit.Colored("/s", Colors.Muted)
 	)
-	-- The Multiplier Pad's own value; rebirth has its own pill beside it.
-	multiplierPill.Text = NumberFormat.Multiplier(
-		TycoonConfig.GetCashMultiplierValue(TycoonController.GetCashMultiplierLevel())
-	)
+	-- The TOTAL income multiplier (pad x rebirth x Index x the shop); tap
+	-- it for the breakdown.
+	multiplierPill.Text = NumberFormat.Multiplier(TycoonController.GetIncomeMultiplier())
+	if breakdownHolder.Visible then
+		HudController.RefreshIncomeBreakdown()
+	end
 	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
 	local rebirths = TycoonController.GetRebirths()
 	local rebirthFill = rebirthPill.Parent :: Frame
@@ -889,6 +1074,40 @@ local function refreshAll()
 	UpgradesPanel.Refresh()
 end
 
+-- The lines under the multiplier pill: every factor that isn't x1, then the
+-- total. Same IncomeInputs as the HUD's income (one formula).
+function HudController.RefreshIncomeBreakdown()
+	local inputs = TycoonController.GetIncomeInputs()
+	local lines = {}
+	for _, part in TycoonConfig.GetIncomeBreakdown(inputs) do
+		if math.abs(part.Value - 1) > 1e-6 then
+			table.insert(lines, ("%s  %s"):format(part.Label, UIKit.Colored(NumberFormat.Multiplier(part.Value), Colors.Cash)))
+		end
+	end
+	if #lines == 0 then
+		table.insert(lines, "No boosts yet")
+	end
+	table.insert(lines, ("<b>Total  %s</b>"):format(UIKit.Colored(NumberFormat.Multiplier(TycoonConfig.GetIncomeMultiplier(inputs)), Colors.Cash)))
+	breakdownLabel.Text = table.concat(lines, "\n")
+end
+
+function HudController.ToggleIncomeBreakdown()
+	breakdownToken += 1
+	if breakdownHolder.Visible then
+		breakdownHolder.Visible = false
+		return
+	end
+	HudController.RefreshIncomeBreakdown()
+	breakdownHolder.Visible = true
+	UIKit.PopIn(breakdownHolder)
+	local token = breakdownToken
+	task.delay(BREAKDOWN_SECONDS, function()
+		if breakdownToken == token then
+			breakdownHolder.Visible = false
+		end
+	end)
+end
+
 function HudController.Init()
 	screenGui = UIKit.Screen("Hud", 40)
 
@@ -897,9 +1116,11 @@ function HudController.Init()
 	buildButtonRow()
 	buildRebirthReadyButton()
 	buildLockChip()
+	buildShopRow()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
+	ShopPanel.Init()
 	SettingsPanel.Init()
 	FusePanel.Init()
 	HowToHeistPanel.Init()
@@ -908,6 +1129,12 @@ function HudController.Init()
 	UIKit.LayoutChanged:Connect(applyLayout)
 
 	RunService.RenderStepped:Connect(onRenderStep)
+	task.spawn(function()
+		while true do
+			refreshShopRow()
+			task.wait(1)
+		end
+	end)
 	task.spawn(runUpgradesPulse)
 	task.spawn(function()
 		while true do

@@ -310,15 +310,35 @@ export type IncomeInputs = {
 	-- The live event's generator boost (EventState.GetGeneratorMultiplier;
 	-- Power Surge). Generators only, never pedestals. nil = 1.
 	EventGeneratorMultiplier: number?,
+	-- The shop (ShopConfig), all on ALL income; nil = 1:
+	PassMultiplier: number?, -- 2x Cash x VIP (permanent passes)
+	BoostMultiplier: number?, -- a timed Boost / Quick Boost
+	OverclockMultiplier: number?, -- the Server Overclock (everyone here)
 }
 
 -- "The multiplier" for every per-generator or per-item number the game
--- shows: Multiplier Pad x rebirth x Index. (GetCashMultiplierValue is the
--- pad alone; only the pad's own label and Upgrades row use it.)
+-- shows: Multiplier Pad x rebirth x Index x the shop's passes, boost and
+-- Server Overclock. (GetCashMultiplierValue is the pad alone; only the
+-- pad's own label and Upgrades row use it.)
 function TycoonConfig.GetIncomeMultiplier(inputs: IncomeInputs): number
 	return TycoonConfig.GetCashMultiplierValue(inputs.CashMultiplierLevel)
 		* RebirthConfig.GetIncomeMultiplier(inputs.Rebirths)
 		* inputs.IndexMultiplier
+		* (inputs.PassMultiplier or 1)
+		* (inputs.BoostMultiplier or 1)
+		* (inputs.OverclockMultiplier or 1)
+end
+
+-- The pieces of GetIncomeMultiplier, for the HUD pill's breakdown.
+function TycoonConfig.GetIncomeBreakdown(inputs: IncomeInputs): { { Label: string, Value: number } }
+	return {
+		{ Label = "Multiplier Pad", Value = TycoonConfig.GetCashMultiplierValue(inputs.CashMultiplierLevel) },
+		{ Label = "Rebirths", Value = RebirthConfig.GetIncomeMultiplier(inputs.Rebirths) },
+		{ Label = "Index", Value = inputs.IndexMultiplier },
+		{ Label = "Passes", Value = inputs.PassMultiplier or 1 },
+		{ Label = "Boost", Value = inputs.BoostMultiplier or 1 },
+		{ Label = "Server Overclock", Value = inputs.OverclockMultiplier or 1 },
+	}
 end
 
 -- Sum of every generator's output, before the multiplier.

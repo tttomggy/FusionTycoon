@@ -6,7 +6,6 @@ local Workspace = game:GetService("Workspace")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
@@ -42,6 +41,7 @@ local REJECTION_TOASTS: { [string]: string } = {
 	BeingStolen = "A thief has it! Tag them to get it back",
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
+	PedestalLocked = "That spot needs the +2 Pedestals pass",
 }
 local FALLBACK_REJECTION_TOAST = "Couldn't do that, try again"
 -- True once this player's plot is claimed (its pedestals then exist).
@@ -105,7 +105,7 @@ function ItemController.PlaceOnFirstEmpty(uid: string): boolean
 	if not pedestalsReady then
 		return false
 	end
-	for index = 1, PlotLayout.PEDESTAL_COUNT do
+	for index = 1, TycoonController.GetPedestalCount() do
 		if not TycoonController.GetPedestalDisplay(index) and not isPending(index) then
 			requestPlaceItem(index, uid)
 			return true
@@ -130,6 +130,11 @@ end
 -- pressing the same prompt either opens the item picker or picks up
 -- whatever's already there.
 local function onPedestalTriggered(pedestalIndex: number)
+	if pedestalIndex > TycoonController.GetPedestalCount() then
+		-- A locked spot: the one in-world sell, only on the owner's own tap.
+		RemoteEvents.RequestShopPurchase:FireServer({ Key = "ExtraPedestals" })
+		return
+	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
 		requestRemoveItem(pedestalIndex)
 	else
@@ -195,7 +200,10 @@ function ItemController.Init()
 	-- Label the prompt for what pressing it will do, as it appears.
 	ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt)
 		local index = getOwnPedestalIndex(prompt, plot)
-		if index then
+		if index and index > TycoonController.GetPedestalCount() then
+			prompt.ActionText = "Unlock"
+			prompt.ObjectText = "+2 Pedestals"
+		elseif index then
 			prompt.ActionText = if TycoonController.GetPedestalDisplay(index) then "Remove" else "Display"
 			prompt.ObjectText = ("Pedestal %d"):format(index)
 		end

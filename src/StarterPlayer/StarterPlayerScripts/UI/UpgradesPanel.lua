@@ -24,6 +24,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ToastController = require(Controllers.ToastController)
+local ShopController = require(Controllers.ShopController)
 local UIKit = require(script.Parent.UIKit)
 
 local UpgradesPanel = {}
@@ -255,6 +256,8 @@ local function onBuyClicked(generator: TycoonConfig.GeneratorDef, row: Row)
 	local cost = TycoonConfig.GetUpgradeCost(generator, current)
 	if TycoonController.GetCash() < cost then
 		ToastController.Show(("Need %s"):format(NumberFormat.Money(cost)), "Error")
+		-- A tap you can't afford: maybe the shop's offer (its own rules).
+		ShopController.OfferForShortfall(("%s LV %d"):format(generator.Name, current + 1), cost, "UpgradesPanel")
 		return
 	end
 	if TycoonController.RequestUpgrade(generator.Id) then
@@ -272,6 +275,9 @@ local function onMaxClicked(generator: TycoonConfig.GeneratorDef, row: Row)
 	local count, _, nextCost = TycoonConfig.GetMaxAffordable(generator, current, TycoonController.GetCash())
 	if count == 0 then
 		ToastController.Show(("Need %s"):format(NumberFormat.Money(nextCost or 0)), "Error")
+		if nextCost then
+			ShopController.OfferForShortfall(("%s LV %d"):format(generator.Name, current + 1), nextCost, "UpgradesPanel")
+		end
 		return
 	end
 	if TycoonController.RequestUpgradeMax(generator.Id) then
@@ -284,6 +290,7 @@ local function onMaxAllClicked()
 	if plan.Levels == 0 then
 		if plan.NextCost then
 			ToastController.Show(("Need %s"):format(NumberFormat.Money(plan.NextCost)), "Error")
+			ShopController.OfferForShortfall("MAX ALL", plan.NextCost, "UpgradesPanel")
 		end
 		return
 	end

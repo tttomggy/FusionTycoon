@@ -23,11 +23,9 @@ local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
-local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -105,6 +103,8 @@ type FuseOutcome = {
 	IsNewIndex: boolean,
 	Chance: number,
 	KeptUid: string?, -- fail only
+	-- A Safe Fusion token was used: on a fail every input stayed.
+	Safe: boolean,
 	-- Success with a mutation: "Kept" (carried over from the inputs) or
 	-- "Rolled" (a fresh fusion roll beat it). nil otherwise.
 	MutationSource: string?,
@@ -117,9 +117,10 @@ type FuseOutcome = {
 --            share a mutation for it to carry) and a fresh fusion roll at
 --            the player's luck.
 --   fail:    the input with the highest mutation rank (the first on a tie)
---            stays untouched, same Uid; all the others go.
+--            stays untouched, same Uid; all the others go. With `safe` (a
+--            Safe Fusion token, spent by the caller) nothing goes.
 -- Returns the outcome, or (nil, reason) if nothing changed.
-local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?, string?)
+local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?): (FuseOutcome?, string?)
 	local count = #items
 	local consumedTier = items[1].Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
@@ -139,12 +140,14 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 			end
 		end
 		local lost = {}
-		for _, item in items do
-			if item ~= keep then
-				table.insert(lost, item.Uid)
+		if not safe then
+			for _, item in items do
+				if item ~= keep then
+					table.insert(lost, item.Uid)
+				end
 			end
 		end
-		if not PlayerDataService.RemoveItemsByUid(player, lost) then
+		if #lost > 0 and not PlayerDataService.RemoveItemsByUid(player, lost) then
 			return nil, "ItemNotOwned"
 		end
 		PlayerDataService.IncrementTotalFusions(player)
@@ -155,6 +158,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 			IsNewIndex = false,
 			Chance = chance,
 			KeptUid = keep.Uid,
+			Safe = safe == true,
 		},
 			nil
 	end
@@ -173,7 +177,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 	for _, item in items do
 		table.insert(uids, item.Uid)
 	end
-	local luck = RebirthConfig.GetLuck(PlayerDataService.GetRebirths(player)) * EventState.GetLuckMultiplier()
+	local luck = PlayerDataService.GetLuck(player)
 	-- An event mutation (Void Moon: Void) replaces the normal fusion roll
 	-- when it hits; otherwise the normal roll at the event's odds.
 	local rolled: string?
@@ -205,6 +209,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }): (FuseOutcome?
 		Chance = chance,
 		KeptUid = nil,
 		MutationSource = if mutation == nil then nil elseif mutation == base then "Kept" else "Rolled",
+		Safe = safe == true,
 	},
 		nil
 end
@@ -280,6 +285,8 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		reject(player, "BadCount", true)
 		return
 	end
+	-- Safe Fusion (a shop token): armed in the Fuse panel; a fail keeps every orb.
+	local safe = (rawPayload :: any).Safe == true
 
 	if not PlayerDataService.IsDataLoaded(player) then
 		reject(player, "DataNotLoaded")
@@ -326,8 +333,22 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		return
 	end
 
+	if safe and PlayerDataService.GetSafeFusionTokens(player) < 1 then
+		reject(player, "NoSafeFusion")
+		return
+	end
+
 	state.lastFusionAt[player.UserId] = os.clock()
-	local outcome, failure = fuseOnce(player, items)
+	-- The token is spent on any armed fusion (success or fail), after every
+	-- check passed and before the roll; a fusion that changes nothing
+	-- (fuseOnce returns nil) gives it back.
+	if safe then
+		PlayerDataService.UseSafeFusionToken(player)
+	end
+	local outcome, failure = fuseOnce(player, items, safe)
+	if not outcome and safe then
+		PlayerDataService.AddSafeFusionTokens(player, 1)
+	end
 	if not outcome then
 		reject(player, failure or "ItemNotOwned")
 		return
@@ -345,6 +366,7 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		KeptUid = outcome.KeptUid,
 		MutationSource = outcome.MutationSource,
 		LostCount = if outcome.Upgraded then nil else #outcome.ConsumedUids,
+		Safe = outcome.Safe,
 		NewIndex = outcome.IsNewIndex,
 		IndexTierComplete = completedTier(player, outcome.Entry, outcome.IsNewIndex),
 	})
@@ -380,22 +402,30 @@ local function findFuseAllPair(player: Player): (InventoryItem?, InventoryItem?)
 end
 
 -- Fuses every Common/Rare/Epic pair, cascading (new Rares pair up again),
--- then sends ONE inventory sync, ONE tycoon sync and one summary.
-local function onFuseAllRequest(player: Player)
+-- then sends ONE inventory sync, ONE tycoon sync and one summary. `auto`:
+-- the Auto-Fuse pass ran it (same rules; no cooldown; the summary carries
+-- Auto = true and nothing is sent when there was no pair).
+local function runFuseAll(player: Player, auto: boolean)
 	if not PlayerDataService.IsDataLoaded(player) then
-		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0 })
+		if not auto then
+			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0 })
+		end
 		return
 	end
 	if PlayerDataService.IsCarrying(player) then
-		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "Carrying" })
+		if not auto then
+			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "Carrying" })
+		end
 		return
 	end
-	local last = state.lastFuseAllAt[player.UserId]
-	if last and os.clock() - last < FUSE_ALL_COOLDOWN_SECONDS then
-		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "OnCooldown" })
-		return
+	if not auto then
+		local last = state.lastFuseAllAt[player.UserId]
+		if last and os.clock() - last < FUSE_ALL_COOLDOWN_SECONDS then
+			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "OnCooldown" })
+			return
+		end
+		state.lastFuseAllAt[player.UserId] = os.clock()
 	end
-	state.lastFuseAllAt[player.UserId] = os.clock()
 
 	local count, upgradedCount = 0, 0
 	local gained: { [string]: number } = {}
@@ -437,7 +467,9 @@ local function onFuseAllRequest(player: Player)
 	end
 
 	if count == 0 then
-		RemoteEvents.FuseAllResult:FireClient(player, { Count = 0 })
+		if not auto then
+			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0 })
+		end
 		return
 	end
 
@@ -451,12 +483,33 @@ local function onFuseAllRequest(player: Player)
 		Best = best,
 		NewIndexItems = newIndexItems,
 		IndexTiersCompleted = tiersCompleted,
+		Auto = auto,
 	})
 
 	-- Only the single best result is announced, and only if it's Legendary+.
 	if best then
 		announce(player, best)
 	end
+end
+
+local function onFuseAllRequest(player: Player)
+	runFuseAll(player, false)
+end
+
+--[[ Public ------------------------------------------------------------- ]]
+
+-- Auto-Fuse (the pass, toggled in the Fuse panel): Fuse All by itself when
+-- new items arrive (TycoonService calls it after a pull). Same rules as
+-- Fuse All: pairs, Common-Epic, never mutated, never on a pedestal.
+function FusionService.RunAutoFuse(player: Player)
+	if not PlayerDataService.IsDataLoaded(player) or not PlayerDataService.OwnsPass(player, "AutoFuse") then
+		return
+	end
+	local data = PlayerDataService.GetData(player)
+	if not data or not data.Settings.AutoFuse then
+		return
+	end
+	runFuseAll(player, true)
 end
 
 local function onPlayerRemoving(player: Player)
@@ -472,9 +525,16 @@ function FusionService:Init()
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 end
 
+-- Auto-Fuse runs this long after a pull, so the pull's own reveal shows first.
+local AUTO_FUSE_DELAY_SECONDS = 1.5
+
 function FusionService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	EventService = require(script.Parent.EventService)
+	local TycoonService = require(script.Parent.TycoonService)
+	TycoonService.OnPull(function(player: Player)
+		task.delay(AUTO_FUSE_DELAY_SECONDS, FusionService.RunAutoFuse, player)
+	end)
 end
 
 return FusionService

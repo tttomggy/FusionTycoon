@@ -47,6 +47,19 @@ MULT_COSTS = [5e3, 3e4, 1.5e5, 7.5e5, 3.5e6, 1.5e7, 6e7, 2.5e8, 1e9, 4e9,
 MULT_LEVELS = [(c, 5.0 if i == 14 else 1 + 0.25 * (i + 1)) for i, c in enumerate(MULT_COSTS)]
 PEDESTAL_CPS = {"Common": 3, "Rare": 12, "Epic": 50, "Legendary": 300, "Mythic": 3000, "Secret": 50000}
 PEDESTALS = 4
+
+# Shop (keep in sync with ShopConfig): what a paying player's passes and
+# boosts change. --monetization compares free / passes / passes + a Boost.
+DOUBLE_CASH_MULT = 2.0  # ShopConfig.DoubleCashMultiplier
+VIP_MULT = 1.25  # ShopConfig.VipMultiplier
+BOOST_MULT = 2.0  # ShopConfig.BoostMultiplier
+EXTRA_PEDESTALS = 6  # ShopConfig.ExtraPedestals
+PAYERS = {
+    "free": {"mult": 1.0, "pedestals": PEDESTALS, "boost": False},
+    "passes": {"mult": DOUBLE_CASH_MULT * VIP_MULT, "pedestals": EXTRA_PEDESTALS, "boost": False},
+    # One 1 h Boost bought every played hour: x2 is always on.
+    "passes+boost": {"mult": DOUBLE_CASH_MULT * VIP_MULT, "pedestals": EXTRA_PEDESTALS, "boost": True},
+}
 GACHA_COST = 250
 GACHA_GROWTH = 1.045
 GACHA_RATES = {"Common": 0.77998, "Rare": 0.18, "Epic": 0.035, "Legendary": 0.0045,
@@ -124,7 +137,7 @@ VOID_CHANCE = 0.05
 RAINBOW_STORM_ODDS = 5
 
 
-def run(seed, horizon=10 * 3600, sessions=0, offline=True):
+def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     """t is played time. With sessions > 0 the player plays that many
     SESSION_SECONDS sessions with AWAY_SECONDS between them, collecting
     offline earnings (unless offline=False) at the start of each new one."""
@@ -158,6 +171,10 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
         ev = ev_slots[slot]
         return (ev, slot) if clock - slot * EV_SLOT < EV_DURATION[ev] else None
 
+    shop = PAYERS[payer]
+    pedestals = shop["pedestals"]
+    shop_mult = shop["mult"] * (BOOST_MULT if shop["boost"] else 1)
+
     cash = 0.0
     t = 0.0
     rebirths = 0
@@ -188,14 +205,14 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True):
         return 1 + b
 
     def global_mult():
-        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus()
+        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult
 
     def ped_items():
         items = []
         for (tr, mu), n in inv.items():
-            items += [(PEDESTAL_CPS[tr] * MUT_MULT[mu], tr, mu)] * min(n, PEDESTALS)
+            items += [(PEDESTAL_CPS[tr] * MUT_MULT[mu], tr, mu)] * min(n, pedestals)
         items.sort(reverse=True)
-        return items[:PEDESTALS]
+        return items[:pedestals]
 
     def cps(ev=None):
         g = sum(b * GEN_TIER_MULT[tr] * gen[i] for i, tr, b, *_ in GENS)
@@ -383,6 +400,30 @@ def report_sessions(seeds, sessions):
           " offline", sorted(r[2] for r in on)[mid])
 
 
+def report_monetization(seeds, hours):
+    """Median time to each milestone for a free player, a 2x Cash + VIP +
+    Extra Pedestals player, and the same with one Boost per hour."""
+    keys = ["first_Epic", "mult1", "first_Legendary", "gen_core", "first_Mythic", "rebirth1", "gen_sing",
+            "rebirth2", "rebirth3", "sing_lv10", "rebirth4", "rebirth5"]
+    mid = seeds // 2
+    results = {name: [run(s, hours * 3600, payer=name) for s in range(seeds)] for name in PAYERS}
+    print(f"Monetization: median of {seeds} seeds, {hours:g} h played (no events)")
+    print(f"{'milestone':16s}" + "".join(f"{name:>16s}" for name in PAYERS) + "   passes / boost vs free")
+    for k in keys:
+        row = []
+        for name in PAYERS:
+            vals = sorted(r[0].get(k, 1e12) for r in results[name])
+            row.append(vals[mid])
+        cells = "".join(f"{fmt(v if v < 1e12 else None):>16s}" for v in row)
+        free = row[0]
+        ratios = "   " + "  ".join(
+            (f"{v / free:.0%}" if free < 1e12 and v < 1e12 else "  -") for v in row[1:]
+        )
+        print(f"{k:16s}{cells}{ratios}")
+    for name in PAYERS:
+        print(f"  {name:13s} rebirths after {hours:g} h, median", sorted(r[2] for r in results[name])[mid])
+
+
 if __name__ == "__main__":
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if "--no-depth" in sys.argv:
@@ -396,6 +437,9 @@ if __name__ == "__main__":
         if a.startswith("--sessions="):
             sessions = int(a.split("=")[1])
     seeds = int(args[0]) if len(args) > 0 else 20
+    if "--monetization" in sys.argv:
+        report_monetization(seeds, float(args[1]) if len(args) > 1 else 12)
+        sys.exit(0)
     if sessions:
         report_sessions(seeds, sessions)
         sys.exit(0)

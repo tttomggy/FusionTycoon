@@ -98,6 +98,33 @@ function PlotKit.BuildWalls(origin: CFrame, parent: Instance, claimed: boolean):
 			Parent = walls,
 		})
 		strip:AddTag(PlotKit.WALL_STRIP_TAG)
+		-- The VIP pass's gold trim: a thin band along the top of the wall's
+		-- outer face, hidden until ApplyLabLook shows it.
+		local alongX = segment.Length.X > segment.Length.Z
+		local outward = if alongX
+			then Vector3.new(0, 0, math.sign(segment.Center.Z))
+			else Vector3.new(math.sign(segment.Center.X), 0, 0)
+		local depth = PlotLayout.VipTrimDepth
+		local trim = PartKit.Part({
+			Name = "VipTrim",
+			Size = Vector3.new(
+				if alongX then segment.Length.X else depth,
+				PlotLayout.VipTrimHeight,
+				if alongX then depth else segment.Length.Z
+			),
+			CFrame = PartKit.At(
+				origin,
+				segment.Center + outward * (thickness / 2 + depth / 2),
+				PlotLayout.WALL_HEIGHT - PlotLayout.VipTrimHeight / 2
+			),
+			Color = World.VipGold,
+			Material = Enum.Material.Neon,
+			Transparency = 1,
+			CanCollide = false,
+			Parent = walls,
+		})
+		PartKit.MakeDecorative(trim)
+		trim:AddTag(PlotKit.VIP_TRIM_TAG)
 	end
 
 	walls.Parent = parent
@@ -157,6 +184,39 @@ function PlotKit.BuildShieldFence(origin: CFrame, parent: Instance): Folder
 
 	fence.Parent = parent
 	return fence
+end
+
+PlotKit.VIP_TRIM_TAG = "FT_VipTrim"
+
+-- The owner's lab look from the shop: Neon Pink strips (LabStyle, looks
+-- only) and the VIP gold trim (sign border + the hidden wall trims). Call
+-- after the plot is claimed; violet / Ink when neither.
+function PlotKit.ApplyLabLook(plot: Instance, pink: boolean, vip: boolean)
+	local accent = if pink then World.AccentPink else World.AccentViolet
+	local walls = plot:FindFirstChild("Walls")
+	if walls then
+		for _, part in walls:GetChildren() do
+			if part:IsA("BasePart") then
+				if part:HasTag(PlotKit.WALL_STRIP_TAG) then
+					part.Color = accent
+				elseif part:HasTag(PlotKit.VIP_TRIM_TAG) then
+					part.Transparency = if vip then 0 else 1
+				end
+			end
+		end
+	end
+	local gate = plot:FindFirstChild("SignGate")
+	if gate then
+		local strip = gate:FindFirstChild("SignStrip")
+		if strip and strip:IsA("BasePart") then
+			strip.Color = accent
+		end
+		local border = gate:FindFirstChild("SignBorder")
+		if border and border:IsA("BasePart") then
+			border.Color = if vip then World.VipGold else UITheme.Colors.Ink
+			border.Material = if vip then Enum.Material.Neon else Enum.Material.SmoothPlastic
+		end
+	end
 end
 
 -- Violet once claimed, Unclaimed before.

@@ -5,7 +5,10 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local InventoryController = require(script.Parent.InventoryController)
 
 local TycoonController = {}
@@ -30,10 +33,49 @@ local tipsSeen: { [string]: boolean } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
+-- The shop's view of this player (snapshot Shop). Timed boosts count down
+-- locally from the moment the snapshot arrived.
+type ShopView = {
+	OwnedPasses: { [string]: boolean },
+	Restricted: boolean,
+	IncomeBoostSeconds: number,
+	LuckBoostSeconds: number,
+	SafeFusionTokens: number,
+	StarterPackBought: boolean,
+	Cosmetics: { [string]: boolean },
+	Sessions: number,
+	OfflineDoubleAmount: number,
+	ReceivedAt: number, -- os.clock()
+}
+local shop: ShopView = {
+	OwnedPasses = {},
+	Restricted = true,
+	IncomeBoostSeconds = 0,
+	LuckBoostSeconds = 0,
+	SafeFusionTokens = 0,
+	StarterPackBought = false,
+	Cosmetics = {},
+	Sessions = 0,
+	OfflineDoubleAmount = 0,
+	ReceivedAt = 0,
+}
 -- Settings (SettingsConfig): the server's copy plus local changes it hasn't
 -- echoed yet (optimistic: they apply at once).
 local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
 local pendingReveal: { [string]: string } = {}
+local sfxVolume = SettingsConfig.DefaultSfxVolume
+local sfxMuted = false
+-- Local sound changes not echoed yet (nil = none pending).
+local pendingSfxVolume: number? = nil
+local pendingSfxMuted: boolean? = nil
+-- The Auto-Fuse pass's toggle (Settings.AutoFuse), optimistic like the rest.
+local autoFuse = false
+local pendingAutoFuse: boolean? = nil
+
+local function applySfx()
+	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
+end
+applySfx()
 
 local tycoonChanged = Instance.new("BindableEvent")
 TycoonController.TycoonChanged = tycoonChanged.Event
@@ -152,6 +194,44 @@ function TycoonController.SetRevealRule(tier: string, value: string)
 	RemoteEvents.SetSetting:FireServer({ Key = "RevealRule", Tier = tier, Value = value })
 end
 
+-- Sound effects volume (0..1) and mute (SettingsConfig).
+function TycoonController.GetSfxVolume(): number
+	return sfxVolume
+end
+
+function TycoonController.IsSfxMuted(): boolean
+	return sfxMuted
+end
+
+-- Applies at once. `save` false while dragging the slider (local only);
+-- true on release sends it to the server.
+function TycoonController.SetSfxVolume(volume: number, save: boolean)
+	sfxVolume = SettingsConfig.SanitizeSfxVolume(volume)
+	-- Pending even mid-drag, so a snapshot can't snap the slider back.
+	pendingSfxVolume = sfxVolume
+	applySfx()
+	if save then
+		RemoteEvents.SetSetting:FireServer({ Key = "SfxVolume", Value = sfxVolume })
+	end
+end
+
+function TycoonController.SetSfxMuted(muted: boolean)
+	sfxMuted = muted
+	pendingSfxMuted = muted
+	applySfx()
+	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
+end
+
+function TycoonController.IsAutoFuseOn(): boolean
+	return autoFuse
+end
+
+function TycoonController.SetAutoFuse(on: boolean)
+	autoFuse = on
+	pendingAutoFuse = on
+	RemoteEvents.SetSetting:FireServer({ Key = "AutoFuse", Value = on })
+end
+
 -- One of this player's displayed items is being carried off by a thief.
 function TycoonController.IsItemCarried(uid: string): boolean
 	return carriedUids[uid] == true
@@ -165,9 +245,10 @@ function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 		byUid[item.Uid] = item
 	end
 	local items = {}
-	for _, uid in pedestalDisplays do
+	local count = ShopConfig.GetPedestalCount(shop.OwnedPasses)
+	for index, uid in pedestalDisplays do
 		local item = byUid[uid]
-		if item and not carriedUids[uid] then
+		if item and index <= count and not carriedUids[uid] then
 			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
 		end
 	end
@@ -183,7 +264,37 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		Rebirths = rebirths,
 		IndexMultiplier = indexMultiplier,
 		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
+		PassMultiplier = ShopConfig.GetPassIncomeMultiplier(shop.OwnedPasses),
+		BoostMultiplier = if TycoonController.GetBoostSecondsLeft("Income") > 0 then ShopConfig.BoostMultiplier else 1,
+		OverclockMultiplier = ShopState.GetOverclockMultiplier(),
 	}
+end
+
+--[[ Shop (read-only view of the server's state) ]]
+
+function TycoonController.GetShop(): ShopView
+	return shop
+end
+
+function TycoonController.OwnsPass(key: string): boolean
+	return shop.OwnedPasses[key] == true
+end
+
+-- Seconds left on a timed boost ("Income" | "Luck"), counted down locally.
+function TycoonController.GetBoostSecondsLeft(kind: "Income" | "Luck"): number
+	local base = if kind == "Income" then shop.IncomeBoostSeconds else shop.LuckBoostSeconds
+	return math.max(0, base - (os.clock() - shop.ReceivedAt))
+end
+
+-- The shop's luck multiplier (Lucky pass x an active Luck Potion), for
+-- displays; the server's PlayerDataService.GetLuck is what rolls use.
+function TycoonController.GetShopLuckMultiplier(): number
+	return ShopConfig.GetLuckMultiplier(shop.OwnedPasses, TycoonController.GetBoostSecondsLeft("Luck"))
+end
+
+-- 4, or 6 with the +2 Pedestals pass.
+function TycoonController.GetPedestalCount(): number
+	return ShopConfig.GetPedestalCount(shop.OwnedPasses)
 end
 
 -- Pad x rebirth: the multiplier every per-generator/per-item number shows.
@@ -274,8 +385,8 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 	end
-	local settings = snapshot.Settings
-	local rule = SettingsConfig.SanitizeRevealRule(if typeof(settings) == "table" then settings.RevealRule else nil)
+	local settings = SettingsConfig.Sanitize(snapshot.Settings)
+	local rule = settings.RevealRule
 	for tier, value in pendingReveal do
 		if rule[tier] == value then
 			pendingReveal[tier] = nil
@@ -284,8 +395,60 @@ local function onSyncTycoon(snapshot: any)
 		end
 	end
 	revealRule = rule
+	-- Sound: keep a local change until the snapshot echoes it.
+	if pendingSfxVolume ~= nil and math.abs(settings.SfxVolume - pendingSfxVolume) < 1e-4 then
+		pendingSfxVolume = nil
+	end
+	if pendingSfxMuted ~= nil and settings.SfxMuted == pendingSfxMuted then
+		pendingSfxMuted = nil
+	end
+	if pendingAutoFuse ~= nil and settings.AutoFuse == pendingAutoFuse then
+		pendingAutoFuse = nil
+	end
+	if pendingAutoFuse ~= nil then
+		autoFuse = pendingAutoFuse
+	else
+		autoFuse = settings.AutoFuse
+	end
+	sfxVolume = if pendingSfxVolume ~= nil then pendingSfxVolume else settings.SfxVolume
+	if pendingSfxMuted ~= nil then
+		sfxMuted = pendingSfxMuted
+	else
+		sfxMuted = settings.SfxMuted
+	end
+	applySfx()
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
+	local rawShop = snapshot.Shop
+	if typeof(rawShop) == "table" then
+		local owned: { [string]: boolean } = {}
+		for _, key in (if typeof(rawShop.OwnedPasses) == "table" then rawShop.OwnedPasses else {}) do
+			if typeof(key) == "string" then
+				owned[key] = true
+			end
+		end
+		local cosmetics: { [string]: boolean } = {}
+		for _, key in (if typeof(rawShop.Cosmetics) == "table" then rawShop.Cosmetics else {}) do
+			if typeof(key) == "string" then
+				cosmetics[key] = true
+			end
+		end
+		local function number(value: any): number
+			return if typeof(value) == "number" then value else 0
+		end
+		shop = {
+			OwnedPasses = owned,
+			Restricted = rawShop.Restricted ~= false,
+			IncomeBoostSeconds = number(rawShop.IncomeBoostSeconds),
+			LuckBoostSeconds = number(rawShop.LuckBoostSeconds),
+			SafeFusionTokens = number(rawShop.SafeFusionTokens),
+			StarterPackBought = rawShop.StarterPackBought == true,
+			Cosmetics = cosmetics,
+			Sessions = number(rawShop.Sessions),
+			OfflineDoubleAmount = number(rawShop.OfflineDoubleAmount),
+			ReceivedAt = os.clock(),
+		}
+	end
 	hasSynced = true
 	tycoonChanged:Fire(cash, generatorLevels)
 end

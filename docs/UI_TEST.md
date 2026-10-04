@@ -729,8 +729,9 @@ published place with API access (otherwise it toasts "DataStore save
 failed").
 
 - [ ] **Each `/event <id>`** (GoldenRain, PowerSurge, MeteorShower,
-  RainbowStorm, Night, VoidMoon): the start banner counts **3 · 2 · 1** with
-  a ping, then shows the icon, name and one line on the event's gradient;
+  RainbowStorm, Night, VoidMoon): the start banner appears **at once** (no
+  3-2-1 countdown) with one ping: the icon, name and one line on the
+  event's gradient, gone after ~2.5 s;
   the HUD chip turns that gradient with a live timer
   ("⚡ POWER SURGE · 4:58"); the sky changes (gold tint + gold sparkles /
   storm tint + denser haze + generator bands flicker / dusk to midnight /
@@ -814,11 +815,16 @@ failed").
 - [ ] **Info card: between events.** With nothing on, the chip opens the
   same card for the NEXT event, "Starts in 8:40". When that event starts
   with the card open, it switches to "… left".
-- [ ] **No pop-up; the TAP tag instead.** After `/tips reset`, `/event
-  GoldenRain`: the card does **not** open by itself. A small gold "ⓘ TAP"
-  tag bounces beside the event chip. Tap the chip once: the card opens and
-  the tag is gone for good (end Golden Rain and start it again: no tag). A
-  different event type shows its own tag once.
+- [ ] **No pop-up; the chip pulses instead.** After `/tips reset`, `/event
+  GoldenRain`: the card does **not** open by itself, and there is **no**
+  separate tag beside the chip. The chip itself pulses (a gentle scale
+  bounce with a gold glow behind it). Tap anywhere on it once (the text or
+  the ⓘ): the card opens and the pulse stops for good (end Golden Rain and
+  start it again: no pulse). A different event type pulses once too.
+- [ ] **ⓘ inside the chip.** A small ⓘ sits inside the chip's right end in
+  every state (running event, muted NEXT); the chip text stays centred and
+  never runs under it, on desktop and on a phone. Tapping the ⓘ or the
+  text both open the card.
 - [ ] **Info card closes.** With the card open: tapping anywhere outside it
   (the world, another HUD button) closes it; tapping the chip toggles it;
   ✕ closes it. When the running event ends, the open card closes itself.
@@ -880,8 +886,8 @@ failed").
 
 ## 18. Polish 7 (Index book, MAX upgrades, smaller HUD)
 
-The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up and
-the TAP tag, the card closing) live in §16 / §17b.
+The HUD cases (LOCK chip fits its text, no steal chip, no event pop-up,
+the chip's ⓘ and first-time pulse, the card closing) live in §16 / §17b.
 
 - [ ] **Index orbs.** Open INDEX on a fresh save, `/give` a few items with
   `[mutation]`. Found cells are the real orb in that variant: Normal the
@@ -962,3 +968,123 @@ the TAP tag, the card closing) live in §16 / §17b.
   only Golden Rares are added. Empty chamber + AUTO-FILL: plain Rares only.
 - [ ] **Fail card.** A failed fusion with a Golden in: "Kept your Golden
   Rare (Golden …), lost N".
+
+## 20. Sounds (every slot filled, volume, play cap)
+
+- [ ] **Preload.** Play in Studio and check the Output: no "SoundKit: <slot>
+  failed to load …" warning. Any that appears names a slot to re-pick.
+- [ ] **Every slot audible once.** Each should be clearly different:
+  - EventStart: `/event GoldenRain` (once, as the banner shows).
+  - EventEnd: `/event off`.
+  - CoinPickup / BigCoin: grab Golden Rain coins.
+  - Thunder: `/event PowerSurge`, wait for a strike; it's louder near the
+    target and fades by ~150 studs.
+  - MeteorImpact: `/event MeteorShower`; it plays at the crater and fades
+    with distance.
+  - EventReveal: `/eventmut void`.
+  - Grab / Alarm: a two-player heist (thief / victim; the alarm is three
+    quick high blips).
+  - RevealMajor / RevealMinor: fuse to Epic / to Rare.
+  - Toast: any top banner.
+  - Station: buy on the Multiplier Pad or the Gacha Pad.
+- [ ] **Volume slider.** ⚙ → Sound effects: it starts at 80%. Drag it to
+  20%: the number follows the knob and a click plays at the new level on
+  release; every sound above, and the other player's Station purchases near
+  you, are quieter. 0% is silent. The value survives a rejoin in a live
+  test place (Studio profiles never save).
+- [ ] **Mute.** Tap 🔊: it turns red 🔇, the slider greys, and nothing plays,
+  including server sounds (Station). Tap again: sound returns at the slider
+  level.
+- [ ] **No stacking on a coin streak.** `/event GoldenRain` and run through a
+  line of coins fast (or Pull ×10 for RevealMinor): at most 6 of one sound
+  overlap, and the coin pitch varies slightly from coin to coin.
+
+## 21. Monetization (shop, passes, boosts, offers, real sales)
+
+All ShopConfig ids are 0 until Harris pastes them, so in Studio every item
+shows a "TEST" price and tapping it (or `/shop grant <key>`) runs the real
+grant path for free. Live-game checks need real ids (docs/SHOP_SETUP.md).
+
+- [ ] **Every product through `/shop grant`.** For each key, `/shop grant
+  <key>` shows the THANK YOU card (gold sunburst, RevealMajor, "(Studio test
+  grant)") with the right lines, and:
+  - DoubleCash: the HUD income doubles; tap the multiplier pill: "Passes
+    ×2".
+  - VIP: income ×1.25 more; a gold 👑 VIP tag over your head; `[VIP]` in
+    gold before your chat messages; gold sign border and wall trims.
+  - ExtraPedestals: spots 5–6 turn solid, their lock label becomes EMPTY,
+    you can display there and income counts them.
+  - AutoFuse: the Fuse panel shows "🔁 Auto-Fuse"; switch it on, pull:
+    ~1.5 s later a Fuse All summary appears by itself (mutated items never
+    touched).
+  - LabStyle: wall and sign strips turn Neon Pink; your cash balls are
+    pink. Nothing else changes.
+  - Lucky / LuckPotion: see "odds" below. QuickBoost / Boost: "⚡ 2× ·
+    15:00 / 1:00:00" pill by the SHOP button, income ×2; a second grant
+    adds time (cap 3 h).
+  - PocketCash / CashCrate / CashVault: cash goes up by the amount the
+    tile showed (20 min / 2 h / 8 h of base income, floors $5k / $50k /
+    $250k).
+  - Overclock: see below. SafeFusion1 / 5: "OWNED 1 / 6" on the tiles.
+  - StarterPack: Neon Pink + a 1 h boost + Pocket Cash; it disappears from
+    the shop afterwards. OfflineDouble: `/offline 120`, then COLLECT ×2 on
+    the welcome-back card pays twice the amount.
+- [ ] **Restricted player.** In `MonetizationService`, temporarily force
+  `restricted = true` (or play from a region where paid random items are
+  restricted): the shop shows only 2× Cash, VIP, +2 Pedestals, Auto-Fuse
+  and Neon Pink Lab; no cash, boost, luck, Safe Fusion, Starter Pack or
+  COLLECT ×2; `/shop grant boost` still works in Studio (test only), but
+  `RequestShopPurchase { Key = "Boost" }` from the command bar is refused
+  ("not available for your account"). Gacha and fusion work as before.
+- [ ] **Odds with the Luck Potion.** Note the Gacha Pad's Legendary / Mythic
+  % and the mutation line. `/shop grant luckpotion`: the pad's numbers rise
+  at once (×2 luck); when the 15 min run out (or `/shop grant` Lucky for
+  ×1.5 permanently) they update again. The Fusion Machine's success
+  board doesn't change (luck never touches fusion success).
+- [ ] **Contextual offer timing.** On a profile in its 2nd+ session (a live
+  test place; Studio profiles are always session 1, so in Studio wait 10
+  min first):
+  - Tap an upgrade you can't afford: one side card bottom-right ("You
+    tapped: Core Engine LV 7 · $8.2M", "Need $3.4M more?", the smallest
+    covering pack with its amount, Not now, the price, "or wait ~N min").
+  - Tap again at once: no card (5 min cooldown); toasts still show.
+  - Within the first 10 min of a first session: never.
+  - Fail a fusion (or get robbed, or get caught stealing), then tap
+    something unaffordable within 60 s: no card. After 60 s (and the
+    cooldown): it may show.
+  - With the welcome-back card, a result card or the shop open: no card.
+  - A gap no pack covers: it offers the Boost instead.
+- [ ] **Starter Pack in session 2 only.** Session 1: never offered by a
+  card. Session 2: 3 min after joining a "Welcome back! 🎁 Starter Pack"
+  side card, once; dismiss it and it doesn't come back (it stays in the
+  shop's featured banner until bought). Session 3: no card.
+- [ ] **A sale only inside its window.** No Admin Abuse: no SALE tag, no
+  BoostSale tile, the featured banner isn't a sale. Admin panel → start an
+  event (or schedule Admin Abuse to now): the red SALE tag appears on the
+  SHOP button; the banner shows "normally <Boost price> · today <sale
+  price> (−N%)" (live prices) and "Ends when Admin Abuse ends · m:ss"
+  counting the real time. End the event: everything sale-related goes, and
+  `RequestShopPurchase { Key = "BoostSale" }` is refused ("That sale just
+  ended").
+- [ ] **Pedestals 5–6 locked / unlocked.** Without the pass: two dim plinths
+  behind the front row, owner-only "🔒 +2 PEDESTALS"; their prompt reads
+  "Unlock" and asks for the pass (Studio: a test grant). Another player
+  sees no prompt. DISPLAY IT never targets them. After the grant they work
+  like the others.
+- [ ] **Safe Fusion returns the orbs.** `/shop grant safefusion5`. In the
+  Fuse panel arm "🛡 Safe Fusion (5)" (it reads ON) and fuse a low-chance
+  set until one fails: the fail card says "🛡 Safe Fusion · every orb came
+  back", the inventory still has every input, tokens 4, and the toggle is
+  OFF again. A success also spends the token. The fail card never offers
+  Safe Fusion; AGAIN fuses without it.
+- [ ] **Overclock for the whole server.** Two players: one runs `/shop grant
+  overclock`. Both see the "SERVER · OVERCLOCK" banner "⚡ <name>
+  overclocked the server! ×2 income for everyone", both HUD incomes double,
+  both show "⚡ SERVER 2× · 15:00"; another grant extends it (cap 60 min);
+  it ends for everyone together, and a rejoin after it ended shows none.
+- [ ] **Phone layout.** Device emulator (iPhone 14 landscape): the SHOP
+  button sits beside the cash card with the LOCK chip under it (top-left
+  170 × 60 still clear); the shop fills the screen and scrolls; tiles are 2
+  per row; every button is easy to tap; the side cards don't cover the
+  bottom buttons.
+

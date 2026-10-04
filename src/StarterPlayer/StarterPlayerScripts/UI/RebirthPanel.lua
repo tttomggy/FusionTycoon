@@ -36,6 +36,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ToastController = require(Controllers.ToastController)
+local ShopController = require(Controllers.ShopController)
 local UIKit = require(script.Parent.UIKit)
 
 local RebirthPanel = {}
@@ -247,6 +248,9 @@ end
 
 local function onActionClicked()
 	if not isReady then
+		-- The disabled "Need $X more" button was tapped: maybe the shop's
+		-- offer (its own rules).
+		ShopController.OfferForShortfall("Rebirth", TycoonController.GetRebirthCost(), "RebirthPanel")
 		return
 	end
 	confirm.Open()

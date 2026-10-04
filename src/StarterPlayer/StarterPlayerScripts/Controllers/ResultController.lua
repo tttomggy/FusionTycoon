@@ -31,6 +31,7 @@ local TweenService = game:GetService("TweenService")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -50,6 +51,7 @@ local TycoonController = require(script.Parent.TycoonController)
 local ItemController = require(script.Parent.ItemController)
 local HudController = require(script.Parent.HudController)
 local ToastController = require(script.Parent.ToastController)
+local ShopController = require(script.Parent.ShopController)
 
 local ResultController = {}
 
@@ -96,6 +98,7 @@ local function closeBigCard()
 	end
 	local holder = bigHolder
 	bigHolder = nil
+	UIKit.SetOverlay("ResultCard", false)
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -206,6 +209,7 @@ local function showBigCard(info: BigCardInfo)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	local z = body.ZIndex + 3
 
@@ -416,6 +420,7 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	UIKit.MutationCardStroke(body, mutation)
 	local z = body.ZIndex + 3
@@ -551,6 +556,7 @@ local multiHolder: Frame? = nil
 local function closeMultiCard()
 	local holder = multiHolder
 	multiHolder = nil
+	UIKit.SetOverlay("MultiPull", false)
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -656,6 +662,7 @@ local function showMultiCard(items: { any })
 		ZIndex = 1, -- under the big card the best pull may also get
 	})
 	multiHolder = holder
+	UIKit.SetOverlay("MultiPull", true)
 	local z = body.ZIndex + 1
 
 	UIKit.Label({
@@ -734,6 +741,7 @@ local function onGachaMultiPullResult(payload: any)
 	if payload.Success ~= true then
 		if payload.Reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
 			ToastController.Show(("Need %s for 10 pulls"):format(NumberFormat.Money(payload.Cost)), "Error")
+			ShopController.OfferForShortfall("Pull ×10", payload.Cost)
 		end
 		return
 	end
@@ -773,6 +781,7 @@ local function showRebirthCard(rebirths: number)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	local z = body.ZIndex + 3
 
@@ -894,6 +903,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	UIKit.MutationCardStroke(body, item.Mutation)
 	local z = body.ZIndex + 3
 	UIKit.Label({
@@ -1064,6 +1074,7 @@ local function showFuseAllCard(result: any)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	UIKit.SetOverlay("ResultCard", true)
 	local z = body.ZIndex + 1
 	UIKit.Padding(body, 18, 20, 18, 20)
 	local layout = Instance.new("UIListLayout")
@@ -1289,7 +1300,9 @@ local function newBottomCard(name: string, size: Vector2): (Frame, number)
 	return body, generation
 end
 
-local function showFailCard(item: any, lostCount: number)
+-- `safe`: a Safe Fusion token was spent, so every orb came back. (Safe
+-- Fusion is never offered here: this card only reports.)
+local function showFailCard(item: any, lostCount: number, safe: boolean?)
 	local tier = item.Tier :: string
 	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
 	local z = body.ZIndex + 1
@@ -1313,16 +1326,18 @@ local function showFailCard(item: any, lostCount: number)
 	})
 	UIKit.Label({
 		Name = "Detail",
-		Text = ("Kept your %s (%s), lost %d"):format(
-			"<b>"
-				.. UIKit.Colored(
-					(if item.Mutation then item.Mutation .. " " else "") .. tier,
-					UITheme.GetMutationColor(item.Mutation) or UITheme.GetTierLight(tier)
-				)
-				.. "</b>",
-			UIKit.EscapeRichText(itemName(item)),
-			lostCount
-		),
+		Text = if safe
+			then "🛡 Safe Fusion · every orb came back"
+			else ("Kept your %s (%s), lost %d"):format(
+				"<b>"
+					.. UIKit.Colored(
+						(if item.Mutation then item.Mutation .. " " else "") .. tier,
+						UITheme.GetMutationColor(item.Mutation) or UITheme.GetTierLight(tier)
+					)
+					.. "</b>",
+				UIKit.EscapeRichText(itemName(item)),
+				lostCount
+			),
 		RichText = true,
 		Font = Fonts.Body,
 		TextSize = 14,
@@ -1551,7 +1566,7 @@ local function onFusionResolved(result: any)
 	end
 	local newItem = result.NewItem
 	if not result.Upgraded then
-		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1)
+		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1, result.Safe == true)
 		return
 	end
 	if isEventMutation(newItem) then
@@ -1612,6 +1627,7 @@ local COIN_SPREAD = 170
 local welcome: UIKit.Modal? = nil
 local welcomeAway: TextLabel
 local welcomeAmount: TextLabel
+local welcomeDouble: Frame -- the COLLECT x2 holder (OfflineDouble)
 local lastPendingOffline = 0
 
 -- "3h 12m", "45m"; capped at "4h+" (OfflineConfig.MaxSeconds).
@@ -1751,6 +1767,8 @@ local function buildWelcome(): UIKit.Modal
 			modal.Close()
 		end,
 	})
+	-- COLLECT x2: the OfflineDouble product (shown only when it's offered to
+	-- you; the server re-checks and prompts Roblox's purchase dialog).
 	local _, doubleHolder = UIKit.Button({
 		Name = "CollectDouble",
 		Parent = row,
@@ -1760,8 +1778,12 @@ local function buildWelcome(): UIKit.Modal
 		Size = UDim2.fromOffset(COLLECT_SIZE.X, COLLECT_SIZE.Y),
 		LayoutOrder = 2,
 		ZIndex = row.ZIndex,
+		OnClick = function()
+			RemoteEvents.RequestShopPurchase:FireServer({ Key = "OfflineDouble" })
+		end,
 	})
 	doubleHolder.Visible = false
+	welcomeDouble = doubleHolder
 	return modal
 end
 
@@ -1772,6 +1794,9 @@ local function onTycoonChanged()
 	local amount, away = TycoonController.GetPendingOffline()
 	local modal = welcome or buildWelcome()
 	welcome = modal
+	local shop = TycoonController.GetShop()
+	welcomeDouble.Visible = amount > 0
+		and ShopConfig.IsOffered("OfflineDouble", shop.Restricted, RunService:IsStudio(), shop.StarterPackBought)
 	if amount > 0 then
 		welcomeAway.Text = ("You were away %s"):format(formatAway(away))
 		welcomeAmount.Text = "+" .. NumberFormat.Money(amount)

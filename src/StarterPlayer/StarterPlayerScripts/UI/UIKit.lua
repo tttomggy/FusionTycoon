@@ -988,6 +988,28 @@ function UIKit.SetOpacity(root: Instance, opacity: number)
 	end
 end
 
+--[[ Overlay registry --------------------------------------------------------------
+	Which full-screen cards / modals are up right now, by name. Every
+	UIKit.Modal registers itself; custom cards (ResultController's big result
+	card, the Pull x10 grid) call SetOverlay. The shop's contextual offer
+	reads it so it never lands on top of another card.
+]]
+local openOverlays: { [string]: boolean } = {}
+
+function UIKit.SetOverlay(name: string, open: boolean)
+	openOverlays[name] = open
+end
+
+-- Is any overlay other than `except` open?
+function UIKit.IsOverlayOpen(except: string?): boolean
+	for name, open in openOverlays do
+		if open and name ~= except then
+			return true
+		end
+	end
+	return false
+end
+
 --[[ Modal ----------------------------------------------------------------------- ]]
 
 export type ModalProps = {
@@ -1099,6 +1121,7 @@ function UIKit.Modal(props: ModalProps): Modal
 			return
 		end
 		isOpen = false
+		UIKit.SetOverlay(props.Name, false)
 		local tween = UIKit.PopOut(root)
 		TweenService:Create(backdrop, POP_OUT_INFO, { BackgroundTransparency = 1 }):Play()
 		tween.Completed:Once(function()
@@ -1113,6 +1136,7 @@ function UIKit.Modal(props: ModalProps): Modal
 
 	local function open()
 		isOpen = true
+		UIKit.SetOverlay(props.Name, true)
 		gui.Enabled = true
 		backdrop.BackgroundTransparency = 1
 		TweenService:Create(backdrop, POP_IN_INFO, { BackgroundTransparency = 0.45 }):Play()

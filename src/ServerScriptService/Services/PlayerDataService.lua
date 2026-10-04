@@ -25,7 +25,10 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -77,6 +80,18 @@ export type PlayerData = {
 	-- os.time() when this profile was last saved (every autosave and on
 	-- leaving) or loaded. nil on old saves: no offline payout the first time.
 	LastOnline: number?,
+	-- Shop (MonetizationService): granted PurchaseIds, newest last (the
+	-- last ShopConfig.MaxReceipts), so ProcessReceipt never grants twice.
+	Receipts: { string },
+	-- Timed boosts as REMAINING seconds (they pause while offline).
+	Boosts: { Income: number, Luck: number },
+	SafeFusionTokens: number,
+	StarterPackBought: boolean,
+	-- Cosmetics owned through a product (the Starter Pack's LabStyle);
+	-- passes are checked with Roblox at join instead.
+	Cosmetics: { [string]: boolean },
+	-- Times this profile has loaded (the Starter Pack offer: session 2).
+	Sessions: number,
 }
 
 -- Offline earnings waiting to be collected (session only, never saved).
@@ -120,6 +135,27 @@ export type TycoonSnapshot = {
 	TipKeys: { string },
 	-- The player's settings (SettingsConfig), a copy.
 	Settings: SettingsConfig.Settings,
+	-- The shop's view of this player (MonetizationService).
+	Shop: ShopSnapshot,
+}
+
+export type ShopSnapshot = {
+	OwnedPasses: { string }, -- pass keys owned (Roblox check at join + purchases)
+	Restricted: boolean, -- PolicyService: no cash / luck products
+	IncomeBoostSeconds: number,
+	LuckBoostSeconds: number,
+	SafeFusionTokens: number,
+	StarterPackBought: boolean,
+	Cosmetics: { string },
+	Sessions: number,
+	-- Offline cash the welcome-back card's COLLECT x2 can still double.
+	OfflineDoubleAmount: number,
+}
+
+-- What MonetizationService tells this service at join (session only).
+export type ShopSession = {
+	OwnedPasses: { [string]: boolean },
+	Restricted: boolean,
 }
 
 type State = {
@@ -147,6 +183,11 @@ type State = {
 	lastSyncRequest: { [number]: number },
 	-- A settings change already has a sync scheduled (SetSetting).
 	settingsSyncQueued: { [number]: boolean },
+	-- Session-only shop state per UserId (MonetizationService sets it).
+	shop: { [number]: ShopSession },
+	-- The last offline payout collected this session (OfflineDouble can
+	-- still double it once), per UserId.
+	lastOfflinePaid: { [number]: number },
 	connections: { RBXScriptConnection },
 }
 
@@ -178,6 +219,12 @@ local DEFAULT_DATA: PlayerData = {
 	Settings = SettingsConfig.GetDefaultSettings(),
 	Rebirths = 0,
 	Index = {},
+	Receipts = {},
+	Boosts = { Income = 0, Luck = 0 },
+	SafeFusionTokens = 0,
+	StarterPackBought = false,
+	Cosmetics = {},
+	Sessions = 0,
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -193,6 +240,8 @@ local state: State = {
 	syncHooks = {},
 	lastSyncRequest = {},
 	settingsSyncQueued = {},
+	shop = {},
+	lastOfflinePaid = {},
 	connections = {},
 }
 
@@ -288,9 +337,7 @@ local function reconcile(raw: any): PlayerData
 			end
 		end
 	end
-	data.Settings = {
-		RevealRule = SettingsConfig.SanitizeRevealRule(typeof(raw.Settings) == "table" and raw.Settings.RevealRule or nil),
-	}
+	data.Settings = SettingsConfig.Sanitize(raw.Settings)
 	if typeof(raw.Rebirths) == "number" and raw.Rebirths >= 0 then
 		data.Rebirths = math.floor(raw.Rebirths)
 	end
@@ -303,6 +350,34 @@ local function reconcile(raw: any): PlayerData
 				data.Index[key] = true
 			end
 		end
+	end
+
+	-- Shop fields (old saves: none bought).
+	if typeof(raw.Receipts) == "table" then
+		for _, id in raw.Receipts do
+			if typeof(id) == "string" then
+				table.insert(data.Receipts, id)
+			end
+		end
+	end
+	if typeof(raw.Boosts) == "table" then
+		local income, luck = raw.Boosts.Income, raw.Boosts.Luck
+		data.Boosts.Income = if typeof(income) == "number" then math.clamp(income, 0, ShopConfig.MaxBoostBankSeconds) else 0
+		data.Boosts.Luck = if typeof(luck) == "number" then math.clamp(luck, 0, ShopConfig.MaxLuckBankSeconds) else 0
+	end
+	if typeof(raw.SafeFusionTokens) == "number" and raw.SafeFusionTokens >= 0 then
+		data.SafeFusionTokens = math.floor(raw.SafeFusionTokens)
+	end
+	data.StarterPackBought = raw.StarterPackBought == true
+	if typeof(raw.Cosmetics) == "table" then
+		for key, owned in raw.Cosmetics do
+			if owned == true and typeof(key) == "string" and ShopConfig.GetItem(key) then
+				data.Cosmetics[key] = true
+			end
+		end
+	end
+	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
+		data.Sessions = math.floor(raw.Sessions)
 	end
 
 	-- Any item flagged InUse that isn't actually on a pedestal (e.g. the save
@@ -364,14 +439,18 @@ local function loadData(player: Player): boolean
 	end
 
 	if success then
-		state.sessionCache[player.UserId] = reconcile(result)
+		local data = reconcile(result)
+		data.Sessions += 1
+		state.sessionCache[player.UserId] = data
 		return true
 	end
 
 	if RunService:IsStudio() then
 		warn(("PlayerDataService: using a blank, UNSAVED profile for %s in Studio (%s). "
 			.. "Enable Studio API access in Game Settings > Security to test saving."):format(player.Name, tostring(lastError)))
-		state.sessionCache[player.UserId] = deepCopy(DEFAULT_DATA)
+		local blank = deepCopy(DEFAULT_DATA)
+		blank.Sessions = 1
+		state.sessionCache[player.UserId] = blank
 		state.noSave[player.UserId] = true
 		return true
 	end
@@ -414,6 +493,17 @@ function PlayerDataService.SaveNow(player: Player)
 	if data then
 		task.spawn(saveData, userId, data)
 	end
+end
+
+-- Saves `player`'s data and WAITS for the result (yields). ProcessReceipt
+-- grants, then calls this, and only returns PurchaseGranted on true. A
+-- Studio blank profile (never saved) counts as saved.
+function PlayerDataService.SaveNowAsync(player: Player): boolean
+	local userId = player.UserId
+	if state.noSave[userId] then
+		return state.sessionCache[userId] ~= nil
+	end
+	return saveData(userId, state.sessionCache[userId])
 end
 
 local function saveAll()
@@ -742,6 +832,21 @@ function PlayerDataService.SetRevealRule(player: Player, tier: string, value: st
 	return true
 end
 
+-- SetSetting SfxVolume / SfxMuted (clamped / coerced server-side).
+function PlayerDataService.SetSfx(player: Player, volume: number?, muted: boolean?): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	if volume ~= nil then
+		data.Settings.SfxVolume = SettingsConfig.SanitizeSfxVolume(volume)
+	end
+	if muted ~= nil then
+		data.Settings.SfxMuted = muted
+	end
+	return true
+end
+
 -- Studio /tips reset.
 function PlayerDataService.ResetTips(player: Player)
 	local data = state.sessionCache[player.UserId]
@@ -779,9 +884,11 @@ end
 function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
 	local items = {}
 	local carried = state.carriedUids[player.UserId]
-	for _, uid in PlayerDataService.GetPedestalDisplays(player) do
-		-- A pedestal whose item is being carried off earns nothing.
-		if uid and not (carried and carried[uid]) then
+	local count = PlayerDataService.GetPedestalCount(player)
+	for index, uid in PlayerDataService.GetPedestalDisplays(player) do
+		-- A pedestal whose item is being carried off earns nothing; spots 5-6
+		-- count only with the +2 Pedestals pass.
+		if uid and index <= count and not (carried and carried[uid]) then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
 				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
@@ -792,8 +899,9 @@ function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.Ped
 end
 
 -- The one place the server builds TycoonConfig.IncomeInputs. nil until the
--- player's data has loaded.
-function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeInputs?
+-- player's data has loaded. `baseOnly`: without the timed boosts (a Boost,
+-- the Server Overclock): what offline earnings and cash packs use.
+function PlayerDataService.GetIncomeInputs(player: Player, baseOnly: boolean?): TycoonConfig.IncomeInputs?
 	local data = state.sessionCache[player.UserId]
 	if not data then
 		return nil
@@ -805,7 +913,192 @@ function PlayerDataService.GetIncomeInputs(player: Player): TycoonConfig.IncomeI
 		Rebirths = data.Rebirths,
 		IndexMultiplier = IndexConfig.GetMultiplier(data.Index),
 		EventGeneratorMultiplier = EventState.GetGeneratorMultiplier(),
+		PassMultiplier = ShopConfig.GetPassIncomeMultiplier(PlayerDataService.GetOwnedPasses(player)),
+		BoostMultiplier = if not baseOnly and data.Boosts.Income > 0 then ShopConfig.BoostMultiplier else 1,
+		OverclockMultiplier = if baseOnly then 1 else ShopState.GetOverclockMultiplier(),
 	}
+end
+
+-- Income per second without timed boosts (offline earnings, cash packs).
+function PlayerDataService.GetBasePassiveCashPerSecond(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player, true)
+	return if inputs then TycoonConfig.GetPassiveCashPerSecond(inputs) else 0
+end
+
+-- The ONE luck number every roll and every odds display uses: rebirth luck
+-- x the admin luck boost x the shop (Lucky pass, Luck Potion).
+function PlayerDataService.GetLuck(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 1
+	end
+	return RebirthConfig.GetLuck(data.Rebirths)
+		* EventState.GetLuckMultiplier()
+		* ShopConfig.GetLuckMultiplier(PlayerDataService.GetOwnedPasses(player), data.Boosts.Luck)
+end
+
+--[[ Public API: shop (MonetizationService is the only writer) ------------- ]]
+
+function PlayerDataService.SetShopSession(player: Player, session: ShopSession)
+	state.shop[player.UserId] = session
+end
+
+local NO_PASSES: { [string]: boolean } = table.freeze({})
+
+-- Pass keys this player owns (empty until MonetizationService has checked).
+function PlayerDataService.GetOwnedPasses(player: Player): { [string]: boolean }
+	local session = state.shop[player.UserId]
+	return if session then session.OwnedPasses else NO_PASSES
+end
+
+function PlayerDataService.OwnsPass(player: Player, key: string): boolean
+	return PlayerDataService.GetOwnedPasses(player)[key] == true
+end
+
+-- PolicyService: no cash / luck products. True until checked (and when the
+-- check failed).
+function PlayerDataService.IsPolicyRestricted(player: Player): boolean
+	local session = state.shop[player.UserId]
+	return session == nil or session.Restricted
+end
+
+-- 4, or 6 with the +2 Pedestals pass.
+function PlayerDataService.GetPedestalCount(player: Player): number
+	return ShopConfig.GetPedestalCount(PlayerDataService.GetOwnedPasses(player))
+end
+
+function PlayerDataService.HasReceipt(player: Player, purchaseId: string): boolean
+	local data = state.sessionCache[player.UserId]
+	return data ~= nil and table.find(data.Receipts, purchaseId) ~= nil
+end
+
+function PlayerDataService.AddReceipt(player: Player, purchaseId: string)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	table.insert(data.Receipts, purchaseId)
+	while #data.Receipts > ShopConfig.MaxReceipts do
+		table.remove(data.Receipts, 1)
+	end
+end
+
+-- Banked timed boost seconds ("Income" | "Luck").
+function PlayerDataService.GetBoostSeconds(player: Player, kind: "Income" | "Luck"): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Boosts[kind] else 0
+end
+
+function PlayerDataService.AddBoostSeconds(player: Player, kind: "Income" | "Luck", seconds: number)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	local cap = if kind == "Income" then ShopConfig.MaxBoostBankSeconds else ShopConfig.MaxLuckBankSeconds
+	data.Boosts[kind] = ShopConfig.AddBanked(data.Boosts[kind], seconds, cap)
+end
+
+-- Ticks this player's timed boosts down by `dt` (in game only). Returns
+-- true when one ran out (the caller re-syncs).
+function PlayerDataService.TickBoosts(player: Player, dt: number): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	local ended = false
+	for _, kind in { "Income", "Luck" } do
+		local before = data.Boosts[kind]
+		if before > 0 then
+			data.Boosts[kind] = math.max(0, before - dt)
+			ended = ended or data.Boosts[kind] <= 0
+		end
+	end
+	return ended
+end
+
+function PlayerDataService.GetSafeFusionTokens(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.SafeFusionTokens else 0
+end
+
+function PlayerDataService.AddSafeFusionTokens(player: Player, count: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.SafeFusionTokens = math.max(0, data.SafeFusionTokens + count)
+	end
+end
+
+-- Spends one token; false if there were none.
+function PlayerDataService.UseSafeFusionToken(player: Player): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data or data.SafeFusionTokens <= 0 then
+		return false
+	end
+	data.SafeFusionTokens -= 1
+	return true
+end
+
+function PlayerDataService.IsStarterPackBought(player: Player): boolean
+	local data = state.sessionCache[player.UserId]
+	return data ~= nil and data.StarterPackBought
+end
+
+function PlayerDataService.SetStarterPackBought(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.StarterPackBought = true
+	end
+end
+
+-- A cosmetic owned through a product or its pass (LabStyle).
+function PlayerDataService.HasCosmetic(player: Player, key: string): boolean
+	local data = state.sessionCache[player.UserId]
+	return PlayerDataService.OwnsPass(player, key) or (data ~= nil and data.Cosmetics[key] == true)
+end
+
+function PlayerDataService.GrantCosmetic(player: Player, key: string)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Cosmetics[key] = true
+	end
+end
+
+function PlayerDataService.GetSessions(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Sessions else 0
+end
+
+-- OfflineDouble: doubles the offline payout once. Pending (not collected
+-- yet): pays it twice over now. Already collected this session: pays the
+-- same amount again. Returns the extra cash paid (0 = nothing to double).
+function PlayerDataService.DoubleOfflinePayout(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return 0
+	end
+	local pending = state.pendingOffline[player.UserId]
+	if pending and pending.Amount > 0 then
+		local amount = pending.Amount
+		state.pendingOffline[player.UserId] = nil
+		PlayerDataService.AddCash(player, amount * 2)
+		return amount
+	end
+	local paid = state.lastOfflinePaid[player.UserId]
+	if paid and paid > 0 then
+		state.lastOfflinePaid[player.UserId] = nil
+		PlayerDataService.AddCash(player, paid)
+		return paid
+	end
+	return 0
+end
+
+-- What COLLECT x2 would still double (pending, or collected this session).
+function PlayerDataService.GetOfflineDoubleAmount(player: Player): number
+	local pending = state.pendingOffline[player.UserId]
+	if pending and pending.Amount > 0 then
+		return pending.Amount
+	end
+	return state.lastOfflinePaid[player.UserId] or 0
 end
 
 -- Pad x rebirth: the multiplier every per-generator/per-item number shows.
@@ -845,8 +1138,17 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
-		Settings = {
-			RevealRule = SettingsConfig.SanitizeRevealRule(data and data.Settings.RevealRule or nil),
+		Settings = SettingsConfig.Sanitize(data and data.Settings or nil),
+		Shop = {
+			OwnedPasses = indexKeys(PlayerDataService.GetOwnedPasses(player)),
+			Restricted = PlayerDataService.IsPolicyRestricted(player),
+			IncomeBoostSeconds = if data then data.Boosts.Income else 0,
+			LuckBoostSeconds = if data then data.Boosts.Luck else 0,
+			SafeFusionTokens = if data then data.SafeFusionTokens else 0,
+			StarterPackBought = data ~= nil and data.StarterPackBought,
+			Cosmetics = indexKeys(if data then data.Cosmetics else {}),
+			Sessions = if data then data.Sessions else 0,
+			OfflineDoubleAmount = PlayerDataService.GetOfflineDoubleAmount(player),
 		},
 	}
 end
@@ -933,7 +1235,12 @@ end
 function PlayerDataService.TakePendingOffline(player: Player): number
 	local pending = state.pendingOffline[player.UserId]
 	state.pendingOffline[player.UserId] = nil
-	return if pending then pending.Amount else 0
+	local amount = if pending then pending.Amount else 0
+	if amount > 0 then
+		-- COLLECT x2 (OfflineDouble) can still double it this session.
+		state.lastOfflinePaid[player.UserId] = amount
+	end
+	return amount
 end
 
 -- On load: what the lab earned while away, at the income the player left
@@ -950,7 +1257,8 @@ local function computeOfflineEarnings(player: Player)
 		return
 	end
 	local away = math.max(0, os.time() - lastOnline)
-	local amount = OfflineConfig.Compute(PlayerDataService.GetPassiveCashPerSecond(player), away)
+	-- Base income: timed boosts are paused offline.
+	local amount = OfflineConfig.Compute(PlayerDataService.GetBasePassiveCashPerSecond(player), away)
 	PlayerDataService.SetPendingOffline(player, amount, away)
 	if amount > 0 then
 		PlayerDataService.SaveNow(player)
@@ -1040,6 +1348,8 @@ local function onPlayerRemoving(player: Player)
 	state.noSave[userId] = nil
 	state.goalProgress[userId] = nil
 	state.lastSyncRequest[userId] = nil
+	state.shop[userId] = nil
+	state.lastOfflinePaid[userId] = nil
 end
 
 -- A client asking for a fresh snapshot (it just had a request rejected and
@@ -1074,8 +1384,9 @@ function PlayerDataService:Init()
 		end)
 	)
 
-	-- SetSetting { Key = "RevealRule", Tier, Value }: tier and value
-	-- whitelisted (SettingsConfig); stored in the saved profile, then one
+	-- SetSetting { Key = "RevealRule", Tier, Value } (tier and value
+	-- whitelisted), { Key = "SfxVolume", Value } (clamped 0..1) or
+	-- { Key = "SfxMuted", Value } (a boolean) (SettingsConfig); stored in the saved profile, then one
 	-- (coalesced) sync carries Settings back.
 	table.insert(
 		state.connections,
@@ -1084,10 +1395,21 @@ function PlayerDataService:Init()
 				return
 			end
 			local request = payload :: any
-			if request.Key ~= "RevealRule" then
-				return
+			local changed = false
+			if request.Key == "RevealRule" then
+				changed = PlayerDataService.SetRevealRule(player, request.Tier, request.Value)
+			elseif request.Key == "SfxVolume" and typeof(request.Value) == "number" then
+				changed = PlayerDataService.SetSfx(player, request.Value, nil)
+			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
+				changed = PlayerDataService.SetSfx(player, nil, request.Value)
+			elseif request.Key == "AutoFuse" and typeof(request.Value) == "boolean" then
+				local data = state.sessionCache[player.UserId]
+				if data then
+					data.Settings.AutoFuse = request.Value
+					changed = true
+				end
 			end
-			if not PlayerDataService.SetRevealRule(player, request.Tier, request.Value) then
+			if not changed then
 				return
 			end
 			if not state.settingsSyncQueued[player.UserId] then
