@@ -55,7 +55,6 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local AnnouncementController = require(script.Parent.AnnouncementController)
-local HudController = require(script.Parent.HudController)
 local ResultController = require(script.Parent.ResultController)
 local ToastController = require(script.Parent.ToastController)
 
@@ -103,6 +102,11 @@ local FLASH_BRIGHTNESS = 0.35
 local FLASH_SECONDS = 0.18
 
 local METEOR_SHAKE_RADIUS = 60
+
+local POP_TEXT_SIZE = 24
+local POP_SECONDS = 1.2
+local POP_RISE_STUDS = 4
+local POP_MAX_DISTANCE = 150
 
 local CHIP_Y = 12
 local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44) }
@@ -171,22 +175,52 @@ end
 
 --[[ Sky ------------------------------------------------------------------------- ]]
 
--- Everything the sky added for the last event (particles, the moon, the
--- band flicker) is parented here or cleaned up by its loop's generation.
+-- Every client FX of an event (sky particles, the moon, lightning, meteors,
+-- pops) goes in Workspace.EventObjects.<Id>, next to the server's objects
+-- (local children exist only on this client). The event's end clears the
+-- whole folder here, as the server clears its own.
 local fxFolder: Folder? = nil
 
-local function clearFx()
+local function fxParent(id: string?): Instance
+	local folder = if id then EventState.GetObjectsFolder(id) else nil
+	return folder or Workspace.CurrentCamera
+end
+
+-- A tiny invisible anchored part to hang attachments and billboards on
+-- (instead of Terrain attachments, which no folder would clean up).
+local function anchorPart(parent: Instance, position: Vector3, name: string): BasePart
+	local part = Instance.new("Part")
+	part.Name = name
+	part.Size = Vector3.one * 0.2
+	part.Transparency = 1
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CFrame = CFrame.new(position)
+	part.Parent = parent
+	return part
+end
+
+-- Clears this client's FX for `id` (and the sky folder).
+local function clearFx(id: string?)
 	if fxFolder then
 		fxFolder:Destroy()
 		fxFolder = nil
 	end
+	local folder = if id then EventState.GetObjectsFolder(id) else nil
+	if folder then
+		folder:ClearAllChildren()
+	end
 end
 
-local function newFx(): Folder
-	clearFx()
+local function newFx(id: string): Folder
+	if fxFolder then
+		fxFolder:Destroy()
+	end
 	local folder = Instance.new("Folder")
-	folder.Name = "EventSkyFx"
-	folder.Parent = Workspace.CurrentCamera
+	folder.Name = "SkyFx"
+	folder.Parent = fxParent(id)
 	fxFolder = folder
 	return folder
 end
@@ -300,9 +334,7 @@ end
 -- The Void Moon: a purple disc (a world BillboardGui, so the haze doesn't
 -- swallow it) held in the same patch of sky as the camera moves.
 local function buildMoon(folder: Folder, myGeneration: number)
-	local anchor = Instance.new("Attachment")
-	anchor.Name = "VoidMoonAnchor"
-	anchor.Parent = Workspace.Terrain
+	local anchor = anchorPart(folder, Vector3.zero, "VoidMoonAnchor")
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "VoidMoon"
 	gui.Adornee = anchor
@@ -329,7 +361,7 @@ local function buildMoon(folder: Folder, myGeneration: number)
 		while generation == myGeneration and gui.Parent do
 			local camera = Workspace.CurrentCamera
 			if camera then
-				anchor.WorldPosition = camera.CFrame.Position + MOON_DIRECTION * MOON_DISTANCE
+				anchor.CFrame = CFrame.new(camera.CFrame.Position + MOON_DIRECTION * MOON_DISTANCE)
 			end
 			RunService.RenderStepped:Wait()
 		end
@@ -356,7 +388,7 @@ local function applySky(id: string, myGeneration: number)
 	local base = captureBaseline()
 	local cc = colorCorrection()
 	local atm = atmosphere()
-	local folder = newFx()
+	local folder = newFx(id)
 	if id == "GoldenRain" then
 		if cc then
 			tween(cc, SKY_TWEEN_SECONDS, { TintColor = base.Tint:Lerp(Sky.GoldTint, GOLD_TINT_ALPHA) })
@@ -492,7 +524,7 @@ local function onEventChanged(live: boolean)
 	generation += 1
 	local myGeneration = generation
 	if old then
-		clearFx()
+		clearFx(old)
 		restoreSky(myGeneration)
 		if live then
 			ToastController.Show(("%s %s is over"):format(EventConfig.Icons[old] or "", EventConfig.Names[old] or old), "Neutral")
@@ -519,12 +551,13 @@ end
 --[[ EventFx -------------------------------------------------------------------------- ]]
 
 local function strikeLightning(position: Vector3)
+	local parent = fxParent("PowerSurge")
+	local topPart = anchorPart(parent, position + Vector3.new(math.random(-12, 12), LIGHTNING_HEIGHT, math.random(-12, 12)), "BoltTop")
+	local bottomPart = anchorPart(parent, position, "BoltBottom")
 	local top = Instance.new("Attachment")
-	top.WorldPosition = position + Vector3.new(math.random(-12, 12), LIGHTNING_HEIGHT, math.random(-12, 12))
-	top.Parent = Workspace.Terrain
+	top.Parent = topPart
 	local bottom = Instance.new("Attachment")
-	bottom.WorldPosition = position
-	bottom.Parent = Workspace.Terrain
+	bottom.Parent = bottomPart
 	local beam = Instance.new("Beam")
 	beam.Attachment0 = top
 	beam.Attachment1 = bottom
@@ -549,8 +582,8 @@ local function strikeLightning(position: Vector3)
 	task.delay(LIGHTNING_SECONDS, function()
 		beam.Transparency = NumberSequence.new(0.6)
 	end)
-	Debris:AddItem(top, 6)
-	Debris:AddItem(bottom, 6)
+	Debris:AddItem(topPart, 6)
+	Debris:AddItem(bottomPart, 6)
 end
 
 local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
@@ -565,7 +598,7 @@ local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
 	rock.CanQuery = false
 	rock.CanTouch = false
 	rock.CFrame = CFrame.new(from)
-	rock.Parent = Workspace.CurrentCamera
+	rock.Parent = fxParent("MeteorShower")
 	local a0 = Instance.new("Attachment")
 	a0.Position = Vector3.new(0, 1.2, 0)
 	a0.Parent = rock
@@ -591,6 +624,39 @@ local function dropMeteor(from: Vector3, to: Vector3, seconds: number)
 	end)
 end
 
+-- "+$X" rising and fading over `position`, parented into the event's folder
+-- (so the event's end takes any still on screen).
+local function floatPop(parent: Instance, position: Vector3, text: string, color: Color3, textSize: number)
+	local anchor = anchorPart(parent, position, "Pop")
+	local gui = Instance.new("BillboardGui")
+	gui.Name = "Pop"
+	gui.Adornee = anchor
+	gui.Size = UDim2.fromOffset(260, textSize + 18)
+	gui.LightInfluence = 0
+	gui.AlwaysOnTop = false
+	gui.MaxDistance = POP_MAX_DISTANCE
+	gui.Parent = anchor
+	local label = UIKit.Label({
+		Name = "Text",
+		Text = text,
+		Font = Fonts.Display,
+		TextSize = textSize,
+		TextColor3 = color,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = UITheme.Stroke.Text,
+		Parent = gui,
+	})
+	local info = TweenInfo.new(POP_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	TweenService:Create(gui, info, { StudsOffsetWorldSpace = Vector3.new(0, POP_RISE_STUDS, 0) }):Play()
+	TweenService:Create(label, info, { TextTransparency = 1 }):Play()
+	local stroke = label:FindFirstChildOfClass("UIStroke")
+	if stroke then
+		TweenService:Create(stroke, info, { Transparency = 1 }):Play()
+	end
+	Debris:AddItem(anchor, POP_SECONDS)
+end
+
 local function onEventFx(payload: any)
 	if typeof(payload) ~= "table" then
 		return
@@ -605,7 +671,7 @@ local function onEventFx(payload: any)
 	then
 		dropMeteor(payload.From, payload.To, payload.Seconds)
 	elseif payload.Kind == "Coin" and typeof(payload.Position) == "Vector3" and typeof(payload.Amount) == "number" then
-		HudController.FloatPop(payload.Position, "+" .. NumberFormat.Money(payload.Amount), Colors.Cash)
+		floatPop(fxParent("GoldenRain"), payload.Position, "+" .. NumberFormat.Money(payload.Amount), Colors.Cash, POP_TEXT_SIZE)
 	end
 end
 

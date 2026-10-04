@@ -133,6 +133,13 @@ function EventState.GetAdminAbuseText(): string
 	return ("ADMIN ABUSE · %s · in %s"):format(when, inText)
 end
 
+-- Workspace.EventObjects.<eventId> (EventService builds one per event at
+-- Init), or nil before it has replicated.
+function EventState.GetObjectsFolder(eventId: string): Instance?
+	local root = Workspace:FindFirstChild(EventConfig.ObjectsFolderName)
+	return root and root:FindFirstChild(eventId)
+end
+
 -- The admin luck boost (stacks with rebirth luck); 1 when none.
 function EventState.GetLuckMultiplier(): number
 	local luck = Workspace:GetAttribute("AdminLuck")

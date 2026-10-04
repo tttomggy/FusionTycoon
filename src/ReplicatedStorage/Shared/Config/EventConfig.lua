@@ -11,9 +11,13 @@
 	  every hh:15/:30/:45   one weather by weight: Golden Rain 40, Power Surge
 	                        35, Meteor Shower 20, Rainbow Storm 5
 
-	GetEventForSlot(slotStartUnix) seeds Random.new(slotStartUnix); a slot is
-	SlotSeconds (15 min) long and its event lasts Durations[id]. Between
-	events there is nothing on.
+	GetEventForSlot(slotStartUnix) draws from a HASH of the slot start (see
+	slotDraw), not Random.new(slotStart): slot times are only 900 apart and
+	Luau's Random gave correlated first draws for nearby seeds (three POWER
+	SURGEs in a row). The hash is plain bit32 arithmetic, so the same code
+	runs in tools/event_schedule_check.luau to verify the distribution. A
+	slot is SlotSeconds (15 min) long and its event lasts Durations[id].
+	Between events there is nothing on.
 
 	Effects (all scaled by an event's Strength, 1 normally, admin x2/x3, and
 	clamped so x3 can't break the economy) are pure functions here, so the
@@ -33,6 +37,10 @@ export type EventSlot = {
 }
 
 EventConfig.SlotSeconds = 15 * 60
+-- Everything an event puts in the world lives in Workspace.EventObjects.<Id>
+-- (server objects and each client's own FX), so ending it is one
+-- ClearAllChildren on each side. EventService builds the folders at Init.
+EventConfig.ObjectsFolderName = "EventObjects"
 EventConfig.NightMinute = 0 -- the hh:00 slot is always a night
 EventConfig.VoidMoonChance = 0.15
 
@@ -135,12 +143,43 @@ EventConfig.MaxMutationOdds = 15 -- clamp for every mutation multiplier
 
 --[[ The clock ------------------------------------------------------------------ ]]
 
-local function pickWeather(rng: Random): string
+-- a * b mod 2^32 (Luau numbers are doubles: split into 16-bit halves so no
+-- product loses precision).
+local function mul32(a: number, b: number): number
+	local aHi, aLo = bit32.rshift(a, 16), bit32.band(a, 0xFFFF)
+	local bHi, bLo = bit32.rshift(b, 16), bit32.band(b, 0xFFFF)
+	local mid = bit32.band(aHi * bLo + aLo * bHi, 0xFFFF)
+	return bit32.band(aLo * bLo + bit32.lshift(mid, 16), 0xFFFFFFFF)
+end
+
+-- lowbias32 (an avalanche integer hash): every input bit flips about half
+-- of the output bits, so neighbouring slot times give unrelated draws.
+local function hash32(x: number): number
+	x = bit32.bxor(x, bit32.rshift(x, 16))
+	x = mul32(x, 0x7FEB352D)
+	x = bit32.bxor(x, bit32.rshift(x, 15))
+	x = mul32(x, 0x846CA68B)
+	return bit32.bxor(x, bit32.rshift(x, 16))
+end
+
+-- Draws discarded per slot before the real ones (belt and braces: with the
+-- hash there is no warm-up correlation left, but it keeps the old intent).
+local DISCARDED_DRAWS = 2
+
+-- The k-th draw (1-based) for the slot starting at `start`, in [0, 1): a
+-- pure function of the two, the same on every server and client.
+local function slotDraw(start: number, k: number): number
+	local seed = hash32(bit32.band(start, 0xFFFFFFFF))
+	local h = hash32(bit32.bxor(seed, mul32(k + DISCARDED_DRAWS, 0x9E3779B9)))
+	return h / 4294967296
+end
+
+local function pickWeather(draw: number): string
 	local total = 0
 	for _, entry in EventConfig.WeatherWeights do
 		total += entry.Weight
 	end
-	local roll = rng:NextNumber() * total
+	local roll = draw * total
 	for _, entry in EventConfig.WeatherWeights do
 		roll -= entry.Weight
 		if roll < 0 then
@@ -158,13 +197,13 @@ end
 -- The event of the slot starting at `slotStartUnix`: a pure function of it.
 function EventConfig.GetEventForSlot(slotStartUnix: number): EventSlot
 	local start = math.floor(slotStartUnix)
-	local rng = Random.new(start)
 	local minute = (start // 60) % 60
+	local draw = slotDraw(start, 1)
 	local id
 	if minute == EventConfig.NightMinute then
-		id = if rng:NextNumber() < EventConfig.VoidMoonChance then "VoidMoon" else "Night"
+		id = if draw < EventConfig.VoidMoonChance then "VoidMoon" else "Night"
 	else
-		id = pickWeather(rng)
+		id = pickWeather(draw)
 	end
 	return { Id = id, StartsAt = start, EndsAt = start + (EventConfig.Durations[id] or 0) }
 end

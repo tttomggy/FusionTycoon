@@ -241,18 +241,54 @@ local function claimedPlot(player: Player): Model?
 	return nil
 end
 
+-- Event objects ----------------------------------------------------------------
+
+-- Workspace.EventObjects.<Id>: every server object an event makes goes here,
+-- so its end is one ClearAllChildren (clients clear their own FX in the
+-- same folder).
+local objectFolders: { [string]: Folder } = {}
+
+local function buildObjectFolders()
+	local root = Instance.new("Folder")
+	root.Name = EventConfig.ObjectsFolderName
+	for _, id in EventConfig.Order do
+		local folder = Instance.new("Folder")
+		folder.Name = id
+		folder.Parent = root
+		objectFolders[id] = folder
+	end
+	root.Parent = Workspace
+end
+
+local function objectsFolder(id: string): Folder
+	return objectFolders[id]
+end
+
+-- A subfolder of an event's folder (e.g. one per lab for Golden Rain coins).
+local function subFolder(id: string, name: string): Folder
+	local parent = objectsFolder(id)
+	local existing = parent:FindFirstChild(name)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+	local created = Instance.new("Folder")
+	created.Name = name
+	created.Parent = parent
+	return created
+end
+
+-- Destroys everything `id` left in the world (coins, craters, prompts).
+local function clearEventObjects(id: string?)
+	local folder = id and objectFolders[id]
+	if folder then
+		folder:ClearAllChildren()
+	end
+end
+
 -- Golden Rain ----------------------------------------------------------------
 
-local COIN_FOLDER = "EventCoins"
-
-local function clearCoins()
-	for _, player in Players:GetPlayers() do
-		local plot = TycoonService.GetPlotForPlayer(player)
-		local folder = plot and plot:FindFirstChild(COIN_FOLDER)
-		if folder then
-			folder:Destroy()
-		end
-	end
+local function labCoinFolderName(owner: Player): string
+	return "Lab" .. owner.UserId
 end
 
 local function collectCoin(owner: Player, coin: BasePart, strength: number)
@@ -273,14 +309,7 @@ local function collectCoin(owner: Player, coin: BasePart, strength: number)
 end
 
 local function spawnCoin(owner: Player, plot: Model, strength: number)
-	local coinFolder = plot:FindFirstChild(COIN_FOLDER)
-	if not coinFolder then
-		local created = Instance.new("Folder")
-		created.Name = COIN_FOLDER
-		created.Parent = plot
-		coinFolder = created
-	end
-	assert(coinFolder)
+	local coinFolder = subFolder("GoldenRain", labCoinFolderName(owner))
 	if #coinFolder:GetChildren() >= EventConfig.CoinMaxLive then
 		return
 	end
@@ -329,7 +358,6 @@ local function runGoldenRain(myGeneration: number, strength: number)
 		end
 		task.wait(interval)
 	end
-	clearCoins()
 end
 
 -- Power Surge -------------------------------------------------------------------
@@ -398,7 +426,6 @@ end
 
 -- Meteor Shower -------------------------------------------------------------------
 
-local METEOR_FOLDER = "EventMeteors"
 
 local function rollCoreItem(): (string?, string, string?)
 	local total = 0
@@ -449,13 +476,7 @@ end
 -- disc), a glowing core, and the race-to-grab prompt.
 local function buildCrater(point: Vector3)
 	local m = StreetLayout.MeteorCrater
-	local folder = Workspace:FindFirstChild(METEOR_FOLDER)
-	if not folder then
-		local created = Instance.new("Folder")
-		created.Name = METEOR_FOLDER
-		created.Parent = Workspace
-		folder = created
-	end
+	local folder = objectsFolder("MeteorShower")
 	local crater = Instance.new("Model")
 	crater.Name = "MeteorCrater"
 	local base = CFrame.new(point + Vector3.new(0, m.Height / 2, 0))
@@ -522,7 +543,7 @@ local function buildCrater(point: Vector3)
 	Debris:AddItem(crater, EventConfig.MeteorCraterLifetime)
 end
 
-local function dropMeteor()
+local function dropMeteor(myGeneration: number)
 	local point = StreetLayout.GetRandomMeteorPoint(rng)
 	local m = StreetLayout.MeteorCrater
 	RemoteEvents.EventFx:FireAllClients({
@@ -531,7 +552,12 @@ local function dropMeteor()
 		To = point,
 		Seconds = EventConfig.MeteorFallSeconds,
 	})
-	task.delay(EventConfig.MeteorFallSeconds, buildCrater, point)
+	task.delay(EventConfig.MeteorFallSeconds, function()
+		-- The shower may have ended mid-fall: no crater after its cleanup.
+		if generation == myGeneration then
+			buildCrater(point)
+		end
+	end)
 end
 
 local function runMeteorShower(myGeneration: number, strength: number, endsAt: number)
@@ -552,20 +578,22 @@ local function runMeteorShower(myGeneration: number, strength: number, endsAt: n
 		if generation ~= myGeneration then
 			return
 		end
-		dropMeteor()
+		dropMeteor(myGeneration)
 	end
 end
 
--- Starts the new event's world effects (its loop stops on the next change).
-local function startWorldEffects(event: ActiveEvent)
+-- Ends the old event's world effects (its loops stop on the generation bump,
+-- its objects go) and starts the new one's.
+local function startWorldEffects(event: ActiveEvent, old: ActiveEvent?)
 	generation += 1
 	local myGeneration = generation
+	if old then
+		clearEventObjects(old.Id)
+	end
+	clearEventObjects(event.Id)
 	if event.Id == "GoldenRain" then
 		task.spawn(runGoldenRain, myGeneration, event.Strength)
-	else
-		clearCoins()
-	end
-	if event.Id == "PowerSurge" then
+	elseif event.Id == "PowerSurge" then
 		task.spawn(runPowerSurge, myGeneration, event.Strength)
 	elseif event.Id == "MeteorShower" then
 		task.spawn(runMeteorShower, myGeneration, event.Strength, event.EndsAt)
@@ -575,14 +603,15 @@ end
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function EventService:Init()
+	buildObjectFolders()
 	publish(state.active)
 end
 
 function EventService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	TycoonService = require(script.Parent.TycoonService)
-	EventService.OnEventChanged(function(newEvent: ActiveEvent)
-		startWorldEffects(newEvent)
+	EventService.OnEventChanged(function(newEvent: ActiveEvent, oldEvent: ActiveEvent)
+		startWorldEffects(newEvent, oldEvent)
 		-- Every odds display and income number re-reads the event on sync
 		-- (pad and board labels, the HUD's generator income).
 		for _, player in Players:GetPlayers() do
