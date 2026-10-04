@@ -10,12 +10,13 @@
 	    the fence without a remote.
 	  * Raised for ClaimShieldSeconds on claim, VictimShieldSeconds after
 	    losing an item, and ShieldSeconds when the owner LOCKs on purpose:
-	    TryLock, from the LOCK console's prompt (LockKit, built on claim) or
-	    the HUD LOCK button (RequestLock). Nothing fires by walking around.
+	    TryLock, only from the LOCK console's prompt (LockKit, built on
+	    claim), checked server-side to be within reach of that console.
+	    There is no remote for it: you have to run home to lock.
 	  * After any shield ends (timeout or a drop) LOCK recharges for
 	    ShieldRearmSeconds: the thieves' window. Published as the plot
 	    attribute ShieldRearmAt (server time); clients drive the console's
-	    label, button and prompt and the HUD button from ShieldUntil /
+	    label, button and prompt and the HUD status chip from ShieldUntil /
 	    ShieldRearmAt / Protected. The claim and victim shields ignore the
 	    recharge; /shield 0 clears it.
 	  * While up, a loop every EjectTickSeconds moves any non-owner whose
@@ -49,7 +50,7 @@
 	    same pedestal in one frame resolve as one win, one reject.
 
 	Follows ServiceTemplate:
-	  :Init()   own state, RequestSteal, RequestLock, the LOCK prompt and
+	  :Init()   own state, RequestSteal, the LOCK prompt and
 	            PlayerRemoving.
 	  :Start()  resolves PlayerDataService and TycoonService, registers the
 	            OnRelease hook, starts the shield loop and the carry loop.
@@ -108,7 +109,7 @@ type State = {
 	claimSeen: { [number]: boolean },
 	-- Server time each player's pad may raise the shield again (re-arm).
 	rearmAt: { [number]: number },
-	-- os.clock() of each player's last lock request (RequestLock / console).
+	-- os.clock() of each player's last lock request (the console prompt).
 	lastLockRequest: { [number]: number },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
@@ -294,9 +295,10 @@ function HeistService.IsLossCapped(player: Player): boolean
 	return losses ~= nil and #losses >= HeistConfig.LossCap
 end
 
--- Studio /heistcd: clears the thief cooldown.
+-- Studio /heistcd: clears the thief cooldown (and its published attribute).
 function HeistService.ClearCooldown(player: Player)
 	state.cooldownUntil[player.UserId] = nil
+	player:SetAttribute("HeistCooldownUntil", nil)
 end
 
 -- Studio /stealable: toggles stealable-at-Rebirth-0 for this player's lab.
@@ -611,6 +613,8 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	state.carries[thief.UserId] = carry
 	state.carriedItems[uid] = thief.UserId
 	state.cooldownUntil[thief.UserId] = os.clock() + HeistConfig.ThiefCooldownSeconds
+	-- The client's steal timer (HUD chip, "Steal in 42s" prompts), server time.
+	thief:SetAttribute("HeistCooldownUntil", serverNow() + HeistConfig.ThiefCooldownSeconds)
 	PlayerDataService.SetItemCarried(victim, uid, true)
 	PlayerDataService.SetCarrying(thief, true)
 
@@ -700,13 +704,27 @@ end
 
 --[[ LOCK: the one way an owner raises their shield on purpose ----------- ]]
 
-export type LockReason = "Protected" | "Carrying" | "AlreadyLocked" | "Recharging" | "NotHome"
+export type LockReason = "Protected" | "Carrying" | "AlreadyLocked" | "Recharging" | "TooFar"
+
+-- Is `player`'s root within reach of their own LOCK console (prompt
+-- distance + LockReachSlack, flat)? A client can fire a prompt from
+-- anywhere with an exploit, so the server measures it.
+local function isAtConsole(player: Player): boolean
+	local _, origin = getClaimedPlot(player)
+	local root = getRoot(player)
+	if not origin or not root then
+		return false
+	end
+	local console = origin:PointToWorldSpace(PlotLayout.LOCK_CONSOLE)
+	local offset = root.Position - console
+	local flat = Vector3.new(offset.X, 0, offset.Z).Magnitude
+	return flat <= PlotLayout.LockConsole.PromptDistance + HeistConfig.LockReachSlack
+end
 
 -- Raises `player`'s shield for ShieldSeconds if every rule allows it, in
 -- this order: Protected (Rebirth 0), Carrying, AlreadyLocked, Recharging
--- (the re-arm lock; also returns the seconds left), NotHome (root outside
--- their own walls). Both the LOCK console's prompt and the HUD LOCK button
--- (RequestLock) come through here.
+-- (the re-arm lock; also returns the seconds left), TooFar (not at their
+-- own LOCK console). The console's prompt is the only way in.
 function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
 	if HeistService.IsProtected(player) then
 		return false, "Protected"
@@ -721,10 +739,8 @@ function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
 	if rearmLeft > 0 then
 		return false, "Recharging", math.ceil(rearmLeft)
 	end
-	local _, origin = getClaimedPlot(player)
-	local root = getRoot(player)
-	if not origin or not root or not isInsidePlot(origin, root.Position) then
-		return false, "NotHome"
+	if not isAtConsole(player) then
+		return false, "TooFar"
 	end
 	HeistService.RaiseShield(player, HeistConfig.ShieldSeconds)
 	PlayerDataService.IncrementShieldRaises(player)
@@ -732,8 +748,8 @@ function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
 	return true, nil
 end
 
--- RequestLock (HUD button) and the console prompt: rejections come back on
--- the heist toast path (HeistEnded Rejected, Role "Lock").
+-- The console prompt: rejections come back on the heist toast path
+-- (HeistEnded Rejected, Role "Lock").
 local function requestLock(player: Player)
 	local now = os.clock()
 	local last = state.lastLockRequest[player.UserId]
@@ -833,7 +849,6 @@ end
 
 function HeistService:Init()
 	table.insert(state.connections, RemoteEvents.RequestSteal.OnServerEvent:Connect(onRequestSteal))
-	table.insert(state.connections, RemoteEvents.RequestLock.OnServerEvent:Connect(requestLock))
 	table.insert(state.connections, ProximityPromptService.PromptTriggered:Connect(onPromptTriggered))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(

@@ -745,8 +745,16 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 end
 
 -- The thief got home: the item is theirs.
-function ResultController.ShowHeistComplete(item: HeistItem, victimName: string)
-	showHeistCard("HEIST COMPLETE!", Colors.Rebirth, ("FROM %s'S LAB"):format(victimName:upper()), item, "It's in your inventory now", "Orange")
+-- `subline`: the steal timer ("You can steal again in 60s").
+function ResultController.ShowHeistComplete(item: HeistItem, victimName: string, subline: string?)
+	showHeistCard(
+		"HEIST COMPLETE!",
+		Colors.Rebirth,
+		("FROM %s'S LAB"):format(victimName:upper()),
+		item,
+		subline or "It's in your inventory now",
+		"Orange"
+	)
 end
 
 -- The victim lost an item.

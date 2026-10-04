@@ -59,7 +59,7 @@ export type PlayerData = {
 	GoalIndex: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
-	-- Heist: items delivered home, and shields raised with LOCK (console or HUD button)
+	-- Heist: items delivered home, and shields raised with LOCK (the console)
 	-- (drive the first_steal / first_shield goals).
 	TotalSteals: number,
 	ShieldRaises: number,

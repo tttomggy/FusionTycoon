@@ -4,7 +4,7 @@
 	-----------
 	A lab's LOCK state from the attributes HeistService publishes on the
 	plot (Protected, ShieldUntil, ShieldRearmAt; server times), so every
-	client view (the LOCK console, the HUD LOCK button) reads it the same
+	client view (the LOCK console, the HUD LOCK chip) reads it the same
 	way without a remote.
 
 	  Protected   owner under HeistConfig.MinRebirths (also before known)

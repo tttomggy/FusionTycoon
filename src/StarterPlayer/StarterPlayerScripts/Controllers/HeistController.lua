@@ -77,6 +77,7 @@ local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
 local GoalMarkerController = require(script.Parent.GoalMarkerController)
 local TycoonController = require(script.Parent.TycoonController)
+local HudController = require(script.Parent.HudController)
 
 local HeistController = {}
 
@@ -124,7 +125,7 @@ local REJECT_MESSAGES: { [string]: string } = {
 
 -- LOCK rejections (HeistService.TryLock reasons; Recharging adds seconds).
 local LOCK_REJECT_MESSAGES: { [string]: string } = {
-	NotHome = "Get back to your lab to lock it!",
+	TooFar = "Get to your LOCK button inside your gate!",
 	Carrying = "Not while carrying!",
 	AlreadyLocked = "Your lab is already locked",
 	Protected = "New labs are protected until Rebirth 1",
@@ -164,8 +165,22 @@ local GUARD_RING_ALPHA = 0.25 -- faint, while the owner is home
 local GUARD_RING_GUARDED_ALPHA = 0.6 -- while that pedestal is guarded
 -- One-time tips (saved in PlayerData.Tips via TycoonController).
 local GUARDED_TIP = "They're guarding it. Wait for them to walk away."
-local INTRUDER_TIP = "Someone's in your lab! Stand by your items or LOCK your lab!"
-local LOCK_AFTER_LOSS_TIP = "Tip: press LOCK LAB when you leave your lab."
+local INTRUDER_TIP = "Someone's in your lab! Stand by your items or run to your LOCK button!"
+local LOCK_AFTER_LOSS_TIP = "Tip: hit the LOCK button inside your gate before you leave your lab."
+-- Tapping the HUD LOCK chip points the goal arrow at your console this long.
+local POINT_AT_CONSOLE_SECONDS = 8
+local POINT_AT_CONSOLE_TOAST = "Your LOCK button is just inside your gate"
+local pointToken = 0
+local STEAL_AGAIN_TEXT = "You can steal again in %ds"
+
+-- "You can steal again in 42s", from the Player attribute HeistCooldownUntil.
+local function cooldownText(): string
+	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
+	local left = if typeof(untilTime) == "number"
+		then math.max(0, math.ceil(untilTime - Workspace:GetServerTimeNow()))
+		else 0
+	return STEAL_AGAIN_TEXT:format(left)
+end
 local LOSS_TIP_DELAY_SECONDS = 2.5
 -- Set per carry: this is the player's first time as a victim.
 local firstCatch = false
@@ -648,10 +663,14 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
 		return
 	end
-	-- WorldLabelController's local Mode: a guarded pedestal and the
-	-- Rebirth-0 teaser are instant taps that only explain themselves.
+	-- WorldLabelController's local Mode: a guarded pedestal, your steal
+	-- cooldown and the Rebirth-0 teaser are instant taps that only explain
+	-- themselves.
 	local mode = prompt:GetAttribute("Mode")
-	if mode == "Guarded" then
+	if mode == "Cooldown" then
+		ToastController.Show(cooldownText(), "Neutral")
+		return
+	elseif mode == "Guarded" then
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
 		return
 	elseif mode == "Locked" then
@@ -724,7 +743,7 @@ local function onHeistEnded(payload: any)
 			return
 		end
 		if payload.Reason == "Cooldown" then
-			ToastController.Show(("Lay low for %ds"):format(tonumber(payload.Seconds) or 0), "Neutral")
+			ToastController.Show(STEAL_AGAIN_TEXT:format(tonumber(payload.Seconds) or 0), "Neutral")
 			return
 		end
 		local message = REJECT_MESSAGES[payload.Reason]
@@ -744,7 +763,7 @@ local function onHeistEnded(payload: any)
 	local other = tostring(payload.OtherName)
 	if payload.Role == "Thief" then
 		if payload.Outcome == "Delivered" then
-			ResultController.ShowHeistComplete(item, other)
+			ResultController.ShowHeistComplete(item, other, cooldownText())
 		else
 			ToastController.Show(THIEF_FAIL_TOASTS[payload.Outcome] or "It slipped away", "Error")
 		end
@@ -806,7 +825,7 @@ local function updateConsole()
 	end
 	local state, seconds = ShieldState.Get(plot)
 	-- Someone walked into your unlocked lab: tell you once (the HUD LOCK
-	-- button pulses on its own while LOCK is ready).
+	-- chip turns into the red alarm on its own while LOCK is ready).
 	if (state == "Ready" or state == "Recharging") and not TycoonController.HasSeenTip("intruder") then
 		local origin = plot:IsA("Model") and plot.PrimaryPart
 		if origin then
@@ -1038,6 +1057,13 @@ local function updateGuards()
 end
 
 -- Markers on every grabbable enemy pedestal, and the first-visit tip.
+-- A pedestal worth a red hand: grabbable now, or after your cooldown (the
+-- markers stay up while it runs so you can plan the next target).
+local function isMarkTarget(pedestal: Instance, prompt: Instance): boolean
+	local mode = prompt:GetAttribute("Mode")
+	return mode == "Steal" or (mode == "Cooldown" and pedestal:GetAttribute("GuardedByOwner") ~= true)
+end
+
 local function updateTeaching()
 	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
 	if not folder then
@@ -1051,7 +1077,7 @@ local function updateTeaching()
 		if pedestals then
 			for _, pedestal in pedestals:GetChildren() do
 				local prompt = pedestal:FindFirstChild("StealPrompt")
-				if pedestal:IsA("BasePart") and prompt and prompt:GetAttribute("Mode") == "Steal" then
+				if pedestal:IsA("BasePart") and prompt and isMarkTarget(pedestal, prompt) then
 					hasTarget = true
 					seen[pedestal] = true
 					local marker = markers[pedestal]
@@ -1096,8 +1122,31 @@ end
 
 --[[ Init ------------------------------------------------------------------------- ]]
 
+-- The HUD LOCK chip was tapped: point the goal arrow at your console for a
+-- few seconds (never over a running heist's arrow).
+local function pointAtConsole()
+	ToastController.Show(POINT_AT_CONSOLE_TOAST, "Neutral")
+	if active then
+		return
+	end
+	local plot = getOwnPlot()
+	local console = plot and plot:FindFirstChild("LockConsole")
+	if not console then
+		return
+	end
+	pointToken += 1
+	local myToken = pointToken
+	GoalMarkerController.SetOverride(console, "LOCK", false)
+	task.delay(POINT_AT_CONSOLE_SECONDS, function()
+		if pointToken == myToken and not active then
+			GoalMarkerController.SetOverride(nil)
+		end
+	end)
+end
+
 function HeistController.Init()
 	screenGui = UIKit.Screen("Heist", 105)
+	HudController.SetLockChipHandler(pointAtConsole)
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	RemoteEvents.HeistStarted.OnClientEvent:Connect(onHeistStarted)
 	RemoteEvents.HeistEnded.OnClientEvent:Connect(onHeistEnded)

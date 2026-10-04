@@ -40,9 +40,12 @@ HeistConfig.LossCap = 3 -- at most this many items lost ...
 HeistConfig.LossWindowSeconds = 10 * 60 -- ... per this window; then the lab is unstealable until one ages out
 
 -- Shield
-HeistConfig.ShieldSeconds = 60 -- per LOCK (the console prompt or the HUD LOCK button, from inside your walls)
+HeistConfig.ShieldSeconds = 60 -- per LOCK (only at your LOCK console: you have to run home)
 HeistConfig.ShieldRearmSeconds = 20 -- after any shield ends (timeout or drop), LOCK recharges for this long: the thieves' window
 HeistConfig.LockRequestDebounceSeconds = 0.5
+-- TryLock: the root must be within PlotLayout.LockConsole.PromptDistance +
+-- this (studs, flat distance) of your own console, else "TooFar".
+HeistConfig.LockReachSlack = 2
 HeistConfig.ClaimShieldSeconds = 60 -- automatic, on claim
 HeistConfig.EjectTickSeconds = 0.25 -- shielded labs push non-owners out this often
 
