@@ -220,6 +220,26 @@ end
 
 --[[ World effects ------------------------------------------------------------ ]]
 
+-- How an event-only mutation came about (the reveal card's "how you got it"
+-- and the server banner's line).
+export type MutationSource = "VoidMoon" | "Lightning" | "Meteor" | "Debug"
+
+-- The SERVER banner for an event-only mutation, at any tier: "Har got a
+-- VOID Nova Heart under the Void Moon!" (AnnouncementController, Verb
+-- "event").
+function EventService.AnnounceEventMutation(player: Player, item: { ItemId: string, Tier: string, Mutation: string? }, source: MutationSource)
+	local def = ItemConfig.GetItemById(item.ItemId)
+	RemoteEvents.RareFusionAnnouncement:FireAllClients({
+		Message = ("%s got a %s %s!"):format(player.DisplayName, tostring(item.Mutation):upper(), def and def.Name or item.ItemId),
+		Tier = item.Tier,
+		Mutation = item.Mutation,
+		PlayerName = player.DisplayName,
+		Verb = "event",
+		Source = source,
+		ItemName = def and def.Name or item.ItemId,
+	})
+end
+
 local function isFeedTier(tier: string): boolean
 	return (ItemConfig.Tiers[tier] or 0) >= (ItemConfig.Tiers[EFFECT_FEED_MIN_TIER] or math.huge)
 end
@@ -500,24 +520,19 @@ local function strike(target: Target): boolean
 		return false
 	end
 	-- Charged: inventory, Index, pedestal visuals and labels, then the syncs.
-	PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
+	local isNew = PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
 	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation)
 	TycoonService.RefreshPedestalLabels(target.Owner)
 	RemoteEvents.SyncInventory:FireClient(target.Owner, PlayerDataService.GetInventory(target.Owner))
 	PlayerDataService.SyncTycoon(target.Owner)
-	local name = itemName(item)
-	RemoteEvents.EventNotice:FireClient(target.Owner, { Text = ("⚡ Your %s got CHARGED!"):format(name), Big = true })
-	if isFeedTier(item.Tier) then
-		local def = ItemConfig.GetItemById(item.ItemId)
-		RemoteEvents.RareFusionAnnouncement:FireAllClients({
-			Message = ("%s's %s got CHARGED!"):format(target.Owner.DisplayName, name),
-			Tier = item.Tier,
-			Mutation = item.Mutation,
-			PlayerName = target.Owner.DisplayName,
-			Verb = "charged",
-			ItemName = def and def.Name or item.ItemId,
-		})
-	end
+	-- The owner gets the event mutation reveal card; everyone the banner.
+	RemoteEvents.EventReward:FireClient(target.Owner, {
+		Caption = "⚡ STRUCK BY LIGHTNING",
+		Item = item,
+		NewIndex = isNew,
+		Source = "Lightning",
+	})
+	EventService.AnnounceEventMutation(target.Owner, item, "Lightning")
 	return true
 end
 
@@ -591,8 +606,10 @@ local function grantCore(player: Player)
 	end
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
-	RemoteEvents.EventReward:FireClient(player, { Caption = "☄ METEOR CORE", Item = entry, NewIndex = isNew })
-	if isFeedTier(tier) or mutation then
+	RemoteEvents.EventReward:FireClient(player, { Caption = "☄ METEOR CORE", Item = entry, NewIndex = isNew, Source = "Meteor" })
+	if mutation and MutationConfig.IsEventOnly(mutation) then
+		EventService.AnnounceEventMutation(player, entry, "Meteor")
+	elseif isFeedTier(tier) then
 		local def = ItemConfig.GetItemById(itemId)
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s grabbed a %s from a meteor!"):format(player.DisplayName, itemName(entry)),
@@ -603,6 +620,31 @@ local function grantCore(player: Player)
 			ItemName = def and def.Name or itemId,
 		})
 	end
+end
+
+-- Studio /eventmut: a random Epic with an event-only mutation, through the
+-- real reward path (EventReward -> the reveal card, and the banner).
+function EventService.GrantEventMutationItem(player: Player, mutation: string): boolean
+	if not MutationConfig.IsEventOnly(mutation) or not PlayerDataService.IsDataLoaded(player) then
+		return false
+	end
+	local def = ItemConfig.PickRandomOfTier("Epic", rng)
+	if not def then
+		return false
+	end
+	local entry, isNew = PlayerDataService.AddItem(player, def.Id, "Epic", mutation)
+	if not entry then
+		return false
+	end
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	PlayerDataService.SyncTycoon(player)
+	local source: MutationSource = if mutation == "Void"
+		then "VoidMoon"
+		elseif mutation == "Charged" then "Lightning"
+		else "Meteor"
+	RemoteEvents.EventReward:FireClient(player, { Caption = "EVENT MUTATION", Item = entry, NewIndex = isNew, Source = source })
+	EventService.AnnounceEventMutation(player, entry, source)
+	return true
 end
 
 -- The crater: a dark rock disc, orange Neon crack strips (never a flat Neon

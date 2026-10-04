@@ -215,6 +215,12 @@ end
 -- Server-wide brag for a Legendary+ result, or any Rainbow: the moment
 -- everyone else in the server sees and wants for themselves.
 local function announce(player: Player, item: InventoryItem)
+	-- An event-only mutation (a Void from the Void Moon) is a server moment
+	-- at any tier, with its own line.
+	if MutationConfig.IsEventOnly(item.Mutation) then
+		EventService.AnnounceEventMutation(player, item, "VoidMoon")
+		return
+	end
 	local visual = RarityVisuals.Tiers[item.Tier]
 	local rainbow = item.Mutation == "Rainbow"
 	if not rainbow and (not visual or not visual.AnnounceServerWide) then

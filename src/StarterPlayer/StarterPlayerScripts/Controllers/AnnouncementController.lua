@@ -356,7 +356,31 @@ local function onRareFusionAnnouncement(payload: any)
 		local who = UIKit.EscapeRichText(payload.PlayerName)
 		local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(payload.ItemName, mutation))
 		local mutationColor = UITheme.GetMutationColor(mutation)
-		if payload.Verb == "charged" then
+		if payload.Verb == "event" and mutation then
+			-- An event-only mutation: a SERVER banner at any tier, in its colour.
+			local word = UIKit.Colored(mutation:upper(), mutationColor or Colors.Text)
+			local item = UIKit.EscapeRichText(payload.ItemName)
+			local line = if payload.Source == "VoidMoon"
+				then ("%s got a %s %s under the Void Moon!"):format(who, word, item)
+				elseif payload.Source == "Lightning" then ("%s's %s got %s by lightning!"):format(who, item, word)
+				elseif payload.Source == "Meteor" then ("%s found a %s %s in a meteor!"):format(who, word, item)
+				else ("%s got a %s %s!"):format(who, word, item)
+			enqueue({
+				Text = line,
+				AccentColor = mutationColor or Colors.Text,
+				Big = {
+					Caption = "SERVER · EVENT MUTATION",
+					CaptionColor = mutationColor or Colors.White,
+					Left = UITheme.TowardInk(mutationColor or Colors.Panel, 0.55),
+					Right = Colors.Panel,
+					Emblem = function()
+						return UIKit.TierOrb(tier, 50, nil, mutation)
+					end,
+					Shake = false,
+				},
+			})
+			return
+		elseif payload.Verb == "charged" then
 			-- "Har's Charged Rift Engine got CHARGED!" (Power Surge lightning)
 			text = ("%s's %s got %s!"):format(who, UIKit.Colored(name, UITheme.GetTierLight(tier)), UIKit.Colored("CHARGED", mutationColor or Colors.Text))
 		elseif payload.Verb == "grabbed" then

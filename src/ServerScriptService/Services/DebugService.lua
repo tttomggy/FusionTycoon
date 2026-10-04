@@ -71,6 +71,10 @@ local STEALABLE_COMMAND = "/stealable"
 -- clock 15 min ahead so the schedule can be walked through.
 local EVENT_COMMAND = "/event"
 local EVENT_CLOCK_COMMAND = "/eventclock"
+-- "/eventmut void" gives a random Epic with an event-only mutation (Charged,
+-- Void, Celestial) through the real reward path, so the reveal card and the
+-- banner can be tested (/give skips them).
+local EVENT_MUTATION_COMMAND = "/eventmut"
 -- "/tips reset" clears your seen one-time tips (TipConfig), so HOW TO HEIST
 -- and the heist tips can be re-tested.
 local TIPS_COMMAND = "/tips"
@@ -167,6 +171,19 @@ local function onPlayerChatted(player: Player, message: string)
 		local minutes = tonumber(argument) or 0
 		EventService.SetClockOffset(minutes)
 		print(("DebugService: event clock offset %d min"):format(minutes))
+	elseif command == EVENT_MUTATION_COMMAND then
+		-- The message was lowercased: match the mutation's real name.
+		local mutation: string? = nil
+		for _, name in MutationConfig.Order do
+			if name:lower() == argument and MutationConfig.IsEventOnly(name) then
+				mutation = name
+			end
+		end
+		if mutation and EventService.GrantEventMutationItem(player, mutation) then
+			print(("DebugService: gave %s a %s Epic"):format(player.Name, mutation))
+		else
+			warn("DebugService: /eventmut <charged|void|celestial>")
+		end
 	elseif command == TIPS_COMMAND then
 		if argument == "reset" then
 			PlayerDataService.ResetTips(player)
@@ -224,7 +241,7 @@ function DebugService:Init()
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /wipe")
 end
 
 function DebugService:Start()

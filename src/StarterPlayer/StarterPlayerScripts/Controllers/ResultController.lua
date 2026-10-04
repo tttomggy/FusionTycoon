@@ -34,6 +34,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -315,6 +316,211 @@ local function showBigCard(info: BigCardInfo)
 	if tier == "Mythic" or tier == "Secret" then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
 	end
+end
+
+--[[ Event mutation reveal --------------------------------------------------------------
+	Charged / Void / Celestial (MutationConfig.IsEventOnly) replace the normal
+	result card with this one, from any source (a Void Moon fusion, a
+	lightning strike, a meteor core, /eventmut): the mutation colour behind
+	a sunburst, "EVENT-ONLY MUTATION", the giant word ("VOID!"), the orb in
+	its shell, the item, "VOID ×8 income", how you got it, the Index count,
+	and DISPLAY / OK. Everyone else sees the SERVER banner
+	(AnnouncementController, Verb "event").
+]]
+
+local EVENT_CARD_SIZE = Vector2.new(400, 500)
+local EVENT_SHAKE_MAGNITUDE = 0.5
+local EVENT_SHAKE_SECONDS = 0.6
+local EVENT_SOUND_ID = "rbxasset://sounds/electronicpingshort.wav"
+
+local function oneIn(chance: number): number
+	return math.floor(1 / chance + 0.5)
+end
+
+local HOW_YOU_GOT_IT: { [string]: () -> string } = {
+	Void = function()
+		return ("🌙 You fused during a Void Moon. Only 1 in %d fusions come out Void, and Void Moons are rare."):format(
+			oneIn(EventConfig.VoidChance)
+		)
+	end,
+	Charged = function()
+		return "⚡ Lightning hit it during a Power Surge."
+	end,
+	Celestial = function()
+		return "☄ You found it in a meteor core."
+	end,
+}
+
+-- "Void 3 / 17": found Index entries with `mutation`, out of every item.
+local function indexCount(mutation: string): (number, number)
+	local found = 0
+	local suffix = "|" .. mutation
+	for key, on in TycoonController.GetIndex() do
+		if on and key:sub(-#suffix) == suffix then
+			found += 1
+		end
+	end
+	return found, #ItemConfig.Items
+end
+
+local function showEventMutationCard(item: any, newIndex: boolean)
+	if bigHolder then
+		if sunburstConnection then
+			sunburstConnection:Disconnect()
+			sunburstConnection = nil
+		end
+		(bigHolder :: Frame):Destroy()
+		bigHolder = nil
+	end
+	local mutation = item.Mutation :: string
+	local color = UITheme.GetMutationColor(mutation) or Colors.Text
+	local tier = item.Tier :: string
+
+	local body, holder = UIKit.Panel({
+		Name = "EventMutationReveal",
+		Parent = screenGui,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		Size = UDim2.fromOffset(EVENT_CARD_SIZE.X, EVENT_CARD_SIZE.Y),
+		-- A "radial" look: the mutation colour in the middle fading to ink.
+		Gradient = {
+			{ 0, Colors.Ink },
+			{ 0.3, UITheme.TowardInk(color, 0.55) },
+			{ 0.5, UITheme.TowardInk(color, 0.25) },
+			{ 0.7, UITheme.TowardInk(color, 0.55) },
+			{ 1, Colors.Ink },
+		},
+		Radius = 24,
+		StrokeThickness = UITheme.Stroke.Modal,
+		ZIndex = 2,
+	})
+	bigHolder = holder
+	buildSunburst(body)
+	UIKit.MutationCardStroke(body, mutation)
+	local z = body.ZIndex + 3
+	local function label(name: string, text: string, font: Font, size: number, y: number, height: number, textColor: Color3, stroke: number?)
+		return UIKit.Label({
+			Name = name,
+			Text = text,
+			Font = font,
+			TextSize = size,
+			TextColor3 = textColor,
+			TextWrapped = true,
+			Position = UDim2.fromOffset(16, y),
+			Size = UDim2.new(1, -32, 0, height),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z,
+			Stroke = stroke,
+			Parent = body,
+		})
+	end
+	label("Caption", "EVENT-ONLY MUTATION", Fonts.BodyHeavy, 14, 18, 18, color)
+	label("Word", mutation:upper() .. "!", Fonts.Display, 44, 38, 52, color, 4)
+	local orb = UIKit.TierOrb(tier, 112, nil, mutation)
+	orb.AnchorPoint = Vector2.new(0.5, 0)
+	orb.Position = UDim2.new(0.5, 0, 0, 96)
+	orb.ZIndex = z
+	orb.Parent = body
+	label("ItemName", itemName(item), Fonts.Display, 24, 214, 30, Colors.Text, UITheme.Stroke.Text)
+	UIKit.MutationPill({
+		Parent = body,
+		Mutation = mutation,
+		Label = ("%s ×%d income"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation)),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, 250),
+		TextSize = 15,
+		Height = 26,
+		ZIndex = z + 1,
+	})
+	-- How you got it.
+	local box = Instance.new("Frame")
+	box.Name = "HowYouGotIt"
+	box.BackgroundColor3 = Colors.Panel2
+	box.BackgroundTransparency = 0.15
+	box.Position = UDim2.fromOffset(20, 288)
+	box.Size = UDim2.new(1, -40, 0, 64)
+	box.ZIndex = z
+	box.Parent = body
+	UIKit.Corner(box, UITheme.Radius.Row)
+	UIKit.Stroke(box, 2, color)
+	local how = HOW_YOU_GOT_IT[mutation]
+	UIKit.Label({
+		Name = "Text",
+		Text = if how then how() else "",
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(10, 4),
+		Size = UDim2.new(1, -20, 1, -8),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = z + 1,
+		Parent = box,
+	})
+	local found, total = indexCount(mutation)
+	label(
+		"IndexLine",
+		(if newIndex then "Index +1 · " else "") .. ("%s %d / %d"):format(mutation, found, total),
+		Fonts.BodyHeavy,
+		14,
+		360,
+		18,
+		Colors.GoldLabel
+	)
+
+	local buttons = Instance.new("Frame")
+	buttons.Name = "Buttons"
+	buttons.BackgroundTransparency = 1
+	buttons.AnchorPoint = Vector2.new(0.5, 0)
+	buttons.Position = UDim2.new(0.5, 0, 0, 392)
+	buttons.Size = UDim2.fromOffset(170 + 12 + 120, 52)
+	buttons.ZIndex = z
+	buttons.Parent = body
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 12)
+	layout.Parent = buttons
+	local uid = item.Uid :: string
+	UIKit.Button({
+		Name = "DisplayIt",
+		Parent = buttons,
+		Style = "Green",
+		Text = "DISPLAY",
+		TextSize = 20,
+		Size = UDim2.fromOffset(170, 52),
+		LayoutOrder = 1,
+		ZIndex = z,
+		OnClick = function()
+			onDisplayIt(uid)
+		end,
+	})
+	UIKit.Button({
+		Name = "Ok",
+		Parent = buttons,
+		Style = "Disabled",
+		Text = "OK",
+		TextSize = 20,
+		Size = UDim2.fromOffset(120, 52),
+		LayoutOrder = 2,
+		ZIndex = z,
+		OnClick = closeBigCard,
+	})
+
+	UIKit.PopIn(holder)
+	-- The major reveal: a shake and the reveal sound.
+	RevealEffects.ShakeCamera(EVENT_SHAKE_MAGNITUDE, EVENT_SHAKE_SECONDS)
+	local sound = Instance.new("Sound")
+	sound.SoundId = EVENT_SOUND_ID
+	sound.PlaybackSpeed = 0.8
+	sound.Volume = 1
+	sound.Parent = holder
+	sound:Play()
+end
+
+-- An event-only mutation always gets the reveal card instead.
+local function isEventMutation(item: any): boolean
+	return typeof(item) == "table" and MutationConfig.IsEventOnly(item.Mutation)
 end
 
 --[[ Pull x10 grid -------------------------------------------------------------------- ]]
@@ -1207,8 +1413,12 @@ end
 -- Epic+ tiers, and Diamond/Rainbow at any tier.
 -- The big card for an item granted outside a pull or fusion (a meteor core,
 -- an admin gift): `caption` over the tier name, the earn rate under it.
-function ResultController.ShowItemCard(caption: string, item: any, description: string?)
+function ResultController.ShowItemCard(caption: string, item: any, description: string?, newIndex: boolean?)
 	if typeof(item) ~= "table" or typeof(item.Tier) ~= "string" or typeof(item.Uid) ~= "string" then
+		return
+	end
+	if isEventMutation(item) then
+		showEventMutationCard(item, newIndex == true)
 		return
 	end
 	showBigCard({
@@ -1231,6 +1441,10 @@ local function onFusionResolved(result: any)
 		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1)
 		return
 	end
+	if isEventMutation(newItem) then
+		showEventMutationCard(newItem, result.IsNewIndex == true or result.NewIndex == true)
+		return
+	end
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
@@ -1250,6 +1464,10 @@ local function onGachaPullResult(payload: any)
 		return
 	end
 	local newItem = payload.NewItem
+	if isEventMutation(newItem) then
+		showEventMutationCard(newItem, payload.NewIndex == true)
+		return
+	end
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "YOU PULLED",
