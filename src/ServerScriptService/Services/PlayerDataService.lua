@@ -38,6 +38,7 @@ local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
+local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
@@ -107,6 +108,8 @@ export type PlayerData = {
 	Sessions: number,
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
+	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
+	Gifts: GiftConfig.State,
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -157,6 +160,9 @@ export type TycoonSnapshot = {
 	-- The daily reward: what the next claim gives (DailyConfig.GetStatus at
 	-- the server's UTC day) and the cycle day of the last claim.
 	Daily: DailyConfig.Status & { LastDay: number },
+	-- Today's playtime gifts (GiftConfig): the client counts PlaySeconds on
+	-- from when the snapshot arrived.
+	Gifts: { PlaySeconds: number, Claimed: { number } },
 }
 
 export type ShopSnapshot = {
@@ -265,6 +271,7 @@ local DEFAULT_DATA: PlayerData = {
 	Cosmetics = {},
 	Sessions = 0,
 	Daily = DailyConfig.Default(),
+	Gifts = GiftConfig.Default(-1),
 	Version = DATA_VERSION,
 }
 
@@ -422,6 +429,7 @@ local function reconcile(raw: any): PlayerData
 		data.Sessions = math.floor(raw.Sessions)
 	end
 	data.Daily = DailyConfig.Sanitize(raw.Daily)
+	data.Gifts = GiftConfig.Sanitize(raw.Gifts, RewardConfig.GetUtcDay(os.time()))
 	-- Version 1 is the first FT_Live_1 format; later versions migrate here
 	-- (raw.Version < DATA_VERSION) before the stamp below.
 	data.Version = DATA_VERSION
@@ -1247,6 +1255,10 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 			OfflineDoubleAmount = PlayerDataService.GetOfflineDoubleAmount(player),
 		},
 		Daily = dailySnapshot(data),
+		Gifts = {
+			PlaySeconds = if data then data.Gifts.PlaySeconds else 0,
+			Claimed = if data then table.clone(data.Gifts.Claimed) else {},
+		},
 	}
 end
 

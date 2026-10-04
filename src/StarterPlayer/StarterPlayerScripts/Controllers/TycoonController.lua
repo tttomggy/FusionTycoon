@@ -70,6 +70,11 @@ export type DailyView = {
 	LastDay: number,
 }
 local daily: DailyView = { CanClaim = false, Day = 1, Streak = 0, Skips = 1, UsesSkip = false, Resets = false, LastDay = 0 }
+-- Today's playtime gifts (snapshot Gifts); play time counts on locally
+-- from the moment the snapshot arrived.
+local giftPlaySeconds = 0
+local giftReceivedAt = os.clock()
+local giftClaimed: { number } = {}
 -- Settings (SettingsConfig): the server's copy plus local changes it hasn't
 -- echoed yet (optimistic: they apply at once).
 local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRule()
@@ -287,6 +292,16 @@ function TycoonController.GetShop(): ShopView
 	return shop
 end
 
+-- Today's play time (seconds, counting on between snapshots) and the
+-- claimed gift indices.
+function TycoonController.GetGiftPlaySeconds(): number
+	return giftPlaySeconds + (os.clock() - giftReceivedAt)
+end
+
+function TycoonController.GetClaimedGifts(): { number }
+	return giftClaimed
+end
+
 function TycoonController.GetDaily(): DailyView
 	return daily
 end
@@ -463,6 +478,17 @@ local function onSyncTycoon(snapshot: any)
 			OfflineDoubleAmount = number(rawShop.OfflineDoubleAmount),
 			ReceivedAt = os.clock(),
 		}
+	end
+	local rawGifts = snapshot.Gifts
+	if typeof(rawGifts) == "table" then
+		giftPlaySeconds = if typeof(rawGifts.PlaySeconds) == "number" then rawGifts.PlaySeconds else 0
+		giftReceivedAt = os.clock()
+		giftClaimed = {}
+		for _, index in (if typeof(rawGifts.Claimed) == "table" then rawGifts.Claimed else {}) do
+			if typeof(index) == "number" then
+				table.insert(giftClaimed, index)
+			end
+		end
 	end
 	local rawDaily = snapshot.Daily
 	if typeof(rawDaily) == "table" then

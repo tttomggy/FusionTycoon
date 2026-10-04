@@ -34,6 +34,7 @@ local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local ShopPanel = require(script.Parent.Parent.UI.ShopPanel)
+local GiftsPanel = require(script.Parent.Parent.UI.GiftsPanel)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
@@ -888,17 +889,26 @@ local cashHolder: Frame
 	tall), wiggling gently every SHOP_WIGGLE_SECONDS; a red SALE tag only
 	while a real sale is live (ShopState); and a pill per active timed
 	effect: "⚡ 2× · 12:41", "🍀 2× luck · 3:10", "⚡ SERVER 2× · 8:02".
+	Beside SHOP, the pink "🎁 GIFTS" (GiftsPanel): a green count badge and a
+	bounce while any playtime gift is ready, otherwise a small "next in
+	3:12" pill (hidden once today's gifts are all open).
 ]]
 local SHOP_BUTTON_SIZE = Vector2.new(132, 56)
 local SHOP_ROW_GAP = 8
 local SHOP_WIGGLE_SECONDS = 20
 local SHOP_WIGGLE_DEGREES = 7
 local EFFECT_PILL_HEIGHT = 28
+local GIFTS_BUTTON_SIZE = Vector2.new(124, 56)
+local GIFTS_BOUNCE_SCALE = 1.08
 
 local shopRow: Frame
 local shopHolder: Frame
 local saleTag: TextLabel
 local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
+local giftsButton: TextButton
+local giftsScale: UIScale
+local giftsNextPill: TextLabel
+local giftsBounce: Tween? = nil
 
 local function buildShopRow()
 	shopRow = Instance.new("Frame")
@@ -944,12 +954,41 @@ local function buildShopRow()
 	local saleFill = saleTag.Parent :: Frame
 	saleFill.Visible = false
 
+	local gifts, giftsHolder = UIKit.Button({
+		Name = "GiftsButton",
+		Parent = shopRow,
+		Style = "Pink",
+		Text = "🎁 GIFTS",
+		TextSize = 20,
+		Size = UDim2.fromOffset(GIFTS_BUTTON_SIZE.X, GIFTS_BUTTON_SIZE.Y),
+		LayoutOrder = 2,
+		OnClick = function()
+			GiftsPanel.Toggle()
+		end,
+	})
+	giftsButton = gifts
+	giftsScale = Instance.new("UIScale")
+	giftsScale.Parent = giftsHolder
+	giftsNextPill = UIKit.Pill({
+		Name = "GiftsNext",
+		Parent = shopRow,
+		Text = "",
+		Color = Colors.Panel2,
+		TextColor3 = Colors.Muted,
+		TextSize = 13,
+		Height = EFFECT_PILL_HEIGHT - 4,
+		LayoutOrder = 3,
+		TextStroke = 1.5,
+	})
+	local nextFill = giftsNextPill.Parent :: Frame
+	nextFill.Visible = false
+
 	local pills = Instance.new("Frame")
 	pills.Name = "Effects"
 	pills.BackgroundTransparency = 1
 	pills.AutomaticSize = Enum.AutomaticSize.XY
 	pills.Size = UDim2.new()
-	pills.LayoutOrder = 2
+	pills.LayoutOrder = 4
 	pills.Parent = shopRow
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.Padding = UDim.new(0, 4)
@@ -1011,6 +1050,31 @@ local function refreshShopRow()
 	end
 	local saleFill = saleTag.Parent :: Frame
 	saleFill.Visible = saleLive
+
+	-- GIFTS: the ready count (green badge + bounce) or "next in 3:12".
+	local ready, nextIn = GiftsPanel.GetStatus()
+	local badge = UIKit.Badge(giftsButton, if TycoonController.HasSynced() then ready else 0)
+	badge.BackgroundColor3 = Colors.Cash
+	badge.TextColor3 = Colors.CoinText
+	local nextFill = giftsNextPill.Parent :: Frame
+	nextFill.Visible = TycoonController.HasSynced() and ready == 0 and nextIn ~= nil
+	if nextIn then
+		giftsNextPill.Text = ("next in %s"):format(EventState.FormatTimer(nextIn))
+	end
+	local shouldBounce = ready > 0 and TycoonController.HasSynced()
+	if shouldBounce and not giftsBounce then
+		local tween = TweenService:Create(
+			giftsScale,
+			TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = GIFTS_BOUNCE_SCALE }
+		)
+		tween:Play()
+		giftsBounce = tween
+	elseif not shouldBounce and giftsBounce then
+		(giftsBounce :: Tween):Cancel()
+		giftsBounce = nil
+		giftsScale.Scale = 1
+	end
 end
 
 local function applyLayout(isPhone: boolean)
@@ -1121,6 +1185,7 @@ function HudController.Init()
 	RebirthPanel.Init()
 	IndexPanel.Init()
 	ShopPanel.Init()
+	GiftsPanel.Init()
 	SettingsPanel.Init()
 	FusePanel.Init()
 	HowToHeistPanel.Init()

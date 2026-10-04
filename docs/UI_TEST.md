@@ -1167,3 +1167,31 @@ published place.
   in Studio force `Restricted`): the card and every reward still work.
 - [ ] **Phone.** Device emulator: the card fits at 92% width, the 7 tiles
   stay in one row, CLAIM ≥ 44 px.
+
+## 24. Playtime gifts (GiftConfig)
+
+- [ ] **HUD.** A pink "🎁 GIFTS" button sits right of SHOP. On a fresh
+  profile a small "next in 4:59" pill sits beside it and counts down.
+  At 5:00 the pill goes, a green "1" badge appears and the button bounces.
+- [ ] **Panel.** GIFTS opens the panel: the daily strip on top ("📅 Daily
+  reward ready · Day N" + OPEN, which closes this and opens the daily
+  card; once claimed "next in 7:12:03" to 00:00 UTC), "Played today:
+  5:02", six boxes: ready = green with a pulsing glow and "OPEN!",
+  locked = "10 min" etc. with a thin progress bar, claimed = dim with ✓.
+  Footer: "Rare 60% · Epic 35% · Legendary 5%".
+- [ ] **Every gift.** `/gifts time 60` (all six ready, badge 6). Open each:
+  5 min: the box shows "💰 +$X" for a moment then ✓; 10 min: the panel
+  closes and the "🎁 GIFT · FREE PULL" card shows one pull; 15 min: ×2
+  income 10 min (HUD boost pill); 25 min: cash; 40 min: ×2 luck 10 min;
+  60 min: the "🎁 PLAYTIME GIFT" item reveal (Rare / Epic / Legendary).
+  The badge counts down and the bounce stops at 0; with all six open the
+  next pill stays hidden.
+- [ ] **Server checks.** `/gifts time 7`: only the first gift is ready; a
+  forged `ClaimGift { Index = 3 }` (command bar) is refused "Not open
+  yet"; a second claim of gift 1 is refused "Already opened".
+- [ ] **Sums across sessions.** With `FT_StudioSaves`: play 6 min, leave,
+  rejoin: "Played today" carries on from ~6:00 and gift 1 is still ready
+  (or still claimed). `/gifts reset` locks them all again.
+- [ ] **Phone.** Device emulator: SHOP and GIFTS fit beside the cash card
+  without covering the top-centre event chip; the panel's boxes stay 3 per
+  row and each is easy to tap.

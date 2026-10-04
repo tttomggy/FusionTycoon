@@ -17,6 +17,7 @@ local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
+local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
@@ -95,6 +96,9 @@ local SHOP_COMMAND = "/shop"
 -- the free skip, miss 2+ = back to Day 1);
 -- "/daily reset" starts a fresh streak.
 local DAILY_COMMAND = "/daily"
+-- "/gifts time 24" sets today's play time to 24 min (the playtime gifts);
+-- "/gifts reset" also re-locks every gift.
+local GIFTS_COMMAND = "/gifts"
 
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -238,6 +242,29 @@ local function onPlayerChatted(player: Player, message: string)
 		local status = DailyConfig.GetStatus(data.Daily, today)
 		print(("DebugService: %s daily -> next Day %d, can claim %s, uses skip %s, resets %s, skips %d"):format(
 			player.Name, status.Day, tostring(status.CanClaim), tostring(status.UsesSkip), tostring(status.Resets), data.Daily.Skips
+		))
+	elseif command == GIFTS_COMMAND then
+		local data = PlayerDataService.GetData(player)
+		if not data then
+			return
+		end
+		local verb, rawNumber = argument:match("^(%S+)%s*(%S*)$")
+		local minutes = tonumber(rawNumber)
+		local today = RewardConfig.GetUtcDay(os.time())
+		if verb == "time" and minutes then
+			data.Gifts.UtcDay = today
+			data.Gifts.PlaySeconds = math.max(0, minutes * 60)
+		elseif verb == "reset" then
+			data.Gifts = GiftConfig.Default(today)
+		else
+			warn("DebugService: /gifts time <minutes> | /gifts reset")
+			return
+		end
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: %s gifts -> %d s played, %d ready"):format(
+			player.Name,
+			math.floor(data.Gifts.PlaySeconds),
+			GiftConfig.CountReady(data.Gifts.PlaySeconds, data.Gifts.Claimed)
 		))
 	elseif command == SHOP_COMMAND then
 		local verb, rawKey = argument:match("^(%S+)%s*(%S*)$")
