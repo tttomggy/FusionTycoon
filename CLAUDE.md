@@ -132,6 +132,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/tips reset` (clears your seen one-time tips),
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
+  `/shop grant <key>` (any ShopConfig key, the real grant path, no Robux),
   `/eventclock <offsetMinutes>` (shifts the event clock to walk the
   schedule; clients read the same offset), `/eventmut
   <charged|void|celestial>` (a random Epic with that event-only mutation
@@ -269,6 +270,103 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `RollOffMaxDistance` (Thunder 150, MeteorImpact 200 via
   `SoundKit.PlayAt`). No looping ambient sounds (the pedestal bell loop is
   gone). `docs/SOUNDS.md` lists every slot with its id and name.
+- **Monetization** (`MonetizationService`, every item and number in
+  `ShopConfig`). **The deals must be real.** The "never" list: no fake
+  discounts or permanent "sales", no countdowns that aren't real, no
+  pressure copy ("LAST CHANCE"), no purchase prompt after a loss, nothing
+  sold that protects a lab from theft or helps a thief (an item's steal
+  value is the item itself), and **no Robux price typed into the UI**.
+  - **Prices are live:** `ShopPrices.Get(key)` reads
+    `MarketplaceService:GetProductInfo` (cached 10 min); every "SAVE %",
+    "Worth ~~N~~ R$" and sale "(−38%)" is computed from those live prices
+    (`ShopConfig.GetSavePercent`). `ShopConfig.Price` is the PLANNED price,
+    only for `docs/SHOP_SETUP.md` (what Harris creates in Creator Hub). An
+    item with `Id = 0` is hidden in live games; in Studio it shows with a
+    "TEST" button that runs a test grant.
+  - **PolicyService:** at join, `GetPolicyInfoForPlayerAsync`; a player with
+    `ArePaidRandomItemsRestricted` (or a failed call) never sees or gets a
+    `PolicyRestricted` item (cash packs, boosts, Overclock, Luck Potion,
+    Lucky, Safe Fusion, Starter Pack, Double Offline Cash). 2× Cash, VIP,
+    +2 Pedestals, Auto-Fuse and the cosmetic stay. The gacha and fusion
+    stay fully playable with earned cash.
+  - **Receipts:** `ProcessReceipt` is idempotent: a PurchaseId already in
+    `PlayerData.Receipts` (the last 200) → `PurchaseGranted`; else check
+    (`refusal`) → grant (synchronous) → record → `PlayerDataService.
+    SaveNowAsync` → `PurchaseGranted`. Not loaded, a refused item or a
+    failed save → `NotProcessedYet`. Passes: `UserOwnsGamePassAsync` at
+    join + `PromptGamePassPurchaseFinished` (session state, pushed into
+    `PlayerDataService.SetShopSession`). Purchases start with remote
+    `RequestShopPurchase { Key }`: the server re-checks (set up, policy,
+    owned, one-time, sale window, something to double) and only then
+    prompts; `ShopPurchased { Key, Result, Reason?, Lines?, Test? }` comes
+    back (THANK YOU card or a refusal toast). Studio: `/shop grant <key>`
+    runs the real grant path without Robux.
+  - **One luck number:** `PlayerDataService.GetLuck(player)` = rebirth ×
+    admin luck × `ShopConfig.GetLuckMultiplier` (Lucky ×1.5, Luck Potion
+    ×2). Every roll and the Gacha Pad's `FusionConfig.FormatOdds` use it,
+    so the displayed odds change while a boost runs.
+  - **Income inputs added:** `PassMultiplier` (2× Cash × VIP ×1.25),
+    `BoostMultiplier` (a Quick Boost / Boost: ×2), `OverclockMultiplier`
+    (the Server Overclock: ×2 for everyone here), all inside
+    `TycoonConfig.GetIncomeMultiplier`; `GetIncomeBreakdown` feeds the HUD
+    pill's tap breakdown. `GetIncomeInputs(player, baseOnly)` drops the
+    timed ones: offline earnings and cash packs use base income.
+  - **Timed effects** are saved as REMAINING seconds (`PlayerData.Boosts =
+    { Income, Luck }`, banked up to 3 h) and tick only in game
+    (MonetizationService, 1 s); the client counts down from the snapshot
+    (`TycoonController.GetBoostSecondsLeft`). The Server Overclock is
+    session-only: workspace `OverclockUntil` / `OverclockBy` (`ShopState`),
+    up to 60 min, with a server banner (`ShopAnnouncement`).
+  - **+2 Pedestals:** `PlotLayout` spots 5–6 (a second row at z −10, x
+    ±11.5). Every lab builds all 6; without the pass 5–6 are a dim plinth
+    (`LockedPedestalTransparency`) with an owner-only "🔒 +2 PEDESTALS"
+    label whose prompt reads "Unlock" and asks for the pass (the one
+    in-world sell, on the owner's own tap). ItemService refuses them
+    (`PedestalLocked`); `GetDisplayedItems` counts them only with the pass.
+  - **Safe Fusion:** tokens (`PlayerData.SafeFusionTokens`); the Fuse
+    panel's "🛡 Safe Fusion (3)" toggle (only with tokens, off by default,
+    disarms after each fusion) sends `RequestFusion { Safe = true }`; the
+    token is spent on that fusion, and a fail keeps every orb. **Never**
+    offered on the fail card.
+  - **Auto-Fuse:** the pass + `Settings.AutoFuse` (Fuse panel toggle);
+    after a pull (`TycoonService.OnPull`) FusionService runs Fuse All with
+    the same rules and sends `FuseAllResult { Auto = true }`.
+  - **VIP:** a gold "👑 VIP" head tag, `[VIP]` chat prefix
+    (`TextChatService.OnIncomingMessage`, Player attribute `VIP`), the gold
+    sign border and wall trims (`PlotKit.ApplyLabLook`). **Neon Pink
+    Lab** (`LabStyle` pass or the Starter Pack's cosmetic): pink wall/sign
+    strips and pink cash balls (plot attribute `LabStyle`). Looks only.
+  - **Shop UI:** the HUD's gold "🛒 SHOP" button (left, above the LOCK
+    chip; wiggles every 20 s; red SALE tag only while a real sale is live;
+    timed-effect pills beside it) opens `UI/ShopPanel` (featured banner
+    with a shine sweep: Starter Pack until bought, then the live sale,
+    then the best value; tabs; 4 / 2 column tiles; cash tiles show what
+    you'd get right now; the honest footer).
+  - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
+    the player taps something they can't afford (upgrade / MAX, pull /
+    ×10, Multiplier Pad, Rebirth). One non-modal side card: what they
+    tapped, "Need $X more?", the smallest covering cash pack (or the
+    Boost), "Not now", the price, and "or wait ~4 min with your income".
+    At most once per 5 min; never in a first session's first 10 min;
+    never over another card (`UIKit.IsOverlayOpen`); never within 60 s of
+    a failed fusion, a theft or a caught steal.
+  - **Starter Pack:** a one-time product; a dismissible side card once, 3
+    min into the player's 2nd session (`PlayerData.Sessions`); after that
+    only the shop's featured slot, until bought.
+  - **Real sales** (`ShopConfig.Sales`): a separate, cheaper developer
+    product (`BoostSale`) sellable ONLY while its window is live
+    (`ShopState`; "AdminAbuse" = an admin's panel event / luck via the
+    `AdminAbuseUntil` attribute, or the scheduled Admin Abuse hour). The
+    tile and banner show "normally ~~79~~ R$ · today 49 R$ (−38%)" and the
+    real end time. The server refuses it outside the window (a receipt is
+    honoured for 10 min after a prompt it made inside the window).
+  - Balance (`tools/econ_sim.py 30 12 --monetization`, median of 30 seeds,
+    12 h, no events; prices and the base economy unchanged): Rebirth 1 at
+    1:04:17 free / 0:28:44 with 2× Cash + VIP + Extra Pedestals (45%) /
+    0:22:41 with those plus a Boost every hour (35%); Rebirth 3 at 2:45:59
+    / 1:20:28 (48%) / 1:01:35 (37%); rebirths after 12 h 7 / 8 / 10.
+    Harris decides any change from that table; re-run it after touching a
+    shop multiplier (keep the sim's shop block in sync with ShopConfig).
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
   owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
@@ -402,7 +500,8 @@ src/ReplicatedStorage/Shared/
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals,
-                 SettingsConfig — the player's reveal-card rules, …)
+                 SettingsConfig — the player's reveal-card rules,
+                 ShopConfig — every pass / product and shop number, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -411,6 +510,8 @@ src/ReplicatedStorage/Shared/
                  states), FactoryKit (factory belt + collector, and the
                  ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
+                 ShopPrices (live Robux prices), ShopState (Server
+                 Overclock, real sale windows),
                  NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -445,6 +546,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   orb fusion chamber + picker, opened by the machine prompt),
                   AdminPanel (built only on the server's AdminOpen),
                   SettingsPanel (the ⚙ button: reveal-card rules),
+                  ShopPanel + ShopCards (the shop, the offer / Starter /
+                  THANK YOU cards),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens)
 ```
@@ -528,6 +631,7 @@ calls left in `Services/`.
 | `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `EventService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `AdminService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
+| `MonetizationService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -571,7 +675,8 @@ stating direction, then connect it in `:Init()`.
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
-SfxVolume, SfxMuted; SettingsConfig),
+SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
+`{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

@@ -50,7 +50,9 @@ local function gui(): ScreenGui
 	if existing then
 		return existing
 	end
-	local created = UIKit.Screen("ShopCards", 135)
+	-- Above every panel (Upgrades 140, Shop 141, Settings 143), so an offer
+	-- from the Upgrades panel and the THANK YOU over the shop both show.
+	local created = UIKit.Screen("ShopCards", 150)
 	screenGui = created
 	return created
 end

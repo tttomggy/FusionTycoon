@@ -90,6 +90,7 @@ local VIP_TAG_OFFSET = Vector3.new(0, 2.4, 0)
 local VIP_TAG_MAX_DISTANCE = 70
 
 local MonetizationService = {}
+local watchCharacter: (Player) -> () -- defined with the pass effects
 
 MonetizationService.Name = "MonetizationService"
 
@@ -435,6 +436,14 @@ local function applyVipTag(player: Player)
 	end
 end
 
+-- The VIP tag goes back on every respawn.
+function watchCharacter(player: Player)
+	table.insert(state.connections, player.CharacterAdded:Connect(function(character: Model)
+		character:WaitForChild("Head", 10)
+		applyVipTag(player)
+	end))
+end
+
 local function applyPassEffects(player: Player)
 	if not player.Parent then
 		return
@@ -480,10 +489,7 @@ function MonetizationService:Init()
 	table.insert(state.connections, RemoteEvents.RequestShopPurchase.OnServerEvent:Connect(onRequestShopPurchase))
 	table.insert(state.connections, Players.PlayerAdded:Connect(function(player: Player)
 		task.spawn(checkPlayer, player)
-		table.insert(state.connections, player.CharacterAdded:Connect(function(character: Model)
-			character:WaitForChild("Head", 10)
-			applyVipTag(player)
-		end))
+		watchCharacter(player)
 	end))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(onPlayerRemoving))
 	table.insert(state.connections, RunService.Heartbeat:Connect(onHeartbeat))
@@ -497,6 +503,7 @@ function MonetizationService:Start()
 	MonetizationService.OnPassesChanged(applyPassEffects)
 	for _, player in Players:GetPlayers() do
 		task.spawn(checkPlayer, player)
+		watchCharacter(player)
 	end
 end
 
