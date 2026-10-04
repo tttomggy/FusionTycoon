@@ -98,13 +98,19 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
   `/eventclock <offsetMinutes>` (shifts the event clock to walk the
-  schedule; clients read the same offset),
+  schedule; clients read the same offset), `/eventmut
+  <charged|void|celestial>` (a random Epic with that event-only mutation
+  through the real reward path: the reveal card + the banner),
   `/wipe` (fails your active steals first).
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
-  seeds `Random.new(slotStart)`, so every server and client computes the
-  same lineup with no messaging. hh:00 Night 10 min (15% Void Moon);
+  draws from a **lowbias32 hash of the slot start** (bit32 only; two draws
+  discarded), so every server and client computes the same lineup with no
+  messaging. Not `Random.new(slotStart)`: slots 900 s apart gave correlated
+  first draws (three POWER SURGEs in a row). `luau
+  tools/event_schedule_check.luau` runs the real EventConfig over 10,000
+  slots (shares within 0.3 pts, repeats at each weather's own share). hh:00 Night 10 min (15% Void Moon);
   hh:15/:30/:45 one weather by weight (Golden Rain 40 / Power Surge 35 /
   Meteor Shower 20 / Rainbow Storm 5). An override (`/event`, admin) replaces
   the scheduled event until it ends, then the clock resumes.
@@ -128,22 +134,71 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     ≤ 15%.** The first spec numbers gave 20–27% (Void Moon the biggest
     part, coins minor), so they were cut: Void Moon 30% → 15% of nights,
     fusion bonus +10 → +5 points, Void roll 10% → 5%, coin 5 s → 3 s of
-    income, Surge ×1.5 → ×1.25. Now +10.5% / +12.5% / +10.8% (30 seeds,
-    12 h). Any change to an event number: re-run and keep it ≤ 15%.
-  - Rewards are server-side (EventService): Golden Rain coins (owner-only,
-    touch + distance check, 3 s of income), Power Surge (generators ×1.25;
-    lightning: 25% of a
-    plain displayed item turns Charged, carried items skipped; inventory,
-    Index, pedestal visuals/labels, SyncInventory), Meteor Shower craters on
-    the street (`StreetLayout.MeteorBounds`; first finished hold wins a core:
-    Epic 60 / Legendary 30 / Mythic 9 / Secret 1, 15% Celestial). Void Moon:
-    fusion +5 points, 5% Void replacing the normal fusion roll.
+    income, Surge ×1.5 → ×1.25. Events 2 added BIG + street coins
+    (modelled: 1 in 6 street coins per player) and lowered the coin
+    FREQUENCY, not the size: lab coins every 4 → 10 s, street coins every
+    6 → 15 s. Now +10.4% / +14.4% / +10.3% (30 seeds, 12 h). Any change to
+    an event number: re-run and keep it ≤ 15%.
+  - Rewards are server-side (EventService):
+    - **Golden Rain:** lab coins (owner-only, touch + distance check, 3 s of
+      income; 1 in `BigCoinChance` (8) is a **BIG** coin worth 20 s) and
+      **street coins** (in `MeteorBounds`, max 8, anyone grabs, pays the
+      GRABBER 6 s). Value is seconds of income on purpose (never cash).
+      Per-player tally: Player attribute `GoldenRainTally` (chip "💰 +$X
+      this rain", the end toast).
+    - **Power Surge:** generators ×1.25; lightning every 20 s on a target
+      picked by lab, then pedestal, marked `LightningWarningSeconds` (3)
+      early (pedestal attribute `LightningTarget` + EventFx StrikeWarning);
+      25% of a plain displayed item turns Charged (carried items skipped;
+      inventory, Index, pedestal visuals/labels, SyncInventory).
+    - **Meteor Shower:** craters on the street (`StreetLayout.MeteorBounds`;
+      first finished hold wins a core: Epic 60 / Legendary 30 / Mythic 9 /
+      Secret 1, 15% Celestial; a "Hold E · free item" pill).
+    - **Void Moon:** fusion +5 points, 5% Void replacing the normal roll.
+  - **Cleanup:** every object an event makes lives in
+    `Workspace.EventObjects.<EventId>` (EventService builds the folders at
+    Init): server coins, craters and prompts; each client's own FX (sky,
+    moon, lightning, meteors, rings, chips, pops, station pills). Any end
+    (timeout, `/event off`, admin, an override) is one `ClearAllChildren`
+    on each side; a meteor still falling leaves no crater.
+  - **Event-only mutations** (Charged / Void / Celestial) from a pull,
+    fusion, strike, core or `/eventmut` get the **reveal card**
+    (ResultController: "EVENT-ONLY MUTATION", the giant word, how you got
+    it, "Index +1 · Void 3 / 17") and a SERVER banner at any tier
+    (`EventService.AnnounceEventMutation`, RareFusionAnnouncement Verb
+    "event").
   - Visuals are client-side (`EventController`): start banner (3-2-1),
-    sound, end toast, sky from a captured Lighting baseline restored exactly
+    end toast, sky from a captured Lighting baseline restored exactly
     (never raise a light: Night just darkens), band flicker through
-    `LocalTransparencyModifier`, EventFx cues (lightning, meteors, coin
-    pops), the top-centre HUD chip + schedule card, and the two street
+    `LocalTransparencyModifier`, EventFx cues (strike warnings, lightning +
+    CHARGED!/MISSED, meteors + ☄ INCOMING rings, coin pops: full
+    `NumberFormat.Money`, BIG in gold), "⚡ ×1.25" chips over generators
+    (`BillboardKit.Chip`), faster/brighter factory balls, the two street
     Event Boards (`StreetLayout.EventBoard`, built by WorldService).
+  - **Every event explains itself:** the top-centre HUD chip opens the
+    **info card** (`UI/EventInfoCard`, copy from `EventConfig.GetInfo`,
+    built from the config numbers; `EventConfig.Blurbs` = the first "what to
+    do" sentence). It auto-opens once per event type per account (Tips
+    `event_<EventId>`, TipConfig) after the start banner, and between
+    events explains the next one. **Event arrows:**
+    `GoalMarkerController.SetEventOverride` (heist > event > goal): Rainbow
+    Storm → your Gacha Pad (then the machine once you're on it), Night /
+    Void Moon → your machine, Meteor Shower → the nearest crater, Golden
+    Rain → the nearest street coin. Station pills: "🌈 MUTATIONS ×5 · PULL
+    NOW" on your pad, "🌙 FUSE NOW" on your machine.
+- **Odds board** (FusionMachineService + `BillboardKit.OddsSurface`): 9 × 6
+  studs at 60 px/stud, a real table (one rounded cell per %, 100% teal),
+  no mutation line (the pad and Index have it). `SetOddsChances(gui, rows,
+  { Rebirths, Boosted })` on every sync: the Mythic → Secret row reads "R1"
+  until the owner has Rebirth 1, a Void Moon turns every cell purple with
+  the boosted number. The Fuse panel's chips are one two-line chip per
+  count, the chamber's count highlighted.
+- **Index headers:** each mutation column heading (ⓘ) opens a "how to get
+  it" box (numbers from EventConfig) with "You have X / 17".
+- **Sounds** (`SoundConfig` slots + `SoundKit.Play(slot, parent?)`): every
+  sound goes through a slot; an empty Id is silent, a failed Id warns once
+  (client `SoundKit.Preload` at boot). No looping ambient sounds (the
+  pedestal bell loop is gone). `docs/SOUNDS.md` lists every slot.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
   owner). `/admin` opens the panel by sending `AdminOpen` to admins only;
@@ -272,7 +327,8 @@ src/ReplicatedStorage/Shared/
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
-                 EventConfig — the event clock and effects, AdminConfig —
+                 EventConfig — the event clock, effects and info-card copy,
+                 SoundConfig — every sound slot, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals, …)
@@ -283,6 +339,7 @@ src/ReplicatedStorage/Shared/
                  (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
                  ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
+                 SoundKit (every sound, by SoundConfig slot),
                  NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -316,7 +373,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),
                   AdminPanel (built only on the server's AdminOpen),
-                  HowToHeistPanel + HeistScenes (the 3D heist clips)
+                  HowToHeistPanel + HeistScenes (the 3D heist clips),
+                  EventInfoCard (what the HUD event chip opens)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)

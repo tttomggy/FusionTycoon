@@ -738,19 +738,19 @@ failed").
   generator bands are solid again.
 - [ ] **Golden Rain coins.** Gold coins (edge-on, spinning, bobbing) appear
   in your lab on open floor, never inside a station or pedestal, one every
-  4 s, max 30, each gone after 20 s. Touching one pays **3 s of your
-  income** (cash jumps by income × 3) with a green "+$X" pop. A second
-  player can't pick up yours.
+  10 s, max 30, each gone after 20 s. Touching one pays **3 s of your
+  income** (cash jumps by income × 3) with a green "+$X" pop (the full
+  amount, 24 px). A second player can't pick up yours.
 - [ ] **Surge income.** `/event PowerSurge`: the collector pill's generator
   income (and the HUD's income/s, generator share only) reads ×1.25 of what
   it was; back to normal when it ends. Pedestal rates don't change.
 - [ ] **Lightning Charge.** `/event PowerSurge`, display a plain item: every
-  20 s a white-blue bolt hits a displayed item somewhere with a flash and a
-  low rumble. When yours turns Charged: the toast "⚡ Your <item> got
-  CHARGED!", the pedestal orb gets 3 cyan satellites with a trail, the
-  label and inventory show Charged, the Index gains the Charged cell.
-  Legendary+ shows the server feed line. An item being carried in a heist
-  is never hit.
+  20 s a white-blue bolt hits a displayed item somewhere with a flash (the
+  Thunder slot is empty until a sound is chosen). When yours turns Charged:
+  the event mutation reveal card (below), the pedestal orb gets 3 cyan
+  satellites with a trail, the label and inventory show Charged, the Index
+  gains the Charged cell; everyone sees the SERVER banner. An item being
+  carried in a heist is never hit.
 - [ ] **Meteor race (2 players).** `/event MeteorShower`: glowing rocks fall
   onto the street (never a belt, never a plot); each leaves a dark crater
   with orange crack strips and a glowing core. Both players hold **Grab
@@ -758,22 +758,24 @@ failed").
   card (Epic+ item, sometimes Celestial); the other gets **Too slow!**. A
   Rebirth 0 player can grab. Unclaimed craters vanish after 60 s.
 - [ ] **Void Moon.** `/event VoidMoon`, open the Fuse panel: the success
-  chance reads 5 points higher (2 Commons 55% → 60%), and the machine's
-  odds board cells rise by the same. About 1 success in 20 comes out
-  Void. The banner line reads "Fusion success +5%".
-- [ ] **Rainbow Storm odds.** `/event RainbowStorm`: the gacha pad and odds
-  board mutation lines show ×5 numbers (Golden 4% → 20%); the big SERVER ·
-  EVENT rainbow banner plays once.
+  chance reads 5 points higher (2 Commons 55% → 60%) and the chips turn
+  purple; the machine's odds board cells turn Void purple with the same
+  boosted numbers, and go back at the end. About 1 success in 20 comes out
+  Void. The banner line reads "Fuse as much as you can before the moon
+  sets!".
+- [ ] **Rainbow Storm odds.** `/event RainbowStorm`: the gacha pad's
+  mutation line shows ×5 numbers (Golden 4% → 20%); the big SERVER · EVENT
+  rainbow banner plays once.
 - [ ] **Index.** The Index shows 7 variant columns (Normal + Golden,
   Charged, Diamond, Void, Rainbow, Celestial); unfound Charged / Void /
   Celestial cells show a 🕐. It fits on a phone (the page scrolls).
 - [ ] **`/eventclock`.** `/eventclock 0`, then step `/eventclock 15`, `30`,
   `45`, `60`: hh:00 is always Night or Void Moon, the others a weather; the
-  HUD chip, the schedule card and both street Event Boards agree at every
-  step. Between events the chip is muted: "NEXT · ☄ METEOR SHOWER in 8:40".
-- [ ] **Schedule card + boards.** Tapping the chip opens NOW / NEXT / THEN
-  with timers and the Admin Abuse line; tapping again closes it. The two
-  Event Boards past the street ends show the same, ticking every second,
+  HUD chip, the info card's NEXT rows and both street Event Boards agree at
+  every step. Between events the chip is muted: "NEXT · ☄ METEOR SHOWER in
+  8:40". The same weather three slots in a row should be rare (chance).
+- [ ] **Street Event Boards.** The two boards past the street ends show NOW
+  / NEXT / THEN with timers and the Admin Abuse line, ticking every second,
   and block no belt or gate.
 - [ ] **`/admin`.** In Play Solo (your own account = the owner) `/admin`
   opens ADMIN ABUSE: start each event at ×1/×2/×3 for 5/10/15 min (the
@@ -791,3 +793,78 @@ failed").
   live game with 2 servers: the second server applies it too and logs
   "FT_Admin from <id>". In Studio it toasts that it applied on this server
   only if MessagingService isn't available.
+
+### 17b. Events 2 (every event explains itself)
+
+- [ ] **Schedule check.** `luau tools/event_schedule_check.luau` (repo root)
+  prints every event's share within 2 points of its target (they land
+  within 0.3), the "next weather repeats" shares near each weather's own
+  share, a longest run around 9, and **OK**.
+- [ ] **Info card: tap.** Tap the event chip during any event: a card under
+  it on the event's gradient with the icon, name, live timer ("3:12 left")
+  and "Lab weather · every server"; WHAT'S HAPPENING (the numbers match
+  EventConfig: e.g. Power Surge "×1.25", "every 20s", "1 in 4"), WHAT TO
+  DO, "Can give:" mutation pills, NEXT (2 events + the Admin Abuse line).
+  The X or the chip closes it. On a phone it's 90% of the width.
+- [ ] **Info card: between events.** With nothing on, the chip opens the
+  same card for the NEXT event, "Starts in 8:40". When that event starts
+  with the card open, it switches to "… left".
+- [ ] **Info card: auto once.** After `/tips reset`, `/event GoldenRain`:
+  ~1 s after the start banner goes, the card opens by itself. End it and
+  start Golden Rain again: it doesn't reopen. A different event opens its
+  own card once.
+- [ ] **Arrows per event.** Rainbow Storm: the goal arrow points at your
+  Gacha Pad ("PULL HERE"); step on the pad and it moves to your Fusion
+  Machine ("THEN FUSE"). Night / Void Moon: the machine ("FUSE NOW").
+  Meteor Shower: the nearest unclaimed crater. Golden Rain: the nearest
+  street coin. A heist arrow wins while it lasts; every event arrow clears
+  at the end. Pills: "🌈 MUTATIONS ×5 · PULL NOW" over your pad in a
+  Rainbow Storm, "🌙 FUSE NOW" over your machine at night.
+- [ ] **Surge chips + strike warning.** `/event PowerSurge`: a "⚡ ×1.25"
+  chip over every running generator in every lab (from up to 80 studs);
+  cash balls on the factory lines run faster and look brighter. 3 s before
+  each bolt a cyan ring under the target pedestal and a red "⚡ STRIKE IN
+  3·2·1" over it, seen by everyone; then "CHARGED!" (cyan) or "MISSED"
+  (muted) pops for 1.5 s. With two labs, one with 4 items and one with 1,
+  both get struck about as often.
+- [ ] **BIG + street coins and the tally.** `/event GoldenRain`: about 1 in
+  8 lab coins is double size; it pays 20 s of income with a big gold "BIG
+  +$X". Every 15 s a coin lands on the street (off the belts, never in a
+  plot, at most 8); either player can grab it and it pays the grabber 6 s
+  of their own income. The chip shows "💰 +$X this rain" and the end toast
+  "… is over · you earned +$X".
+- [ ] **Meteor warnings.** `/event MeteorShower`: a red "☄ INCOMING" ring
+  and pill where each meteor lands, ~2 s before it hits; craters show
+  "Hold E · free item".
+- [ ] **Cleanup after `/event off` (every event).** Start each event, let it
+  make things (coins, chips, rings, craters, the moon), then `/event off`:
+  Workspace.EventObjects.<Id> is empty on the server (Explorer, Server view)
+  and on the client (Client view); no coin, crater, prompt, ring, chip or
+  pill is left in the world, and no pedestal keeps LightningTarget.
+- [ ] **Event mutation reveal.** `/eventmut void`, `/eventmut charged`,
+  `/eventmut celestial`: each opens the reveal card: mutation-colour
+  background, "EVENT-ONLY MUTATION", "VOID!" (CHARGED! / CELESTIAL!), the
+  orb in its shell, the item, "VOID ×8 income", the how-you-got-it box
+  (Void: "1 in 20 fusions"), "Index +1 · Void 1 / 17" the first time
+  (no "+1" for a repeat), a shake, DISPLAY / OK. Everyone sees the SERVER ·
+  EVENT MUTATION banner ("… got a VOID … under the Void Moon!", "…got
+  CHARGED by lightning!", "…found a CELESTIAL … in a meteor!"). A meteor
+  core that rolls Celestial and a Void Moon Void fusion use the same card.
+- [ ] **Index headers.** In the Index, tap the VOID ⓘ heading: a box under
+  the header row reads "VOID ×8" in purple, "Only from fusing during a
+  Void Moon (1 in 20 fusions). …", "You have X / 17". Tap it again (or
+  change tier) to close. Golden / Diamond / Rainbow mention Rainbow Storm
+  ×5 and Golden Rain ×3; Charged lightning; Celestial "15%".
+- [ ] **Odds board.** At desktop distance from the machine the board reads
+  as a table: "FUSE → TIER UP", "more orbs = better odds", ORBS IN 2–6,
+  one row per recipe with an orb dot, every % in its own cell, 100% cells
+  teal, the footer. No mutation line. At Rebirth 0 the Mythic → Secret row
+  reads R1 in every cell; after `/rebirths 1` the numbers show. On a phone
+  (Device emulator) the cells are still legible from the walkway. The Fuse
+  panel's chips are one two-line chip per count with a gap; the count in
+  the chamber is highlighted.
+- [ ] **Sounds.** No bell loops near Mythic / Secret pedestals any more. Put
+  a nonsense id (`rbxassetid://1`) in one SoundConfig slot: the output
+  shows one "SoundKit: <slot> failed to load …" warning at start and that
+  sound is simply silent afterwards; empty slots (Thunder, CoinPickup, …)
+  play nothing with no errors.
