@@ -412,7 +412,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   players get every free reward. **Free pulls and reward items** go
   through `TycoonService.GrantFreePulls` / `GrantRewardItem`: the plot's
   real pull path (VFX, Index, banners, the pull card with the reward's
-  caption) and they **don't raise the pad price**.
+  caption) and they **don't raise the pad price** (`PlayerData.FreePulls`,
+  not `GachaPulls`); they do count for the `gacha_pull` goal and the
+  FirstPull funnel step (the Day 7 / gift item does not).
   Client: `DailyController` opens `UI/DailyCard` once per session when
   claimable, 2 s after the first sync and only when no other card is open
   (UIKit overlays, shop side cards), so never over the welcome-back card;

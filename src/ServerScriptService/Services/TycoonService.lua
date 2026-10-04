@@ -1051,8 +1051,19 @@ end
 -- if the player has no plot yet (nothing is given).
 function TycoonService.GrantFreePulls(player: Player, count: number, caption: string): boolean
 	local puller = rewardPullersByUserId[player.UserId]
-	local rolled = puller and rollPulls(math.max(1, math.floor(count)), getLuck(player))
-	return puller ~= nil and rolled ~= nil and puller(rolled, caption)
+	local pulls = math.max(1, math.floor(count))
+	local rolled = puller and rollPulls(pulls, getLuck(player))
+	if not puller or not rolled then
+		return false
+	end
+	-- Before the puller's sync, so the first-pull goal pays in that snapshot.
+	PlayerDataService.IncrementFreePulls(player, pulls)
+	if not puller(rolled, caption) then
+		PlayerDataService.IncrementFreePulls(player, -pulls)
+		return false
+	end
+	AnalyticsKit.Funnel(player, "FirstPull")
+	return true
 end
 
 -- One item of `tier` with the normal pull mutation roll (the Day 7 / gift

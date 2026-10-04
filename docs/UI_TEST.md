@@ -1152,7 +1152,8 @@ published place.
   CLAIM for each n:
   1: cash · 2: "⚡ ×2 income · 15 min banked" and the HUD boost chip ·
   3: the card closes and the "🎁 DAY 3 · FREE PULLS" pull card shows 3
-  pulls (pad price unchanged) · 4: "🍀 ×2 luck", the pad odds rise ·
+  pulls (pad price unchanged; on a fresh profile the "Pull from the Gacha
+  Pad" goal completes and Output prints `funnel 4 FirstPull`) · 4: "🍀 ×2 luck", the pad odds rise ·
   5: Safe Fusion tokens +1 in the Fuse panel · 6: ×2 income 60 min ·
   7: the "🎁 DAY 7 REWARD" reveal of an Epic / Legendary / Mythic item
   (can be mutated), RevealMajor.

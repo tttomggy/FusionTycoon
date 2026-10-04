@@ -36,6 +36,7 @@ type PlayerData = {
 	PedestalDisplays: { [number]: string? },
 	CashMultiplierLevel: number,
 	GachaPulls: number,
+	FreePulls: number,
 	GoalIndex: number,
 	TotalFusions: number,
 	Rebirths: number,
@@ -108,7 +109,9 @@ local EVALUATORS: { [string]: Evaluator } = {
 		return level >= 5, math.min(level, 5), 5
 	end,
 	gacha_pull = function(_player, data)
-		return yesNo(data.GachaPulls >= 1)
+		-- Free pulls (daily / gifts) count too: they're real pulls, they
+		-- just don't move the pad price.
+		return yesNo(data.GachaPulls >= 1 or data.FreePulls >= 1)
 	end,
 	display_item = function(_player, data)
 		return yesNo(next(data.PedestalDisplays) ~= nil)

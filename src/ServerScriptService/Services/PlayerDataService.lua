@@ -114,6 +114,9 @@ export type PlayerData = {
 	-- The highest base income ($/s, no timed boosts) this save has reached:
 	-- the street's BEST INCOME board (LeaderboardService).
 	BestIncome: number,
+	-- Free pulls taken (daily / gift rewards). Kept apart from GachaPulls,
+	-- which sets the pad price; both count for the first-pull goal.
+	FreePulls: number,
 	-- Onboarding funnel steps already logged (AnalyticsKit.FunnelSteps), so
 	-- each is sent once per player ever.
 	Funnel: { [string]: boolean },
@@ -280,6 +283,7 @@ local DEFAULT_DATA: PlayerData = {
 	Daily = DailyConfig.Default(),
 	Gifts = GiftConfig.Default(-1),
 	BestIncome = 0,
+	FreePulls = 0,
 	Funnel = {},
 	Version = DATA_VERSION,
 }
@@ -438,6 +442,9 @@ local function reconcile(raw: any): PlayerData
 		data.Sessions = math.floor(raw.Sessions)
 	end
 	data.Daily = DailyConfig.Sanitize(raw.Daily)
+	if typeof(raw.FreePulls) == "number" and raw.FreePulls >= 0 then
+		data.FreePulls = math.floor(raw.FreePulls)
+	end
 	if typeof(raw.Funnel) == "table" then
 		for step, done in raw.Funnel do
 			if done == true and table.find(AnalyticsKit.FunnelSteps, step) then
@@ -835,6 +842,15 @@ end
 function PlayerDataService.GetGachaPulls(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.GachaPulls else 0
+end
+
+-- A free pull (daily / gift): counts for the first-pull goal, never for
+-- the pad price.
+function PlayerDataService.IncrementFreePulls(player: Player, count: number)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.FreePulls += count
+	end
 end
 
 function PlayerDataService.IncrementGachaPulls(player: Player)
