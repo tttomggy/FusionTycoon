@@ -56,8 +56,9 @@ roll better"; mixed → a red warning box naming how many lower orbs are in
 and what is lost ("⚠ 1 plain orb mixed in: the Epic comes out plain, not
 Golden…"), those orbs ringed red; all plain → no line. AUTO-FILL only adds
 the first orb's mutation (an empty chamber fills plain orbs). The fusion
-result carries `MutationSource = "Kept" | "Rolled"`: the success card (big
-card and skipped line) shows the pill and "GOLDEN kept" / "GOLDEN rolled!";
+result carries `MutationSource = "Kept" | "Rolled"`: the big card shows
+the pill and "GOLDEN kept" / "GOLDEN rolled!" (without a big card, your own
+"FUSION SUCCESS!" banner says it);
 the fail card says "Kept your Golden Rare (…)". The five count chips sit in
 **one row** (non-wrapping list, scale widths, 6 px gaps; the % TextScaled
 with a max of 18). The **Index** (`IndexConfig`, 119 entries =
@@ -98,7 +99,10 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   BEST OF 10 and fusion successes (fail cards and Fuse All unchanged); a
   skipped card pops a **small line** above the bottom bar for 2.5 s (orb
   dot, "+ Golden Plasma Orb" in the mutation colour, the tier, "+$X/s";
-  max 3, older ones fade). The client applies a change at once
+  max 3, older ones fade) — except your own fusions: their top "FUSION
+  SUCCESS!" banner already shows the result, so they get no line
+  (`ResultController.FusionBannerShows` decides both; other players still
+  see the server-wide banner). The client applies a change at once
   (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
   UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
   wide, one scrolling list of sections; only "Big reveal card" so far:

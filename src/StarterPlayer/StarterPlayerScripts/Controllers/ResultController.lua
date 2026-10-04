@@ -8,9 +8,10 @@
 	    Fusion cards wait for FusionController.FusionResolved, i.e. after the
 	    machine's reveal animation, so the card never spoils it.
 	  * Fail card (bottom) - a failed fusion, 3 s, with an AGAIN button.
-	  * Skipped-card lines (bottom) - a pull / fusion success / BEST OF 10
-	    whose big card the player's RevealRule skips (Settings): one small
-	    line each, 2.5 s, at most 3.
+	  * Skipped-card lines (bottom) - a pull or BEST OF 10 whose big card
+	    the player's RevealRule skips (Settings): one small line each,
+	    2.5 s, at most 3. A skipped fusion success gets none: your own top
+	    banner already shows it (FusionBannerShows).
 
 	  * Pull x10 grid (centre) - all ten pulls popping in 0.06 s apart; the
 	    best one (by GetItemCashPerSecond) is outlined and, if it qualifies,
@@ -1516,9 +1517,23 @@ function ResultController.ShowsBigCardFor(tier: string, mutation: string?): bool
 	return SettingsConfig.ShowsBigCard(tier, mutation, TycoonController.GetRevealRule())
 end
 
+-- Does your own "FUSION SUCCESS!" top banner (AnnouncementController) show
+-- this fusion result? Every success without a big card. The one rule both
+-- sides read: the banner shows exactly then, and the skipped line doesn't.
+function ResultController.FusionBannerShows(result: any): boolean
+	if typeof(result) ~= "table" or not result.Success or not result.Upgraded or typeof(result.NewItem) ~= "table" then
+		return false
+	end
+	local item = result.NewItem
+	return typeof(item.Tier) == "string"
+		and not MutationConfig.IsEventOnly(item.Mutation)
+		and not ResultController.ShowsBigCardFor(item.Tier, item.Mutation)
+end
+
 -- "GOLDEN kept" (carried over from the inputs) or "GOLDEN rolled!" (a
--- fresh fusion roll), from the server's MutationSource.
-local function mutationSourceLine(mutation: string?, source: unknown): string?
+-- fresh fusion roll), from the server's MutationSource. Public so the
+-- fusion banner (AnnouncementController) can say it too.
+function ResultController.GetMutationSourceLine(mutation: string?, source: unknown): string?
 	if not mutation then
 		return nil
 	end
@@ -1543,7 +1558,7 @@ local function onFusionResolved(result: any)
 		showEventMutationCard(newItem, result.IsNewIndex == true or result.NewIndex == true)
 		return
 	end
-	local sourceLine = mutationSourceLine(newItem.Mutation, result.MutationSource)
+	local sourceLine = ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource)
 	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
@@ -1556,7 +1571,9 @@ local function onFusionResolved(result: any)
 				NumberFormat.Money(earnRate(newItem))
 			),
 		})
-	else
+	elseif not ResultController.FusionBannerShows(result) then
+		-- Your own fusion's top banner already shows this result (and the
+		-- kept / rolled line); only a result without one gets the line.
 		showSkippedLine(newItem, sourceLine)
 	end
 end

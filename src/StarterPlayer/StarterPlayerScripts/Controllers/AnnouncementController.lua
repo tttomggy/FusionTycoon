@@ -6,8 +6,9 @@
 	    Legendary or Mythic) - Mythic gets the bigger "SERVER · MYTHIC" variant
 	  * server-wide RebirthAnnouncement - the same big kit as "SERVER · REBIRTH",
 	    shown to everyone including the player who rebirthed
-	  * your own events: multiplier upgrades, completed goals, and Rare-tier
-	    fusion successes (Epic+ get ResultController's big card instead)
+	  * your own events: multiplier upgrades, completed goals, and every
+	    fusion success without a big card (your RevealRule; the banner says
+	    "GOLDEN kept / rolled!" and replaces the skipped-card line)
 
 	Queued so a burst plays one at a time. Fusion banners are "instant": the
 	newest replaces whatever is showing. Error messages (e.g. "Need $936 for
@@ -36,6 +37,8 @@ local Fonts = UITheme.Fonts
 
 local BANNER_WIDTH = 520
 local BANNER_HEIGHT = 64
+local SMALL_BANNER_TEXT_MAX = 21
+local SMALL_BANNER_TEXT_MIN = 14
 local MYTHIC_BANNER_HEIGHT = 84
 local VISIBLE_Y = 24
 local SLIDE_IN_SECONDS = 0.35
@@ -231,12 +234,15 @@ local function buildBanner(announcement: Announcement): Frame
 			Parent = body,
 		})
 	else
-		UIKit.Label({
+		-- Scales down (21 → 14 px) so a long line ("FUSION SUCCESS! → EPIC
+		-- Golden Plasma Orb · GOLDEN kept") fits before it truncates.
+		local message = UIKit.Label({
 			Name = "Message",
 			Text = announcement.Text,
 			RichText = true,
 			Font = Fonts.Display,
-			TextSize = 21,
+			TextSize = SMALL_BANNER_TEXT_MAX,
+			TextScaled = true,
 			Position = UDim2.fromOffset(32, 0),
 			Size = UDim2.new(1, -48, 1, 0),
 			TextTruncate = Enum.TextTruncate.AtEnd,
@@ -244,6 +250,10 @@ local function buildBanner(announcement: Announcement): Frame
 			Stroke = UITheme.Stroke.Text,
 			Parent = body,
 		})
+		local cap = Instance.new("UITextSizeConstraint")
+		cap.MaxTextSize = SMALL_BANNER_TEXT_MAX
+		cap.MinTextSize = SMALL_BANNER_TEXT_MIN
+		cap.Parent = message
 	end
 
 	return holder
@@ -492,15 +502,21 @@ local function onFusionResolved(result: any)
 	end
 	local newItem = result.NewItem
 	local tier = newItem.Tier :: string
-	-- Epic+ get the big result card; fails get the fail card.
-	if ResultController.ShowsBigCardFor(tier, newItem.Mutation) then
+	-- Big-card results (the player's RevealRule) and event mutations get
+	-- their card instead; fails get the fail card. Same rule that keeps the
+	-- skipped line off (ResultController.FusionBannerShows).
+	if not ResultController.FusionBannerShows(result) then
 		return
 	end
 	local def = ItemConfig.GetItemById(newItem.ItemId)
+	local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(def and def.Name or tostring(newItem.ItemId), newItem.Mutation))
+	local mutationColor = UITheme.GetMutationColor(newItem.Mutation)
+	local sourceLine = ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource)
 	enqueueInstant({
-		Text = ("FUSION SUCCESS! → %s %s"):format(
+		Text = ("FUSION SUCCESS! → %s %s%s"):format(
 			tierWord(tier),
-			UIKit.EscapeRichText(def and def.Name or tostring(newItem.ItemId))
+			if mutationColor then UIKit.Colored(name, mutationColor) else name,
+			if sourceLine and mutationColor then " · " .. UIKit.Colored(UIKit.EscapeRichText(sourceLine), mutationColor) else ""
 		),
 		AccentColor = FusionConfig.TierAccentColors[tier] or Colors.Text,
 	})
