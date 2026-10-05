@@ -12,11 +12,28 @@ function NumberFormat.Short(value: number): string
 		return "0"
 	end
 	local negative = value < 0
+	local sign = if negative then "-" else ""
 	local n = math.abs(value)
+	if n == math.huge then
+		return sign .. "∞"
+	end
 	local index = 1
-	while n >= 1000 and index < #SUFFIXES do
-		n /= 1000
-		index += 1
+	if n >= 1000 then
+		-- The suffix from log10, not by dividing by 1000 repeatedly: eleven
+		-- divisions drift (1e33 came out "999No" instead of "1Dc").
+		local thousands = math.min(math.floor(math.log10(n) / 3 + 1e-9), #SUFFIXES - 1)
+		n /= 1000 ^ thousands
+		index = thousands + 1
+	end
+	if n >= 1000 then
+		-- Past the last suffix (1e36+): "1.23e45". "%d" there threw ("no
+		-- integer representation") and took the label's whole UI with it.
+		local exponent = math.floor(math.log10(math.abs(value)))
+		local mantissa = math.abs(value) / 10 ^ exponent
+		if mantissa >= 9.995 then
+			mantissa, exponent = 1, exponent + 1
+		end
+		return sign .. ("%.2fe%d"):format(mantissa, exponent)
 	end
 
 	local text
@@ -42,8 +59,12 @@ function NumberFormat.Money(value: number): string
 	return "$" .. NumberFormat.Short(value)
 end
 
--- "x1.5", "x2", "x12.5"
+-- "x1.5", "x2", "x12.5" (huge ones: "x1.2M"; never "%d" past 1e15, which
+-- throws for numbers with no integer representation).
 function NumberFormat.Multiplier(value: number): string
+	if value ~= value or math.abs(value) >= 1e6 then
+		return "x" .. NumberFormat.Short(value)
+	end
 	if value == math.floor(value) then
 		return ("x%d"):format(value)
 	end
