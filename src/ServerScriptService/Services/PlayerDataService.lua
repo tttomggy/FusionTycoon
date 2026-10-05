@@ -37,6 +37,7 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
@@ -361,8 +362,8 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw) ~= "table" then
 		return data
 	end
-	if typeof(raw.Cash) == "number" then
-		data.Cash = raw.Cash
+	if typeof(raw.Cash) == "number" and raw.Cash == raw.Cash and raw.Cash ~= math.huge then
+		data.Cash = math.clamp(raw.Cash, 0, 1e300)
 	end
 	if typeof(raw.Inventory) == "table" then
 		data.Inventory = raw.Inventory
@@ -646,12 +647,23 @@ function PlayerDataService.GetCash(player: Player): number
 end
 
 -- Mirrors the authoritative Cash value onto the player's leaderstats display.
+-- A StringValue ("$1.2Qa"), not an IntValue: late-game cash passes the
+-- int64 range (~9.2e18), and assigning that to an IntValue would break the
+-- income tick for every player after this one.
 local function updateLeaderstatsCash(player: Player)
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
-	if cashValue and cashValue:IsA("IntValue") then
-		cashValue.Value = math.floor(PlayerDataService.GetCash(player))
+	if cashValue and cashValue:IsA("StringValue") then
+		cashValue.Value = NumberFormat.Money(PlayerDataService.GetCash(player))
 	end
+end
+
+-- Cash stays finite and saveable: a DataStore can't hold inf / NaN, and
+-- NumberFormat reads up to 1e300.
+local MAX_CASH = 1e300
+
+local function isFinite(n: number): boolean
+	return n == n and n ~= math.huge and n ~= -math.huge
 end
 
 local function updateLeaderstatsRebirths(player: Player)
@@ -668,14 +680,21 @@ function PlayerDataService.AddCash(player: Player, amount: number)
 	if not data then
 		return
 	end
-	data.Cash = math.max(0, data.Cash + amount)
+	-- A NaN amount used to zero the cash (math.max(0, NaN) is 0) and an
+	-- inf one made every later save fail. Refuse both, loudly.
+	if not isFinite(amount) then
+		warn(("PlayerDataService: refused non-finite AddCash(%s) for %s"):format(tostring(amount), player.Name))
+		return
+	end
+	data.Cash = math.clamp(data.Cash + amount, 0, MAX_CASH)
 	updateLeaderstatsCash(player)
 end
 
 -- Atomically checks-and-deducts; fails (no mutation) if funds are insufficient.
 function PlayerDataService.SpendCash(player: Player, amount: number): boolean
 	local data = state.sessionCache[player.UserId]
-	if not data or data.Cash < amount then
+	-- A NaN cost turned cash into NaN; a negative one added money.
+	if not data or not isFinite(amount) or amount < 0 or data.Cash < amount then
 		return false
 	end
 	data.Cash -= amount
@@ -1457,9 +1476,9 @@ local function createLeaderstats(player: Player)
 	rebirthsValue.Value = 0
 	rebirthsValue.Parent = leaderstats
 
-	local cashValue = Instance.new("IntValue")
+	local cashValue = Instance.new("StringValue")
 	cashValue.Name = "Cash"
-	cashValue.Value = 0
+	cashValue.Value = NumberFormat.Money(0)
 	cashValue.Parent = leaderstats
 
 	leaderstats.Parent = player
