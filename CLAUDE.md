@@ -162,7 +162,12 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/daily miss <days>` (as if you missed that many days: 1 = the free
   skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
   (today's play time), `/gifts reset`,
-  `/wipe` (fails your active steals first). **`/selftest`** runs the Bug
+  `/wipe` (fails your active steals first). **`/trailer`** (admins, live
+  servers too; AdminService → S→C `TrailerStart { Shot?, Stop? }`):
+  TrailerController plays the ~30 s video-thumbnail cinematic on that
+  client only (local orbs / NPC rigs / cards / `EventController.PreviewLocal`
+  skies, clean frame, everything restored), shots and plot-local camera
+  keyframes in `TrailerConfig`; `/trailer <shot>`, `/trailer stop` or F8. **`/selftest`** runs the Bug
   Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
   round trip, a junk-remote fuzz with no error / state change, every panel
   at both scales with no leftover instances) and prints PASS / FAIL lines;
@@ -620,7 +625,8 @@ src/ReplicatedStorage/Shared/
                  ShopConfig — every pass / product and shop number,
                  RewardConfig — free reward kinds and their labels,
                  DailyConfig — the 7-day daily reward and streak,
-                 GiftConfig — the playtime gifts, …)
+                 GiftConfig — the playtime gifts,
+                 TrailerConfig — the /trailer shots and camera, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -841,6 +847,7 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
 `GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
 only),
+`TrailerStart` (S→one admin, `/trailer`),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

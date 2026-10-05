@@ -1433,3 +1433,38 @@ featured banner is the Starter Pack.
   card per row, the featured banner stacks (icon, text, a full-width buy
   button).
 - [ ] `/selftest`: PASS for ShopPanel at both scales.
+
+## 32. Trailer (/trailer, admins only)
+
+`/trailer` plays the ~30 s cinematic on YOUR client only (TrailerController).
+Admins are `AdminConfig.AdminUserIds` plus the place owner. Record from a
+built-up lab (generators running), with no event live (the HUD chip says
+NEXT), so no live coins or craters wander into the shots.
+
+- [ ] **Non-admin:** a non-admin's `/trailer` does nothing at all.
+- [ ] **Full run:** black + "3 2 1", then night → pull → fuse → heist →
+  void moon → hold, each joined by a quick fade through black. Every
+  pedestal (all 6, the +2 spots solid) shows the lineup's glowing mutated
+  orbs. The pull shows the real pad burst and the Rainbow Legendary card;
+  the fuse shows the machine's real charge-up and reveal, a Secret and the
+  "FUSION SUCCESS!" banner; the heist shows the hold ring, the carry orb,
+  RUN!, CAUGHT! and the whip-pan; the void moon shows the purple moon,
+  then the Void reveal with the event-mutation card; the hold is a still
+  wide shot with the Secret on pedestal 1. No HUD, chat, player list,
+  prompts or characters in any frame.
+- [ ] **Twice in a row:** run it again straight after: identical.
+- [ ] **One shot:** `/trailer heist` (and each of night, pull, fuse,
+  voidmoon, hold) plays just that shot after the countdown.
+- [ ] **Stop mid-shot:** press F8 (the chat bar is hidden during the run,
+  so F8 is the in-trailer stop; `/trailer stop` works whenever chat is
+  reachable): everything is back at once.
+- [ ] **Reset mid-shot:** Esc → Reset during a shot: it stops cleanly.
+- [ ] **2-player server:** the other player sees NOTHING change: no orbs,
+  NPCs, cards, banners, sky or sounds; your character stays where it was;
+  your pedestals still show your real items.
+- [ ] **Everything restored afterwards:** HUD and every gui as before, the
+  CoreGui (chat, player list, backpack), prompts work, the camera follows
+  you again at the normal FOV, your character visible, the Lighting exactly
+  as before (and a live event's sky comes back if one started meanwhile),
+  your pedestals show your own items and labels, the machine core visible,
+  nothing left in Workspace.TrailerLocal.
