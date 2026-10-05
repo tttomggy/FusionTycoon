@@ -939,7 +939,6 @@ local function buildShopRow()
 		Parent = shopRow,
 		Style = "Gold",
 		Text = "🛒 SHOP",
-		TextColor3 = Colors.GoldText,
 		TextSize = 22,
 		Size = UDim2.fromOffset(SHOP_BUTTON_SIZE.X, SHOP_BUTTON_SIZE.Y),
 		LayoutOrder = 1,

@@ -15,10 +15,12 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+local TextChatService = game:GetService("TextChatService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 
 local UIKit = {}
@@ -34,6 +36,8 @@ local PRESS_UP_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Back, Enum.EasingDire
 local POP_IN_INFO = TweenInfo.new(0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 local POP_OUT_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 local PRESS_DEPTH = 4
+local SELECT_BOUNCE_INFO = TweenInfo.new(0.16, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+local SELECT_BOUNCE_FROM = 0.94
 
 --[[ Small helpers ------------------------------------------------------------ ]]
 
@@ -312,8 +316,16 @@ function UIKit.Button(props: ButtonProps): (TextButton, Frame)
 	button.Parent = holder
 	UIKit.Corner(button, props.Radius or UITheme.Radius.Button)
 	UIKit.Stroke(button)
-	local gradient = UIKit.PairGradient(button, UITheme.Gradients[props.Style or "Green"] or UITheme.Gradients.Green)
+	local pair = UITheme.Gradients[props.Style or "Green"] or UITheme.Gradients.Green
+	local gradient = UIKit.PairGradient(button, pair)
 	gradient.Name = "Fill"
+	-- The contrast rule: a warm fill always gets white text (UITheme.TextOn).
+	local warm = UITheme.IsWarmPair(pair)
+	button:SetAttribute("Warm", warm)
+	local textColor = if warm then UITheme.WarmText else (props.TextColor3 or Colors.Text)
+	if props.TextColor3 then
+		button:SetAttribute("TextColor", props.TextColor3)
+	end
 
 	local content = Instance.new("Frame")
 	content.Name = "Content"
@@ -362,7 +374,7 @@ function UIKit.Button(props: ButtonProps): (TextButton, Frame)
 		Text = props.Text or "",
 		Font = Fonts.Display,
 		TextSize = textSize,
-		TextColor3 = props.TextColor3 or Colors.Text,
+		TextColor3 = textColor,
 		AutomaticSize = Enum.AutomaticSize.XY,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 1,
@@ -370,13 +382,14 @@ function UIKit.Button(props: ButtonProps): (TextButton, Frame)
 		Stroke = UITheme.Stroke.Text,
 		Parent = textColumn,
 	})
-	-- No drop stroke on the tiny sub-label; it would swallow the glyphs.
-	UIKit.Label({
+	-- No heavy drop stroke on the tiny sub-label; it would swallow the
+	-- glyphs. A 1 px one on warm fills keeps white legible on gold.
+	local subLabel = UIKit.Label({
 		Name = "SubLabel",
 		Text = props.SubText or "",
 		Font = Fonts.BodyHeavy,
 		TextSize = props.SubTextSize or 11,
-		TextColor3 = props.TextColor3 or Colors.Text,
+		TextColor3 = textColor,
 		AutomaticSize = Enum.AutomaticSize.XY,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 2,
@@ -384,6 +397,9 @@ function UIKit.Button(props: ButtonProps): (TextButton, Frame)
 		Visible = props.SubText ~= nil and props.SubText ~= "",
 		Parent = textColumn,
 	})
+	local subStroke = UIKit.TextStroke(subLabel, 1)
+	subStroke.Name = "WarmStroke"
+	subStroke.Enabled = warm
 
 	UIKit.Shadow(button, props.ShadowOffset)
 	UIKit.AttachPress(button)
@@ -407,13 +423,19 @@ export type ButtonState = {
 }
 
 -- Restyles a UIKit.Button in place (state changes: affordable, locked, ...).
+-- The text colour follows the contrast rule: white on a warm Style, else
+-- state.TextColor3 (or the one the button was built with).
 function UIKit.SetButton(button: TextButton, state: ButtonState)
 	if state.Style then
 		local gradient = button:FindFirstChild("Fill") :: UIGradient?
 		local pair = UITheme.Gradients[state.Style]
 		if gradient and pair then
 			UIKit.SetPairGradient(gradient, pair)
+			button:SetAttribute("Warm", UITheme.IsWarmPair(pair))
 		end
+	end
+	if state.TextColor3 then
+		button:SetAttribute("TextColor", state.TextColor3)
 	end
 	local column = button:FindFirstChild("Content") and (button :: any).Content:FindFirstChild("TextColumn")
 	if not column then
@@ -428,12 +450,17 @@ function UIKit.SetButton(button: TextButton, state: ButtonState)
 		subLabel.Text = state.SubText
 		subLabel.Visible = state.SubText ~= ""
 	end
-	if state.TextColor3 then
-		if label then
-			label.TextColor3 = state.TextColor3
-		end
-		if subLabel then
-			subLabel.TextColor3 = state.TextColor3
+	local warm = button:GetAttribute("Warm") == true
+	local chosen = button:GetAttribute("TextColor")
+	local color = if warm then UITheme.WarmText elseif typeof(chosen) == "Color3" then chosen else Colors.Text
+	if label then
+		label.TextColor3 = color
+	end
+	if subLabel then
+		subLabel.TextColor3 = color
+		local stroke = subLabel:FindFirstChild("WarmStroke") :: UIStroke?
+		if stroke then
+			stroke.Enabled = warm
 		end
 	end
 end
@@ -467,6 +494,55 @@ function UIKit.AttachPress(button: GuiButton)
 	button.MouseButton1Up:Connect(release)
 	button.MouseLeave:Connect(release)
 	button.SelectionLost:Connect(release)
+end
+
+--[[ Selected state -------------------------------------------------------------
+	Every tab, chip and segment row: the SELECTED item is the UPGRADES green
+	with white text; the rest stay the muted panel colour. A tap bounces the
+	item (UIScale 0.94 -> 1) and plays the Toast slot.
+]]
+UIKit.SELECTED_STYLE = "Green"
+UIKit.UNSELECTED_STYLE = "Disabled"
+
+-- A UIKit.Button as a tab / chip: green + white when selected, else the
+-- muted Disabled fill with `unselectedText` (default Muted).
+function UIKit.SetSelected(button: TextButton, selected: boolean, unselectedText: Color3?)
+	UIKit.SetButton(button, {
+		Style = if selected then UIKit.SELECTED_STYLE else UIKit.UNSELECTED_STYLE,
+		TextColor3 = if selected then Colors.Text else (unselectedText or Colors.Muted),
+	})
+end
+
+-- The same for a plain Frame / TextButton (custom tabs, segments): a green
+-- gradient named "SelectFill" when selected, else `unselected` (default
+-- Panel3). Text on it is the caller's (white when selected).
+function UIKit.SetSelectedFill(gui: GuiObject, selected: boolean, unselected: Color3?)
+	local gradient = gui:FindFirstChild("SelectFill") :: UIGradient?
+	if not gradient then
+		local created = UIKit.PairGradient(gui, UITheme.Gradients[UIKit.SELECTED_STYLE])
+		created.Name = "SelectFill"
+		gradient = created
+	end
+	(gradient :: UIGradient).Enabled = selected
+	gui.BackgroundColor3 = if selected then Colors.White else (unselected or Colors.Panel3)
+end
+
+-- The tap feedback for a tab / chip / segment: a quick press-bounce and
+-- the Toast sound. Uses its own UIScale ("SelectScale"); an object that
+-- already has another UIScale (a PopScale) only gets the sound.
+function UIKit.SelectFeedback(gui: GuiObject)
+	local scale = gui:FindFirstChild("SelectScale") :: UIScale?
+	if not scale and not gui:FindFirstChildOfClass("UIScale") then
+		local created = Instance.new("UIScale")
+		created.Name = "SelectScale"
+		created.Parent = gui
+		scale = created
+	end
+	if scale then
+		scale.Scale = SELECT_BOUNCE_FROM
+		TweenService:Create(scale, SELECT_BOUNCE_INFO, { Scale = 1 }):Play()
+	end
+	SoundKit.Play("Toast", nil)
 end
 
 --[[ Pill / Badge ------------------------------------------------------------- ]]
@@ -514,18 +590,20 @@ function UIKit.Pill(props: PillProps): TextLabel
 	else
 		fill.BackgroundColor3 = props.Color or Colors.Panel2
 	end
+	-- The contrast rule: white text with the ink stroke on a warm fill.
+	local warm = if props.Gradient then UITheme.IsWarmPair(props.Gradient) else UITheme.IsWarm(fill.BackgroundColor3)
 
 	local pill = UIKit.Label({
 		Name = "Text",
 		Text = props.Text or "",
 		Font = props.Font or Fonts.BodyHeavy,
 		TextSize = props.TextSize or 13,
-		TextColor3 = props.TextColor3 or Colors.Text,
+		TextColor3 = if warm then UITheme.WarmText else (props.TextColor3 or Colors.Text),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromScale(0, 1),
 		ZIndex = fill.ZIndex + 1,
 		TextXAlignment = Enum.TextXAlignment.Center,
-		Stroke = props.TextStroke,
+		Stroke = if warm then math.max(props.TextStroke or 0, UITheme.WarmTextStroke) else props.TextStroke,
 	})
 	UIKit.Padding(pill, 0, 10, 0, 10)
 	pill.Parent = fill
@@ -905,10 +983,17 @@ end
 -- A fixed-size card (offset layout) taller than the screen: shrink it as a
 -- whole (through its PopScale, so PopIn / PopOut keep working) to leave
 -- `margin` px above and below. Call before PopIn. Uses the logical height
--- (after the phone UIScale). Returns the scale used.
+-- (after the phone UIScale). A card centred at (0.5, 0.5) also moves down
+-- below UIKit.GetTopSafe() (desktop chat). Returns the scale used.
 function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): number
 	local logical = viewportHeight() / (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
-	local fit = math.clamp((logical - 2 * (margin or 12)) / height, 0.5, 1)
+	local top = 0
+	local position = holder.Position
+	if holder.AnchorPoint.Y == 0.5 and position.Y.Scale == 0.5 then
+		top = UIKit.GetTopSafe()
+		holder.Position = UDim2.new(position.X.Scale, position.X.Offset, 0.5, top / 2)
+	end
+	local fit = math.clamp((logical - top - 2 * (margin or 12)) / height, 0.5, 1)
 	holder:SetAttribute("FitScale", fit)
 	getPopScale(holder).Scale = fit
 	return fit
@@ -1072,10 +1157,36 @@ export type Modal = {
 	IsOpen: () -> boolean,
 }
 
+--[[ Top safe area (desktop) ------------------------------------------------------
+	On desktop the Roblox chat window sits under the top bar, over the
+	top-left of anything centred (the Daily card's title was hidden behind
+	it). Centred modals start below TOP_SAFE there. Phones are unchanged
+	(their chat is a collapsed button).
+]]
+UIKit.TOP_BAR_HEIGHT = 58 -- the Roblox top bar
+UIKit.CHAT_HEIGHT = 180 -- the default desktop chat window under it
+UIKit.TOP_SAFE = UIKit.TOP_BAR_HEIGHT + UIKit.CHAT_HEIGHT
+local BOTTOM_SAFE = 12
+
+-- Px a centred card must keep clear at the top right now: TOP_SAFE on
+-- desktop with the chat window on, the top bar on desktop without it, 0 on
+-- phones.
+function UIKit.GetTopSafe(): number
+	if UIKit.IsPhone() then
+		return 0
+	end
+	local ok, chatOn = pcall(function()
+		return TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+			and TextChatService.ChatWindowConfiguration.Enabled
+	end)
+	return if ok and chatOn then UIKit.TOP_SAFE else UIKit.TOP_BAR_HEIGHT
+end
+
 -- Centered modal: dim backdrop, 92% wide on phone, capped at MaxSize by a
 -- UISizeConstraint, header gradient, title and red close button. The panel
 -- sits inside a CanvasGroup so PopOut can fade it; the group is a few px
 -- larger than the panel so the 4 px stroke and the shadow aren't clipped.
+-- On desktop it centres in the area below UIKit.GetTopSafe().
 local MODAL_MARGIN = 4
 
 function UIKit.Modal(props: ModalProps): Modal
@@ -1094,11 +1205,22 @@ function UIKit.Modal(props: ModalProps): Modal
 	local root = Instance.new("CanvasGroup")
 	root.Name = "Root"
 	root.AnchorPoint = Vector2.new(0.5, 0.5)
-	root.Position = UDim2.fromScale(0.5, 0.5)
-	root.Size = UDim2.fromScale(0.92, 0.9)
 	root.BackgroundTransparency = 1
 	root.ZIndex = 2
 	root.Parent = gui
+	local function placeRoot()
+		local top = UIKit.GetTopSafe()
+		if top > 0 then
+			-- Centred in [top, height - BOTTOM_SAFE].
+			root.Position = UDim2.new(0.5, 0, 0.5, (top - BOTTOM_SAFE) / 2)
+			root.Size = UDim2.new(0.92, 0, 1, -(top + BOTTOM_SAFE))
+		else
+			root.Position = UDim2.fromScale(0.5, 0.5)
+			root.Size = UDim2.fromScale(0.92, 0.9)
+		end
+	end
+	placeRoot()
+	UIKit.LayoutChanged:Connect(placeRoot)
 	local constraint = Instance.new("UISizeConstraint")
 	constraint.MaxSize = props.MaxSize + Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
 	constraint.Parent = root
@@ -1174,6 +1296,7 @@ function UIKit.Modal(props: ModalProps): Modal
 
 	local function open()
 		isOpen = true
+		placeRoot()
 		UIKit.SetOverlay(props.Name, true)
 		gui.Enabled = true
 		backdrop.BackgroundTransparency = 1

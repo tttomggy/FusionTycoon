@@ -302,7 +302,6 @@ local function build(): UIKit.Modal
 		Parent = strip,
 		Style = "Gold",
 		Text = "OPEN",
-		TextColor3 = Colors.GoldText,
 		TextSize = 16,
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.fromScale(1, 0.5),

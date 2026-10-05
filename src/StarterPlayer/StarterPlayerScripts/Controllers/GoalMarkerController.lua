@@ -240,7 +240,9 @@ local function buildMarker(goalText: string, danger: boolean, pulse: boolean?)
 		Text = goalText:upper(),
 		Font = Fonts.Display,
 		TextSize = 20,
-		TextColor3 = if danger then Colors.Text else Colors.GoldText,
+		-- White with the ink stroke on gold (the contrast rule) or red.
+		TextColor3 = Colors.Text,
+		Stroke = UITheme.WarmTextStroke,
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextScaled = true,

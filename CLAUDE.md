@@ -689,6 +689,24 @@ src/StarterPlayer/StarterPlayerScripts/
   `pill.Parent` from the caller's side of the pill. `UIKit.MutationPill`
   returns the fill Frame. (Plain-colour pills used to BE the label, so
   hiding `.Parent` hid the SHOP button and the whole SHOP / GIFTS row.)
+- **Contrast rule:** on any gold, yellow or orange fill, text is **white**
+  with the ink stroke (the UPGRADES / ITEMS / INDEX look), never dark brown
+  or gold-on-gold. `UITheme.IsWarm` / `IsWarmPair` / `TextOn` decide it;
+  `UIKit.Button` / `SetButton` / `Pill` and BillboardKit's `Pad` / `Chip`
+  pills apply it by themselves (a warm Style ignores `TextColor3`). A
+  hand-built label on a warm fill uses `UITheme.WarmText` +
+  `WarmTextStroke`. There is no dark "gold text" token.
+- **Selected state:** a tab / chip / segment row's selected item is the
+  UPGRADES green with white text, the rest the muted panel colour:
+  `UIKit.SetSelected(button, selected)` for a UIKit.Button,
+  `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
+  a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
+  `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
+- **Chat-safe top (desktop):** centred cards start below `UIKit.TOP_SAFE`
+  (Roblox top bar 58 + chat 180) so their title is never under chat;
+  `UIKit.Modal` and `UIKit.FitHeight` (on a card centred at 0.5, 0.5) do it
+  through `UIKit.GetTopSafe()` (0 on phones, the top bar alone when the chat
+  window is off).
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per

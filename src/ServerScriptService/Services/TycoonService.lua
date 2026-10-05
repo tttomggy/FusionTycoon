@@ -552,8 +552,6 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		TitleColor = UITheme.Colors.GoldLabel,
 		Pill = "",
 		PillGradient = UITheme.Gradients.Gold,
-		PillTextColor = UITheme.Colors.GoldText,
-		PillTextStroke = false,
 		Detail = getOddsText(getLuck(player)),
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 		TallDetail = true,
@@ -736,7 +734,6 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		PillGradient = UITheme.Gradients.Violet,
 		-- The price, in the same Gold pill as the Gacha's "$483 / pull".
 		SecondPillGradient = UITheme.Gradients.Gold,
-		SecondPillTextColor = UITheme.Colors.GoldText,
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
 	local prompt = newPrompt(pad, "UpgradePrompt", "Upgrade", "Cash Multiplier", PlotLayout.Station.PromptDistance)
@@ -937,8 +934,6 @@ local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
 		TitleColor = UITheme.Colors.GoldLabel,
 		Pill = "+$0/s",
 		PillGradient = UITheme.Gradients.Gold,
-		PillTextColor = UITheme.Colors.GoldText,
-		PillTextStroke = false,
 		StudsOffset = Vector3.new(0, c.LabelOffsetY, 0),
 		MaxDistance = c.LabelMaxDistance,
 		OwnerOnly = true,

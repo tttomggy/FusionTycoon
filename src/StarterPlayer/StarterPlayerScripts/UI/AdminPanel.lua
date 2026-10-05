@@ -35,8 +35,8 @@ local Fonts = UITheme.Fonts
 local MAX_SIZE = Vector2.new(600, 620)
 local TAP = UITheme.MinTapSize
 local GAP = 8
-local SELECTED_STYLE = "Violet"
-local UNSELECTED_STYLE = "Disabled"
+local SELECTED_STYLE = UIKit.SELECTED_STYLE
+local UNSELECTED_STYLE = UIKit.UNSELECTED_STYLE
 local STEP_HOUR = 3600
 
 local modal: UIKit.Modal? = nil
@@ -125,6 +125,7 @@ local function picker(options: { { Label: string, Value: any } }, width: number,
 	for _, option in options do
 		local b: TextButton
 		b = button(parent, option.Label, width, UNSELECTED_STYLE, function()
+			UIKit.SelectFeedback(b)
 			set(option.Value)
 			restyle(option.Value)
 		end)

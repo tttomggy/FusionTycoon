@@ -408,8 +408,11 @@ local function buildChips(cards: { Card })
 			Name = filter or "All",
 			Parent = chipsRow,
 			Text = label,
-			Color = if selected then Colors.White else Colors.Panel2,
-			TextColor3 = if selected then Colors.Ink else textColor,
+			-- Selected = the UPGRADES green with white text.
+			Gradient = if selected then UITheme.Gradients[UIKit.SELECTED_STYLE] else nil,
+			Color = Colors.Panel2,
+			TextColor3 = if selected then Colors.Text else textColor,
+			TextStroke = if selected then 1.5 else nil,
 			Font = Fonts.BodyHeavy,
 			TextSize = 13,
 			Height = UITheme.MinTapSize - 8,
@@ -429,6 +432,11 @@ local function buildChips(cards: { Card })
 		hit.Activated:Connect(function()
 			selectedFilter = filter
 			renderGrid()
+			-- The chips were rebuilt: bounce the new one.
+			local rebuilt = chipsRow:FindFirstChild(filter or "All")
+			if rebuilt and rebuilt:IsA("GuiObject") then
+				UIKit.SelectFeedback(rebuilt)
+			end
 		end)
 	end
 

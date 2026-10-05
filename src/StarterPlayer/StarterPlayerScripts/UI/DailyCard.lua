@@ -97,7 +97,9 @@ local function buildTile(day: number, stateName: string, z: number)
 		ShadowOffset = UITheme.SmallShadowOffset,
 		ZIndex = z,
 	})
-	local textColor = if isToday then Colors.GoldText else Colors.Text
+	-- The contrast rule: white with the ink stroke on today's gold tile.
+	local textColor = Colors.Text
+	local textStroke = if isToday then UITheme.WarmTextStroke else nil
 	local inner = body.ZIndex + 1
 	UIKit.Label({
 		Name = "DayLabel",
@@ -105,6 +107,7 @@ local function buildTile(day: number, stateName: string, z: number)
 		Font = Fonts.BodyHeavy,
 		TextSize = 13,
 		TextColor3 = textColor,
+		Stroke = textStroke,
 		Position = UDim2.fromOffset(0, 6),
 		Size = UDim2.new(1, 0, 0, 16),
 		TextXAlignment = Enum.TextXAlignment.Center,
@@ -127,6 +130,7 @@ local function buildTile(day: number, stateName: string, z: number)
 		Font = Fonts.BodyHeavy,
 		TextSize = 12,
 		TextColor3 = textColor,
+		Stroke = textStroke,
 		TextWrapped = true,
 		Position = UDim2.fromOffset(2, 62),
 		Size = UDim2.new(1, -4, 0, 30),
@@ -141,7 +145,8 @@ local function buildTile(day: number, stateName: string, z: number)
 			Text = "TODAY",
 			Font = Fonts.Display,
 			TextSize = 14,
-			TextColor3 = Colors.GoldText,
+			TextColor3 = UITheme.WarmText,
+			Stroke = UITheme.WarmTextStroke,
 			AnchorPoint = Vector2.new(0, 1),
 			Position = UDim2.new(0, 0, 1, -6),
 			Size = UDim2.new(1, 0, 0, 16),

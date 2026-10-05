@@ -447,8 +447,11 @@ local function refresh(force: boolean?)
 			else ("%s at %d"):format(percent(IndexConfig.BonusPerCompletedTier), total)
 		tab.Goal.Visible = selected
 		UIKit.SetProgress(tab.Bar, if total > 0 then have / total else 0)
+		-- The active pill is the UPGRADES green (the name keeps its tier
+		-- colour); the rest stay the muted panel colour.
+		UIKit.SetSelectedFill(tab.Button, selected, Colors.Panel2)
 		tab.Button.BackgroundTransparency = if selected then 0 else 0.45
-		tab.Stroke.Color = if selected then UITheme.GetTierLight(tier) else Colors.Ink
+		tab.Stroke.Color = if selected then Colors.Text else Colors.Ink
 		tab.Stroke.Thickness = if selected then 3 else 2
 	end
 	-- The page only rebuilds when what it shows changed.
@@ -495,18 +498,20 @@ local function buildTab(parent: Instance, tier: string, order: number, z: number
 		Position = UDim2.fromOffset(10, 27),
 		Size = UDim2.new(0.5, -10, 0, 16),
 		ZIndex = z + 1,
+		Stroke = 1.5,
 		Parent = button,
 	})
 	local goal = UIKit.Label({
 		Name = "Goal",
 		Font = Fonts.BodyHeavy,
 		TextSize = 12,
-		TextColor3 = Colors.GoldLabel,
+		TextColor3 = Colors.Text,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -10, 0, 27),
 		Size = UDim2.new(0.5, 0, 0, 16),
 		TextXAlignment = Enum.TextXAlignment.Right,
 		ZIndex = z + 1,
+		Stroke = 1.5,
 		Parent = button,
 	})
 	local bar = UIKit.ProgressBar({
@@ -518,6 +523,7 @@ local function buildTab(parent: Instance, tier: string, order: number, z: number
 		ZIndex = z + 1,
 	})
 	button.Activated:Connect(function()
+		UIKit.SelectFeedback(button)
 		if selectedTier ~= tier then
 			selectedTier = tier
 			refresh()

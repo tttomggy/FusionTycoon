@@ -199,14 +199,13 @@ local function ribbon(parent: Instance, text: string, z: number)
 		Parent = parent,
 		Text = text,
 		Gradient = if text == "VIP" then UITheme.Gradients.Gold else UITheme.Gradients.Red,
-		TextColor3 = if text == "VIP" then Colors.GoldText else Colors.Text,
 		Font = Fonts.Display,
 		TextSize = 12,
 		Height = 22,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -8, 0, 8),
 		ZIndex = z,
-		TextStroke = if text == "VIP" then nil else 1.5,
+		TextStroke = 1.5,
 	})
 end
 
@@ -282,7 +281,7 @@ local function buildFeatured()
 		Text = if entry.SaleOf then "🔥 ADMIN ABUSE SALE" elseif key == "StarterPack" then "🎁 ONE TIME ONLY" else "⭐ BEST VALUE",
 		Font = Fonts.BodyHeavy,
 		TextSize = 14,
-		TextColor3 = Colors.GoldLabel,
+		TextColor3 = Colors.Text,
 		Position = UDim2.fromOffset(textLeft, 18),
 		Size = UDim2.new(1, -(textLeft + 200), 0, 18),
 		ZIndex = z + 2,
@@ -325,7 +324,6 @@ local function buildFeatured()
 			Parent = fill,
 			Text = ("SAVE %d%%"):format(save),
 			Gradient = UITheme.Gradients.Gold,
-			TextColor3 = Colors.GoldText,
 			Font = Fonts.Display,
 			TextSize = 16,
 			Height = 28,
@@ -478,10 +476,7 @@ local function buildGrid()
 	end
 	for tab, button in tabButtons do
 		local selected = tab == selectedTab
-		UIKit.SetButton(button, {
-			Style = if selected then "Gold" else "Disabled",
-			TextColor3 = if selected then Colors.GoldText else Colors.Muted,
-		})
+		UIKit.SetSelected(button, selected)
 	end
 end
 
