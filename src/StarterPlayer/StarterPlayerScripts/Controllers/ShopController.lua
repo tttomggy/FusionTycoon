@@ -36,7 +36,8 @@
 	StarterOfferDelaySeconds after joining, a dismissible side card. After
 	that it only lives in the shop's featured slot until bought.
 
-	Also: refusal toasts, the THANK YOU card after a grant, the VIP chat
+	Also: refusal toasts, the purchase celebration after a grant
+	(UI/PurchaseCelebration), the VIP chat
 	prefix (TextChatService, from the Player attribute "VIP").
 ]]
 local Players = game:GetService("Players")
@@ -56,6 +57,7 @@ local ToastController = require(script.Parent.ToastController)
 local FusionController = require(script.Parent.FusionController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ShopCards = require(script.Parent.Parent.UI.ShopCards)
+local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 
 local ShopController = {}
 
@@ -298,8 +300,7 @@ local function onPurchased(payload: any)
 		local reason = if typeof(payload.Reason) == "string" then payload.Reason else "Unknown"
 		ToastController.Show(REFUSAL_TOASTS[reason] or REFUSAL_TOASTS.Unknown, "Error")
 	elseif payload.Result == "Granted" then
-		local lines = if typeof(payload.Lines) == "table" then payload.Lines else {}
-		ShopCards.ShowThankYou(lines, payload.Test == true)
+		PurchaseCelebration.Show(payload)
 	end
 	purchased:Fire(payload)
 end

@@ -165,8 +165,15 @@ end
 	the THANK YOU card.
 ]]
 
+-- What each grant did, for the client's purchase celebration (filled by the
+-- grant helpers during one synchronous grant, sent as ShopPurchased.Effects):
+-- { Kind = "Cash", Amount } | { Kind = "Boost" | "Luck" | "Overclock",
+-- Seconds } | { Kind = "Tokens", Count, Total } | { Kind = "Pass", Key }.
+local grantEffects: { { [string]: any } } = {}
+
 local function grantBoost(player: Player, seconds: number): string
 	PlayerDataService.AddBoostSeconds(player, "Income", seconds)
+	table.insert(grantEffects, { Kind = "Boost", Seconds = seconds })
 	local banked = PlayerDataService.GetBoostSeconds(player, "Income")
 	return ("⚡ ×%d income · %d min banked"):format(ShopConfig.BoostMultiplier, math.floor(banked / 60))
 end
@@ -174,6 +181,7 @@ end
 local function grantCash(player: Player, packKey: string): string
 	local amount = ShopConfig.GetCashPackAmount(packKey, PlayerDataService.GetBasePassiveCashPerSecond(player))
 	PlayerDataService.AddCash(player, amount)
+	table.insert(grantEffects, { Kind = "Cash", Amount = amount })
 	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.IAP.Name, packKey)
 	return ("💰 +%s cash"):format(NumberFormat.Money(amount))
 end
@@ -183,6 +191,7 @@ local function grantOverclock(player: Player): string
 	local current = ShopState.GetOverclockSeconds()
 	local seconds = math.min(ShopConfig.MaxOverclockSeconds, current + ShopConfig.OverclockSeconds)
 	Workspace:SetAttribute("OverclockUntil", now + seconds)
+	table.insert(grantEffects, { Kind = "Overclock", Seconds = ShopConfig.OverclockSeconds })
 	Workspace:SetAttribute("OverclockBy", player.DisplayName)
 	state.overclockWasOn = true
 	RemoteEvents.ShopAnnouncement:FireAllClients({
@@ -196,6 +205,11 @@ local function grantOverclock(player: Player): string
 		ShopConfig.OverclockMultiplier,
 		math.floor(seconds / 60)
 	)
+end
+
+local function grantTokens(player: Player, count: number)
+	PlayerDataService.AddSafeFusionTokens(player, count)
+	table.insert(grantEffects, { Kind = "Tokens", Count = count, Total = PlayerDataService.GetSafeFusionTokens(player) })
 end
 
 local GRANTS: { [string]: (Player) -> { string } } = {
@@ -222,20 +236,22 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 	end,
 	LuckPotion = function(player)
 		PlayerDataService.AddBoostSeconds(player, "Luck", ShopConfig.LuckPotionSeconds)
+		table.insert(grantEffects, { Kind = "Luck", Seconds = ShopConfig.LuckPotionSeconds })
 		local banked = PlayerDataService.GetBoostSeconds(player, "Luck")
 		return { ("🧪 ×%d luck · %d min banked"):format(ShopConfig.LuckPotionMultiplier, math.floor(banked / 60)) }
 	end,
 	SafeFusion1 = function(player)
-		PlayerDataService.AddSafeFusionTokens(player, ShopConfig.SafeFusionTokens.SafeFusion1)
+		grantTokens(player, ShopConfig.SafeFusionTokens.SafeFusion1)
 		return { ("🛡 Safe Fusion · you have %d"):format(PlayerDataService.GetSafeFusionTokens(player)) }
 	end,
 	SafeFusion5 = function(player)
-		PlayerDataService.AddSafeFusionTokens(player, ShopConfig.SafeFusionTokens.SafeFusion5)
+		grantTokens(player, ShopConfig.SafeFusionTokens.SafeFusion5)
 		return { ("🛡 +5 Safe Fusion · you have %d"):format(PlayerDataService.GetSafeFusionTokens(player)) }
 	end,
 	StarterPack = function(player)
 		PlayerDataService.SetStarterPackBought(player)
 		PlayerDataService.GrantCosmetic(player, "LabStyle")
+		table.insert(grantEffects, { Kind = "Pass", Key = "LabStyle" })
 		return {
 			"🎨 Neon Pink Lab",
 			grantBoost(player, ShopConfig.BoostSeconds.StarterPack),
@@ -244,6 +260,7 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 	end,
 	OfflineDouble = function(player)
 		local extra = PlayerDataService.DoubleOfflinePayout(player)
+		table.insert(grantEffects, { Kind = "Cash", Amount = extra })
 		return { ("🌙 Offline cash doubled · +%s"):format(NumberFormat.Money(extra)) }
 	end,
 }
@@ -252,7 +269,9 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 local function grant(player: Player, key: string, test: boolean?): { string }
 	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
 	local lines: { string }
+	grantEffects = {}
 	if item.Kind == "Pass" then
+		table.insert(grantEffects, { Kind = "Pass", Key = key })
 		local owned = state.owned[player.UserId] or {}
 		owned[key] = true
 		state.owned[player.UserId] = owned
@@ -266,7 +285,9 @@ local function grant(player: Player, key: string, test: boolean?): { string }
 	AnalyticsKit.Custom(player, "Purchase", nil, key)
 	runPassHooks(player)
 	syncPlayer(player)
-	RemoteEvents.ShopPurchased:FireClient(player, { Key = key, Result = "Granted", Lines = lines, Test = test == true })
+	local effects = grantEffects
+	grantEffects = {}
+	RemoteEvents.ShopPurchased:FireClient(player, { Key = key, Result = "Granted", Lines = lines, Effects = effects, Test = test == true })
 	return lines
 end
 

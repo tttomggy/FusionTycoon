@@ -34,6 +34,7 @@ local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local ShopPanel = require(script.Parent.Parent.UI.ShopPanel)
+local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 local GiftsPanel = require(script.Parent.Parent.UI.GiftsPanel)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
@@ -87,6 +88,7 @@ local displayedCash = 0
 
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
+local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
 local multiplierPill: TextLabel
 local breakdownHolder: Frame
 local breakdownLabel: TextLabel
@@ -417,7 +419,28 @@ local function buildCashCard(): Frame
 	return holder
 end
 
+-- The purchase celebration holds the counter at the old amount until its
+-- coins land (HudController.HoldCash).
+local cashHoldUntil = 0
+local incomeCountFrom: number? = nil
+local incomeCountStart = 0
+local INCOME_COUNT_SECONDS = 0.8
+
 local function onRenderStep(dt: number)
+	local count = incomeCountFrom
+	if count then
+		local u = math.clamp((os.clock() - incomeCountStart) / INCOME_COUNT_SECONDS, 0, 1)
+		local now = getIncomePerSecond()
+		incomeLabel.Text = ("+%s%s"):format(NumberFormat.Money(count + (now - count) * u), UIKit.Colored("/s", Colors.Muted))
+		if u >= 1 then
+			incomeCountFrom = nil
+			incomeLabel.TextColor3 = Colors.Text
+		end
+	end
+	if os.clock() < cashHoldUntil then
+		cashLabel.Text = NumberFormat.Short(math.floor(displayedCash))
+		return
+	end
 	local target = TycoonController.GetCash()
 	-- Ease toward the real value so income "ticks up" instead of snapping;
 	-- big drops (spending) snap immediately so it never shows cash you don't have.
@@ -431,6 +454,68 @@ local function onRenderStep(dt: number)
 	end
 	-- The coin stands for "$": the number only.
 	cashLabel.Text = NumberFormat.Short(math.floor(displayedCash))
+end
+
+--[[ Purchase celebration hooks (UI/PurchaseCelebration) ------------------------ ]]
+
+local function screenCentre(gui: GuiObject): Vector2
+	return gui.AbsolutePosition + gui.AbsoluteSize / 2
+end
+
+local function bounce(gui: GuiObject)
+	local scale = gui:FindFirstChild("BounceScale") :: UIScale?
+	if not scale then
+		local created = Instance.new("UIScale")
+		created.Name = "BounceScale"
+		created.Parent = gui
+		scale = created
+	end
+	local s = scale :: UIScale
+	s.Scale = 1.18
+	TweenService:Create(s, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+end
+
+-- Screen point (px) of the cash counter: where the coins fly.
+function HudController.GetCashTarget(): Vector2
+	return screenCentre(cashLabel)
+end
+
+-- Shows `amount` on the counter for `seconds` (the coins are in the air),
+-- then it ticks up to the real cash as usual.
+function HudController.HoldCash(amount: number, seconds: number)
+	displayedCash = math.max(0, amount)
+	cashHoldUntil = os.clock() + seconds
+end
+
+function HudController.BounceCash()
+	bounce(cashLabel)
+end
+
+-- The timed pill for "Income" | "Luck" | "Server" (nil while it's hidden).
+function HudController.GetEffectPill(kind: string): TextLabel?
+	local pill = (effectPills :: any)[kind] :: TextLabel?
+	return pill
+end
+
+function HudController.PopEffectPill(kind: string)
+	local pill = HudController.GetEffectPill(kind)
+	if pill then
+		local fill = UIKit.PillRoot(pill)
+		fill.Visible = true
+		bounce(fill)
+	end
+end
+
+-- The $/s line counts up from `from` to the real income with a green flash.
+function HudController.CountUpIncome(from: number)
+	incomeCountFrom = from
+	incomeCountStart = os.clock()
+	incomeLabel.TextColor3 = Colors.Cash
+	bounce(incomeLabel)
+end
+
+function HudController.GetIncomePerSecond(): number
+	return getIncomePerSecond()
 end
 
 --[[ Bottom buttons -------------------------------------------------------- ]]
@@ -908,7 +993,6 @@ local GIFTS_BOUNCE_SCALE = 1.08
 local shopRow: Frame
 local shopHolder: Frame
 local saleTag: TextLabel
-local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
 local giftsButton: TextButton
 local giftsScale: UIScale
 local giftsNextPill: TextLabel
@@ -1179,6 +1263,16 @@ function HudController.Init()
 
 	buildGoalTracker()
 	cashHolder = buildCashCard()
+	PurchaseCelebration.SetHud({
+		GetCashTarget = HudController.GetCashTarget,
+		HoldCash = HudController.HoldCash,
+		BounceCash = HudController.BounceCash,
+		GetEffectPill = HudController.GetEffectPill,
+		PopEffectPill = HudController.PopEffectPill,
+		CountUpIncome = HudController.CountUpIncome,
+		GetIncomePerSecond = HudController.GetIncomePerSecond,
+		GetCash = TycoonController.GetCash,
+	})
 	buildButtonRow()
 	buildRebirthReadyButton()
 	buildLockChip()
