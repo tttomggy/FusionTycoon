@@ -1300,3 +1300,51 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   event info card (in their list order), "OWNED 3" on Safe Fusion tiles,
   the daily card's skip chip, and the HOW TO HEIST scene labels (they
   follow the 3D scene and hide when off-screen).
+
+## 28. Bug Hunt 1
+
+- [ ] **/selftest.** Plain Studio Play, no event running (`/event off`):
+  `/selftest`. Output: "[SelfTest] running for … (store: Mock)", every
+  line PASS, "done: N passed, 0 failed". The panels flash open and shut at
+  desktop then phone scale while it runs (~30 s). With `FT_StudioSaves`
+  it says "store: StudioTest"; it never runs against the live store.
+- [ ] **Live shop with no ids.** Published place with every ShopConfig id
+  still 0: no SHOP button (GIFTS sits where it was); the locked pedestal
+  spots read "Locked · +2 Pedestals · coming soon" and only toast. Studio
+  still shows SHOP with TEST tiles.
+- [ ] **Leaderboard Cash column.** The player list shows Cash as "$1.2M"
+  (text). `/cash 1e20`: still shows ("$100Qi"), income keeps ticking, no
+  error in Output.
+- [ ] **NumberFormat.** `/cash 1e40`: the HUD reads "$1.00e40", nothing
+  breaks.
+- [ ] **Gifts panel fits.** Desktop and phone: both box rows are fully
+  visible or scroll into view; the footer sits under the boxes, never over
+  them.
+- [ ] **Event card on a phone.** 844 × 390, `/eventmut void`: the whole
+  event card (title to OK) is on screen, scaled down.
+- [ ] **Offline with passes.** Own 2× Cash (`/shop grant doublecash` in a
+  FT_StudioSaves session), leave, `/offline 60` on rejoin: the payout
+  counts the 2× pass.
+- [ ] **Spam.** Hold the Upgrades panel's upgrade button / mash a pedestal
+  prompt: it works at human speed; a script firing 50 / s gets "Slow down
+  a little" and nothing else happens.
+
+## 29. Reset and respawn
+
+Reset your character (Esc → Reset) in the middle of each of these, and check
+nothing sticks or breaks afterwards:
+
+- [ ] **Each panel / card open** (Upgrades, Shop, Gifts, Daily, Index,
+  Settings, Fuse, Rebirth, HOW TO HEIST, a pull / fusion / event result
+  card): it stays usable or closes cleanly; reopening works; HUD intact.
+- [ ] **During a pull and a fusion:** the result card still shows; the item
+  is in the inventory once.
+- [ ] **During a heist, as the thief:** the carry ends (death = it goes
+  back), the orb leaves your head, walk speed is normal after respawn.
+- [ ] **During a heist, as the owner:** after respawning you still run at
+  the chase speed (18) until the carry ends, then normal.
+- [ ] **During each event** (`/event <id>`): coins / craters / strikes
+  keep working; the goal / event arrow points from your new character;
+  pedestal and station prompts still work.
+- [ ] **After respawn:** goal arrow distance counts from the new character;
+  the GIFTS bounce / next pill and SHOP are unchanged.

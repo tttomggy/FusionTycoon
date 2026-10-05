@@ -162,7 +162,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/daily miss <days>` (as if you missed that many days: 1 = the free
   skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
   (today's play time), `/gifts reset`,
-  `/wipe` (fails your active steals first).
+  `/wipe` (fails your active steals first). **`/selftest`** runs the Bug
+  Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
+  round trip, a junk-remote fuzz with no error / state change, every panel
+  at both scales with no leftover instances) and prints PASS / FAIL lines;
+  it refuses unless saves go to the mock store or `FT_StudioTest_1`.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
@@ -623,6 +627,8 @@ src/ServerScriptService/
                            only PlayerDataService requires it
     Modules/AnalyticsKit.lua   the one AnalyticsService wrapper (not a
                            service; required directly)
+    Modules/RemoteGuard.lua    remote arg checks (`Int`: finite whole numbers
+                           in range) and the per-player rate limit (`Allow`)
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
                            WorldService builds ground, street, Event Boards
@@ -800,7 +806,8 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
 `ShopAnalytics` (C→S `{ Event, Key? }`, analytics only), `ClaimDaily`
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
-`GiftResult` (S→C),
+`GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
+only),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
@@ -815,6 +822,13 @@ themselves. It is a plain callback list on purpose: a BindableEvent handler
 would run deferred, after the snapshot was already sent.
 
 ### Server authority
+
+Remote handlers validate numbers with `RemoteGuard.Int` (a NaN or ±inf
+passes `math.floor` + a range check) and rate-limit anything that syncs
+or loops with `RemoteGuard.Allow`. Cash only moves through
+`PlayerDataService.AddCash` / `SpendCash`, which refuse non-finite and
+negative amounts and keep cash in [0, 1e300]; the leaderstats Cash column
+is a StringValue (an IntValue overflows past int64).
 
 Services never trust client-supplied ownership, tiers, or instance references.
 Resolve everything server-side from the requesting `Player` and validate before
