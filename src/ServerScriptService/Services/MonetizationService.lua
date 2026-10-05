@@ -42,6 +42,8 @@ local Workspace = game:GetService("Workspace")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -153,6 +155,15 @@ local function refusal(player: Player, key: string, atReceipt: boolean?): string
 			return "SaleOver"
 		end
 	end
+	if item.Deal and not DealState.IsCurrent(key) then
+		-- Only the current slot's deal sells; a prompt made inside its slot
+		-- is honoured at the receipt for DealConfig.ReceiptGraceSeconds.
+		local prompted = state.salePromptedAt[player.UserId]
+		local at = prompted and prompted[key]
+		if not (atReceipt and at and os.clock() - at <= DealConfig.ReceiptGraceSeconds) then
+			return "DealOver"
+		end
+	end
 	if key == "OfflineDouble" and PlayerDataService.GetOfflineDoubleAmount(player) <= 0 then
 		return "NothingToDouble"
 	end
@@ -212,7 +223,36 @@ local function grantTokens(player: Player, count: number)
 	table.insert(grantEffects, { Kind = "Tokens", Count = count, Total = PlayerDataService.GetSafeFusionTokens(player) })
 end
 
-local GRANTS: { [string]: (Player) -> { string } } = {
+local GRANTS: { [string]: (Player) -> { string } }
+
+-- A deal grants its parts through their own grants (identical Safe Fusion
+-- parts in one go, so the celebration counts them together).
+local function grantParts(player: Player, key: string): { string }
+	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
+	local lines: { string } = {}
+	local tokens = 0
+	local parts: { string } = item.Parts or {}
+	for _, part in parts do
+		local count = ShopConfig.SafeFusionTokens[part]
+		if count then
+			tokens += count
+		else
+			local handler = GRANTS[part]
+			if handler then
+				for _, line in handler(player) do
+					table.insert(lines, line)
+				end
+			end
+		end
+	end
+	if tokens > 0 then
+		grantTokens(player, tokens)
+		table.insert(lines, ("🛡 +%d Safe Fusion · you have %d"):format(tokens, PlayerDataService.GetSafeFusionTokens(player)))
+	end
+	return lines
+end
+
+GRANTS = {
 	QuickBoost = function(player)
 		return { grantBoost(player, ShopConfig.BoostSeconds.QuickBoost) }
 	end,
@@ -257,6 +297,15 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 			grantBoost(player, ShopConfig.BoostSeconds.StarterPack),
 			grantCash(player, "PocketCash"),
 		}
+	end,
+	DealPowerHour = function(player)
+		return grantParts(player, "DealPowerHour")
+	end,
+	DealFusionKit = function(player)
+		return grantParts(player, "DealFusionKit")
+	end,
+	DealRichLab = function(player)
+		return grantParts(player, "DealRichLab")
 	end,
 	OfflineDouble = function(player)
 		local extra = PlayerDataService.DoubleOfflinePayout(player)
@@ -402,7 +451,7 @@ local function onRequestShopPurchase(player: Player, payload: unknown)
 		grant(player, key, true)
 		return
 	end
-	if item.SaleOf then
+	if item.SaleOf or item.Deal then
 		local prompted = state.salePromptedAt[player.UserId] or {}
 		prompted[key] = os.clock()
 		state.salePromptedAt[player.UserId] = prompted
@@ -513,6 +562,11 @@ function MonetizationService.GrantForTest(player: Player, key: string): (boolean
 end
 
 -- Registers a callback run after a player's passes or grants change.
+-- Why `key` can't be sold to `player` right now (nil = it can); /selftest.
+function MonetizationService.GetRefusal(player: Player, key: string): string?
+	return refusal(player, key)
+end
+
 function MonetizationService.OnPassesChanged(callback: (Player) -> ())
 	table.insert(state.passHooks, callback)
 end
@@ -520,7 +574,15 @@ end
 -- Client-side shop moments, for analytics only (AnalyticsKit custom
 -- events). Names and keys are whitelisted; one per name per player per
 -- SHOP_ANALYTICS_SECONDS.
-local SHOP_ANALYTICS_EVENTS = { ShopOpened = true, OfferShown = true, OfferAccepted = true, OfferDismissed = true }
+local SHOP_ANALYTICS_EVENTS = {
+	ShopOpened = true,
+	OfferShown = true,
+	OfferAccepted = true,
+	OfferDismissed = true,
+	DealShown = true,
+	DealOpened = true,
+	DealDismissed = true,
+}
 local SHOP_ANALYTICS_SECONDS = 2
 local lastShopAnalytics: { [number]: { [string]: number } } = {}
 

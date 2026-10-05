@@ -26,7 +26,15 @@ tile shows the item's emoji in a circle.
   version of `Boost`: give it the lower price. It's only sellable while
   Admin Abuse is live, and the shop shows the normal `Boost` price
   struck through next to it.
-- Testing without Robux in Studio: type `/shop grant <key>` in chat.
+- **Deals are separate products too** (`DealConfig`). One is on sale per
+  6-hour UTC slot, rotating so the same deal never runs twice in a row.
+  Each must cost **less than its parts** at your live prices: a deal only
+  shows while its live saving is at least 15%. Planned: Power Hour 99
+  (parts 128, −23%), Fusion Kit 79 (parts 124, −36%), Rich Lab 179 (parts
+  228, −21%). Upload `marketing/shop_icons/Deal*.png` as their icons.
+- Testing without Robux in Studio: type `/shop grant <key>` in chat;
+  `/deal slot <hours>` walks the deal rotation, `/deal pop` shows the
+  "New deal!" card.
 
 | Key | Type | Name | Price (R$) | Description | Restricted |
 |---|---|---|---|---|---|
@@ -48,6 +56,9 @@ tile shows the item's emoji in a circle.
 | `SafeFusion5` | Developer Product | Safe Fusion x5 | 99 | Five Safe Fusion tokens: arm one in the Fuse panel, and if that fusion fails you keep every orb. | yes |
 | `StarterPack` | Developer Product | Starter Pack | 99 | One time only: the Neon Pink Lab look, a 1 hour x2 Boost and Pocket Cash. | yes |
 | `OfflineDouble` | Developer Product | Double Offline Cash | 25 | Doubles the cash your lab earned while you were away (the welcome-back card's COLLECT x2). | yes |
+| `DealPowerHour` | Developer Product | Power Hour Deal | 99 | A x2 income Boost for 1 hour plus a x2 Luck Potion for 15 minutes, for less than buying both. | yes |
+| `DealFusionKit` | Developer Product | Fusion Kit Deal | 79 | Three Safe Fusion tokens plus a x2 Luck Potion for 15 minutes, for less than buying them one by one. | yes |
+| `DealRichLab` | Developer Product | Rich Lab Deal | 179 | A Cash Crate (2 hours of your lab's income) plus a 15 minute x2 Quick Boost, for less than buying both. | yes |
 
 After pasting ids: publish, join the live game, open the shop and check
 every price shows (an item whose price never loads has a wrong id or type).

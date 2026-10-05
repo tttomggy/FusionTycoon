@@ -69,7 +69,7 @@ local PASS_HEIGHT = 140
 local TILE_HEIGHT = 244
 local GRID_GAP = 12
 local NARROW_WIDTH = 560 -- logical px of page width under which tiles go 2-up
-local REFRESH_SECONDS = 2
+local REFRESH_SECONDS = 1
 local SHINE_SECONDS = 0.9
 local SHINE_EVERY_SECONDS = 3
 local BOB_PIXELS = 5
@@ -98,6 +98,7 @@ local headers: { [string]: Frame } = {}
 local sectionOrder: { string } = {}
 local tiles: { TileRefs } = {}
 local featuredRefs: { Key: string?, Detail: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
+local dealRefs: { Key: string?, Line: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
 local activeSection: string? = nil
 local scrollLockUntil = 0 -- a chip's tween owns the active chip until then
 local builtSignature = ""
@@ -645,6 +646,115 @@ local function buildFeatured(key: string, order: number)
 	featuredRefs.Key = key
 end
 
+-- The 🔥 DEAL banner: the current slot's bundle (ShopController.GetDeal),
+-- its parts as mini icons, the live "normally ~~128~~ · now 99 (−23%)" and
+-- the real countdown to the next slot.
+local function buildDeal(deal: ShopController.DealView, order: number)
+	local narrow = pageWidth() < NARROW_WIDTH
+	local holder = Instance.new("Frame")
+	holder.Name = "DealBanner"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.new(1, 0, 0, if narrow then FEATURED_NARROW_HEIGHT else FEATURED_HEIGHT)
+	holder.LayoutOrder = order
+	holder.ZIndex = scroller.ZIndex + 1
+	holder.Parent = scroller
+	local z = holder.ZIndex + 1
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset)
+	fill.BackgroundColor3 = Colors.White
+	fill.ZIndex = z
+	fill.Parent = holder
+	UIKit.Corner(fill, 20)
+	UIKit.Stroke(fill, 3)
+	UIKit.PairGradient(fill, UITheme.Gradients.Pink, 20)
+	UIKit.Shadow(fill, UITheme.SmallShadowOffset)
+	addShine(fill)
+
+	-- The parts as mini icons (the live store icon, or the glyph).
+	local icons = Instance.new("Frame")
+	icons.Name = "Parts"
+	icons.BackgroundTransparency = 1
+	icons.Position = UDim2.fromOffset(16, if narrow then 16 else 52)
+	icons.Size = UDim2.fromOffset(136, 64)
+	icons.ZIndex = z + 2
+	icons.Parent = fill
+	local seen: { [string]: boolean } = {}
+	local count = 0
+	local parts: { string } = deal.Item.Parts or {}
+	for _, part in parts do
+		if not seen[part] and count < 3 then
+			seen[part] = true
+			count += 1
+			iconView(icons, part, 60, UDim2.fromOffset((count - 1) * 44, 0), Vector2.zero, z + 2 + count)
+		end
+	end
+	local textLeft = if narrow then 16 else 168
+	local textRight = if narrow then 16 else 210
+	local textTop = if narrow then 86 else 16
+	UIKit.Label({
+		Name = "Caption",
+		Text = "🔥 DEAL",
+		Font = Fonts.Display,
+		TextSize = 16,
+		Position = UDim2.fromOffset(textLeft, textTop),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 20),
+		ZIndex = z + 2,
+		Stroke = UITheme.WarmTextStroke,
+		Parent = fill,
+	})
+	UIKit.Label({
+		Name = "Title",
+		Text = deal.Item.Name,
+		Font = Fonts.Display,
+		TextSize = if narrow then 24 else 30,
+		Position = UDim2.fromOffset(textLeft, textTop + 20),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 36),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		ZIndex = z + 2,
+		Stroke = 3,
+		Parent = fill,
+	})
+	dealRefs.Line = UIKit.Label({
+		Name = "Price",
+		Text = deal.Item.Effect .. "\n" .. ShopController.GetDealPriceLine(deal),
+		RichText = true,
+		Font = Fonts.Body,
+		TextSize = 15,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(textLeft, textTop + 58),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 40),
+		ZIndex = z + 2,
+		Stroke = UITheme.Stroke.Text,
+		Parent = fill,
+	})
+	dealRefs.Timer = UIKit.Label({
+		Name = "NewIn",
+		Font = Fonts.BodyHeavy,
+		TextSize = 13,
+		Position = UDim2.fromOffset(textLeft, textTop + 102),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 18),
+		ZIndex = z + 2,
+		Stroke = 1.5,
+		Parent = fill,
+	})
+	dealRefs.Price = UIKit.Button({
+		Name = "Buy",
+		Parent = fill,
+		Style = "Green",
+		Text = ShopController.GetPriceText(deal.Key),
+		TextSize = 28,
+		AnchorPoint = if narrow then Vector2.new(0.5, 1) else Vector2.new(1, 0.5),
+		Position = if narrow then UDim2.new(0.5, 0, 1, -14) else UDim2.new(1, -20, 0.5, -2),
+		Size = if narrow then UDim2.new(1, -32, 0, 56) else UDim2.fromOffset(170, 64),
+		ZIndex = z + 2,
+		OnClick = function()
+			ShopController.Buy(deal.Key)
+		end,
+	})
+	dealRefs.Key = deal.Key
+end
+
 -- A pass: a big card (large icon, name, benefit, buy).
 local function buildPassCard(parent: Frame, section: ShopConfig.Section, key: string, order: number)
 	local entry = item(key)
@@ -938,7 +1048,8 @@ end
 -- What the page shows; a change means a rebuild (a purchase, a sale
 -- starting, an icon arriving, a layout switch).
 local function signature(): string
-	local parts = { featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
+	local deal = ShopController.GetDeal()
+	local parts = { if deal then deal.Key .. ":" .. tostring(deal.SlotStart) else "-", featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
 	for _, section in ShopConfig.Sections do
 		for _, key in keysFor(section) do
 			table.insert(parts, key .. (if ShopController.IsOwned(key) then "+" else "") .. (ShopPrices.GetIcon(key) or ""))
@@ -957,17 +1068,23 @@ local function rebuild()
 	table.clear(tiles)
 	sectionOrder = {}
 	featuredRefs = {}
+	dealRefs = {}
+	local deal = ShopController.GetDeal()
 	local best = bestValueKey()
 	local order = 0
 	for _, section in ShopConfig.Sections do
 		local featured = if section.Id == "Featured" then featuredKey() else nil
-		local keys: { string } = if section.Id == "Featured" then {} else keysFor(section)
-		if featured or #keys > 0 then
+		local banner = section.Id == "Featured" or section.Id == "Deal"
+		local keys: { string } = if banner then {} else keysFor(section)
+		local hasDeal = section.Id == "Deal" and deal ~= nil
+		if featured or hasDeal or #keys > 0 then
 			table.insert(sectionOrder, section.Id)
 			order += 1
 			sectionHeader(section, order)
 			order += 1
-			if featured then
+			if hasDeal and deal then
+				buildDeal(deal, order)
+			elseif featured then
 				buildFeatured(featured, order)
 			elseif section.Id == "Passes" then
 				local cards = grid("PassesGrid", order, passColumns(), PASS_HEIGHT)
@@ -989,6 +1106,22 @@ end
 
 -- Text-only refresh (cash amounts, banks, prices, tags, the sale timer).
 local function refreshTexts()
+	local dealKey = dealRefs.Key
+	if dealKey then
+		local deal = ShopController.GetDeal()
+		local timer = dealRefs.Timer
+		if deal and timer then
+			timer.Text = ("New deal in %s"):format(EventState.FormatTimer(deal.SecondsLeft))
+		end
+		local line = dealRefs.Line
+		if deal and line then
+			line.Text = deal.Item.Effect .. "\n" .. ShopController.GetDealPriceLine(deal)
+		end
+		local price = dealRefs.Price
+		if price then
+			UIKit.SetButton(price, { Text = ShopController.GetPriceText(dealKey) })
+		end
+	end
 	for _, refs in tiles do
 		local main, sub = tileLines(refs.Key)
 		if refs.Sub then

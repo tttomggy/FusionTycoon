@@ -998,6 +998,36 @@ local giftsScale: UIScale
 local giftsNextPill: TextLabel
 local giftsBounce: Tween? = nil
 
+-- The 🔥 deal badge (ShopController.GetDeal): the live saving and the real
+-- countdown; it pulses once when a new slot starts; a tap opens the shop at
+-- the deal. Under SHOP / GIFTS on desktop, at the end of their row on a
+-- phone (the column there is full).
+local DEAL_BADGE_SIZE = Vector2.new(176, 40)
+local dealButton: TextButton
+local dealHolder: Frame
+local dealSlot: number? = nil
+local dealShown = false
+local layoutIsPhone = false
+
+local function buildDealBadge()
+	local button, holder = UIKit.Button({
+		Name = "DealBadge",
+		Style = "Pink",
+		Text = "🔥 DEAL",
+		TextSize = 16,
+		Size = UDim2.fromOffset(DEAL_BADGE_SIZE.X, DEAL_BADGE_SIZE.Y + 4),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		LayoutOrder = 9,
+		OnClick = function()
+			ShopPanel.Open("Deal")
+		end,
+	})
+	dealButton = button
+	dealHolder = holder
+	holder.Visible = false
+	holder.Parent = screenGui
+end
+
 local function buildShopRow()
 	shopRow = Instance.new("Frame")
 	shopRow.Name = "ShopRow"
@@ -1116,7 +1146,38 @@ local function buildShopRow()
 end
 
 -- Once a second: the effect pills' timers and the SALE tag.
+local applyLayout: (isPhone: boolean) -> ()
+
+local function refreshDealBadge()
+	local deal = ShopController.GetDeal()
+	local shown = deal ~= nil
+	if deal then
+		UIKit.SetButton(dealButton, {
+			Text = ("🔥 %s · %s"):format(if deal.Save then ("−%d%%"):format(deal.Save) else "DEAL", EventState.FormatTimer(deal.SecondsLeft)),
+		})
+		if dealSlot and dealSlot ~= deal.SlotStart then
+			local pulse = dealButton:FindFirstChild("DealPulse") :: UIScale?
+			if not pulse then
+				local created = Instance.new("UIScale")
+				created.Name = "DealPulse"
+				created.Parent = dealButton
+				pulse = created
+			end
+			local scale = pulse :: UIScale
+			scale.Scale = 1.25
+			TweenService:Create(scale, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		end
+		dealSlot = deal.SlotStart
+	end
+	if shown ~= dealShown then
+		dealShown = shown
+		dealHolder.Visible = shown
+		applyLayout(layoutIsPhone)
+	end
+end
+
 local function refreshShopRow()
+	refreshDealBadge()
 	local function setPill(label: TextLabel, seconds: number, format: string)
 		local fill = UIKit.PillRoot(label)
 		fill.Visible = seconds > 0
@@ -1163,7 +1224,8 @@ local function refreshShopRow()
 	end
 end
 
-local function applyLayout(isPhone: boolean)
+function applyLayout(isPhone: boolean)
+	layoutIsPhone = isPhone
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
 	-- The left column, desktop and phone alike: cash card, then the SHOP /
@@ -1172,6 +1234,15 @@ local function applyLayout(isPhone: boolean)
 	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
 	local lockTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	if isPhone then
+		dealHolder.Parent = shopRow
+	else
+		dealHolder.Parent = screenGui
+		dealHolder.Position = lockTop
+		if dealShown then
+			lockTop += UDim2.fromOffset(0, DEAL_BADGE_SIZE.Y + 4 + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
+		end
+	end
 	lockRow.Position = lockTop
 	goalHolder.Position = if isPhone
 		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
@@ -1277,6 +1348,7 @@ function HudController.Init()
 	buildRebirthReadyButton()
 	buildLockChip()
 	buildShopRow()
+	buildDealBadge()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()

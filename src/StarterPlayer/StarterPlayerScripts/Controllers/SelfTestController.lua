@@ -31,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
@@ -246,6 +247,11 @@ local function run(payload: any)
 	end)
 	local otherUserId = if typeof(payload) == "table" and typeof(payload.OtherUserId) == "number" then payload.OtherUserId else 1
 	local slots = if typeof(payload) == "table" and typeof(payload.Slots) == "table" then payload.Slots else {}
+	local dealSlots = if typeof(payload) == "table" and typeof(payload.DealSlots) == "table" then payload.DealSlots else {}
+	local dealKeys = {}
+	for _, slot in dealSlots do
+		table.insert(dealKeys, DealConfig.GetDealForSlot(slot))
+	end
 
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.
@@ -264,6 +270,7 @@ local function run(payload: any)
 	RemoteEvents.SelfTestReport:FireServer({
 		Stage = "Done",
 		ScheduleHash = scheduleHash(slots),
+		DealHash = table.concat(dealKeys, ","),
 		Panels = panelLines,
 		FailedSounds = failedSounds,
 		ClientErrors = errors,
