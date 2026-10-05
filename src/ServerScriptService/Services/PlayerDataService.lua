@@ -1612,7 +1612,14 @@ function PlayerDataService:Init()
 			local changed = false
 			if request.Key == "RevealRule" then
 				changed = PlayerDataService.SetRevealRule(player, request.Tier, request.Value)
-			elseif request.Key == "SfxVolume" and typeof(request.Value) == "number" then
+			-- Finite numbers only: SanitizeSfxVolume maps NaN / inf to the
+			-- default, so a junk value silently reset the player's volume.
+			elseif
+				request.Key == "SfxVolume"
+				and typeof(request.Value) == "number"
+				and request.Value == request.Value
+				and math.abs(request.Value) ~= math.huge
+			then
 				changed = PlayerDataService.SetSfx(player, request.Value, nil)
 			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
 				changed = PlayerDataService.SetSfx(player, nil, request.Value)
