@@ -1006,7 +1006,7 @@ shows a "TEST" price and tapping it (or `/shop grant <key>`) runs the real
 grant path for free. Live-game checks need real ids (docs/SHOP_SETUP.md).
 
 - [ ] **Every product through `/shop grant`.** For each key, `/shop grant
-  <key>` shows the THANK YOU card (gold sunburst, RevealMajor, "(Studio test
+  <key>` shows the purchase celebration (see §33; "(Studio test
   grant)") with the right lines, and:
   - DoubleCash: the HUD income doubles; tap the multiplier pill: "Passes
     ×2".
@@ -1400,7 +1400,7 @@ featured banner is the Starter Pack.
   the chip of the section on screen turns green, the last one at the very
   bottom.
 - [ ] **Every buy button opens the right prompt** (in Studio: TEST → the
-  THANK YOU card for that exact item). Tapping a tile outside its button
+  purchase celebration for that exact item). Tapping a tile outside its button
   does nothing.
 - [ ] **Owned passes sort last:** `/shop grant doublecash`, `/shop grant
   vip`: both move to the end of Passes with a grey "OWNED ✓" button.
@@ -1433,3 +1433,109 @@ featured banner is the Starter Pack.
   card per row, the featured banner stacks (icon, text, a full-width buy
   button).
 - [ ] `/selftest`: PASS for ShopPanel at both scales.
+
+## 32. Trailer (/trailer, admins only)
+
+`/trailer` plays the ~30 s cinematic on YOUR client only (TrailerController).
+Admins are `AdminConfig.AdminUserIds` plus the place owner. Record from a
+built-up lab (generators running), with no event live (the HUD chip says
+NEXT), so no live coins or craters wander into the shots.
+
+- [ ] **Non-admin:** a non-admin's `/trailer` does nothing at all.
+- [ ] **Full run:** black + "3 2 1", then night → pull → fuse → heist →
+  void moon → hold, each joined by a quick fade through black. Every
+  pedestal (all 6, the +2 spots solid) shows the lineup's glowing mutated
+  orbs. The pull shows the real pad burst and the Rainbow Legendary card;
+  the fuse shows the machine's real charge-up and reveal, a Secret and the
+  "FUSION SUCCESS!" banner; the heist shows the hold ring, the carry orb,
+  RUN!, CAUGHT! and the whip-pan; the void moon shows the purple moon,
+  then the Void reveal with the event-mutation card; the hold is a still
+  wide shot with the Secret on pedestal 1. No HUD, chat, player list,
+  prompts or characters in any frame.
+- [ ] **Twice in a row:** run it again straight after: identical.
+- [ ] **One shot:** `/trailer heist` (and each of night, pull, fuse,
+  voidmoon, hold) plays just that shot after the countdown.
+- [ ] **Stop mid-shot:** press F8 (the chat bar is hidden during the run,
+  so F8 is the in-trailer stop; `/trailer stop` works whenever chat is
+  reachable): everything is back at once.
+- [ ] **Reset mid-shot:** Esc → Reset during a shot: it stops cleanly.
+- [ ] **2-player server:** the other player sees NOTHING change: no orbs,
+  NPCs, cards, banners, sky or sounds; your character stays where it was;
+  your pedestals still show your real items.
+- [ ] **Everything restored afterwards:** HUD and every gui as before, the
+  CoreGui (chat, player list, backpack), prompts work, the camera follows
+  you again at the normal FOV, your character visible, the Lighting exactly
+  as before (and a live event's sky comes back if one started meanwhile),
+  your pedestals show your own items and labels, the machine core visible,
+  nothing left in Workspace.TrailerLocal.
+
+## 33. Shop 3 (placement, purchase celebration, real deals)
+
+**Placement** (desktop 1920×1080 and 1366×768, the iPhone emulator; every
+card: Shop, Gifts, Daily, Index, Upgrades, Settings, Fuse, Rebirth, How to
+Heist, the result cards, the celebration):
+
+- [ ] Each card's top sits just under the Roblox top bar (not at the
+  bottom of the screen); its bottom stops above the HUD's bottom button
+  row, never over it.
+- [ ] Desktop with chat open: a card whose left edge would sit under the
+  chat window slides right if there's room; otherwise it overlaps chat
+  (collapse chat to read it). Never pushed down.
+- [ ] Phone: every card's title row clears the ☰ / chat buttons (starts
+  below 60 px). The SHOP / GIFTS / timed-pill row sits in the left column
+  under the cash card, then LOCK, then the goal tracker; nothing overlaps
+  at 844×390 (event chip, goal arrow, bottom row, REBIRTH!).
+- [ ] With any card open on the phone, no HUD button draws on top of it.
+- [ ] Fuse, Daily, Rebirth, How to Heist and the welcome-back card keep
+  their layout and shrink as a whole on a phone.
+
+**Chip jumps**
+
+- [ ] Every chip puts its section's header right under the chip bar; the
+  last sections stop at the end of the page. Same at phone scale.
+- [ ] The contextual offer's "See all in the shop ›" lands on Cash /
+  Boosts exactly.
+
+**Purchase celebration** (`/shop grant <key>` for each):
+
+- [ ] PocketCash / CashCrate / CashVault: "+$X" counts up, coins fly into
+  the HUD cash counter, which holds, then ticks up and bounces; the amount
+  matches the tile.
+- [ ] QuickBoost / Boost / LuckPotion / Overclock: "+15 min" / "+1 h" flies
+  into its HUD pill, which pops; with no boost running, the $/s line counts
+  up green (not for Luck).
+- [ ] DoubleCash / VIP: "✓ ACTIVE" stamp + shake; $/s counts up.
+  ExtraPedestals: the two back plinths sparkle and turn solid. LabStyle:
+  the lab sparkles pink. AutoFuse: the line points at the Fuse toggle.
+- [ ] SafeFusion1 / SafeFusion5: shields drop into "🛡 Safe Fusion (N)".
+- [ ] StarterPack and each deal: every content plays one after another.
+- [ ] A tap after 0.6 s skips; AWESOME! (or a tap once done) closes; the
+  shop is still open with the tile updated (OWNED ✓, banked time).
+- [ ] Muted SFX: no sound. No second purchase prompt ever follows.
+
+**Deals**
+
+- [ ] The shop opens with 🔥 DEAL first: the parts' icons, the price line
+  (Studio: TEST + "live prices appear once the product is set up") and
+  "New deal in h:mm:ss" counting down; the 🔥 Deal chip is first.
+- [ ] `/deal slot 6`, `/deal slot 12`, …: the deal changes each slot and
+  never repeats back to back; the countdown jumps to match; `/deal slot 0`
+  restores.
+- [ ] HUD 🔥 badge under SHOP / GIFTS (end of that row on a phone) with
+  the saving and countdown; it pulses once on a new slot; tapping it opens
+  the shop at the deal.
+- [ ] `/deal pop`: the "New deal!" side card (icons, saving, Not now / See
+  deal). See deal opens the shop at the deal; Not now hides it until the
+  next slot. Not in a first session's first 10 min, not over another card,
+  not within 60 s of a loss, not while carrying or being stolen from, and
+  at most one shop pop-up per 5 min (shared with the contextual offer).
+- [ ] Buying a deal outside its slot (command bar, an old key) is refused
+  ("That deal just ended").
+- [ ] Restricted player (`restricted = true`): no deal anywhere.
+- [ ] Look: vivid section tiles (Passes blue, Boosts orange, Cash green,
+  Luck teal, Safe indigo, Deal pink) with white text, big icons, hover
+  1.04 + white glow, header shine; "NEW!" on the deals until 7 days after
+  2026-10-05, nowhere else.
+- [ ] `/selftest`: PASS for hud below modals, every chip at both scales,
+  the deal schedule (repeatable, no repeats, client matches server) and
+  each non-current deal refused.

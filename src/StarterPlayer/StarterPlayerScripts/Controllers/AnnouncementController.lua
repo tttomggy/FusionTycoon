@@ -500,23 +500,36 @@ local function onGachaPullResult(payload: any)
 	end
 end
 
+local showFusionBanner: (newItem: any, sourceLine: string?) -> ()
+
 -- Shown after the Fusion Machine's reveal finishes, so it never spoils it.
 local function onFusionResolved(result: any)
 	if not result or not result.Success or not result.NewItem or not result.Upgraded then
 		return
 	end
 	local newItem = result.NewItem
-	local tier = newItem.Tier :: string
 	-- Big-card results (the player's RevealRule) and event mutations get
 	-- their card instead; fails get the fail card. Same rule that keeps the
 	-- skipped line off (ResultController.FusionBannerShows).
 	if not ResultController.FusionBannerShows(result) then
 		return
 	end
+	showFusionBanner(newItem, ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource))
+end
+
+-- /trailer: your own "FUSION SUCCESS!" banner for a local item (no rule
+-- check: the shot needs it even for a big-card tier).
+function AnnouncementController.PreviewFusionBanner(newItem: any)
+	if typeof(newItem) == "table" and typeof(newItem.Tier) == "string" then
+		showFusionBanner(newItem, nil)
+	end
+end
+
+showFusionBanner = function(newItem: any, sourceLine: string?)
+	local tier = newItem.Tier :: string
 	local def = ItemConfig.GetItemById(newItem.ItemId)
 	local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(def and def.Name or tostring(newItem.ItemId), newItem.Mutation))
 	local mutationColor = UITheme.GetMutationColor(newItem.Mutation)
-	local sourceLine = ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource)
 	enqueueInstant({
 		Text = ("FUSION SUCCESS! → %s %s%s"):format(
 			tierWord(tier),

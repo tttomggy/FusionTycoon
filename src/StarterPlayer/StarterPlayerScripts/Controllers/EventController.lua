@@ -147,6 +147,11 @@ type Baseline = {
 
 local baseline: Baseline? = nil
 local currentId: string? = nil
+-- /trailer: an event's look shown on this client only (PreviewLocal); live
+-- event changes wait until StopPreview.
+local previewId: string? = nil
+local instantSky = false -- PreviewLocal snaps instead of tweening
+local moonDirection = MOON_DIRECTION
 -- Bumped on every change: loops from the last event exit.
 local generation = 0
 local screenGui: ScreenGui
@@ -180,6 +185,12 @@ local function captureBaseline(): Baseline
 end
 
 local function tween(instance: Instance, seconds: number, goal: { [string]: any })
+	if instantSky then
+		for property, value in goal do
+			(instance :: any)[property] = value
+		end
+		return
+	end
 	TweenService:Create(instance, TweenInfo.new(seconds, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), goal):Play()
 end
 
@@ -232,7 +243,8 @@ local function newFx(id: string): Folder
 	end
 	local folder = Instance.new("Folder")
 	folder.Name = "SkyFx"
-	folder.Parent = fxParent(id)
+	-- A preview's FX hang off the camera, never the server's event folder.
+	folder.Parent = fxParent(if previewId then nil else id)
 	fxFolder = folder
 	return folder
 end
@@ -373,7 +385,7 @@ local function buildMoon(folder: Folder, myGeneration: number)
 		while generation == myGeneration and gui.Parent do
 			local camera = Workspace.CurrentCamera
 			if camera then
-				anchor.CFrame = CFrame.new(camera.CFrame.Position + MOON_DIRECTION * MOON_DISTANCE)
+				anchor.CFrame = CFrame.new(camera.CFrame.Position + moonDirection * MOON_DISTANCE)
 			end
 			RunService.RenderStepped:Wait()
 		end
@@ -506,6 +518,9 @@ local refreshGuidance: () -> ()
 local refreshChipPulse: () -> ()
 
 local function onEventChanged(live: boolean)
+	if previewId then
+		return -- StopPreview picks up whatever is live then
+	end
 	local id = EventState.GetActive()
 	if id == currentId then
 		return
@@ -1197,6 +1212,76 @@ refreshGuidance = function()
 end
 
 --[[ Public ------------------------------------------------------------------------------ ]]
+
+--[[ Local preview (/trailer) ----------------------------------------------------------- ]]
+
+-- Lighting exactly at the captured baseline.
+local function snapBaseline()
+	local base = captureBaseline()
+	local cc = colorCorrection()
+	local atm = atmosphere()
+	Lighting.ClockTime = base.ClockTime
+	if cc then
+		cc.TintColor = base.Tint
+		cc.Brightness = base.Brightness
+	end
+	if atm and base.Density and base.AtmosphereColor then
+		atm.Density = base.Density
+		atm.Color = base.AtmosphereColor
+	end
+end
+
+export type PreviewOptions = { MoonDirection: Vector3? }
+
+-- Shows event `id`'s sky and FX on THIS client only, at once (no banner,
+-- no workspace attributes, nothing on the server). Live event changes wait
+-- until StopPreview. `MoonDirection` (world) moves the Void Moon. "None"
+-- holds the plain baseline sky (no event look, live or previewed).
+function EventController.PreviewLocal(id: string, options: PreviewOptions?)
+	captureBaseline()
+	previewId = id
+	generation += 1
+	local myGeneration = generation
+	if fxFolder then
+		fxFolder:Destroy()
+		fxFolder = nil
+	end
+	snapBaseline()
+	moonDirection = if options and options.MoonDirection then options.MoonDirection.Unit else MOON_DIRECTION
+	if id == "None" then
+		return
+	end
+	instantSky = true
+	local ok, err = pcall(function()
+		applySky(id, myGeneration)
+	end)
+	instantSky = false
+	if not ok then
+		warn("EventController.PreviewLocal: " .. tostring(err))
+	end
+end
+
+-- Ends a preview: FX gone, Lighting exactly back at the baseline, then
+-- whatever event is live now comes back as usual.
+function EventController.StopPreview()
+	if not previewId then
+		return
+	end
+	previewId = nil
+	generation += 1
+	if fxFolder then
+		fxFolder:Destroy()
+		fxFolder = nil
+	end
+	moonDirection = MOON_DIRECTION
+	snapBaseline()
+	currentId = nil
+	onEventChanged(false)
+end
+
+function EventController.IsPreviewing(): boolean
+	return previewId ~= nil
+end
 
 function EventController.Init()
 	screenGui = UIKit.Screen("EventBanner", 105)

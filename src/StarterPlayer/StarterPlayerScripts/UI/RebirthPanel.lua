@@ -271,6 +271,7 @@ local function buildConfirm()
 		Title = "ARE YOU SURE?",
 		DisplayOrder = 160,
 		MaxSize = CONFIRM_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.RebirthBannerLeft,
 	})
 	local content = confirm.Content
@@ -330,6 +331,7 @@ local function build()
 		Title = "REBIRTH 1",
 		DisplayOrder = 145,
 		MaxSize = MAX_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.RebirthBannerLeft,
 	})
 	local list = Instance.new("ScrollingFrame")

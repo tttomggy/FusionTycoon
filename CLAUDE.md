@@ -162,7 +162,12 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/daily miss <days>` (as if you missed that many days: 1 = the free
   skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
   (today's play time), `/gifts reset`,
-  `/wipe` (fails your active steals first). **`/selftest`** runs the Bug
+  `/wipe` (fails your active steals first). **`/trailer`** (admins, live
+  servers too; AdminService → S→C `TrailerStart { Shot?, Stop? }`):
+  TrailerController plays the ~30 s video-thumbnail cinematic on that
+  client only (local orbs / NPC rigs / cards / `EventController.PreviewLocal`
+  skies, clean frame, everything restored), shots and plot-local camera
+  keyframes in `TrailerConfig`; `/trailer <shot>`, `/trailer stop` or F8. **`/selftest`** runs the Bug
   Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
   round trip, a junk-remote fuzz with no error / state change, every panel
   at both scales with no leftover instances) and prints PASS / FAIL lines;
@@ -333,7 +338,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `RequestShopPurchase { Key }`: the server re-checks (set up, policy,
     owned, one-time, sale window, something to double) and only then
     prompts; `ShopPurchased { Key, Result, Reason?, Lines?, Test? }` comes
-    back (THANK YOU card or a refusal toast). Studio: `/shop grant <key>`
+    back (the purchase celebration or a refusal toast). Studio: `/shop grant <key>`
     runs the real grant path without Robux.
   - **One luck number:** `PlayerDataService.GetLuck(player)` = rebirth ×
     admin luck × `ShopConfig.GetLuckMultiplier` (Lucky ×1.5, Luck Potion
@@ -390,7 +395,36 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `marketing/shop_icons/<Key>.png` (never uploaded from code). No fake
     ribbons: no "POPULAR", no hard-coded "BEST VALUE". The offer card's
     "See all in the shop ›" opens it at Cash / Boosts
-    (`ShopController.OpenShop`).
+    (`ShopController.OpenShop`). Shop 3 look: each section its own vivid
+    gradient (Passes blue, Boosts orange, Cash green, Luck teal, Safe
+    indigo, Deal pink), 120 px icons on 272 px tiles, hover 1.04 + a white
+    glow stroke, a coloured pill behind each section icon, a header shine;
+    "NEW!" only within `ShopConfig.NewForDays` (7) of an item's
+    `AddedUtcDay`. No server-wide "X bought Y" messages.
+  - **Purchase celebration** (`UI/PurchaseCelebration`, replaces the THANK
+    YOU card): on `ShopPurchased` Granted, client-side: dim + rays + glow +
+    ~60 confetti + RevealMajor, the store icon pops in (260 / 180 px),
+    "THANK YOU!" + the name, then each of the server's structured
+    `Effects` in turn (Cash: count-up + 15 coins into the HUD counter;
+    Boost / Luck / Overclock: the time flies into its HUD pill, $/s counts
+    up if it just switched on; Pass: "✓ ACTIVE" stamp + its live change;
+    Tokens: shields drop into the count). Skippable after 0.6 s; AWESOME!
+    closes. HUD hooks come in through `PurchaseCelebration.SetHud`.
+  - **Rotating deals** (`DealConfig`, `DealState`): bundles sold as their
+    own products (`Deal = true`, `Parts`: DealPowerHour / DealFusionKit /
+    DealRichLab), one per 6-hour UTC slot, deterministic from the slot
+    start (`EventConfig.Hash32`; each slot steps 1..n-1 from the last, so
+    no back-to-back repeat). Shown only while the LIVE saving is ≥ 15%
+    (`ShopController.GetDeal`), never to restricted players. The server
+    refuses a non-current deal (`DealOver`; a receipt is honoured 10 min
+    after a prompt made inside the slot) and grants its parts through
+    their own grants. Shop: a 🔥 DEAL banner + chip first ("normally
+    ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: a 🔥 badge under
+    SHOP / GIFTS (pulses on a new slot, opens the shop at the deal); a "New
+    deal!" side card once per slot under the contextual offer's guards and
+    shared 5-min limit, never while carrying or being stolen from.
+    Analytics DealShown / DealOpened / DealDismissed. Studio: `/deal slot
+    <offsetHours>` (Workspace `DealClockOffset`), `/deal pop`.
   - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
     the player taps something they can't afford (upgrade / MAX, pull /
     ×10, Multiplier Pad, Rebirth). One non-modal side card: what they
@@ -620,7 +654,9 @@ src/ReplicatedStorage/Shared/
                  ShopConfig — every pass / product and shop number,
                  RewardConfig — free reward kinds and their labels,
                  DailyConfig — the 7-day daily reward and streak,
-                 GiftConfig — the playtime gifts, …)
+                 GiftConfig — the playtime gifts,
+                 TrailerConfig — the /trailer shots and camera,
+                 DealConfig — the rotating deals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -630,7 +666,8 @@ src/ReplicatedStorage/Shared/
                  ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
                  ShopPrices (live Robux prices), ShopState (Server
-                 Overclock, real sale windows),
+                 Overclock, real sale windows), DealState (the current
+                 deal on the UTC clock),
                  NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -677,7 +714,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   AdminPanel (built only on the server's AdminOpen),
                   SettingsPanel (the ⚙ button: reveal-card rules),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
-                  THANK YOU cards),
+                  deal side cards), PurchaseCelebration (the reveal after
+                  a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
@@ -717,11 +755,17 @@ src/StarterPlayer/StarterPlayerScripts/
   `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
   a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
   `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
-- **Chat-safe top (desktop):** centred cards start below `UIKit.TOP_SAFE`
-  (Roblox top bar 58 + chat 180) so their title is never under chat;
-  `UIKit.Modal` and `UIKit.FitHeight` (on a card centred at 0.5, 0.5) do it
-  through `UIKit.GetTopSafe()` (0 on phones, the top bar alone when the chat
-  window is off).
+- **Card placement:** every `UIKit.Modal` and centred card is
+  **top-anchored** at `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also
+  past the 170 × 60 Roblox buttons after the 0.8 scale: 79 logical),
+  horizontally centred, down to the HUD's bottom row
+  (`UIKit.GetCardBottom()`: 99 / 95 logical), never over it. The desktop
+  chat (`UIKit.CHAT_WIDTH` 400 px) only slides a card right when its left
+  edge overlaps it and there's room (`GetCardShift`); never down.
+  `FitContent` modals (Fuse, Daily, Rebirth, How to Heist, welcome-back)
+  keep their design height and shrink as a whole; centred result cards do
+  the same through `UIKit.FitHeight`. Every modal's DisplayOrder is above
+  the HUD's (`/selftest` checks it).
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per
@@ -841,6 +885,7 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
 `GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
 only),
+`TrailerStart` (S→one admin, `/trailer`),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).

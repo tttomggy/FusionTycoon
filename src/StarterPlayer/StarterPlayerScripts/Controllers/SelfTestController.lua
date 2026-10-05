@@ -16,6 +16,9 @@
 	     counts PlayerGui instances: a second open/close cycle must not add
 	     any (leftovers = a leak).
 	  4. Loads every SoundConfig slot (SoundKit.CheckAll).
+	  5. Checks every UIKit.Modal draws over the HUD (DisplayOrder +
+	     backdrop) and that every shop chip lands its section's header
+	     within 2 px of the top at both scales.
 
 	Then it sends SelfTestReport with the results and any client errors
 	seen in Output meanwhile. Never fires a remote with a VALID request:
@@ -28,6 +31,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
@@ -181,6 +185,55 @@ local function testPanels(): { string }
 	return lines
 end
 
+-- The HUD's ScreenGuis: every open card must draw over them, dim
+-- backdrop included.
+local HUD_GUIS = { "Hud", "EventHud" }
+
+local function testHudOrder(): { string }
+	local playerGui = localPlayer:WaitForChild("PlayerGui")
+	local hudTop = -math.huge
+	for _, name in HUD_GUIS do
+		local gui = playerGui:FindFirstChild(name)
+		if gui and gui:IsA("ScreenGui") then
+			hudTop = math.max(hudTop, gui.DisplayOrder)
+		end
+	end
+	local bad: { string } = {}
+	for _, gui in UIKit.GetModalGuis() do
+		if gui.DisplayOrder <= hudTop or not gui:FindFirstChild("Backdrop") then
+			table.insert(bad, ("%s (%d)"):format(gui.Name, gui.DisplayOrder))
+		end
+	end
+	if #bad > 0 then
+		return { "FAIL hud below modals: " .. table.concat(bad, ", ") .. (" vs HUD %d"):format(hudTop) }
+	end
+	return { ("PASS hud below modals (%d cards over HUD %d)"):format(#UIKit.GetModalGuis(), hudTop) }
+end
+
+-- Every shop chip lands its header within 2 px of the top, at both scales.
+local function testChipJumps(): { string }
+	local lines: { string } = {}
+	local shop = require(UI.ShopPanel) :: any
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local ok, err = pcall(function()
+			shop.Open()
+			task.wait(0.5)
+			for _, line in shop.SelfTestChipJumps(if phone then "phone" else "desktop") do
+				table.insert(lines, line)
+			end
+			shop.Toggle()
+			task.wait(0.4)
+		end)
+		if not ok then
+			table.insert(lines, "FAIL chip jumps: " .. tostring(err))
+		end
+	end
+	UIKit.SetForcedPhone(nil)
+	return lines
+end
+
 local function run(payload: any)
 	if running then
 		return
@@ -194,6 +247,11 @@ local function run(payload: any)
 	end)
 	local otherUserId = if typeof(payload) == "table" and typeof(payload.OtherUserId) == "number" then payload.OtherUserId else 1
 	local slots = if typeof(payload) == "table" and typeof(payload.Slots) == "table" then payload.Slots else {}
+	local dealSlots = if typeof(payload) == "table" and typeof(payload.DealSlots) == "table" then payload.DealSlots else {}
+	local dealKeys = {}
+	for _, slot in dealSlots do
+		table.insert(dealKeys, DealConfig.GetDealForSlot(slot))
+	end
 
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.
@@ -201,11 +259,18 @@ local function run(payload: any)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "Fuzz", Fired = fired })
 
 	local panelLines = testPanels()
+	for _, line in testHudOrder() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testChipJumps() do
+		table.insert(panelLines, line)
+	end
 	local failedSounds = SoundKit.CheckAll()
 	connection:Disconnect()
 	RemoteEvents.SelfTestReport:FireServer({
 		Stage = "Done",
 		ScheduleHash = scheduleHash(slots),
+		DealHash = table.concat(dealKeys, ","),
 		Panels = panelLines,
 		FailedSounds = failedSounds,
 		ClientErrors = errors,

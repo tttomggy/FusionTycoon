@@ -41,6 +41,8 @@ export type Item = {
 	OneTime: boolean?, -- a product you can buy once (Starter Pack)
 	SaleOf: string?, -- this product is the sale version of that key
 	Parts: { string }?, -- a bundle: what's inside (for "Worth N R$" / "SAVE %")
+	Deal: boolean?, -- a rotating deal (DealConfig): sold only in its 6-hour slot
+	AddedUtcDay: number?, -- RewardConfig.GetUtcDay when it went on sale: "NEW!" for 7 days
 }
 
 local function pass(item: { [string]: any }): Item
@@ -231,6 +233,46 @@ ShopConfig.Items = {
 		OneTime = true,
 		Parts = { "LabStyle", "Boost", "PocketCash" },
 	}),
+	--[[ Rotating deals (DealConfig): bundles below their parts' price ]]
+	DealPowerHour = product({
+		Key = "DealPowerHour",
+		Id = 0,
+		Price = 99,
+		Name = "Power Hour Deal",
+		Description = "A x2 income Boost for 1 hour plus a x2 Luck Potion for 15 minutes, for less than buying both.",
+		Effect = "Boost 1 h + Luck Potion 15 min",
+		Icon = "⚡",
+		PolicyRestricted = true,
+		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
+		Parts = { "Boost", "LuckPotion" },
+	}),
+	DealFusionKit = product({
+		Key = "DealFusionKit",
+		Id = 0,
+		Price = 79,
+		Name = "Fusion Kit Deal",
+		Description = "Three Safe Fusion tokens plus a x2 Luck Potion for 15 minutes, for less than buying them one by one.",
+		Effect = "3 Safe Fusion + Luck Potion 15 min",
+		Icon = "🛡",
+		PolicyRestricted = true,
+		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
+		Parts = { "SafeFusion1", "SafeFusion1", "SafeFusion1", "LuckPotion" },
+	}),
+	DealRichLab = product({
+		Key = "DealRichLab",
+		Id = 0,
+		Price = 179,
+		Name = "Rich Lab Deal",
+		Description = "A Cash Crate (2 hours of your lab's income) plus a 15 minute x2 Quick Boost, for less than buying both.",
+		Effect = "Cash Crate + Quick Boost 15 min",
+		Icon = "💰",
+		PolicyRestricted = true,
+		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
+		Parts = { "CashCrate", "QuickBoost" },
+	}),
 	OfflineDouble = product({
 		Key = "OfflineDouble",
 		Id = 0,
@@ -245,6 +287,9 @@ ShopConfig.Items = {
 
 -- Every key the shop knows (HasAnyOffer walks it).
 ShopConfig.Order = {
+	"DealPowerHour",
+	"DealFusionKit",
+	"DealRichLab",
 	"StarterPack",
 	"BoostSale",
 	"QuickBoost",
@@ -273,6 +318,8 @@ ShopConfig.Order = {
 	the welcome-back card; StarterPack only in the banner. ]]
 export type Section = { Id: string, Icon: string, Title: string, Chip: string, Gradient: string, Keys: { string } }
 ShopConfig.Sections = {
+	-- The current rotating deal (DealConfig), one banner; keys from DealState.
+	{ Id = "Deal", Icon = "🔥", Title = "Deal", Chip = "🔥 Deal", Gradient = "Pink", Keys = {} },
 	{ Id = "Featured", Icon = "⭐", Title = "Featured", Chip = "⭐ Featured", Gradient = "ShopFeatured", Keys = {} },
 	{
 		Id = "Passes",
@@ -282,11 +329,20 @@ ShopConfig.Sections = {
 		Gradient = "Blue",
 		Keys = { "DoubleCash", "VIP", "ExtraPedestals", "AutoFuse", "LabStyle", "Lucky" },
 	},
-	{ Id = "Boosts", Icon = "⚡", Title = "Boosts", Chip = "⚡ Boosts", Gradient = "Violet", Keys = { "QuickBoost", "Boost", "Overclock" } },
+	{ Id = "Boosts", Icon = "⚡", Title = "Boosts", Chip = "⚡ Boosts", Gradient = "Orange", Keys = { "QuickBoost", "Boost", "Overclock" } },
 	{ Id = "Cash", Icon = "💰", Title = "Cash", Chip = "💰 Cash", Gradient = "Green", Keys = { "PocketCash", "CashCrate", "CashVault" } },
 	{ Id = "Luck", Icon = "🍀", Title = "Luck", Chip = "🍀 Luck", Gradient = "Teal", Keys = { "LuckPotion" } },
-	{ Id = "Safe", Icon = "🛡", Title = "Safe Fusion", Chip = "🛡 Safe", Gradient = "Shield", Keys = { "SafeFusion1", "SafeFusion5" } },
+	{ Id = "Safe", Icon = "🛡", Title = "Safe Fusion", Chip = "🛡 Safe", Gradient = "Indigo", Keys = { "SafeFusion1", "SafeFusion5" } },
 } :: { Section }
+
+-- "NEW!" only on items that really went on sale in the last NewForDays
+-- (their AddedUtcDay, RewardConfig.GetUtcDay).
+ShopConfig.NewForDays = 7
+
+function ShopConfig.IsNew(item: Item, utcDay: number): boolean
+	local added = item.AddedUtcDay
+	return added ~= nil and utcDay >= added and utcDay - added < ShopConfig.NewForDays
+end
 
 -- The cash pack giving the most $ per Robux right now: `amountOf(key)` is
 -- what it pays this player, `priceOf(key)` its LIVE price. nil unless at

@@ -33,7 +33,7 @@ local REMOTE_EVENT_NAMES = {
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)
 	"RequestShopPurchase", -- client -> server: { Key } (ShopConfig key; the server checks policy, sale window, one-time, then prompts)
-	"ShopPurchased", -- server -> client: { Key, Result = "Granted" | "Refused", Reason?, Lines?, Test? } (the THANK YOU card / a refusal toast)
+	"ShopPurchased", -- server -> client: { Key, Result = "Granted" | "Refused", Reason?, Lines?, Effects?, Test? } (the purchase celebration / a refusal toast)
 	"ShopAnalytics", -- client -> server: { Event = "ShopOpened" | "OfferShown" | "OfferAccepted" | "OfferDismissed", Key? } (analytics only; whitelisted, rate-limited)
 	"SelfTest", -- server -> client: Studio /selftest only; { Cases?, OtherUserId? } runs the client half (DebugService)
 	"SelfTestReport", -- client -> server: Studio /selftest only; the client half's results (ignored outside Studio)
@@ -50,6 +50,7 @@ local REMOTE_EVENT_NAMES = {
 	"AdminAction", -- client -> server: an Admin panel action; { Action, Args, Scope = "Server"|"All" } (AdminService validates the sender and every arg)
 	"AdminResult", -- server -> one admin: outcome of an AdminAction; { Ok, Text }
 	"AdminBroadcast", -- server -> all clients: a filtered admin banner; { Text }
+	"TrailerStart", -- server -> one admin: play the /trailer cinematic locally; { Shot = TrailerConfig shot id?, Stop = true? } (AdminService re-checked AdminConfig; the trailer changes nothing on the server)
 }
 
 local function getOrCreateFolder(): Folder

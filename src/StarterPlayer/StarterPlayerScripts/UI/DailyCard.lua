@@ -250,6 +250,7 @@ local function build()
 		Title = "DAILY REWARD",
 		DisplayOrder = DISPLAY_ORDER,
 		MaxSize = CARD_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.DailyTop,
 		OnClose = stopGlow,
 	})

@@ -283,6 +283,9 @@ local function hash32(x: number): number
 	return bit32.bxor(x, bit32.rshift(x, 16))
 end
 
+-- Shared with DealConfig (the deal rotation uses the same hash).
+EventConfig.Hash32 = hash32
+
 -- Draws discarded per slot before the real ones (belt and braces: with the
 -- hash there is no warm-up correlation left, but it keeps the old intent).
 local DISCARDED_DRAWS = 2

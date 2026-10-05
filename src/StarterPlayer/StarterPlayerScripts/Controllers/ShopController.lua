@@ -36,7 +36,8 @@
 	StarterOfferDelaySeconds after joining, a dismissible side card. After
 	that it only lives in the shop's featured slot until bought.
 
-	Also: refusal toasts, the THANK YOU card after a grant, the VIP chat
+	Also: refusal toasts, the purchase celebration after a grant
+	(UI/PurchaseCelebration), the VIP chat
 	prefix (TextChatService, from the Player attribute "VIP").
 ]]
 local Players = game:GetService("Players")
@@ -45,6 +46,9 @@ local RunService = game:GetService("RunService")
 local TextChatService = game:GetService("TextChatService")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
@@ -56,6 +60,7 @@ local ToastController = require(script.Parent.ToastController)
 local FusionController = require(script.Parent.FusionController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ShopCards = require(script.Parent.Parent.UI.ShopCards)
+local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 
 local ShopController = {}
 
@@ -70,12 +75,16 @@ local REFUSAL_TOASTS: { [string]: string } = {
 	NotSetUp = "Coming soon!",
 	Owned = "You already have that",
 	SaleOver = "That sale just ended",
+	DealOver = "That deal just ended: a new one is up",
 	NothingToDouble = "Nothing to double right now",
 	NotLoaded = "Your lab is still loading, try again",
 	Unknown = "Couldn't do that, try again",
 }
 
 local shopOpener: ((section: string?) -> ())? = nil
+
+local DEAL_CHECK_SECONDS = 15
+local localPlayer = Players.LocalPlayer
 
 local joinedAt = os.clock()
 local lastOfferAt = -math.huge
@@ -104,6 +113,9 @@ function ShopController.IsAvailable(key: string): boolean
 	end
 	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
 	if item.SaleOf and not ShopState.IsSaleLive(key) then
+		return false
+	end
+	if item.Deal and not DealState.IsCurrent(key) then
 		return false
 	end
 	if key == "OfflineDouble" and shop.OfflineDoubleAmount <= 0 then
@@ -251,6 +263,120 @@ function ShopController.OfferForShortfall(label: string, cost: number, fromOverl
 	ShopController.Track("OfferShown", offerKey)
 end
 
+--[[ Rotating deals (DealConfig) ----------------------------------------------------------
+	The current slot's deal, shown only while its LIVE saving is at least
+	DealConfig.MinSavePercent (Studio: Id 0 deals show as TEST with no %).
+	The "New deal!" side card shows at most once per slot, under the same
+	guards and shared 5-minute limit as the contextual offer, never while
+	you carry or are being stolen from; "Not now" hides it until the next
+	slot. ]]
+
+export type DealView = {
+	Key: string,
+	Item: ShopConfig.Item,
+	Icons: string, -- the parts' icons, "⚡ 🧪"
+	Price: number?,
+	Normal: number?, -- the parts at live prices
+	Save: number?,
+	SlotStart: number,
+	SecondsLeft: number,
+}
+
+function ShopController.GetDeal(): DealView?
+	local key, slotStart, secondsLeft = DealState.GetCurrent()
+	if not ShopController.IsAvailable(key) then
+		return nil
+	end
+	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
+	local price = ShopPrices.Get(key)
+	local normal = ShopPrices.GetPartsTotal(key)
+	local save = ShopConfig.GetSavePercent(price, normal)
+	local studioTest = item.Id == 0 and RunService:IsStudio()
+	if not studioTest and (not save or save < DealConfig.MinSavePercent) then
+		return nil
+	end
+	local icons, seen = {}, {}
+	local parts: { string } = item.Parts or {}
+	for _, part in parts do
+		local partItem = ShopConfig.GetItem(part)
+		if partItem and not seen[part] then
+			seen[part] = true
+			table.insert(icons, partItem.Icon)
+		end
+	end
+	return {
+		Key = key,
+		Item = item,
+		Icons = table.concat(icons, " "),
+		Price = price,
+		Normal = normal,
+		Save = save,
+		SlotStart = slotStart,
+		SecondsLeft = secondsLeft,
+	}
+end
+
+-- "normally ~~128~~ R$ · now 99 R$ (−23%)", all live (RichText).
+function ShopController.GetDealPriceLine(deal: DealView): string
+	if deal.Price and deal.Normal then
+		return ("normally <s>%s %d</s> · now %s %d%s"):format(
+			ShopController.ROBUX,
+			deal.Normal,
+			ShopController.ROBUX,
+			deal.Price,
+			if deal.Save then (" (−%d%%)"):format(deal.Save) else ""
+		)
+	end
+	return "Studio test: live prices appear once the product is set up"
+end
+
+local dealPopSlot: number? = nil -- the slot whose card was shown (or dismissed)
+
+-- Carrying a stolen item, or one of yours is being carried off.
+local function heistBusy(): boolean
+	if localPlayer:GetAttribute("HeistTier") ~= nil then
+		return true
+	end
+	for _, player in Players:GetPlayers() do
+		if player:GetAttribute("HeistVictimUserId") == localPlayer.UserId and player:GetAttribute("HeistTier") ~= nil then
+			return true
+		end
+	end
+	return false
+end
+
+local function maybeShowDeal(force: boolean?)
+	local deal = ShopController.GetDeal()
+	if not deal or heistBusy() then
+		return
+	end
+	if not force and dealPopSlot == deal.SlotStart then
+		return
+	end
+	local blocked = offerBlocked(nil)
+	if blocked and not (force and blocked == "Cooldown") then
+		return
+	end
+	dealPopSlot = deal.SlotStart
+	lastOfferAt = os.clock()
+	local key = deal.Key
+	ShopCards.ShowOffer({
+		Name = "DealOffer",
+		Caption = "🔥 New deal!",
+		Title = deal.Item.Name,
+		Detail = ("%s  ·  %s"):format(deal.Icons, ShopController.GetDealPriceLine(deal)),
+		Footnote = ("New deal in %s"):format(EventState.FormatTimer(deal.SecondsLeft)),
+		BuyText = "See deal",
+		DismissText = "Not now",
+	}, function()
+		ShopController.Track("DealOpened", key)
+		ShopController.OpenShop("Deal")
+	end, function()
+		ShopController.Track("DealDismissed", key)
+	end)
+	ShopController.Track("DealShown", key)
+end
+
 --[[ Starter Pack (session 2) --------------------------------------------------------------- ]]
 
 local function maybeShowStarter()
@@ -298,8 +424,7 @@ local function onPurchased(payload: any)
 		local reason = if typeof(payload.Reason) == "string" then payload.Reason else "Unknown"
 		ToastController.Show(REFUSAL_TOASTS[reason] or REFUSAL_TOASTS.Unknown, "Error")
 	elseif payload.Result == "Granted" then
-		local lines = if typeof(payload.Lines) == "table" then payload.Lines else {}
-		ShopCards.ShowThankYou(lines, payload.Test == true)
+		PurchaseCelebration.Show(payload)
 	end
 	purchased:Fire(payload)
 end
@@ -340,6 +465,17 @@ function ShopController.Init()
 	TextChatService.OnIncomingMessage = onIncomingMessage
 	ShopPrices.Prefetch()
 	task.delay(ShopConfig.StarterOfferDelaySeconds, maybeShowStarter)
+	-- The deal card: checked every DEAL_CHECK_SECONDS (a new slot, the quiet
+	-- time ending); Studio /deal pop forces it once (ignores the cooldown).
+	task.spawn(function()
+		while true do
+			task.wait(DEAL_CHECK_SECONDS)
+			maybeShowDeal(false)
+		end
+	end)
+	localPlayer:GetAttributeChangedSignal("DealPopNonce"):Connect(function()
+		maybeShowDeal(true)
+	end)
 end
 
 return ShopController

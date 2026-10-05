@@ -42,6 +42,8 @@ local Workspace = game:GetService("Workspace")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -153,6 +155,15 @@ local function refusal(player: Player, key: string, atReceipt: boolean?): string
 			return "SaleOver"
 		end
 	end
+	if item.Deal and not DealState.IsCurrent(key) then
+		-- Only the current slot's deal sells; a prompt made inside its slot
+		-- is honoured at the receipt for DealConfig.ReceiptGraceSeconds.
+		local prompted = state.salePromptedAt[player.UserId]
+		local at = prompted and prompted[key]
+		if not (atReceipt and at and os.clock() - at <= DealConfig.ReceiptGraceSeconds) then
+			return "DealOver"
+		end
+	end
 	if key == "OfflineDouble" and PlayerDataService.GetOfflineDoubleAmount(player) <= 0 then
 		return "NothingToDouble"
 	end
@@ -165,8 +176,15 @@ end
 	the THANK YOU card.
 ]]
 
+-- What each grant did, for the client's purchase celebration (filled by the
+-- grant helpers during one synchronous grant, sent as ShopPurchased.Effects):
+-- { Kind = "Cash", Amount } | { Kind = "Boost" | "Luck" | "Overclock",
+-- Seconds } | { Kind = "Tokens", Count, Total } | { Kind = "Pass", Key }.
+local grantEffects: { { [string]: any } } = {}
+
 local function grantBoost(player: Player, seconds: number): string
 	PlayerDataService.AddBoostSeconds(player, "Income", seconds)
+	table.insert(grantEffects, { Kind = "Boost", Seconds = seconds })
 	local banked = PlayerDataService.GetBoostSeconds(player, "Income")
 	return ("⚡ ×%d income · %d min banked"):format(ShopConfig.BoostMultiplier, math.floor(banked / 60))
 end
@@ -174,6 +192,7 @@ end
 local function grantCash(player: Player, packKey: string): string
 	local amount = ShopConfig.GetCashPackAmount(packKey, PlayerDataService.GetBasePassiveCashPerSecond(player))
 	PlayerDataService.AddCash(player, amount)
+	table.insert(grantEffects, { Kind = "Cash", Amount = amount })
 	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.IAP.Name, packKey)
 	return ("💰 +%s cash"):format(NumberFormat.Money(amount))
 end
@@ -183,6 +202,7 @@ local function grantOverclock(player: Player): string
 	local current = ShopState.GetOverclockSeconds()
 	local seconds = math.min(ShopConfig.MaxOverclockSeconds, current + ShopConfig.OverclockSeconds)
 	Workspace:SetAttribute("OverclockUntil", now + seconds)
+	table.insert(grantEffects, { Kind = "Overclock", Seconds = ShopConfig.OverclockSeconds })
 	Workspace:SetAttribute("OverclockBy", player.DisplayName)
 	state.overclockWasOn = true
 	RemoteEvents.ShopAnnouncement:FireAllClients({
@@ -198,7 +218,41 @@ local function grantOverclock(player: Player): string
 	)
 end
 
-local GRANTS: { [string]: (Player) -> { string } } = {
+local function grantTokens(player: Player, count: number)
+	PlayerDataService.AddSafeFusionTokens(player, count)
+	table.insert(grantEffects, { Kind = "Tokens", Count = count, Total = PlayerDataService.GetSafeFusionTokens(player) })
+end
+
+local GRANTS: { [string]: (Player) -> { string } }
+
+-- A deal grants its parts through their own grants (identical Safe Fusion
+-- parts in one go, so the celebration counts them together).
+local function grantParts(player: Player, key: string): { string }
+	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
+	local lines: { string } = {}
+	local tokens = 0
+	local parts: { string } = item.Parts or {}
+	for _, part in parts do
+		local count = ShopConfig.SafeFusionTokens[part]
+		if count then
+			tokens += count
+		else
+			local handler = GRANTS[part]
+			if handler then
+				for _, line in handler(player) do
+					table.insert(lines, line)
+				end
+			end
+		end
+	end
+	if tokens > 0 then
+		grantTokens(player, tokens)
+		table.insert(lines, ("🛡 +%d Safe Fusion · you have %d"):format(tokens, PlayerDataService.GetSafeFusionTokens(player)))
+	end
+	return lines
+end
+
+GRANTS = {
 	QuickBoost = function(player)
 		return { grantBoost(player, ShopConfig.BoostSeconds.QuickBoost) }
 	end,
@@ -222,28 +276,40 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 	end,
 	LuckPotion = function(player)
 		PlayerDataService.AddBoostSeconds(player, "Luck", ShopConfig.LuckPotionSeconds)
+		table.insert(grantEffects, { Kind = "Luck", Seconds = ShopConfig.LuckPotionSeconds })
 		local banked = PlayerDataService.GetBoostSeconds(player, "Luck")
 		return { ("🧪 ×%d luck · %d min banked"):format(ShopConfig.LuckPotionMultiplier, math.floor(banked / 60)) }
 	end,
 	SafeFusion1 = function(player)
-		PlayerDataService.AddSafeFusionTokens(player, ShopConfig.SafeFusionTokens.SafeFusion1)
+		grantTokens(player, ShopConfig.SafeFusionTokens.SafeFusion1)
 		return { ("🛡 Safe Fusion · you have %d"):format(PlayerDataService.GetSafeFusionTokens(player)) }
 	end,
 	SafeFusion5 = function(player)
-		PlayerDataService.AddSafeFusionTokens(player, ShopConfig.SafeFusionTokens.SafeFusion5)
+		grantTokens(player, ShopConfig.SafeFusionTokens.SafeFusion5)
 		return { ("🛡 +5 Safe Fusion · you have %d"):format(PlayerDataService.GetSafeFusionTokens(player)) }
 	end,
 	StarterPack = function(player)
 		PlayerDataService.SetStarterPackBought(player)
 		PlayerDataService.GrantCosmetic(player, "LabStyle")
+		table.insert(grantEffects, { Kind = "Pass", Key = "LabStyle" })
 		return {
 			"🎨 Neon Pink Lab",
 			grantBoost(player, ShopConfig.BoostSeconds.StarterPack),
 			grantCash(player, "PocketCash"),
 		}
 	end,
+	DealPowerHour = function(player)
+		return grantParts(player, "DealPowerHour")
+	end,
+	DealFusionKit = function(player)
+		return grantParts(player, "DealFusionKit")
+	end,
+	DealRichLab = function(player)
+		return grantParts(player, "DealRichLab")
+	end,
 	OfflineDouble = function(player)
 		local extra = PlayerDataService.DoubleOfflinePayout(player)
+		table.insert(grantEffects, { Kind = "Cash", Amount = extra })
 		return { ("🌙 Offline cash doubled · +%s"):format(NumberFormat.Money(extra)) }
 	end,
 }
@@ -252,7 +318,9 @@ local GRANTS: { [string]: (Player) -> { string } } = {
 local function grant(player: Player, key: string, test: boolean?): { string }
 	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
 	local lines: { string }
+	grantEffects = {}
 	if item.Kind == "Pass" then
+		table.insert(grantEffects, { Kind = "Pass", Key = key })
 		local owned = state.owned[player.UserId] or {}
 		owned[key] = true
 		state.owned[player.UserId] = owned
@@ -266,7 +334,9 @@ local function grant(player: Player, key: string, test: boolean?): { string }
 	AnalyticsKit.Custom(player, "Purchase", nil, key)
 	runPassHooks(player)
 	syncPlayer(player)
-	RemoteEvents.ShopPurchased:FireClient(player, { Key = key, Result = "Granted", Lines = lines, Test = test == true })
+	local effects = grantEffects
+	grantEffects = {}
+	RemoteEvents.ShopPurchased:FireClient(player, { Key = key, Result = "Granted", Lines = lines, Effects = effects, Test = test == true })
 	return lines
 end
 
@@ -381,7 +451,7 @@ local function onRequestShopPurchase(player: Player, payload: unknown)
 		grant(player, key, true)
 		return
 	end
-	if item.SaleOf then
+	if item.SaleOf or item.Deal then
 		local prompted = state.salePromptedAt[player.UserId] or {}
 		prompted[key] = os.clock()
 		state.salePromptedAt[player.UserId] = prompted
@@ -492,6 +562,11 @@ function MonetizationService.GrantForTest(player: Player, key: string): (boolean
 end
 
 -- Registers a callback run after a player's passes or grants change.
+-- Why `key` can't be sold to `player` right now (nil = it can); /selftest.
+function MonetizationService.GetRefusal(player: Player, key: string): string?
+	return refusal(player, key)
+end
+
 function MonetizationService.OnPassesChanged(callback: (Player) -> ())
 	table.insert(state.passHooks, callback)
 end
@@ -499,7 +574,15 @@ end
 -- Client-side shop moments, for analytics only (AnalyticsKit custom
 -- events). Names and keys are whitelisted; one per name per player per
 -- SHOP_ANALYTICS_SECONDS.
-local SHOP_ANALYTICS_EVENTS = { ShopOpened = true, OfferShown = true, OfferAccepted = true, OfferDismissed = true }
+local SHOP_ANALYTICS_EVENTS = {
+	ShopOpened = true,
+	OfferShown = true,
+	OfferAccepted = true,
+	OfferDismissed = true,
+	DealShown = true,
+	DealOpened = true,
+	DealDismissed = true,
+}
 local SHOP_ANALYTICS_SECONDS = 2
 local lastShopAnalytics: { [number]: { [string]: number } } = {}
 

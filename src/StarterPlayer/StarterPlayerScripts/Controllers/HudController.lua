@@ -34,6 +34,7 @@ local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local ShopPanel = require(script.Parent.Parent.UI.ShopPanel)
+local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 local GiftsPanel = require(script.Parent.Parent.UI.GiftsPanel)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
@@ -63,8 +64,8 @@ local LAYOUT = {
 		ButtonTextSize = 22,
 	},
 	Phone = {
-		-- Under the cash card and its shadow (76 + 96 + 4 + 8 gap); 154 sat
-		-- 22 px over the card's bottom.
+		-- Unused on a phone: the goal tracker follows the SHOP and LOCK rows
+		-- in the left column (applyLayout).
 		GoalPosition = UDim2.fromOffset(10, 184),
 		GoalWidth = 168,
 		GoalBarHeight = 10,
@@ -74,12 +75,6 @@ local LAYOUT = {
 	},
 }
 local CASH_CARD_SIZE = Vector2.new(260, 96)
--- Phone: the SHOP / GIFTS row (beside the cash card) drops this far below
--- the card's top, so the GIFTS badge and SALE tag (they poke ~8 px above
--- their buttons, more while GIFTS bounces) clear the pulsing top-centre
--- event chip and its glow (ends at y ~66 at 844 x 390, i.e. 1055 x 487.5
--- after the 0.8 scale).
-local PHONE_SHOP_ROW_DROP = 8
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
@@ -93,6 +88,7 @@ local displayedCash = 0
 
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
+local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
 local multiplierPill: TextLabel
 local breakdownHolder: Frame
 local breakdownLabel: TextLabel
@@ -423,7 +419,28 @@ local function buildCashCard(): Frame
 	return holder
 end
 
+-- The purchase celebration holds the counter at the old amount until its
+-- coins land (HudController.HoldCash).
+local cashHoldUntil = 0
+local incomeCountFrom: number? = nil
+local incomeCountStart = 0
+local INCOME_COUNT_SECONDS = 0.8
+
 local function onRenderStep(dt: number)
+	local count = incomeCountFrom
+	if count then
+		local u = math.clamp((os.clock() - incomeCountStart) / INCOME_COUNT_SECONDS, 0, 1)
+		local now = getIncomePerSecond()
+		incomeLabel.Text = ("+%s%s"):format(NumberFormat.Money(count + (now - count) * u), UIKit.Colored("/s", Colors.Muted))
+		if u >= 1 then
+			incomeCountFrom = nil
+			incomeLabel.TextColor3 = Colors.Text
+		end
+	end
+	if os.clock() < cashHoldUntil then
+		cashLabel.Text = NumberFormat.Short(math.floor(displayedCash))
+		return
+	end
 	local target = TycoonController.GetCash()
 	-- Ease toward the real value so income "ticks up" instead of snapping;
 	-- big drops (spending) snap immediately so it never shows cash you don't have.
@@ -437,6 +454,70 @@ local function onRenderStep(dt: number)
 	end
 	-- The coin stands for "$": the number only.
 	cashLabel.Text = NumberFormat.Short(math.floor(displayedCash))
+end
+
+--[[ Purchase celebration hooks (UI/PurchaseCelebration) ------------------------ ]]
+
+local function screenCentre(gui: GuiObject): Vector2
+	return gui.AbsolutePosition + gui.AbsoluteSize / 2
+end
+
+local function bounce(gui: GuiObject)
+	local scale = gui:FindFirstChild("BounceScale") :: UIScale?
+	if not scale then
+		local created = Instance.new("UIScale")
+		created.Name = "BounceScale"
+		created.Parent = gui
+		scale = created
+	end
+	local s = scale :: UIScale
+	s.Scale = 1.18
+	TweenService:Create(s, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+end
+
+-- Screen point (px) of the cash counter: where the coins fly.
+function HudController.GetCashTarget(): Vector2
+	return screenCentre(cashLabel)
+end
+
+-- Shows `amount` on the counter for `seconds` (the coins are in the air),
+-- then it ticks up to the real cash as usual (seconds 0 = release now).
+function HudController.HoldCash(amount: number, seconds: number)
+	if seconds > 0 then
+		displayedCash = math.max(0, amount)
+	end
+	cashHoldUntil = os.clock() + seconds
+end
+
+function HudController.BounceCash()
+	bounce(cashLabel)
+end
+
+-- The timed pill for "Income" | "Luck" | "Server" (nil while it's hidden).
+function HudController.GetEffectPill(kind: string): TextLabel?
+	local pill = (effectPills :: any)[kind] :: TextLabel?
+	return pill
+end
+
+function HudController.PopEffectPill(kind: string)
+	local pill = HudController.GetEffectPill(kind)
+	if pill then
+		local fill = UIKit.PillRoot(pill)
+		fill.Visible = true
+		bounce(fill)
+	end
+end
+
+-- The $/s line counts up from `from` to the real income with a green flash.
+function HudController.CountUpIncome(from: number)
+	incomeCountFrom = from
+	incomeCountStart = os.clock()
+	incomeLabel.TextColor3 = Colors.Cash
+	bounce(incomeLabel)
+end
+
+function HudController.GetIncomePerSecond(): number
+	return getIncomePerSecond()
 end
 
 --[[ Bottom buttons -------------------------------------------------------- ]]
@@ -914,11 +995,40 @@ local GIFTS_BOUNCE_SCALE = 1.08
 local shopRow: Frame
 local shopHolder: Frame
 local saleTag: TextLabel
-local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
 local giftsButton: TextButton
 local giftsScale: UIScale
 local giftsNextPill: TextLabel
 local giftsBounce: Tween? = nil
+
+-- The 🔥 deal badge (ShopController.GetDeal): the live saving and the real
+-- countdown; it pulses once when a new slot starts; a tap opens the shop at
+-- the deal. Under SHOP / GIFTS on desktop, at the end of their row on a
+-- phone (the column there is full).
+local DEAL_BADGE_SIZE = Vector2.new(176, 40)
+local dealButton: TextButton
+local dealHolder: Frame
+local dealSlot: number? = nil
+local dealShown = false
+local layoutIsPhone = false
+
+local function buildDealBadge()
+	local button, holder = UIKit.Button({
+		Name = "DealBadge",
+		Style = "Pink",
+		Text = "🔥 DEAL",
+		TextSize = 16,
+		Size = UDim2.fromOffset(DEAL_BADGE_SIZE.X, DEAL_BADGE_SIZE.Y + 4),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		LayoutOrder = 9,
+		OnClick = function()
+			ShopPanel.Open("Deal")
+		end,
+	})
+	dealButton = button
+	dealHolder = holder
+	holder.Visible = false
+	holder.Parent = screenGui
+end
 
 local function buildShopRow()
 	shopRow = Instance.new("Frame")
@@ -1038,7 +1148,38 @@ local function buildShopRow()
 end
 
 -- Once a second: the effect pills' timers and the SALE tag.
+local applyLayout: (isPhone: boolean) -> ()
+
+local function refreshDealBadge()
+	local deal = ShopController.GetDeal()
+	local shown = deal ~= nil
+	if deal then
+		UIKit.SetButton(dealButton, {
+			Text = ("🔥 %s · %s"):format(if deal.Save then ("−%d%%"):format(deal.Save) else "DEAL", EventState.FormatTimer(deal.SecondsLeft)),
+		})
+		if dealSlot and dealSlot ~= deal.SlotStart then
+			local pulse = dealButton:FindFirstChild("DealPulse") :: UIScale?
+			if not pulse then
+				local created = Instance.new("UIScale")
+				created.Name = "DealPulse"
+				created.Parent = dealButton
+				pulse = created
+			end
+			local scale = pulse :: UIScale
+			scale.Scale = 1.25
+			TweenService:Create(scale, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+		end
+		dealSlot = deal.SlotStart
+	end
+	if shown ~= dealShown then
+		dealShown = shown
+		dealHolder.Visible = shown
+		applyLayout(layoutIsPhone)
+	end
+end
+
 local function refreshShopRow()
+	refreshDealBadge()
 	local function setPill(label: TextLabel, seconds: number, format: string)
 		local fill = UIKit.PillRoot(label)
 		fill.Visible = seconds > 0
@@ -1085,19 +1226,29 @@ local function refreshShopRow()
 	end
 end
 
-local function applyLayout(isPhone: boolean)
+function applyLayout(isPhone: boolean)
+	layoutIsPhone = isPhone
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
-	-- Under the cash card on desktop; beside it on a phone (the goal
-	-- tracker sits under it there).
-	-- The SHOP row on the left, above the LOCK row: under the cash card on
-	-- desktop; beside it on a phone (the goal tracker sits under it there).
-	local shopTop = if isPhone
-		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, PHONE_SHOP_ROW_DROP)
-		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
+	-- The left column, desktop and phone alike: cash card, then the SHOP /
+	-- GIFTS / timed-pill row, then the LOCK row (on a phone the goal
+	-- tracker follows them; on desktop it sits above the cash card).
+	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
-	lockRow.Position = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
-	goalHolder.Position = layout.GoalPosition
+	local lockTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	if isPhone then
+		dealHolder.Parent = shopRow
+	else
+		dealHolder.Parent = screenGui
+		dealHolder.Position = lockTop
+		if dealShown then
+			lockTop += UDim2.fromOffset(0, DEAL_BADGE_SIZE.Y + 4 + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
+		end
+	end
+	lockRow.Position = lockTop
+	goalHolder.Position = if isPhone
+		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+		else layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
@@ -1185,10 +1336,21 @@ function HudController.Init()
 
 	buildGoalTracker()
 	cashHolder = buildCashCard()
+	PurchaseCelebration.SetHud({
+		GetCashTarget = HudController.GetCashTarget,
+		HoldCash = HudController.HoldCash,
+		BounceCash = HudController.BounceCash,
+		GetEffectPill = HudController.GetEffectPill,
+		PopEffectPill = HudController.PopEffectPill,
+		CountUpIncome = HudController.CountUpIncome,
+		GetIncomePerSecond = HudController.GetIncomePerSecond,
+		GetCash = TycoonController.GetCash,
+	})
 	buildButtonRow()
 	buildRebirthReadyButton()
 	buildLockChip()
 	buildShopRow()
+	buildDealBadge()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()

@@ -16,6 +16,8 @@ local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
@@ -96,6 +98,9 @@ local OFFLINE_COMMAND = "/offline"
 -- "/shop grant boost" runs the real grant path (MonetizationService) for a
 -- ShopConfig key without Robux; "/shop" lists the keys.
 local SHOP_COMMAND = "/shop"
+-- "/deal slot 6" shifts the deal clock 6 h (walk the rotation; clients read
+-- the same offset); "/deal pop" forces your "New deal!" card once.
+local DEAL_COMMAND = "/deal"
 -- "/daily day 4" makes your next claim Day 4 (claimable now); "/daily miss
 -- 2" pretends your last claim was 2 missed days before yesterday (miss 1 =
 -- the free skip, miss 2+ = back to Day 1);
@@ -211,6 +216,37 @@ local function runSelfTest(player: Player)
 	local serverLineup = lineup()
 	result(serverLineup == lineup(), "event schedule repeatable (server)")
 
+	-- 4b. Deal rotation: repeatable, never the same deal two slots running,
+	-- and (below) the client agrees; a deal outside its slot is refused.
+	local dealSlots = {}
+	local dealBase = DealConfig.GetSlotStart(os.time())
+	for i = 0, SELFTEST_SLOT_COUNT - 1 do
+		table.insert(dealSlots, dealBase + i * DealConfig.SlotSeconds)
+	end
+	local function dealLineup(): string
+		local keys = {}
+		for _, slot in dealSlots do
+			table.insert(keys, DealConfig.GetDealForSlot(slot))
+		end
+		return table.concat(keys, ",")
+	end
+	local serverDeals = dealLineup()
+	result(serverDeals == dealLineup(), "deal schedule repeatable (server)")
+	local repeats = 0
+	for i = 2, #dealSlots do
+		if DealConfig.GetDealForSlot(dealSlots[i]) == DealConfig.GetDealForSlot(dealSlots[i - 1]) then
+			repeats += 1
+		end
+	end
+	result(repeats == 0, "deal schedule: no deal two slots running", ("%d repeats"):format(repeats))
+	local currentDeal = DealState.GetCurrent()
+	for _, key in DealConfig.Deals do
+		if key ~= currentDeal then
+			local reason = MonetizationService.GetRefusal(player, key)
+			result(reason == "DealOver" or reason == "Restricted", ("deal %s refused outside its slot"):format(key), tostring(reason))
+		end
+	end
+
 	-- 5. Data round trip (in memory only).
 	local roundOk, roundDetail = PlayerDataService.SelfTestRoundTrip(player)
 	result(roundOk, "data round trip (toDisk -> reconcile -> toDisk)", roundDetail)
@@ -232,7 +268,7 @@ local function runSelfTest(player: Player)
 			table.insert(serverErrors, message)
 		end
 	end)
-	RemoteEvents.SelfTest:FireClient(player, { OtherUserId = other, Slots = slots })
+	RemoteEvents.SelfTest:FireClient(player, { OtherUserId = other, Slots = slots, DealSlots = dealSlots })
 	local fuzzReport = waitForReport(player, "Fuzz")
 	logConnection:Disconnect()
 	if not fuzzReport then
@@ -250,6 +286,7 @@ local function runSelfTest(player: Player)
 		result(false, "client half", "no report from the client")
 	else
 		result(done.ScheduleHash == serverLineup, "event schedule: client matches server")
+		result(done.DealHash == serverDeals, "deal schedule: client matches server")
 		for _, line in (if typeof(done.Panels) == "table" then done.Panels else {}) do
 			if typeof(line) == "string" then
 				result(line:sub(1, 4) == "PASS", line:sub(6))
@@ -457,6 +494,20 @@ local function onPlayerChatted(player: Player, message: string)
 		else
 			warn(("DebugService: /shop grant %s refused (%s)"):format(key, tostring(reason)))
 		end
+	elseif command == DEAL_COMMAND then
+		local verb, rawValue = argument:match("^(%S+)%s*(%S*)$")
+		if verb == "slot" then
+			local hours = tonumber(rawValue) or 0
+			Workspace:SetAttribute("DealClockOffset", if hours ~= 0 then hours * 3600 else nil)
+			local key, _, left = DealState.GetCurrent()
+			print(("DebugService: deal clock +%g h: %s, next in %d s"):format(hours, key, math.floor(left)))
+		elseif verb == "pop" then
+			local nonce = player:GetAttribute("DealPopNonce")
+			player:SetAttribute("DealPopNonce", (if typeof(nonce) == "number" then nonce else 0) + 1)
+			print("DebugService: forcing the New deal! card")
+		else
+			warn("DebugService: /deal slot <offsetHours> | /deal pop")
+		end
 	elseif command == WIPE_COMMAND then
 		-- Any steal this player is part of resolves (returns) before the wipe.
 		HeistService.FailCarriesFor(player, "Left")
@@ -511,7 +562,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
