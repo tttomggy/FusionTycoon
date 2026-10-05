@@ -1405,6 +1405,21 @@ function PlayerDataService.SetPendingOffline(player: Player, amount: number, awa
 	end
 end
 
+-- Re-prices still-unclaimed offline earnings from the CURRENT base income.
+-- The payout is computed on load, before MonetizationService's async pass
+-- check has run, so 2x Cash / VIP owners were paid at the no-pass rate.
+-- MonetizationService calls this once passes are known; never lowers it.
+function PlayerDataService.RecomputePendingOffline(player: Player)
+	local pending = state.pendingOffline[player.UserId]
+	if not pending then
+		return
+	end
+	local amount = OfflineConfig.Compute(PlayerDataService.GetBasePassiveCashPerSecond(player), pending.AwaySeconds)
+	if amount > pending.Amount then
+		pending.Amount = amount
+	end
+end
+
 -- Clears the pending offline earnings and returns the amount (0 if none).
 -- The caller pays it; taking and paying happen with no yield between them.
 function PlayerDataService.TakePendingOffline(player: Player): number

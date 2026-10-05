@@ -303,6 +303,8 @@ local function checkPlayer(player: Player)
 	end
 	state.owned[player.UserId] = owned
 	publishSession(player)
+	-- Offline earnings were priced on load, before passes were known.
+	PlayerDataService.RecomputePendingOffline(player)
 	runPassHooks(player)
 	syncPlayer(player)
 end
