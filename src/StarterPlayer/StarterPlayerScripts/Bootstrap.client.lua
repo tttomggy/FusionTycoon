@@ -24,6 +24,7 @@ local AdminController = require(Controllers.AdminController)
 local ShopController = require(Controllers.ShopController)
 local DailyController = require(Controllers.DailyController)
 local SelfTestController = require(Controllers.SelfTestController)
+local TrailerController = require(Controllers.TrailerController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -43,6 +44,7 @@ AdminController.Init()
 ShopController.Init()
 DailyController.Init()
 SelfTestController.Init() -- Studio /selftest only
+TrailerController.Init() -- /trailer (admins; client-only cinematic)
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

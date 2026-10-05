@@ -1235,7 +1235,8 @@ export type PreviewOptions = { MoonDirection: Vector3? }
 
 -- Shows event `id`'s sky and FX on THIS client only, at once (no banner,
 -- no workspace attributes, nothing on the server). Live event changes wait
--- until StopPreview. `MoonDirection` (world) moves the Void Moon.
+-- until StopPreview. `MoonDirection` (world) moves the Void Moon. "None"
+-- holds the plain baseline sky (no event look, live or previewed).
 function EventController.PreviewLocal(id: string, options: PreviewOptions?)
 	captureBaseline()
 	previewId = id
@@ -1247,6 +1248,9 @@ function EventController.PreviewLocal(id: string, options: PreviewOptions?)
 	end
 	snapBaseline()
 	moonDirection = if options and options.MoonDirection then options.MoonDirection.Unit else MOON_DIRECTION
+	if id == "None" then
+		return
+	end
 	instantSky = true
 	local ok, err = pcall(function()
 		applySky(id, myGeneration)
