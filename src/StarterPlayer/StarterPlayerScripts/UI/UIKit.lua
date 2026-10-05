@@ -16,6 +16,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local TextChatService = game:GetService("TextChatService")
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
@@ -154,6 +155,12 @@ local function effectiveScale(gui: Instance): number
 		end
 	end
 	return if scale > 0 then scale else 1
+end
+
+-- The same, for callers converting AbsolutePosition / AbsoluteSize deltas
+-- back to offsets (scroll targets).
+function UIKit.EffectiveScale(gui: Instance): number
+	return effectiveScale(gui)
 end
 
 -- Builds the ink drop shadow as a sibling of `target` and keeps it in sync
@@ -1172,7 +1179,8 @@ local BOTTOM_SAFE = 12
 -- desktop with the chat window on, the top bar on desktop without it, 0 on
 -- phones.
 function UIKit.GetTopSafe(): number
-	if UIKit.IsPhone() then
+	-- Phones and tablets keep the old centring (their chat is a button).
+	if UIKit.IsPhone() or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
 		return 0
 	end
 	local ok, chatOn = pcall(function()

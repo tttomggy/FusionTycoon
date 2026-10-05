@@ -11,7 +11,11 @@
 	                                   missing entry starts a background fetch
 	  ShopPrices.GetPartsTotal(key)    a bundle's parts bought one by one
 	                                   (nil until every part's price is in)
-	  ShopPrices.Changed               fires (key) when a price arrives
+	  ShopPrices.GetIcon(key) -> string?  the store page's icon
+	                                   ("rbxassetid://…", from the same
+	                                   GetProductInfo call's IconImageAssetId),
+	                                   nil while loading / unset / Id 0
+	  ShopPrices.Changed               fires (key) when a price or icon arrives
 	  ShopPrices.Prefetch()            fetches every set-up item
 
 	Works on both sides (the shop UI is the main reader).
@@ -23,7 +27,7 @@ local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 
 local ShopPrices = {}
 
-type Entry = { Price: number?, FetchedAt: number, Fetching: boolean }
+type Entry = { Price: number?, Icon: string?, FetchedAt: number, Fetching: boolean }
 
 local cache: { [string]: Entry } = {}
 local changed = Instance.new("BindableEvent")
@@ -42,7 +46,12 @@ local function fetch(key: string)
 	if entry and entry.Price ~= nil and now - entry.FetchedAt < ShopConfig.PriceCacheSeconds then
 		return
 	end
-	local fresh: Entry = { Price = if entry then entry.Price else nil, FetchedAt = now, Fetching = true }
+	local fresh: Entry = {
+		Price = if entry then entry.Price else nil,
+		Icon = if entry then entry.Icon else nil,
+		FetchedAt = now,
+		Fetching = true,
+	}
 	cache[key] = fresh
 	task.spawn(function()
 		local infoType = if item.Kind == "Pass" then Enum.InfoType.GamePass else Enum.InfoType.Product
@@ -53,9 +62,13 @@ local function fetch(key: string)
 		fresh.FetchedAt = os.clock()
 		if ok and typeof(info) == "table" and typeof((info :: any).PriceInRobux) == "number" then
 			local price = (info :: any).PriceInRobux :: number
-			local before = fresh.Price
+			-- The icon Harris uploads with the pass / product (0 = none).
+			local iconId = (info :: any).IconImageAssetId
+			local icon = if typeof(iconId) == "number" and iconId > 0 then ("rbxassetid://%d"):format(iconId) else nil
+			local before, beforeIcon = fresh.Price, fresh.Icon
 			fresh.Price = price
-			if before ~= price then
+			fresh.Icon = icon
+			if before ~= price or beforeIcon ~= icon then
 				changed:Fire(key)
 			end
 		else
@@ -69,6 +82,13 @@ function ShopPrices.Get(key: string): number?
 	fetch(key)
 	local entry = cache[key]
 	return if entry then entry.Price else nil
+end
+
+-- The live store icon, or nil (then the UI shows the emoji glyph).
+function ShopPrices.GetIcon(key: string): string?
+	fetch(key)
+	local entry = cache[key]
+	return if entry then entry.Icon else nil
 end
 
 -- A bundle's parts bought one by one (live prices), or nil until all are in.

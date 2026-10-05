@@ -186,9 +186,10 @@ export type SideCard = {
 	Footnote: string?, -- the honest "or wait ~4 min" line
 	BuyText: string, -- the price button ("<robux> 49")
 	DismissText: string, -- "Not now"
+	MoreText: string?, -- a quiet link under the buttons ("See all in the shop ›")
 }
 
-local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
+local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?, onMore: (() -> ())?)
 	ShopCards.CloseSide()
 	local body, holder = UIKit.Panel({
 		Name = card.Name,
@@ -277,6 +278,26 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
 	if card.Footnote then
 		line("Footnote", card.Footnote, Fonts.Body, 13, Colors.Faint, 5)
 	end
+	local moreText = card.MoreText
+	if moreText and onMore then
+		-- A quiet text link, still a full 44 px tap target.
+		local more = Instance.new("TextButton")
+		more.Name = "More"
+		more.BackgroundTransparency = 1
+		more.AutoButtonColor = false
+		more.FontFace = Fonts.BodyHeavy
+		more.TextSize = 14
+		more.TextColor3 = Colors.Muted
+		more.Text = moreText
+		more.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize)
+		more.LayoutOrder = 6
+		more.ZIndex = z
+		more.Parent = body
+		more.Activated:Connect(function()
+			ShopCards.CloseSide()
+			onMore()
+		end)
+	end
 	UIKit.PopIn(holder)
 	-- A gentle slide so it reads as "here if you want it", not a popup.
 	local scale = holder:FindFirstChild("PopScale")
@@ -285,8 +306,8 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
 	end
 end
 
-function ShopCards.ShowOffer(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?)
-	sideCard(card, onBuy, onDismiss)
+function ShopCards.ShowOffer(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?, onMore: (() -> ())?)
+	sideCard(card, onBuy, onDismiss, onMore)
 end
 
 function ShopCards.ShowStarter(card: SideCard, onBuy: () -> (), onDismiss: () -> ())

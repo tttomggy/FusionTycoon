@@ -372,10 +372,25 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     strips and pink cash balls (plot attribute `LabStyle`). Looks only.
   - **Shop UI:** the HUD's gold "🛒 SHOP" button (left, above the LOCK
     chip; wiggles every 20 s; red SALE tag only while a real sale is live;
-    timed-effect pills beside it) opens `UI/ShopPanel` (featured banner
-    with a shine sweep: Starter Pack until bought, then the live sale,
-    then the best value; tabs; 4 / 2 column tiles; cash tiles show what
-    you'd get right now; the honest footer).
+    timed-effect pills beside it) opens `UI/ShopPanel`: **one scrolling
+    page** (Shop 2). Sticky header + a sticky chip bar (sideways-scrolling)
+    of `ShopConfig.Sections`: ⭐ Featured (one banner with a shine sweep:
+    Starter Pack until bought, then the live sale, then the best value),
+    🎟 Passes (big cards; an owned pass is a grey "OWNED ✓" and sorts
+    last), ⚡ Boosts (BoostSale replaces Boost while live; "+1 h · you have
+    0:42" from the real bank), 💰 Cash (what you'd get right now; "BEST
+    VALUE" = most $ per Robux, `ShopConfig.GetBestValueKey`, live prices
+    only, else no tag), 🍀 Luck, 🛡 Safe ("SAVE N%" live); empty sections and
+    their chips are left out; the honest footer. A chip tweens the scroll
+    (never filters); the chip of the section on screen is green. Tiles 4
+    per row (2 on phones / under 560 px), the section's colour, a green
+    buy button with the live price, hover 1.03, press bounce. Icons: the
+    store page's `IconImageAssetId` (`ShopPrices.GetIcon`, same cached
+    `GetProductInfo`), else the emoji in a circle; art in
+    `marketing/shop_icons/<Key>.png` (never uploaded from code). No fake
+    ribbons: no "POPULAR", no hard-coded "BEST VALUE". The offer card's
+    "See all in the shop ›" opens it at Cash / Boosts
+    (`ShopController.OpenShop`).
   - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
     the player taps something they can't afford (upgrade / MAX, pull /
     ×10, Multiplier Pad, Rebirth). One non-modal side card: what they

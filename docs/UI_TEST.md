@@ -1348,3 +1348,88 @@ nothing sticks or breaks afterwards:
   pedestal and station prompts still work.
 - [ ] **After respawn:** goal arrow distance counts from the new character;
   the GIFTS bounce / next pill and SHOP are unchanged.
+
+## 30. Contrast rule (white on gold) and the selected state
+
+Look at every gold, yellow or orange surface on desktop AND at phone scale.
+The text on each one must be **white with the ink stroke**, never dark
+brown and never gold-on-gold.
+
+- [ ] **HUD:** 🛒 SHOP button; the orange rebirth pill; the gold Overclock
+  pill (`/shop grant overclock`); the event chip during Golden Rain and
+  Meteor Shower (`/event GoldenRain`, `/event MeteorShower`).
+- [ ] **World:** the goal marker ("CLAIM YOUR BASE" on a new lab, then the
+  next goals); the Gacha Pad price pill; the Collector "+$X/s" pill; the
+  Multiplier Pad's gold price pill; the REBIRTH portal pill; the 👑 VIP head
+  tag (`/shop grant vip`); the meteor crater "Hold E · free item" chip; both
+  Event Boards during a Golden Rain / Meteor Shower row.
+- [ ] **Cards:** Daily card TODAY tile (DAY N, the reward line, "TODAY"),
+  the orange streak pill; Gifts panel OPEN; every Gold / Orange button
+  (Upgrades MAX ALL, rebirth buttons, result-card AWESOME / NICE, the THANK
+  YOU card); the heist banners (GET HOME!, YOU GRABBED …); the Overclock
+  server banner caption ("SERVER · OVERCLOCK" in white).
+- [ ] **Shop:** BEST VALUE and SAVE N% tags, the featured banner caption,
+  title and detail.
+- [ ] **Selected = green, white text, everywhere:** shop chips, Index tier
+  tabs (the tier name keeps its colour on the green pill), Settings
+  5-segment rows, Fuse count chip (the chamber's count) and Fuse tier tabs,
+  the item picker's filter chips, the Upgrades "Generators" tab, the admin
+  panel pickers. Unselected stay the muted panel colour.
+- [ ] **Tap feedback:** tapping any of those bounces it (0.94 → 1) and plays
+  the Toast sound.
+- [ ] **Chat overlap (desktop, chat window open):** open Daily, Shop, Index,
+  Upgrades, Settings and a result card (`/offline 120`): every title sits
+  BELOW the chat window, nothing under it. With the chat window off
+  (TextChatService → ChatWindowConfiguration.Enabled = false) the cards sit
+  just under the top bar. Phone (844×390) layouts are unchanged.
+
+## 31. Shop 2 (one scrolling shop)
+
+Studio: every id is 0, so every item shows with a "TEST" button; there are
+no live prices, so no BEST VALUE tag (it needs live prices) and the
+featured banner is the Starter Pack.
+
+- [ ] **One page:** the header (title + ✕) and the chip bar stay put while
+  the page scrolls. Sections in order: ⭐ Featured, 🎟 Passes, ⚡ Boosts,
+  💰 Cash, 🍀 Luck, 🛡 Safe Fusion, then the footer line. Each has a big
+  header row (icon, title, coloured divider).
+- [ ] **Every chip jumps to its section** with a smooth scroll (never
+  filters); the section's header lands at the top of the page (the last
+  sections stop at the end of the page).
+- [ ] **The active chip follows the scroll:** drag / wheel through the page;
+  the chip of the section on screen turns green, the last one at the very
+  bottom.
+- [ ] **Every buy button opens the right prompt** (in Studio: TEST → the
+  THANK YOU card for that exact item). Tapping a tile outside its button
+  does nothing.
+- [ ] **Owned passes sort last:** `/shop grant doublecash`, `/shop grant
+  vip`: both move to the end of Passes with a grey "OWNED ✓" button.
+- [ ] **Cash amounts match `/cash`:** note "+$X" on Pocket Cash, `/shop
+  grant pocketcash`: cash rises by exactly that. Change income (upgrade):
+  the tile updates within 2 s.
+- [ ] **Boost banks:** Quick Boost reads "+15 min · you have 0:00"; grant a
+  Boost: "you have 1:00:00" counting down; at 3 h "Bank full (3 h)".
+  Overclock reads "server has …"; Luck Potion its own bank.
+- [ ] **Sale:** start Admin Abuse (`/admin` → event): Boost is replaced by
+  "Boost · SALE" with "normally ~~N~~ · today M (−X%)" (live prices only)
+  and the featured banner shows the sale with its real end time; after the
+  window the normal Boost is back.
+- [ ] **Contextual offer:** tap an upgrade you can't afford (after the
+  first-session quiet time): the side card has "See all in the shop ›",
+  which opens the shop scrolled to Cash (or Boosts when it offered the
+  Boost).
+- [ ] **Hover / press:** hovering a tile grows it a little (1.03); pressing
+  its button bounces it.
+- [ ] **Icons:** with ids set, each tile shows the store page's icon (the
+  one uploaded with the pass / product); without one, the emoji in a
+  circle.
+- [ ] **Restricted player** (force `restricted = true`): only Passes (2×
+  Cash, VIP, +2 Pedestals, Auto-Fuse, Neon Pink) and its chip; no Boosts,
+  Cash, Luck, Safe, Lucky or Starter Pack, and no empty headers.
+- [ ] **Phone 844×390:** 2 tiles per row; the chip bar scrolls sideways
+  and the active chip scrolls into view; every chip and button ≥ 44 px;
+  the whole page is reachable down to the footer.
+- [ ] **Narrow desktop window (< 600 px wide):** 2 tiles per row, 1 pass
+  card per row, the featured banner stacks (icon, text, a full-width buy
+  button).
+- [ ] `/selftest`: PASS for ShopPanel at both scales.

@@ -2,30 +2,42 @@
 --[[
 	ShopPanel
 	---------
-	The SHOP modal (the HUD's gold 🛒 SHOP button). Loud and fun to look at;
-	every number on it is real:
+	The SHOP modal (the HUD's 🛒 SHOP button): ONE scrolling page, the
+	pattern kids know from the big simulator games. Every number on it is
+	real.
 
-	  * Header: a gold "🛒 SHOP" on a radial violet glow.
-	  * Featured banner: the Starter Pack until bought, then the live sale,
-	    then the best value. A warm gradient with a diagonal shine sweep (a
-	    client tween every ~3 s), a big icon orb, the title, "Worth ~~227~~
-	    R$ if bought one by one" and "SAVE 56%" (both from LIVE prices), or
-	    a sale's "normally ~~79~~ R$ · today 49 R$ (−38%)" with its real end
-	    time, and a big green Robux price button.
-	  * Tabs: 🔥 Deals · ⚡ Boosts · 💰 Cash · 🎟 Passes · 🍀 Luck.
-	  * Tiles (4 columns, 2 on a phone): a glossy gradient with the shine
-	    sweep, a bobbing icon, the title, a one-line effect (cash tiles show
-	    what you'd get right now: "+$4.1M · 20 min of your income"), and a
-	    green Robux price button. Ribbons POPULAR / BEST VALUE / VIP; owned
-	    passes "✓ OWNED"; Safe Fusion "OWNED 3" plus the buy button.
-	  * Footer: "Prices read live from Roblox · odds are always shown at the
-	    Gacha Pad and the Fusion Machine".
+	  * Sticky: the modal header (title + ✕) and, under it, the category
+	    chip bar (⭐ Featured · 🎟 Passes · ⚡ Boosts · 💰 Cash · 🍀 Luck ·
+	    🛡 Safe, ShopConfig.Sections). A chip TWEENS the scroll to its
+	    section (it never filters); while you scroll, the chip of the section
+	    on screen turns green (UIKit.SetSelected). The bar scrolls sideways
+	    when it doesn't fit.
+	  * Sections, each with a big header row (icon, title, thin divider):
+	      Featured  one wide banner: the Starter Pack until bought, then a
+	                live sale, then the best value; shine sweep.
+	      Passes    big cards (icon, name, benefit, buy); an owned pass
+	                shows a grey "OWNED ✓" and sorts to the end.
+	      Boosts    QuickBoost, Boost (BoostSale while its window is live),
+	                Overclock: "+1 h · you have 0:42" (the real bank).
+	      Cash      what each pack pays YOU right now; "BEST VALUE" on the
+	                most $ per Robux, from live prices only.
+	      Luck      the Luck Potion (the Lucky pass is in Passes).
+	      Safe      Safe Fusion x1 / x5, "SAVE N%" from live prices.
+	    An empty section (policy, nothing set up) is left out with its chip.
+	  * Tiles: 4 columns (2 on a phone or a narrow screen), each its own
+	    rounded panel in its section colour; the live store icon
+	    (ShopPrices.GetIcon) or the emoji in a circle; a green buy button
+	    with the live price ("TEST" in Studio for Id 0). Hover 1.03, press
+	    bounce.
+	  * Footer: the honest line about live prices and shown odds.
 
 	Prices come from ShopPrices (live, cached 10 min) through
 	ShopController.GetPriceText; nothing here is typed in. Items you can't
 	be sold (policy, not set up, a sale outside its window) never show.
+	OfflineDouble lives only on the welcome-back card.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
@@ -44,39 +56,51 @@ local ShopPanel = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local MAX_SIZE = Vector2.new(820, 620)
+local MAX_SIZE = Vector2.new(820, 640)
+local CHIP_WIDTH = 124
+local CHIP_HEIGHT = UITheme.MinTapSize
+local CHIP_GAP = 8
+local CHIP_BAR_HEIGHT = CHIP_HEIGHT + UITheme.SmallShadowOffset + 4
+local SECTION_GAP = 10
+local HEADER_HEIGHT = 44
 local FEATURED_HEIGHT = 170
-local TAB_HEIGHT = UITheme.MinTapSize
-local TILE_HEIGHT = 214
-local TILE_GAP = 12
-local COLUMNS = { Desktop = 4, Phone = 2 }
+local FEATURED_NARROW_HEIGHT = 262
+local PASS_HEIGHT = 140
+local TILE_HEIGHT = 244
+local GRID_GAP = 12
+local NARROW_WIDTH = 560 -- logical px of page width under which tiles go 2-up
 local REFRESH_SECONDS = 2
 local SHINE_SECONDS = 0.9
 local SHINE_EVERY_SECONDS = 3
 local BOB_PIXELS = 5
 local BOB_SECONDS = 1.1
+local SCROLL_TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HOVER_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local PRESS_INFO = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local HOVER_SCALE = 1.03
+local PRESS_SCALE = 0.96
+local ACTIVE_LINE = 60 -- px below the page top where a header counts as "on screen"
 
--- Each tab's tile gradient (UITheme.Gradients keys).
-local TAB_GRADIENT: { [string]: string } = {
-	Deals = "ShopFeatured",
-	Boosts = "Violet",
-	Cash = "Green",
-	Passes = "Blue",
-	Luck = "Teal",
+type TileRefs = {
+	Key: string,
+	Main: TextLabel?,
+	Sub: TextLabel?,
+	Price: TextButton,
+	Owned: boolean,
 }
 
-type TileRefs = { Key: string, Effect: TextLabel, Price: TextButton, Owned: TextLabel? }
-
 local modal: UIKit.Modal
+local chipBar: ScrollingFrame
 local scroller: ScrollingFrame
-local featured: Frame
-local tabsRow: Frame
-local grid: Frame
-local gridLayout: UIGridLayout
-local selectedTab = "Deals"
-local tabButtons: { [string]: TextButton } = {}
+local footer: TextLabel
+local chipButtons: { [string]: TextButton } = {}
+local headers: { [string]: Frame } = {}
+local sectionOrder: { string } = {}
 local tiles: { TileRefs } = {}
 local featuredRefs: { Key: string?, Detail: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
+local activeSection: string? = nil
+local scrollLockUntil = 0 -- a chip's tween owns the active chip until then
+local builtSignature = ""
 local refreshToken = 0
 
 --[[ Helpers ------------------------------------------------------------------------- ]]
@@ -89,45 +113,150 @@ local function robux(price: number): string
 	return ("%s %d"):format(ShopController.ROBUX, price)
 end
 
--- The line under a tile's title: cash packs say what you'd get right now.
-local function effectText(key: string): string
-	local pack = ShopConfig.CashPacks[key]
-	if pack then
-		local minutes = pack.Minutes
-		local span = if minutes >= 60 then ("%d h"):format(minutes // 60) else ("%d min"):format(minutes)
-		return ("%s · %s of your income"):format(
-			UIKit.Colored("+" .. NumberFormat.Money(ShopController.GetCashAmount(key)), Colors.Cash),
-			span
-		)
+local function span(seconds: number): string
+	if seconds >= 3600 and seconds % 3600 == 0 then
+		return ("%d h"):format(seconds // 3600)
 	end
-	if key == "OfflineDouble" then
-		return ("×2 your welcome-back cash (+%s)"):format(NumberFormat.Money(TycoonController.GetShop().OfflineDoubleAmount))
-	end
-	return item(key).Effect
+	return ("%d min"):format(seconds // 60)
 end
 
--- Shown in the shop at all: offered now, or an owned pass ("✓ OWNED").
+local function sectionPair(section: ShopConfig.Section): UITheme.GradientPair
+	return UITheme.Gradients[section.Gradient] or UITheme.Gradients.Violet
+end
+
+-- Logical page width (after the phone UIScale).
+local function pageWidth(): number
+	local width = scroller.AbsoluteSize.X / UIKit.EffectiveScale(scroller)
+	return if width > 0 then width else MAX_SIZE.X
+end
+
+local function isNarrow(): boolean
+	return UIKit.IsPhone() or pageWidth() < NARROW_WIDTH
+end
+
+local function tileColumns(): number
+	return if isNarrow() then 2 else 4
+end
+
+local function passColumns(): number
+	return if pageWidth() < NARROW_WIDTH then 1 else 2
+end
+
+-- Shown at all: offered now, or an owned pass ("OWNED ✓").
 local function isListed(key: string): boolean
 	return ShopController.IsAvailable(key) or (item(key).Kind == "Pass" and ShopController.IsOwned(key))
 end
 
-local function keysForTab(tab: string): { string }
+-- The keys a section lists right now, in order: a live sale replaces its
+-- normal product; owned passes go last.
+local function keysFor(section: ShopConfig.Section): { string }
 	local keys = {}
-	for _, key in ShopConfig.Order do
-		local entry = item(key)
-		local inTab = entry.Tab == tab
-		if tab == "Deals" then
-			-- Deals: bundles, the live sale, and the best value.
-			inTab = entry.Tab == "Deals" or entry.SaleOf ~= nil or entry.Parts ~= nil or key == ShopConfig.BestValueKey
-		elseif entry.SaleOf then
-			inTab = false -- a sale lives in Deals and the banner only
-		end
-		if inTab and isListed(key) then
+	for _, key in section.Keys do
+		local sale = ShopConfig.GetSaleFor(key)
+		if sale and ShopController.IsAvailable(sale.SaleKey) then
+			table.insert(keys, sale.SaleKey)
+		elseif isListed(key) then
 			table.insert(keys, key)
 		end
 	end
-	return keys
+	local owned: { string }, rest: { string } = {}, {}
+	for _, key in keys do
+		table.insert(if ShopController.IsOwned(key) and item(key).Kind == "Pass" then owned else rest, key)
+	end
+	for _, key in owned do
+		table.insert(rest, key)
+	end
+	return rest
 end
+
+-- The cash pack with the most $ per Robux for THIS player at live prices.
+local function bestValueKey(): string?
+	local cash = {}
+	for _, key in ShopConfig.CashPackOrder do
+		if ShopController.IsAvailable(key) then
+			table.insert(cash, key)
+		end
+	end
+	return ShopConfig.GetBestValueKey(cash, ShopController.GetCashAmount, ShopPrices.Get)
+end
+
+-- Starter Pack until bought, then the live sale, then the best value.
+local function featuredKey(): string?
+	if ShopController.IsAvailable("StarterPack") then
+		return "StarterPack"
+	end
+	for _, sale in ShopConfig.Sales do
+		if ShopController.IsAvailable(sale.SaleKey) then
+			return sale.SaleKey
+		end
+	end
+	return bestValueKey()
+end
+
+-- "+1 h · you have 0:42" from the real bank; "Bank full" at the cap.
+local function bankText(key: string): string?
+	local add, have, cap, who
+	local boost = if key == "StarterPack" then nil else ShopConfig.BoostSeconds[key]
+	if key == "LuckPotion" then
+		add, have, cap, who = ShopConfig.LuckPotionSeconds, TycoonController.GetBoostSecondsLeft("Luck"), ShopConfig.MaxLuckBankSeconds, "you have"
+	elseif key == "Overclock" then
+		add, have, cap, who = ShopConfig.OverclockSeconds, ShopState.GetOverclockSeconds(), ShopConfig.MaxOverclockSeconds, "server has"
+	elseif boost then
+		add, have, cap, who = boost, TycoonController.GetBoostSecondsLeft("Income"), ShopConfig.MaxBoostBankSeconds, "you have"
+	else
+		return nil
+	end
+	if have >= cap then
+		return ("Bank full (%s) · %s %s"):format(span(cap), who, EventState.FormatTimer(have))
+	end
+	return ("+%s · %s %s"):format(span(add), who, EventState.FormatTimer(have))
+end
+
+-- The sale line, all from live prices.
+local function saleText(key: string): string
+	local entry = item(key)
+	local normal = entry.SaleOf and ShopPrices.Get(entry.SaleOf)
+	local today = ShopPrices.Get(key)
+	if normal and today then
+		local off = ShopConfig.GetSavePercent(today, normal)
+		return ("normally <s>%s</s> · today %s%s"):format(robux(normal), robux(today), if off then (" (−%d%%)"):format(off) else "")
+	end
+	return entry.Effect
+end
+
+-- A tile's two text lines (RichText).
+local function tileLines(key: string): (string, string)
+	local entry = item(key)
+	local pack = ShopConfig.CashPacks[key]
+	if pack then
+		return UIKit.Colored("+" .. NumberFormat.Money(ShopController.GetCashAmount(key)), Colors.Cash),
+			("%s of your income"):format(span(pack.Minutes * 60))
+	end
+	if entry.SaleOf then
+		return saleText(key), bankText(key) or ""
+	end
+	local tokens = ShopConfig.SafeFusionTokens[key]
+	if tokens then
+		local have = TycoonController.GetShop().SafeFusionTokens
+		return entry.Effect, if have > 0 then ("You have %d"):format(have) else ""
+	end
+	return entry.Effect, bankText(key) or ""
+end
+
+-- "BEST VALUE" (cash, live) or "SAVE N%" (a bundle or a sale, live).
+local function tagText(key: string, best: string?): string?
+	if key == best then
+		return "BEST VALUE"
+	end
+	local entry = item(key)
+	local price = ShopPrices.Get(key)
+	local save = if entry.SaleOf
+		then ShopConfig.GetSavePercent(price, ShopPrices.Get(entry.SaleOf))
+		else ShopConfig.GetSavePercent(price, ShopPrices.GetPartsTotal(key))
+	return if save then ("SAVE %d%%"):format(save) else nil
+end
+
+--[[ Building blocks --------------------------------------------------------------- ]]
 
 -- A diagonal white shine sweeping across `frame` every few seconds.
 local function addShine(frame: GuiObject)
@@ -157,12 +286,13 @@ local function addShine(frame: GuiObject)
 	):Play()
 end
 
--- A round icon orb (emoji on a light disc) that bobs gently.
-local function iconOrb(parent: Instance, icon: string, size: number, position: UDim2, z: number): Frame
+-- The item's icon: the live store icon (what Harris uploaded with the
+-- pass / product), else the emoji in a light circle. Bobs gently.
+local function iconView(parent: Instance, key: string, size: number, position: UDim2, anchor: Vector2, z: number): Frame
 	local holder = Instance.new("Frame")
 	holder.Name = "Icon"
 	holder.BackgroundTransparency = 1
-	holder.AnchorPoint = Vector2.new(0.5, 0)
+	holder.AnchorPoint = anchor
 	holder.Position = position
 	holder.Size = UDim2.fromOffset(size, size)
 	holder.ZIndex = z
@@ -176,15 +306,32 @@ local function iconOrb(parent: Instance, icon: string, size: number, position: U
 	disc.Parent = holder
 	UIKit.Corner(disc, 999)
 	UIKit.Stroke(disc, 3)
-	UIKit.Label({
-		Name = "Glyph",
-		Text = icon,
-		TextSize = math.floor(size * 0.55),
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		ZIndex = z + 1,
-		Parent = disc,
-	})
+	local image = ShopPrices.GetIcon(key)
+	if image then
+		disc.BackgroundTransparency = 1
+		local stroke = disc:FindFirstChildOfClass("UIStroke")
+		if stroke then
+			stroke.Enabled = false
+		end
+		local picture = Instance.new("ImageLabel")
+		picture.Name = "Image"
+		picture.BackgroundTransparency = 1
+		picture.Size = UDim2.fromScale(1, 1)
+		picture.Image = image
+		picture.ScaleType = Enum.ScaleType.Fit
+		picture.ZIndex = z + 1
+		picture.Parent = disc
+	else
+		UIKit.Label({
+			Name = "Glyph",
+			Text = item(key).Icon,
+			TextSize = math.floor(size * 0.55),
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z + 1,
+			Parent = disc,
+		})
+	end
 	TweenService:Create(
 		disc,
 		TweenInfo.new(BOB_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
@@ -193,51 +340,182 @@ local function iconOrb(parent: Instance, icon: string, size: number, position: U
 	return holder
 end
 
-local function ribbon(parent: Instance, text: string, z: number)
-	UIKit.Pill({
-		Name = "Ribbon",
+-- A gold corner tag ("BEST VALUE", "SAVE 56%"): white + ink by the
+-- contrast rule (UIKit.Pill on a warm gradient).
+local function cornerTag(parent: Instance, text: string, z: number): TextLabel
+	return UIKit.Pill({
+		Name = "Tag",
 		Parent = parent,
 		Text = text,
-		Gradient = if text == "VIP" then UITheme.Gradients.Gold else UITheme.Gradients.Red,
+		Gradient = UITheme.Gradients.Gold,
 		Font = Fonts.Display,
 		TextSize = 12,
 		Height = 22,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -8, 0, 8),
 		ZIndex = z,
-		TextStroke = 1.5,
 	})
 end
 
---[[ Featured banner ------------------------------------------------------------------ ]]
+-- The chunky rounded panel every tile / card sits on: a light gradient in
+-- the section colour, a coloured outline, a gloss, the ink shadow. The
+-- holder hovers to 1.03 and bounces on press.
+local function tilePanel(parent: Instance, name: string, order: number, pair: UITheme.GradientPair): (Frame, Frame, UIScale)
+	local holder = Instance.new("Frame")
+	holder.Name = name
+	holder.BackgroundTransparency = 1
+	holder.LayoutOrder = order
+	holder.ZIndex = parent:IsA("GuiObject") and (parent :: GuiObject).ZIndex + 1 or 2
+	holder.Parent = parent
+	local scale = Instance.new("UIScale")
+	scale.Name = "HoverScale"
+	scale.Parent = holder
+	local stops: { { any } } = { { 0, UITheme.TowardInk(pair.Top, 0.35) }, { 1, UITheme.TowardInk(pair.Bottom, 0.62) } }
+	local body = UIKit.Panel({
+		Name = "Fill",
+		Parent = holder,
+		Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset),
+		Gradient = stops,
+		Radius = 18,
+		StrokeThickness = 3,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = holder.ZIndex,
+	})
+	-- Gloss: a soft white wash over the top half.
+	local gloss = Instance.new("Frame")
+	gloss.Name = "Gloss"
+	gloss.Size = UDim2.fromScale(1, 0.45)
+	gloss.BackgroundColor3 = Colors.White
+	gloss.BackgroundTransparency = 0.9
+	gloss.BorderSizePixel = 0
+	gloss.ZIndex = body.ZIndex
+	gloss.Parent = body
+	UIKit.Corner(gloss, 18)
+	-- A coloured band along the top edge: the section's colour, loud.
+	local band = Instance.new("Frame")
+	band.Name = "Band"
+	band.Size = UDim2.new(1, 0, 0, 6)
+	band.BackgroundColor3 = Colors.White
+	band.BorderSizePixel = 0
+	band.ZIndex = body.ZIndex
+	band.Parent = body
+	UIKit.Corner(band, 3)
+	UIKit.PairGradient(band, pair, 0)
+	body.MouseEnter:Connect(function()
+		TweenService:Create(scale, HOVER_INFO, { Scale = HOVER_SCALE }):Play()
+	end)
+	body.MouseLeave:Connect(function()
+		TweenService:Create(scale, HOVER_INFO, { Scale = 1 }):Play()
+	end)
+	return body, holder, scale
+end
 
--- Starter Pack until bought, then the live sale, then the best value.
-local function featuredKey(): string?
-	if ShopController.IsAvailable("StarterPack") then
-		return "StarterPack"
-	end
-	for _, sale in ShopConfig.Sales do
-		if ShopController.IsAvailable(sale.SaleKey) then
-			return sale.SaleKey
-		end
-	end
-	if ShopController.IsAvailable(ShopConfig.BestValueKey) then
-		return ShopConfig.BestValueKey
-	end
-	return nil
+-- The green buy button (owned pass: grey "OWNED ✓"); pressing it bounces
+-- the tile.
+local function buyButton(parent: Frame, key: string, scale: UIScale, props: { [string]: any }): TextButton
+	local owned = item(key).Kind == "Pass" and ShopController.IsOwned(key)
+	local button = UIKit.Button({
+		Name = "Buy",
+		Parent = parent,
+		Style = if owned then "Disabled" else "Green",
+		Text = if owned then "OWNED ✓" else ShopController.GetPriceText(key),
+		TextColor3 = if owned then Colors.Muted else Colors.Text,
+		TextSize = props.TextSize or 20,
+		AnchorPoint = props.AnchorPoint,
+		Position = props.Position,
+		Size = props.Size,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		ZIndex = parent.ZIndex + 3,
+		OnClick = function()
+			if not (item(key).Kind == "Pass" and ShopController.IsOwned(key)) then
+				ShopController.Buy(key)
+			end
+		end,
+	})
+	button.MouseButton1Down:Connect(function()
+		TweenService:Create(scale, PRESS_INFO, { Scale = PRESS_SCALE }):Play()
+	end)
+	button.MouseButton1Up:Connect(function()
+		TweenService:Create(scale, HOVER_INFO, { Scale = HOVER_SCALE }):Play()
+	end)
+	return button
+end
+
+local function textLabel(parent: Frame, name: string, props: { [string]: any }): TextLabel
+	props.Name = name
+	props.Parent = parent
+	props.ZIndex = parent.ZIndex + 3
+	return UIKit.Label(props)
+end
+
+--[[ Sections -------------------------------------------------------------------------- ]]
+
+local function sectionHeader(section: ShopConfig.Section, order: number)
+	local row = Instance.new("Frame")
+	row.Name = section.Id .. "Header"
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
+	row.LayoutOrder = order
+	row.ZIndex = scroller.ZIndex + 1
+	row.Parent = scroller
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 12)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = row
+	UIKit.Label({
+		Name = "Title",
+		Text = ("%s %s"):format(section.Icon, section.Title),
+		Font = Fonts.Display,
+		TextSize = 26,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, HEADER_HEIGHT),
+		LayoutOrder = 1,
+		ZIndex = row.ZIndex,
+		Stroke = UITheme.Stroke.Text,
+		Parent = row,
+	})
+	local divider = Instance.new("Frame")
+	divider.Name = "Divider"
+	divider.BackgroundColor3 = sectionPair(section).Top
+	divider.BackgroundTransparency = 0.35
+	divider.BorderSizePixel = 0
+	divider.Size = UDim2.fromOffset(0, 3)
+	divider.LayoutOrder = 2
+	divider.ZIndex = row.ZIndex
+	divider.Parent = row
+	UIKit.Corner(divider, 2)
+	local flex = Instance.new("UIFlexItem")
+	flex.FlexMode = Enum.UIFlexMode.Fill
+	flex.Parent = divider
+	headers[section.Id] = row
+end
+
+local function grid(name: string, order: number, columns: number, cellHeight: number): Frame
+	local frame = Instance.new("Frame")
+	frame.Name = name
+	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.new(1, 0, 0, 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
+	frame.LayoutOrder = order
+	frame.ZIndex = scroller.ZIndex + 1
+	frame.Parent = scroller
+	local layout = Instance.new("UIGridLayout")
+	layout.CellPadding = UDim2.fromOffset(GRID_GAP, GRID_GAP)
+	-- 1 px of slack so rounding never wraps a row (see GiftsPanel).
+	layout.CellSize = UDim2.new(1 / columns, -GRID_GAP * (columns - 1) / columns - 1, 0, cellHeight)
+	layout.FillDirectionMaxCells = columns
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = frame
+	return frame
 end
 
 -- The banner's money line, all from live prices.
 local function featuredDetail(key: string): string
 	local entry = item(key)
 	if entry.SaleOf then
-		local normal = ShopPrices.Get(entry.SaleOf)
-		local today = ShopPrices.Get(key)
-		if normal and today then
-			local off = ShopConfig.GetSavePercent(today, normal)
-			return ("normally <s>%s</s> · today %s%s"):format(robux(normal), robux(today), if off then (" (−%d%%)"):format(off) else "")
-		end
-		return entry.Effect
+		return saleText(key)
 	end
 	if entry.Parts then
 		local worth = ShopPrices.GetPartsTotal(key)
@@ -246,60 +524,69 @@ local function featuredDetail(key: string): string
 		end
 		return entry.Effect
 	end
-	return effectText(key)
+	local main, sub = tileLines(key)
+	return ("%s · %s"):format(main, sub)
 end
 
-local function buildFeatured()
-	for _, child in featured:GetChildren() do
-		if child:IsA("GuiObject") then
-			child:Destroy()
-		end
-	end
-	featuredRefs = {}
-	local key = featuredKey()
-	featured.Visible = key ~= nil
-	if not key then
-		return
-	end
+local function buildFeatured(key: string, order: number)
 	local entry = item(key)
-	local z = featured.ZIndex + 1
+	local narrow = pageWidth() < NARROW_WIDTH
+	local holder = Instance.new("Frame")
+	holder.Name = "FeaturedBanner"
+	holder.BackgroundTransparency = 1
+	holder.Size = UDim2.new(1, 0, 0, if narrow then FEATURED_NARROW_HEIGHT else FEATURED_HEIGHT)
+	holder.LayoutOrder = order
+	holder.ZIndex = scroller.ZIndex + 1
+	holder.Parent = scroller
+	local z = holder.ZIndex + 1
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
-	fill.Size = UDim2.fromScale(1, 1)
+	fill.Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset)
 	fill.BackgroundColor3 = Colors.White
 	fill.ZIndex = z
-	fill.Parent = featured
+	fill.Parent = holder
 	UIKit.Corner(fill, 20)
 	UIKit.Stroke(fill, 3)
 	UIKit.PairGradient(fill, UITheme.Gradients.ShopFeatured, 20)
+	UIKit.Shadow(fill, UITheme.SmallShadowOffset)
 	addShine(fill)
 
-	iconOrb(fill, entry.Icon, 110, UDim2.new(0, 80, 0.5, -55), z + 2)
-	local textLeft = 160
+	local iconSize = if narrow then 72 else 110
+	iconView(
+		fill,
+		key,
+		iconSize,
+		if narrow then UDim2.fromOffset(16, 16) else UDim2.new(0, 24, 0.5, 0),
+		if narrow then Vector2.zero else Vector2.new(0, 0.5),
+		z + 2
+	)
+	local textLeft = if narrow then 100 else 152
+	local textRight = if narrow then 16 else 210
+	local caption = if entry.SaleOf then "🔥 ADMIN ABUSE SALE" elseif key == "StarterPack" then "🎁 ONE TIME ONLY" else "⭐ BEST VALUE"
 	UIKit.Label({
 		Name = "Caption",
-		Text = if entry.SaleOf then "🔥 ADMIN ABUSE SALE" elseif key == "StarterPack" then "🎁 ONE TIME ONLY" else "⭐ BEST VALUE",
+		Text = caption,
 		Font = Fonts.BodyHeavy,
 		TextSize = 14,
-		TextColor3 = Colors.Text,
 		Position = UDim2.fromOffset(textLeft, 18),
-		Size = UDim2.new(1, -(textLeft + 200), 0, 18),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 18),
 		ZIndex = z + 2,
-		Stroke = 1.5,
+		Stroke = UITheme.WarmTextStroke,
 		Parent = fill,
 	})
 	UIKit.Label({
 		Name = "Title",
 		Text = if entry.SaleOf then item(entry.SaleOf).Name else entry.Name,
 		Font = Fonts.Display,
-		TextSize = 30,
+		TextSize = if narrow then 24 else 30,
 		Position = UDim2.fromOffset(textLeft, 38),
-		Size = UDim2.new(1, -(textLeft + 200), 0, 36),
+		Size = UDim2.new(1, -(textLeft + textRight), 0, 36),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		ZIndex = z + 2,
 		Stroke = 3,
 		Parent = fill,
 	})
+	local detailLeft = if narrow then 16 else textLeft
 	featuredRefs.Detail = UIKit.Label({
 		Name = "Detail",
 		Text = featuredDetail(key),
@@ -307,27 +594,25 @@ local function buildFeatured()
 		Font = Fonts.Body,
 		TextSize = 16,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(textLeft, 78),
-		Size = UDim2.new(1, -(textLeft + 200), 0, 40),
+		Position = UDim2.fromOffset(detailLeft, if narrow then 100 else 78),
+		Size = UDim2.new(1, -(detailLeft + textRight), 0, 40),
 		ZIndex = z + 2,
 		Stroke = UITheme.Stroke.Text,
 		Parent = fill,
 	})
 	-- "SAVE 56%" from live prices (bundles and sales only).
-	local price = ShopPrices.Get(key)
-	local save = if entry.SaleOf
-		then ShopConfig.GetSavePercent(price, ShopPrices.Get(entry.SaleOf))
-		else ShopConfig.GetSavePercent(price, ShopPrices.GetPartsTotal(key))
-	if save then
+	local tag = tagText(key, nil)
+	local tagY = if narrow then 144 else 124
+	if tag then
 		UIKit.Pill({
 			Name = "Save",
 			Parent = fill,
-			Text = ("SAVE %d%%"):format(save),
+			Text = tag,
 			Gradient = UITheme.Gradients.Gold,
 			Font = Fonts.Display,
 			TextSize = 16,
 			Height = 28,
-			Position = UDim2.fromOffset(textLeft, 124),
+			Position = UDim2.fromOffset(detailLeft, tagY),
 			ZIndex = z + 2,
 		})
 	end
@@ -336,8 +621,7 @@ local function buildFeatured()
 			Name = "Ends",
 			Font = Fonts.BodyHeavy,
 			TextSize = 13,
-			TextColor3 = Colors.Text,
-			Position = UDim2.fromOffset(textLeft + (if save then 110 else 0), 128),
+			Position = UDim2.fromOffset(detailLeft + (if tag then 110 else 0), tagY + 4),
 			Size = UDim2.fromOffset(300, 20),
 			ZIndex = z + 2,
 			Stroke = 1.5,
@@ -350,9 +634,9 @@ local function buildFeatured()
 		Style = "Green",
 		Text = ShopController.GetPriceText(key),
 		TextSize = 28,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, -20, 0.5, -2),
-		Size = UDim2.fromOffset(170, 64),
+		AnchorPoint = if narrow then Vector2.new(0.5, 1) else Vector2.new(1, 0.5),
+		Position = if narrow then UDim2.new(0.5, 0, 1, -14) else UDim2.new(1, -20, 0.5, -2),
+		Size = if narrow then UDim2.new(1, -32, 0, 56) else UDim2.fromOffset(170, 64),
 		ZIndex = z + 2,
 		OnClick = function()
 			ShopController.Buy(key)
@@ -361,140 +645,282 @@ local function buildFeatured()
 	featuredRefs.Key = key
 end
 
---[[ Tiles ------------------------------------------------------------------------- ]]
-
-local function buildTile(key: string, order: number)
+-- A pass: a big card (large icon, name, benefit, buy).
+local function buildPassCard(parent: Frame, section: ShopConfig.Section, key: string, order: number)
 	local entry = item(key)
-	local holder = Instance.new("Frame")
-	holder.Name = key
-	holder.BackgroundTransparency = 1
-	holder.LayoutOrder = order
-	holder.ZIndex = grid.ZIndex + 1
-	holder.Parent = grid
-	local z = holder.ZIndex + 1
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset)
-	fill.BackgroundColor3 = Colors.White
-	fill.ZIndex = z
-	fill.Parent = holder
-	UIKit.Corner(fill, 18)
-	UIKit.Stroke(fill, 3)
-	UIKit.PairGradient(fill, UITheme.Gradients[TAB_GRADIENT[entry.Tab] or "Violet"] or UITheme.Gradients.Violet)
-	-- Gloss: a soft white wash over the top half.
-	local gloss = Instance.new("Frame")
-	gloss.Name = "Gloss"
-	gloss.Size = UDim2.fromScale(1, 0.5)
-	gloss.BackgroundColor3 = Colors.White
-	gloss.BackgroundTransparency = 0.82
-	gloss.BorderSizePixel = 0
-	gloss.ZIndex = z
-	gloss.Parent = fill
-	UIKit.Corner(gloss, 18)
-	addShine(fill)
+	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
+	iconView(body, key, 88, UDim2.new(0, 16, 0.5, 0), Vector2.new(0, 0.5), body.ZIndex + 2)
+	textLabel(body, "Title", {
+		Text = entry.Name,
+		Font = Fonts.Display,
+		TextSize = 22,
+		Position = UDim2.fromOffset(118, 14),
+		Size = UDim2.new(1, -134, 0, 26),
+		TextTruncate = Enum.TextTruncate.AtEnd,
+		Stroke = UITheme.Stroke.Text,
+	})
+	local main = textLabel(body, "Main", {
+		Text = entry.Effect,
+		Font = Fonts.Body,
+		TextSize = 14,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(118, 42),
+		Size = UDim2.new(1, -134, 0, 36),
+		TextYAlignment = Enum.TextYAlignment.Top,
+		Stroke = 1.5,
+	})
+	local button = buyButton(body, key, scale, {
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 118, 1, -14),
+		Size = UDim2.new(1, -134, 0, UITheme.MinTapSize),
+	})
+	table.insert(tiles, { Key = key, Main = main, Price = button, Owned = ShopController.IsOwned(key) })
+end
 
-	iconOrb(fill, entry.Icon, 64, UDim2.new(0.5, 0, 0, 14), z + 2)
-	local ribbonText = entry.Ribbon
-	if ribbonText then
-		ribbon(fill, ribbonText, z + 4)
+-- A boost / cash / luck / safe tile.
+local function buildTile(parent: Frame, section: ShopConfig.Section, key: string, order: number, best: string?)
+	local entry = item(key)
+	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
+	iconView(body, key, 72, UDim2.new(0.5, 0, 0, 16), Vector2.new(0.5, 0), body.ZIndex + 2)
+	local tag = tagText(key, best)
+	if tag then
+		cornerTag(body, tag, body.ZIndex + 5)
 	end
-	UIKit.Label({
-		Name = "Title",
+	textLabel(body, "Title", {
 		Text = if entry.SaleOf then item(entry.SaleOf).Name .. " · SALE" else entry.Name,
 		Font = Fonts.Display,
-		TextSize = 18,
-		Position = UDim2.fromOffset(8, 84),
+		TextSize = 19,
+		Position = UDim2.fromOffset(8, 96),
 		Size = UDim2.new(1, -16, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-		ZIndex = z + 2,
 		Stroke = UITheme.Stroke.Text,
-		Parent = fill,
 	})
-	local effect = UIKit.Label({
-		Name = "Effect",
-		Text = if entry.SaleOf then featuredDetail(key) else effectText(key),
+	local mainText, subText = tileLines(key)
+	local isCash = ShopConfig.CashPacks[key] ~= nil
+	local main = textLabel(body, "Main", {
+		Text = mainText,
+		RichText = true,
+		Font = if isCash then Fonts.Display else Fonts.BodyHeavy,
+		TextSize = if isCash then 20 else 13,
+		TextWrapped = true,
+		Position = UDim2.fromOffset(8, 120),
+		Size = UDim2.new(1, -16, 0, 22),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Stroke = 1.5,
+	})
+	local sub = textLabel(body, "Sub", {
+		Text = subText,
 		RichText = true,
 		Font = Fonts.Body,
-		TextSize = 13,
+		TextSize = 12,
+		TextColor3 = Colors.Muted,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 108),
-		Size = UDim2.new(1, -16, 0, 34),
+		Position = UDim2.fromOffset(8, 144),
+		Size = UDim2.new(1, -16, 0, 30),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Top,
-		ZIndex = z + 2,
-		Stroke = 1.5,
-		Parent = fill,
+		Stroke = 1,
 	})
-	local owned = ShopController.IsOwned(key)
-	local ownedLabel: TextLabel? = nil
-	local tokens = TycoonController.GetShop().SafeFusionTokens
-	if (key == "SafeFusion1" or key == "SafeFusion5") and tokens > 0 then
-		ownedLabel = UIKit.Pill({
-			Name = "OwnedCount",
-			Parent = fill,
-			Text = ("OWNED %d"):format(tokens),
-			Color = Colors.Ink,
-			TextColor3 = Colors.Text,
-			Font = Fonts.BodyHeavy,
-			TextSize = 12,
-			Height = 20,
-			Position = UDim2.fromOffset(8, 8),
-			ZIndex = z + 4,
-		})
-	end
-	local button = UIKit.Button({
-		Name = "Buy",
-		Parent = fill,
-		Style = if owned then "Disabled" else "Green",
-		Text = if owned then "✓ OWNED" else ShopController.GetPriceText(key),
-		TextColor3 = if owned then Colors.Muted else Colors.Text,
-		TextSize = 20,
+	local button = buyButton(body, key, scale, {
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -12),
 		Size = UDim2.new(1, -24, 0, UITheme.MinTapSize + 4),
-		ShadowOffset = UITheme.SmallShadowOffset,
-		ZIndex = z + 2,
-		OnClick = function()
-			if not ShopController.IsOwned(key) then
-				ShopController.Buy(key)
-			end
-		end,
 	})
-	table.insert(tiles, { Key = key, Effect = effect, Price = button, Owned = ownedLabel })
+	table.insert(tiles, { Key = key, Main = main, Sub = sub, Price = button, Owned = false })
 end
 
-local function buildGrid()
-	for _, child in grid:GetChildren() do
+--[[ Chips + scrolling -------------------------------------------------------------- ]]
+
+local function setActive(id: string?)
+	if id == activeSection then
+		return
+	end
+	activeSection = id
+	for sectionId, button in chipButtons do
+		UIKit.SetSelected(button, sectionId == id)
+	end
+	-- Keep the active chip in view when the bar scrolls sideways.
+	local chip = id and chipButtons[id]
+	if chip then
+		local scale = UIKit.EffectiveScale(chipBar)
+		local left = (chip.AbsolutePosition.X - chipBar.AbsolutePosition.X) / scale
+		local right = left + chip.AbsoluteSize.X / scale
+		local width = chipBar.AbsoluteSize.X / scale
+		local x = chipBar.CanvasPosition.X
+		if left < 0 then
+			chipBar.CanvasPosition = Vector2.new(math.max(0, x + left - CHIP_GAP), 0)
+		elseif right > width then
+			chipBar.CanvasPosition = Vector2.new(x + right - width + CHIP_GAP, 0)
+		end
+	end
+end
+
+-- The section whose header is on screen: the last header above the
+-- ACTIVE_LINE, or the last section once the page is scrolled to its end.
+-- Screen-space only (AbsolutePosition), so the phone UIScale can't skew it.
+local function sectionOnScreen(): string?
+	local top = scroller.AbsolutePosition.Y
+	local bottom = top + scroller.AbsoluteSize.Y
+	if footer.AbsolutePosition.Y + footer.AbsoluteSize.Y <= bottom + 2 and scroller.CanvasPosition.Y > 0 then
+		return sectionOrder[#sectionOrder]
+	end
+	local line = top + ACTIVE_LINE * UIKit.EffectiveScale(scroller)
+	local found = sectionOrder[1]
+	for _, id in sectionOrder do
+		local header = headers[id]
+		if header and header.AbsolutePosition.Y <= line then
+			found = id
+		end
+	end
+	return found
+end
+
+local function onScrolled()
+	if os.clock() < scrollLockUntil then
+		return
+	end
+	setActive(sectionOnScreen())
+end
+
+-- Canvas offset (logical px) that puts `id`'s header at the page top.
+local function sectionTarget(id: string): number?
+	local header = headers[id]
+	if not header then
+		return nil
+	end
+	local scale = UIKit.EffectiveScale(scroller)
+	return math.max(0, scroller.CanvasPosition.Y + (header.AbsolutePosition.Y - scroller.AbsolutePosition.Y) / scale)
+end
+
+-- Tweens (or jumps) the page to a section; it never filters anything.
+local function scrollTo(id: string, animate: boolean)
+	local target = sectionTarget(id)
+	if not target then
+		return
+	end
+	setActive(id)
+	if not animate then
+		scroller.CanvasPosition = Vector2.new(0, target)
+		return
+	end
+	scrollLockUntil = os.clock() + SCROLL_TWEEN.Time + 0.1
+	local tween = TweenService:Create(scroller, SCROLL_TWEEN, { CanvasPosition = Vector2.new(0, target) })
+	tween:Play()
+	tween.Completed:Once(function()
+		-- One correction pass (the canvas may have moved while tweening).
+		local again = sectionTarget(id)
+		if again and math.abs(again - scroller.CanvasPosition.Y) > 2 then
+			scroller.CanvasPosition = Vector2.new(0, again)
+		end
+		scrollLockUntil = 0
+		onScrolled()
+	end)
+end
+
+local function buildChips()
+	for _, child in chipBar:GetChildren() do
 		if child:IsA("GuiObject") then
 			child:Destroy()
 		end
 	end
-	tiles = {}
-	for order, key in keysForTab(selectedTab) do
-		buildTile(key, order)
+	table.clear(chipButtons)
+	for order, id in sectionOrder do
+		local section: ShopConfig.Section? = nil
+		for _, s in ShopConfig.Sections do
+			if s.Id == id then
+				section = s
+			end
+		end
+		if section then
+			local button: TextButton
+			button = UIKit.Button({
+				Name = id .. "Chip",
+				Parent = chipBar,
+				Style = UIKit.UNSELECTED_STYLE,
+				Text = section.Chip,
+				TextColor3 = Colors.Muted,
+				TextSize = 15,
+				Size = UDim2.fromOffset(CHIP_WIDTH, CHIP_HEIGHT),
+				LayoutOrder = order,
+				ShadowOffset = UITheme.SmallShadowOffset,
+				ZIndex = chipBar.ZIndex + 1,
+				OnClick = function()
+					UIKit.SelectFeedback(button)
+					scrollTo(id, true)
+				end,
+			})
+			chipButtons[id] = button
+		end
 	end
-	for tab, button in tabButtons do
-		local selected = tab == selectedTab
-		UIKit.SetSelected(button, selected)
-	end
+	activeSection = nil
 end
 
-local function applyColumns()
-	local columns = if UIKit.IsPhone() then COLUMNS.Phone else COLUMNS.Desktop
-	-- 1 px of slack so rounding never wraps a row (see GiftsPanel).
-	gridLayout.CellSize = UDim2.new(1 / columns, -TILE_GAP * (columns - 1) / columns - 1, 0, TILE_HEIGHT)
-	gridLayout.FillDirectionMaxCells = columns
+--[[ Build / refresh --------------------------------------------------------------- ]]
+
+-- What the page shows; a change means a rebuild (a purchase, a sale
+-- starting, an icon arriving, a layout switch).
+local function signature(): string
+	local parts = { featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
+	for _, section in ShopConfig.Sections do
+		for _, key in keysFor(section) do
+			table.insert(parts, key .. (if ShopController.IsOwned(key) then "+" else "") .. (ShopPrices.GetIcon(key) or ""))
+		end
+	end
+	return table.concat(parts, "|")
 end
 
---[[ Refresh ------------------------------------------------------------------------- ]]
+local function rebuild()
+	for _, child in scroller:GetChildren() do
+		if child:IsA("GuiObject") and child ~= footer then
+			child:Destroy()
+		end
+	end
+	table.clear(headers)
+	table.clear(tiles)
+	sectionOrder = {}
+	featuredRefs = {}
+	local best = bestValueKey()
+	local order = 0
+	for _, section in ShopConfig.Sections do
+		local featured = if section.Id == "Featured" then featuredKey() else nil
+		local keys: { string } = if section.Id == "Featured" then {} else keysFor(section)
+		if featured or #keys > 0 then
+			table.insert(sectionOrder, section.Id)
+			order += 1
+			sectionHeader(section, order)
+			order += 1
+			if featured then
+				buildFeatured(featured, order)
+			elseif section.Id == "Passes" then
+				local cards = grid("PassesGrid", order, passColumns(), PASS_HEIGHT)
+				for index, key in keys do
+					buildPassCard(cards, section, key, index)
+				end
+			else
+				local cells = grid(section.Id .. "Grid", order, tileColumns(), TILE_HEIGHT)
+				for index, key in keys do
+					buildTile(cells, section, key, index, best)
+				end
+			end
+		end
+	end
+	footer.LayoutOrder = order + 1
+	buildChips()
+	builtSignature = signature()
+end
 
--- Text-only refresh (cash amounts, prices, the sale timer); cheap.
+-- Text-only refresh (cash amounts, banks, prices, tags, the sale timer).
 local function refreshTexts()
 	for _, refs in tiles do
-		local entry = item(refs.Key)
-		refs.Effect.Text = if entry.SaleOf then featuredDetail(refs.Key) else effectText(refs.Key)
-		if not ShopController.IsOwned(refs.Key) then
+		local main, sub = tileLines(refs.Key)
+		if refs.Sub then
+			if refs.Main then
+				refs.Main.Text = main
+			end
+			refs.Sub.Text = sub
+		end
+		if not refs.Owned then
 			UIKit.SetButton(refs.Price, { Text = ShopController.GetPriceText(refs.Key) })
 		end
 	end
@@ -519,36 +945,29 @@ local function refreshTexts()
 	end
 end
 
--- Full rebuild (what's listed can change: a purchase, a sale starting).
-local function rebuild()
-	buildFeatured()
-	buildGrid()
+local function refresh()
+	if signature() ~= builtSignature then
+		local y = scroller.CanvasPosition.Y
+		rebuild()
+		scroller.CanvasPosition = Vector2.new(0, y)
+	end
 	refreshTexts()
+	onScrolled()
 end
 
 local function startTicking()
 	refreshToken += 1
 	local token = refreshToken
 	task.spawn(function()
-		local lastFeatured = featuredKey()
 		while refreshToken == token and modal.IsOpen() do
 			task.wait(REFRESH_SECONDS)
 			if refreshToken ~= token or not modal.IsOpen() then
 				return
 			end
-			-- A sale opening or closing changes the banner and the tiles.
-			local nowFeatured = featuredKey()
-			if nowFeatured ~= lastFeatured then
-				lastFeatured = nowFeatured
-				rebuild()
-			else
-				refreshTexts()
-			end
+			refresh()
 		end
 	end)
 end
-
---[[ Build ------------------------------------------------------------------------- ]]
 
 local function build()
 	modal = UIKit.Modal({
@@ -581,79 +1000,47 @@ local function build()
 	glowGradient.Parent = glow
 
 	local content = modal.Content
+	-- The sticky chip bar (outside the page scroller), sideways-scrolling.
+	chipBar = Instance.new("ScrollingFrame")
+	chipBar.Name = "Chips"
+	chipBar.BackgroundTransparency = 1
+	chipBar.BorderSizePixel = 0
+	chipBar.Size = UDim2.new(1, 0, 0, CHIP_BAR_HEIGHT)
+	chipBar.ScrollingDirection = Enum.ScrollingDirection.X
+	chipBar.AutomaticCanvasSize = Enum.AutomaticSize.X
+	chipBar.CanvasSize = UDim2.new()
+	chipBar.ScrollBarThickness = 0
+	chipBar.ElasticBehavior = Enum.ElasticBehavior.WhenScrollable
+	chipBar.ZIndex = content.ZIndex
+	chipBar.Parent = content
+	local chipLayout = Instance.new("UIListLayout")
+	chipLayout.FillDirection = Enum.FillDirection.Horizontal
+	chipLayout.Padding = UDim.new(0, CHIP_GAP)
+	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	chipLayout.Parent = chipBar
+
+	-- The one page.
 	scroller = Instance.new("ScrollingFrame")
 	scroller.Name = "Scroll"
 	scroller.BackgroundTransparency = 1
 	scroller.BorderSizePixel = 0
-	scroller.Size = UDim2.fromScale(1, 1)
+	scroller.Position = UDim2.fromOffset(0, CHIP_BAR_HEIGHT + 6)
+	scroller.Size = UDim2.new(1, 0, 1, -(CHIP_BAR_HEIGHT + 6))
 	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
 	scroller.CanvasSize = UDim2.new()
+	scroller.ScrollingDirection = Enum.ScrollingDirection.Y
 	scroller.ScrollBarThickness = 6
 	scroller.ScrollBarImageColor3 = Colors.Faint
 	scroller.VerticalScrollBarInset = Enum.ScrollBarInset.Always
 	scroller.ZIndex = content.ZIndex
 	scroller.Parent = content
-	UIKit.Padding(scroller, 4, 6, 10, 4)
+	UIKit.Padding(scroller, 4, 8, 12, 4)
 	local layout = Instance.new("UIListLayout")
-	layout.Padding = UDim.new(0, 12)
+	layout.Padding = UDim.new(0, SECTION_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = scroller
 
-	featured = Instance.new("Frame")
-	featured.Name = "Featured"
-	featured.BackgroundTransparency = 1
-	featured.Size = UDim2.new(1, 0, 0, FEATURED_HEIGHT)
-	featured.LayoutOrder = 1
-	featured.ZIndex = scroller.ZIndex + 1
-	featured.Parent = scroller
-
-	tabsRow = Instance.new("Frame")
-	tabsRow.Name = "Tabs"
-	tabsRow.BackgroundTransparency = 1
-	tabsRow.Size = UDim2.new(1, 0, 0, TAB_HEIGHT + UITheme.SmallShadowOffset)
-	tabsRow.LayoutOrder = 2
-	tabsRow.ZIndex = scroller.ZIndex + 1
-	tabsRow.Parent = scroller
-	local tabLayout = Instance.new("UIListLayout")
-	tabLayout.FillDirection = Enum.FillDirection.Horizontal
-	tabLayout.Padding = UDim.new(0, 8)
-	tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	tabLayout.Parent = tabsRow
-	local tabCount = #ShopConfig.Tabs
-	for order, tab in ShopConfig.Tabs do
-		tabButtons[tab.Id] = UIKit.Button({
-			Name = tab.Id .. "Tab",
-			Parent = tabsRow,
-			Style = "Disabled",
-			Text = tab.Label,
-			TextSize = 15,
-			Size = UDim2.new(1 / tabCount, -8 * (tabCount - 1) / tabCount, 0, TAB_HEIGHT),
-			LayoutOrder = order,
-			ShadowOffset = UITheme.SmallShadowOffset,
-			ZIndex = tabsRow.ZIndex,
-			OnClick = function()
-				selectedTab = tab.Id
-				buildGrid()
-				refreshTexts()
-			end,
-		})
-	end
-
-	grid = Instance.new("Frame")
-	grid.Name = "Grid"
-	grid.BackgroundTransparency = 1
-	grid.Size = UDim2.new(1, 0, 0, 0)
-	grid.AutomaticSize = Enum.AutomaticSize.Y
-	grid.LayoutOrder = 3
-	grid.ZIndex = scroller.ZIndex + 1
-	grid.Parent = scroller
-	gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellPadding = UDim2.fromOffset(TILE_GAP, TILE_GAP)
-	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	gridLayout.Parent = grid
-	applyColumns()
-
-	UIKit.Label({
+	footer = UIKit.Label({
 		Name = "Footer",
 		Text = "Prices read live from Roblox · odds are always shown at the Gacha Pad and the Fusion Machine",
 		Font = Fonts.Body,
@@ -663,26 +1050,44 @@ local function build()
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Size = UDim2.new(1, 0, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		LayoutOrder = 4,
+		LayoutOrder = 999,
 		ZIndex = scroller.ZIndex + 1,
 		Parent = scroller,
 	})
 
-	UIKit.LayoutChanged:Connect(function()
-		applyColumns()
-	end)
+	scroller:GetPropertyChangedSignal("CanvasPosition"):Connect(onScrolled)
+	-- A phone switch or a resize can change the column counts.
+	local function relayout()
+		if modal.IsOpen() then
+			refresh()
+		end
+	end
+	UIKit.LayoutChanged:Connect(relayout)
+	scroller:GetPropertyChangedSignal("AbsoluteSize"):Connect(relayout)
 end
 
 --[[ Public ------------------------------------------------------------------------- ]]
 
-function ShopPanel.Open(tab: string?)
-	if tab then
-		selectedTab = tab
-	end
+-- Opens at the top, or scrolled to `section` (a ShopConfig.Sections id:
+-- the contextual offer opens Cash or Boosts).
+function ShopPanel.Open(section: string?)
 	rebuild()
+	refreshTexts()
+	scroller.CanvasPosition = Vector2.zero
 	if not modal.IsOpen() then
 		modal.Open()
 		ShopController.Track("ShopOpened")
+	end
+	setActive(sectionOrder[1])
+	if section then
+		-- Wait for the layout to place the sections, then jump.
+		task.spawn(function()
+			RunService.Heartbeat:Wait()
+			RunService.Heartbeat:Wait()
+			if modal.IsOpen() then
+				scrollTo(section, true)
+			end
+		end)
 	end
 	startTicking()
 end
@@ -697,21 +1102,22 @@ end
 
 function ShopPanel.Init()
 	build()
+	ShopController.SetShopOpener(ShopPanel.Open)
 	-- Owned states, token counts and what's listed change after a purchase
-	-- or a sync; prices change when they arrive.
+	-- or a sync; prices and icons change when they arrive.
 	ShopController.Purchased:Connect(function()
 		if modal.IsOpen() then
-			rebuild()
+			refresh()
 		end
 	end)
 	TycoonController.TycoonChanged:Connect(function()
 		if modal.IsOpen() then
-			refreshTexts()
+			refresh()
 		end
 	end)
 	ShopPrices.Changed:Connect(function()
 		if modal.IsOpen() then
-			rebuild()
+			refresh()
 		end
 	end)
 end
