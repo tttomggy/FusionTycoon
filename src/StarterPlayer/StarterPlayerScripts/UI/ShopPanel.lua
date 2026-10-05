@@ -487,7 +487,9 @@ end
 
 local function applyColumns()
 	local columns = if UIKit.IsPhone() then COLUMNS.Phone else COLUMNS.Desktop
-	gridLayout.CellSize = UDim2.new(1 / columns, -TILE_GAP * (columns - 1) / columns, 0, TILE_HEIGHT)
+	-- 1 px of slack so rounding never wraps a row (see GiftsPanel).
+	gridLayout.CellSize = UDim2.new(1 / columns, -TILE_GAP * (columns - 1) / columns - 1, 0, TILE_HEIGHT)
+	gridLayout.FillDirectionMaxCells = columns
 end
 
 --[[ Refresh ------------------------------------------------------------------------- ]]

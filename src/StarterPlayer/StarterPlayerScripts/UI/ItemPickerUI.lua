@@ -580,7 +580,9 @@ local function layoutFor(pedestalMode: boolean, isPhone: boolean)
 	local footerSpace = if pedestalMode then FOOTER_HEIGHT + UITheme.SmallShadowOffset + 10 else 0
 	grid.Position = UDim2.fromOffset(0, gridTop)
 	grid.Size = UDim2.new(1, 0, 1, -(gridTop + footerSpace))
-	gridLayout.CellSize = UDim2.new(1 / columns, -GRID_GAP * (columns - 1) / columns, 0, CARD_HEIGHT)
+	-- 1 px of slack so rounding never wraps a row (see GiftsPanel).
+	gridLayout.CellSize = UDim2.new(1 / columns, -GRID_GAP * (columns - 1) / columns - 1, 0, CARD_HEIGHT)
+	gridLayout.FillDirectionMaxCells = columns
 	footerHolder.Visible = pedestalMode
 end
 

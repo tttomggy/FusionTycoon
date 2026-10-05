@@ -336,7 +336,10 @@ local function build(): UIKit.Modal
 	grid.ZIndex = z
 	grid.Parent = content
 	local layout = Instance.new("UIGridLayout")
-	layout.CellSize = UDim2.new(1 / COLUMNS, -BOX_GAP * (COLUMNS - 1) / COLUMNS, 0, BOX_HEIGHT)
+	-- 1 px of slack: an exact 1/3 split rounds over the row width and wraps the
+	-- grid to 2 columns (which pushed the last gifts below the panel).
+	layout.CellSize = UDim2.new(1 / COLUMNS, -BOX_GAP * (COLUMNS - 1) / COLUMNS - 1, 0, BOX_HEIGHT)
+	layout.FillDirectionMaxCells = COLUMNS
 	layout.CellPadding = UDim2.fromOffset(BOX_GAP, BOX_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = grid
