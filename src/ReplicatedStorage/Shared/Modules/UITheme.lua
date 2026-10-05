@@ -155,6 +155,16 @@ UITheme.HeistScene = {
 	LockedButton = hex("#1FB49A"), -- the console button once locked
 }
 
+-- /trailer actors (TrailerController's local NPC rigs).
+UITheme.Trailer = {
+	ThiefBody = hex("#E0304E"), -- the masked thief (HeistScene.ThiefBody)
+	ThiefMask = hex("#0B0A1A"), -- his head (Ink)
+	OwnerHead = hex("#F5CD30"), -- the classic yellow / blue owner
+	OwnerArms = hex("#F5CD30"),
+	OwnerTorso = hex("#1F6FE0"),
+	OwnerLegs = hex("#1B3F8F"),
+}
+
 -- Event id -> its gradient key above.
 UITheme.EventGradient = {
 	GoldenRain = "GoldRain",

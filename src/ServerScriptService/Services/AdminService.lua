@@ -22,6 +22,9 @@
 	        SetNextAdminAbuse { Unix }  DataStore GlobalEvents/NextAdminAbuse
 	                   (UTC), then every server (0 clears)
 	  A non-admin firing AdminAction gets a suspicious warn and nothing else.
+	  /trailer [shot|stop] (chat, live servers too)  TrailerStart { Shot?,
+	        Stop? } to that admin only (shot whitelisted against
+	        TrailerConfig); the cinematic is client-only. Non-admins: nothing.
 
 	Scope "All" publishes { Action, Args, SenderUserId } on MessagingService
 	topic FT_Admin; every server (this one included, via its own
@@ -50,6 +53,7 @@ local AdminConfig = require(ReplicatedStorage.Shared.Config.AdminConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local TrailerConfig = require(ReplicatedStorage.Shared.Config.TrailerConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
@@ -335,7 +339,34 @@ local function onMessage(message: any)
 	apply(action, args)
 end
 
+-- "/trailer", "/trailer stop", "/trailer <shot>": admins only, the shot
+-- whitelisted against TrailerConfig. Returns true if it was a /trailer.
+local function onTrailerCommand(player: Player, message: string): boolean
+	local lower = message:lower()
+	if lower:match("^%s*/trailer") == nil then
+		return false
+	end
+	if not isAdmin(player.UserId) then
+		return true
+	end
+	local arg = lower:match("^%s*/trailer%s+(%S+)%s*$")
+	if lower:match("^%s*/trailer%s*$") then
+		RemoteEvents.TrailerStart:FireClient(player, {})
+	elseif arg == "stop" then
+		RemoteEvents.TrailerStart:FireClient(player, { Stop = true })
+	elseif arg and TrailerConfig.GetShot(arg) then
+		RemoteEvents.TrailerStart:FireClient(player, { Shot = arg })
+	else
+		return true
+	end
+	warn(("AdminService: %s (%d) ran %s"):format(player.Name, player.UserId, message))
+	return true
+end
+
 local function onChatted(player: Player, message: string)
+	if onTrailerCommand(player, message) then
+		return
+	end
 	if message:lower():match("^%s*/admin%s*$") == nil then
 		return
 	end

@@ -1539,6 +1539,11 @@ function ResultController.ShowItemCard(caption: string, item: any, description: 
 	})
 end
 
+-- /trailer: closes the big card (or event card) now.
+function ResultController.CloseCards()
+	closeBigCard()
+end
+
 -- The player's RevealRule (SettingsConfig): Secret and event-only
 -- mutations always; otherwise per tier (Never / Golden+ / … / Always).
 function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean

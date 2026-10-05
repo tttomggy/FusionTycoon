@@ -50,6 +50,7 @@ local REMOTE_EVENT_NAMES = {
 	"AdminAction", -- client -> server: an Admin panel action; { Action, Args, Scope = "Server"|"All" } (AdminService validates the sender and every arg)
 	"AdminResult", -- server -> one admin: outcome of an AdminAction; { Ok, Text }
 	"AdminBroadcast", -- server -> all clients: a filtered admin banner; { Text }
+	"TrailerStart", -- server -> one admin: play the /trailer cinematic locally; { Shot = TrailerConfig shot id?, Stop = true? } (AdminService re-checked AdminConfig; the trailer changes nothing on the server)
 }
 
 local function getOrCreateFolder(): Folder
