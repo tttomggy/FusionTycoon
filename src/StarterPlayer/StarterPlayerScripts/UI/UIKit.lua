@@ -849,22 +849,30 @@ local function getPopScale(gui: GuiObject): UIScale
 	return scale :: UIScale
 end
 
--- Opens from 0.85 to 1 with a Back ease. A CanvasGroup also fades in.
+-- A card's resting scale: 1, or less once UIKit.FitHeight shrank it.
+local function restScale(gui: GuiObject): number
+	local fit = gui:GetAttribute("FitScale")
+	return if typeof(fit) == "number" then fit else 1
+end
+
+-- Opens from 0.85 to its rest scale with a Back ease. A CanvasGroup also
+-- fades in.
 function UIKit.PopIn(gui: GuiObject)
 	local scale = getPopScale(gui)
-	scale.Scale = 0.85
+	local rest = restScale(gui)
+	scale.Scale = 0.85 * rest
 	gui.Visible = true
 	if gui:IsA("CanvasGroup") then
 		gui.GroupTransparency = 0
 	end
-	TweenService:Create(scale, POP_IN_INFO, { Scale = 1 }):Play()
+	TweenService:Create(scale, POP_IN_INFO, { Scale = rest }):Play()
 end
 
 -- Shrinks to 0.9 and fades (CanvasGroup) over 0.12 s, then hides. Returns
 -- the tween so callers can wait on it.
 function UIKit.PopOut(gui: GuiObject): Tween
 	local scale = getPopScale(gui)
-	local tween = TweenService:Create(scale, POP_OUT_INFO, { Scale = 0.9 })
+	local tween = TweenService:Create(scale, POP_OUT_INFO, { Scale = 0.9 * restScale(gui) })
 	if gui:IsA("CanvasGroup") then
 		TweenService:Create(gui, POP_OUT_INFO, { GroupTransparency = 1 }):Play()
 	end
@@ -886,6 +894,18 @@ end
 
 function UIKit.IsPhone(): boolean
 	return viewportHeight() < UITheme.PhoneHeightThreshold
+end
+
+-- A fixed-size card (offset layout) taller than the screen: shrink it as a
+-- whole (through its PopScale, so PopIn / PopOut keep working) to leave
+-- `margin` px above and below. Call before PopIn. Uses the logical height
+-- (after the phone UIScale). Returns the scale used.
+function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): number
+	local logical = viewportHeight() / (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
+	local fit = math.clamp((logical - 2 * (margin or 12)) / height, 0.5, 1)
+	holder:SetAttribute("FitScale", fit)
+	getPopScale(holder).Scale = fit
+	return fit
 end
 
 local layoutChanged = Instance.new("BindableEvent")
