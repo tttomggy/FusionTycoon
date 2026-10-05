@@ -889,6 +889,21 @@ function HeistService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	TycoonService = require(script.Parent.TycoonService)
 
+	-- A victim who respawns mid-heist keeps the chase speed: the new
+	-- Humanoid starts at the default, and nothing else re-applies it.
+	local function watchRespawn(player: Player)
+		table.insert(state.connections, player.CharacterAdded:Connect(function(character: Model)
+			local humanoid = character:WaitForChild("Humanoid", 5)
+			if humanoid and humanoid:IsA("Humanoid") and PlayerDataService.HasCarriedItems(player) then
+				humanoid.WalkSpeed = HeistConfig.OwnerChaseWalkSpeed
+			end
+		end))
+	end
+	table.insert(state.connections, Players.PlayerAdded:Connect(watchRespawn))
+	for _, player in Players:GetPlayers() do
+		watchRespawn(player)
+	end
+
 	-- Leaving or shutdown: fail this player's carries (either side) before
 	-- PlayerDataService saves anything.
 	PlayerDataService.OnRelease(function(player: Player)
