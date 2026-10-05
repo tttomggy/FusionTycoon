@@ -303,6 +303,8 @@ local function checkPlayer(player: Player)
 	end
 	state.owned[player.UserId] = owned
 	publishSession(player)
+	-- Offline earnings were priced on load, before passes were known.
+	PlayerDataService.RecomputePendingOffline(player)
 	runPassHooks(player)
 	syncPlayer(player)
 end
@@ -440,7 +442,6 @@ local function applyVipTag(player: Player)
 			Name = VIP_TAG_NAME,
 			Text = "👑 VIP",
 			Gradient = UITheme.Gradients.Gold,
-			TextColor = UITheme.Colors.GoldText,
 			Studs = VIP_TAG_STUDS,
 			StudsOffset = VIP_TAG_OFFSET,
 			MaxDistance = VIP_TAG_MAX_DISTANCE,

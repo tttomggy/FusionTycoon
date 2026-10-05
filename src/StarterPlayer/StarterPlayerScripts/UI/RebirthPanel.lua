@@ -426,6 +426,12 @@ function RebirthPanel.Open()
 	modal.Open()
 end
 
+function RebirthPanel.Close()
+	if modal then
+		modal.Close()
+	end
+end
+
 function RebirthPanel.IsOpen(): boolean
 	return modal ~= nil and modal.IsOpen()
 end

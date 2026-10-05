@@ -302,7 +302,6 @@ local function build(): UIKit.Modal
 		Parent = strip,
 		Style = "Gold",
 		Text = "OPEN",
-		TextColor3 = Colors.GoldText,
 		TextSize = 16,
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.fromScale(1, 0.5),
@@ -328,15 +327,41 @@ local function build(): UIKit.Modal
 		Parent = content,
 	})
 
+	-- The boxes and the footer scroll together: at full size the pinned
+	-- footer covered the second row's bottom 20 px, and on a phone (0.8
+	-- scale, ~335 px of content) the second row didn't fit at all.
+	local scrollTop = STRIP_HEIGHT + 30
+	local scroller = Instance.new("ScrollingFrame")
+	scroller.Name = "Scroll"
+	scroller.BackgroundTransparency = 1
+	scroller.BorderSizePixel = 0
+	scroller.Position = UDim2.fromOffset(0, scrollTop)
+	scroller.Size = UDim2.new(1, 0, 1, -scrollTop)
+	scroller.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	scroller.CanvasSize = UDim2.new()
+	scroller.ScrollBarThickness = 6
+	scroller.ScrollBarImageColor3 = Colors.Faint
+	scroller.ZIndex = z
+	scroller.Parent = content
+	-- Room for the ready boxes' glow (it reaches ~10 px past a box).
+	UIKit.Padding(scroller, 8, 14, 8, 8)
+	local scrollLayout = Instance.new("UIListLayout")
+	scrollLayout.Padding = UDim.new(0, 8)
+	scrollLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	scrollLayout.Parent = scroller
+
 	grid = Instance.new("Frame")
 	grid.Name = "Grid"
 	grid.BackgroundTransparency = 1
-	grid.Position = UDim2.fromOffset(0, STRIP_HEIGHT + 34)
 	grid.Size = UDim2.new(1, 0, 0, BOX_HEIGHT * 2 + BOX_GAP + UITheme.SmallShadowOffset)
+	grid.LayoutOrder = 1
 	grid.ZIndex = z
-	grid.Parent = content
+	grid.Parent = scroller
 	local layout = Instance.new("UIGridLayout")
-	layout.CellSize = UDim2.new(1 / COLUMNS, -BOX_GAP * (COLUMNS - 1) / COLUMNS, 0, BOX_HEIGHT)
+	-- 1 px of slack: an exact 1/3 split rounds over the row width and wraps the
+	-- grid to 2 columns (which pushed the last gifts below the panel).
+	layout.CellSize = UDim2.new(1 / COLUMNS, -BOX_GAP * (COLUMNS - 1) / COLUMNS - 1, 0, BOX_HEIGHT)
+	layout.FillDirectionMaxCells = COLUMNS
 	layout.CellPadding = UDim2.fromOffset(BOX_GAP, BOX_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = grid
@@ -351,12 +376,12 @@ local function build(): UIKit.Modal
 		TextSize = 12,
 		TextColor3 = Colors.Faint,
 		TextWrapped = true,
-		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.fromScale(0, 1),
+		AutomaticSize = Enum.AutomaticSize.Y,
 		Size = UDim2.new(1, 0, 0, 28),
+		LayoutOrder = 2,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = z,
-		Parent = content,
+		Parent = scroller,
 	})
 
 	task.spawn(function()

@@ -63,7 +63,9 @@ local LAYOUT = {
 		ButtonTextSize = 22,
 	},
 	Phone = {
-		GoalPosition = UDim2.fromOffset(10, 154),
+		-- Under the cash card and its shadow (76 + 96 + 4 + 8 gap); 154 sat
+		-- 22 px over the card's bottom.
+		GoalPosition = UDim2.fromOffset(10, 184),
 		GoalWidth = 168,
 		GoalBarHeight = 10,
 		CashPosition = UDim2.fromOffset(10, 76),
@@ -72,6 +74,12 @@ local LAYOUT = {
 	},
 }
 local CASH_CARD_SIZE = Vector2.new(260, 96)
+-- Phone: the SHOP / GIFTS row (beside the cash card) drops this far below
+-- the card's top, so the GIFTS badge and SALE tag (they poke ~8 px above
+-- their buttons, more while GIFTS bounces) clear the pulsing top-centre
+-- event chip and its glow (ends at y ~66 at 844 x 390, i.e. 1055 x 487.5
+-- after the 0.8 scale).
+local PHONE_SHOP_ROW_DROP = 8
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
@@ -346,7 +354,7 @@ local function buildCashCard(): Frame
 		ZIndex = z,
 		TextStroke = 1.5,
 	})
-	local rebirthFill = rebirthPill.Parent :: Frame
+	local rebirthFill = UIKit.PillRoot(rebirthPill)
 	rebirthFill.Visible = false
 	-- The pill is small; this clear button gives it a >= 44 px hit area.
 	local hit = Instance.new("TextButton")
@@ -381,7 +389,7 @@ local function buildCashCard(): Frame
 	multiplierHit.Position = UDim2.fromScale(0.5, 0.5)
 	multiplierHit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
 	multiplierHit.ZIndex = z + 2
-	multiplierHit.Parent = multiplierPill.Parent
+	multiplierHit.Parent = UIKit.PillRoot(multiplierPill)
 	multiplierHit.Activated:Connect(function()
 		HudController.ToggleIncomeBreakdown()
 	end)
@@ -894,7 +902,9 @@ local cashHolder: Frame
 	3:12" pill (hidden once today's gifts are all open).
 ]]
 local SHOP_BUTTON_SIZE = Vector2.new(132, 56)
-local SHOP_ROW_GAP = 8
+-- Room for the SALE tag (it pokes 8 px past SHOP's right edge) beside the
+-- bouncing GIFTS button (×1.08).
+local SHOP_ROW_GAP = 14
 local SHOP_WIGGLE_SECONDS = 20
 local SHOP_WIGGLE_DEGREES = 7
 local EFFECT_PILL_HEIGHT = 28
@@ -929,7 +939,6 @@ local function buildShopRow()
 		Parent = shopRow,
 		Style = "Gold",
 		Text = "🛒 SHOP",
-		TextColor3 = Colors.GoldText,
 		TextSize = 22,
 		Size = UDim2.fromOffset(SHOP_BUTTON_SIZE.X, SHOP_BUTTON_SIZE.Y),
 		LayoutOrder = 1,
@@ -951,8 +960,7 @@ local function buildShopRow()
 		ZIndex = 10,
 		TextStroke = 1.5,
 	})
-	local saleFill = saleTag.Parent :: Frame
-	saleFill.Visible = false
+	UIKit.SetPillVisible(saleTag, false)
 
 	local gifts, giftsHolder = UIKit.Button({
 		Name = "GiftsButton",
@@ -980,8 +988,7 @@ local function buildShopRow()
 		LayoutOrder = 3,
 		TextStroke = 1.5,
 	})
-	local nextFill = giftsNextPill.Parent :: Frame
-	nextFill.Visible = false
+	UIKit.SetPillVisible(giftsNextPill, false)
 
 	local pills = Instance.new("Frame")
 	pills.Name = "Effects"
@@ -1006,7 +1013,7 @@ local function buildShopRow()
 			LayoutOrder = order,
 			TextStroke = 1.5,
 		})
-		local fill = label.Parent :: Frame
+		local fill = UIKit.PillRoot(label)
 		fill.Visible = false
 		return label
 	end
@@ -1033,7 +1040,7 @@ end
 -- Once a second: the effect pills' timers and the SALE tag.
 local function refreshShopRow()
 	local function setPill(label: TextLabel, seconds: number, format: string)
-		local fill = label.Parent :: Frame
+		local fill = UIKit.PillRoot(label)
 		fill.Visible = seconds > 0
 		if seconds > 0 then
 			label.Text = format:format(EventState.FormatTimer(seconds))
@@ -1048,16 +1055,17 @@ local function refreshShopRow()
 			saleLive = true
 		end
 	end
-	local saleFill = saleTag.Parent :: Frame
-	saleFill.Visible = saleLive
+	UIKit.SetPillVisible(saleTag, saleLive)
+	-- Live with no product ids set yet: nothing to sell, so no SHOP button
+	-- (GIFTS slides left); it appears once any item is set up.
+	shopHolder.Visible = ShopController.HasAnyOffer()
 
 	-- GIFTS: the ready count (green badge + bounce) or "next in 3:12".
 	local ready, nextIn = GiftsPanel.GetStatus()
 	local badge = UIKit.Badge(giftsButton, if TycoonController.HasSynced() then ready else 0)
 	badge.BackgroundColor3 = Colors.Cash
 	badge.TextColor3 = Colors.CoinText
-	local nextFill = giftsNextPill.Parent :: Frame
-	nextFill.Visible = TycoonController.HasSynced() and ready == 0 and nextIn ~= nil
+	UIKit.SetPillVisible(giftsNextPill, TycoonController.HasSynced() and ready == 0 and nextIn ~= nil)
 	if nextIn then
 		giftsNextPill.Text = ("next in %s"):format(EventState.FormatTimer(nextIn))
 	end
@@ -1085,7 +1093,7 @@ local function applyLayout(isPhone: boolean)
 	-- The SHOP row on the left, above the LOCK row: under the cash card on
 	-- desktop; beside it on a phone (the goal tracker sits under it there).
 	local shopTop = if isPhone
-		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, 0)
+		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, PHONE_SHOP_ROW_DROP)
 		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
 	lockRow.Position = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
@@ -1130,7 +1138,7 @@ local function refreshAll()
 	end
 	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
 	local rebirths = TycoonController.GetRebirths()
-	local rebirthFill = rebirthPill.Parent :: Frame
+	local rebirthFill = UIKit.PillRoot(rebirthPill)
 	rebirthFill.Visible = rebirths > 0
 	rebirthPill.Text = ("⟳ %d · %s"):format(rebirths, NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)))
 	refreshBadge()

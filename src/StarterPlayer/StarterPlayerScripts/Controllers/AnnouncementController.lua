@@ -217,6 +217,7 @@ local function buildBanner(announcement: Announcement): Frame
 			Font = Fonts.BodyHeavy,
 			TextSize = 12,
 			TextColor3 = big.CaptionColor,
+			Stroke = if UITheme.IsWarm(big.Left) then 1.5 else nil,
 			Position = UDim2.fromOffset(96, 14),
 			Size = UDim2.new(1, -112, 0, 16),
 			ZIndex = z,
@@ -573,7 +574,8 @@ function AnnouncementController.ShowOverclock(playerName: string, seconds: numbe
 		AccentColor = UITheme.World.VipGold,
 		Big = {
 			Caption = "SERVER · OVERCLOCK",
-			CaptionColor = Colors.GoldLabel,
+			-- White on the gold end (the contrast rule), not gold-on-gold.
+			CaptionColor = Colors.Text,
 			Left = UITheme.Gradients.Gold.Bottom,
 			Right = Colors.Panel,
 			Emblem = rainbowEmblem,

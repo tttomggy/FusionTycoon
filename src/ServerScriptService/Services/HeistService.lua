@@ -69,6 +69,7 @@ local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -514,18 +515,20 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		reject(thief, "InvalidArguments")
 		return
 	end
+	-- A spam guard: the prompt is a 1.5 s hold, so honest grabs never hit it.
+	if not RemoteGuard.Allow(thief, "RequestSteal", 2, 4) then
+		return
+	end
 	local payload = rawPayload :: { [string]: unknown }
-	local rawOwner, rawIndex = payload.OwnerUserId, payload.PedestalIndex
-	if typeof(rawOwner) ~= "number" or typeof(rawIndex) ~= "number" then
+	-- Whole, finite numbers only: NaN / ±inf / 1.5 would slip past a range
+	-- check, and GetPlayerByUserId errors on a value it can't cast.
+	local ownerUserId = RemoteGuard.Int(payload.OwnerUserId, 1, 2 ^ 53)
+	local pedestalIndex = RemoteGuard.Int(payload.PedestalIndex, 1, PlotLayout.PEDESTAL_COUNT)
+	if not ownerUserId or not pedestalIndex then
 		reject(thief, "InvalidArguments")
 		return
 	end
-	local pedestalIndex = math.floor(rawIndex :: number)
-	if pedestalIndex < 1 or pedestalIndex > PlotLayout.PEDESTAL_COUNT then
-		reject(thief, "InvalidArguments")
-		return
-	end
-	local victim = Players:GetPlayerByUserId(rawOwner :: number)
+	local victim = Players:GetPlayerByUserId(ownerUserId)
 	if not victim then
 		reject(thief, "NoVictim")
 		return
@@ -885,6 +888,21 @@ end
 function HeistService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	TycoonService = require(script.Parent.TycoonService)
+
+	-- A victim who respawns mid-heist keeps the chase speed: the new
+	-- Humanoid starts at the default, and nothing else re-applies it.
+	local function watchRespawn(player: Player)
+		table.insert(state.connections, player.CharacterAdded:Connect(function(character: Model)
+			local humanoid = character:WaitForChild("Humanoid", 5)
+			if humanoid and humanoid:IsA("Humanoid") and PlayerDataService.HasCarriedItems(player) then
+				humanoid.WalkSpeed = HeistConfig.OwnerChaseWalkSpeed
+			end
+		end))
+	end
+	table.insert(state.connections, Players.PlayerAdded:Connect(watchRespawn))
+	for _, player in Players:GetPlayers() do
+		watchRespawn(player)
+	end
 
 	-- Leaving or shutdown: fail this player's carries (either side) before
 	-- PlayerDataService saves anything.

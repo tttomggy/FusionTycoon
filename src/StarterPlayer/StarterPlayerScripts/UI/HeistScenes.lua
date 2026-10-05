@@ -167,8 +167,9 @@ local function newPill(context: Context, text: string, color: Color3, textColor:
 		TextStroke = 1.5,
 		AnchorPoint = Vector2.new(0.5, 1),
 	})
-	label.Visible = false
-	local pill: Pill = { Label = label, Holder = label :: GuiObject }
+	local holder = UIKit.PillRoot(label)
+	holder.Visible = false
+	local pill: Pill = { Label = label, Holder = holder }
 	table.insert(context.Pills, pill)
 	return pill
 end

@@ -126,7 +126,7 @@ local function refreshRow(generator: TycoonConfig.GeneratorDef, cash: number, le
 	row.Progress.Visible = lockState == "locked"
 	row.Icon.Visible = lockState == "unlocked"
 	row.LockWell.Visible = lockState ~= "unlocked"
-	row.LevelPill.Visible = lockState == "unlocked"
+	UIKit.SetPillVisible(row.LevelPill, lockState == "unlocked")
 
 	if lockState == "unlocked" then
 		row.Name.Text = generator.Name
@@ -528,8 +528,10 @@ local function buildTabs(parent: Instance)
 		Name = "Generators",
 		Parent = pills,
 		Text = "Generators",
-		Color = Colors.White,
-		TextColor3 = Colors.Ink,
+		-- The selected tab: the UPGRADES green with white text.
+		Gradient = UITheme.Gradients[UIKit.SELECTED_STYLE],
+		TextColor3 = Colors.Text,
+		TextStroke = 1.5,
 		Font = Fonts.BodyHeavy,
 		TextSize = 14,
 		Height = 30,

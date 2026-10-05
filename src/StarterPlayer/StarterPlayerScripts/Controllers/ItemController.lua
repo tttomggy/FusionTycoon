@@ -10,6 +10,7 @@ local InventoryController = require(script.Parent.InventoryController)
 local TycoonController = require(script.Parent.TycoonController)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 local ToastController = require(script.Parent.ToastController)
+local ShopController = require(script.Parent.ShopController)
 
 local ItemController = {}
 
@@ -42,6 +43,7 @@ local REJECTION_TOASTS: { [string]: string } = {
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
 	PedestalLocked = "That spot needs the +2 Pedestals pass",
+	TooFast = "Slow down a little",
 }
 local FALLBACK_REJECTION_TOAST = "Couldn't do that, try again"
 -- True once this player's plot is claimed (its pedestals then exist).
@@ -131,8 +133,13 @@ end
 -- whatever's already there.
 local function onPedestalTriggered(pedestalIndex: number)
 	if pedestalIndex > TycoonController.GetPedestalCount() then
-		-- A locked spot: the one in-world sell, only on the owner's own tap.
-		RemoteEvents.RequestShopPurchase:FireServer({ Key = "ExtraPedestals" })
+		-- A locked spot: the one in-world sell, only on the owner's own tap,
+		-- and only once the pass is really for sale (no id yet: no prompt).
+		if ShopController.IsAvailable("ExtraPedestals") then
+			ShopController.Buy("ExtraPedestals")
+		else
+			ToastController.Show("Coming soon!", "Neutral")
+		end
 		return
 	end
 	if TycoonController.GetPedestalDisplay(pedestalIndex) then
@@ -201,8 +208,9 @@ function ItemController.Init()
 	ProximityPromptService.PromptShown:Connect(function(prompt: ProximityPrompt)
 		local index = getOwnPedestalIndex(prompt, plot)
 		if index and index > TycoonController.GetPedestalCount() then
-			prompt.ActionText = "Unlock"
-			prompt.ObjectText = "+2 Pedestals"
+			local forSale = ShopController.IsAvailable("ExtraPedestals")
+			prompt.ActionText = if forSale then "Unlock" else "Locked"
+			prompt.ObjectText = if forSale then "+2 Pedestals" else "+2 Pedestals · coming soon"
 		elseif index then
 			prompt.ActionText = if TycoonController.GetPedestalDisplay(index) then "Remove" else "Display"
 			prompt.ObjectText = ("Pedestal %d"):format(index)

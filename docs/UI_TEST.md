@@ -1242,3 +1242,194 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   the Starter Pack card; any grant: `Purchase [Key]`; daily claim:
   `DailyClaimed = 3`; gift: `GiftClaimed = 2`; a grab:
   `StealStarted [Epic]`, then `StealDelivered` or (owner tags) `StealSaved`.
+
+## 27. Launch 1 playtest fixes
+
+- [ ] **Reward items reveal (bug 1).** `/daily day 7` and CLAIM: the daily
+  card shows the reveal line, closes itself, and THEN the item reveals
+  through the normal pull path: the big card ("🎁 DAY 7 REWARD", the item's
+  tier and mutation) when your ⚙ reveal rule shows that tier/mutation,
+  else the small skipped line above the bottom bar. Set the Epic rule to
+  "Always" to see the big card every time. Same for the 60-min gift
+  (`/gifts time 60`, open the last box: the panel closes, then "🎁
+  PLAYTIME GIFT"), and for free pulls (Day 3, the 10-min gift).
+- [ ] **GIFTS button stays (bug 2).** `/gifts time 15`: SHOP and GIFTS both
+  stay visible; GIFTS bounces with a green "3" badge and the "next in"
+  pill hides. Open all three: the bounce stops, the badge hides, the
+  "next in 9:59" pill comes back. No sale live: SHOP stays visible with no
+  SALE tag (a solid-colour pill's `.Parent` used to be hidden, which was
+  the whole row / the SHOP button).
+- [ ] **Goal markers stay in your lab (bug 3).** Fresh profile, claim:
+  the "UPGRADE YOUR BASIC GENERATOR" marker sits right over your own Basic
+  Generator (distance a few studs from the generator, not ~54), and its
+  floor ring is round the generator. Walk far down the street and come
+  back (parts stream out and in): the marker re-settles on the generator.
+  Step through the goals (`/cash`, pulls, …): every marker (Gacha Pad,
+  first empty pedestal, Fusion Machine, Multiplier Pad, Portal, LOCK
+  console) is inside your walls; never over the street, a leaderboard, an
+  event object or another lab. Only "Steal an item from another lab"
+  points at an enemy pedestal. Output shows no "outside your plot" warning
+  (it names the offending instance if one ever appears).
+- [ ] **Daily claimed tiles (bug 4).** `/daily day 5`: Days 1–4 are dimmed
+  to half with their DAY / icon / label still readable, and each has a
+  small green round ✓ badge in its top-right corner (no big ✓ over the
+  text). CLAIM: Day 5 pops and gets the same badge.
+- [ ] **Phone HUD at 844 × 390 (bug 5).** Device emulator, custom 844 ×
+  390 landscape (0.8 UI scale → a 1055 × 487.5 canvas). Force an event you
+  haven't tapped (`/tips reset`, `/event powersurge`) so the top chip
+  pulses, and `/gifts time 15` so GIFTS bounces with its badge. Check:
+  the GIFTS badge and the SHOP SALE tag stay below the chip's glow (the
+  SHOP / GIFTS row now starts 8 px lower than the cash card, at y 84
+  logical); the SALE tag no longer touches the bouncing GIFTS (row gap
+  8 → 14); the NEXT GOAL tracker sits under the cash card (y 184, it used
+  to cover the card's bottom 22 px); the LOCK row stays under SHOP; the
+  effect pills end well short of the right edge; the top-left Roblox bar
+  area stays clear. Computed: no overlaps among top bar, event chip (with
+  pulse + glow), cash card, goal tracker, SHOP, SALE, GIFTS (bounce),
+  badge, next pill, effect pills, LOCK row.
+- [ ] **Pills always own their fill (SHOP / GIFTS root cause).** Every
+  `UIKit.Pill` is now a fill Frame with the label inside, colour or
+  gradient alike. Desktop and phone (844 × 390), no sale running: the
+  SHOP button shows, with no SALE tag. `/gifts time 15`: SHOP and GIFTS
+  both stay, GIFTS bounces with its badge, the "next in" pill hides and
+  comes back once all ready gifts are open. Also check every plain-colour
+  pill still looks the same: the HUD multiplier pill (tap it: the income
+  breakdown opens, the tap area is the pill's own ≥ 44 px), Upgrades
+  panel LV pills (hidden on locked generators), the Inventory filter chips
+  (tap each), mutation pills on result cards / inventory cards / the
+  event info card (in their list order), "OWNED 3" on Safe Fusion tiles,
+  the daily card's skip chip, and the HOW TO HEIST scene labels (they
+  follow the 3D scene and hide when off-screen).
+
+## 28. Bug Hunt 1
+
+- [ ] **/selftest.** Plain Studio Play, no event running (`/event off`):
+  `/selftest`. Output: "[SelfTest] running for … (store: Mock)", every
+  line PASS, "done: N passed, 0 failed". The panels flash open and shut at
+  desktop then phone scale while it runs (~30 s). With `FT_StudioSaves`
+  it says "store: StudioTest"; it never runs against the live store.
+- [ ] **Live shop with no ids.** Published place with every ShopConfig id
+  still 0: no SHOP button (GIFTS sits where it was); the locked pedestal
+  spots read "Locked · +2 Pedestals · coming soon" and only toast. Studio
+  still shows SHOP with TEST tiles.
+- [ ] **Leaderboard Cash column.** The player list shows Cash as "$1.2M"
+  (text). `/cash 1e20`: still shows ("$100Qi"), income keeps ticking, no
+  error in Output.
+- [ ] **NumberFormat.** `/cash 1e40`: the HUD reads "$1.00e40", nothing
+  breaks.
+- [ ] **Gifts panel fits.** Desktop and phone: both box rows are fully
+  visible or scroll into view; the footer sits under the boxes, never over
+  them.
+- [ ] **Event card on a phone.** 844 × 390, `/eventmut void`: the whole
+  event card (title to OK) is on screen, scaled down.
+- [ ] **Offline with passes.** Own 2× Cash (`/shop grant doublecash` in a
+  FT_StudioSaves session), leave, `/offline 60` on rejoin: the payout
+  counts the 2× pass.
+- [ ] **Spam.** Hold the Upgrades panel's upgrade button / mash a pedestal
+  prompt: it works at human speed; a script firing 50 / s gets "Slow down
+  a little" and nothing else happens.
+
+## 29. Reset and respawn
+
+Reset your character (Esc → Reset) in the middle of each of these, and check
+nothing sticks or breaks afterwards:
+
+- [ ] **Each panel / card open** (Upgrades, Shop, Gifts, Daily, Index,
+  Settings, Fuse, Rebirth, HOW TO HEIST, a pull / fusion / event result
+  card): it stays usable or closes cleanly; reopening works; HUD intact.
+- [ ] **During a pull and a fusion:** the result card still shows; the item
+  is in the inventory once.
+- [ ] **During a heist, as the thief:** the carry ends (death = it goes
+  back), the orb leaves your head, walk speed is normal after respawn.
+- [ ] **During a heist, as the owner:** after respawning you still run at
+  the chase speed (18) until the carry ends, then normal.
+- [ ] **During each event** (`/event <id>`): coins / craters / strikes
+  keep working; the goal / event arrow points from your new character;
+  pedestal and station prompts still work.
+- [ ] **After respawn:** goal arrow distance counts from the new character;
+  the GIFTS bounce / next pill and SHOP are unchanged.
+
+## 30. Contrast rule (white on gold) and the selected state
+
+Look at every gold, yellow or orange surface on desktop AND at phone scale.
+The text on each one must be **white with the ink stroke**, never dark
+brown and never gold-on-gold.
+
+- [ ] **HUD:** 🛒 SHOP button; the orange rebirth pill; the gold Overclock
+  pill (`/shop grant overclock`); the event chip during Golden Rain and
+  Meteor Shower (`/event GoldenRain`, `/event MeteorShower`).
+- [ ] **World:** the goal marker ("CLAIM YOUR BASE" on a new lab, then the
+  next goals); the Gacha Pad price pill; the Collector "+$X/s" pill; the
+  Multiplier Pad's gold price pill; the REBIRTH portal pill; the 👑 VIP head
+  tag (`/shop grant vip`); the meteor crater "Hold E · free item" chip; both
+  Event Boards during a Golden Rain / Meteor Shower row.
+- [ ] **Cards:** Daily card TODAY tile (DAY N, the reward line, "TODAY"),
+  the orange streak pill; Gifts panel OPEN; every Gold / Orange button
+  (Upgrades MAX ALL, rebirth buttons, result-card AWESOME / NICE, the THANK
+  YOU card); the heist banners (GET HOME!, YOU GRABBED …); the Overclock
+  server banner caption ("SERVER · OVERCLOCK" in white).
+- [ ] **Shop:** BEST VALUE and SAVE N% tags, the featured banner caption,
+  title and detail.
+- [ ] **Selected = green, white text, everywhere:** shop chips, Index tier
+  tabs (the tier name keeps its colour on the green pill), Settings
+  5-segment rows, Fuse count chip (the chamber's count) and Fuse tier tabs,
+  the item picker's filter chips, the Upgrades "Generators" tab, the admin
+  panel pickers. Unselected stay the muted panel colour.
+- [ ] **Tap feedback:** tapping any of those bounces it (0.94 → 1) and plays
+  the Toast sound.
+- [ ] **Chat overlap (desktop, chat window open):** open Daily, Shop, Index,
+  Upgrades, Settings and a result card (`/offline 120`): every title sits
+  BELOW the chat window, nothing under it. With the chat window off
+  (TextChatService → ChatWindowConfiguration.Enabled = false) the cards sit
+  just under the top bar. Phone (844×390) layouts are unchanged.
+
+## 31. Shop 2 (one scrolling shop)
+
+Studio: every id is 0, so every item shows with a "TEST" button; there are
+no live prices, so no BEST VALUE tag (it needs live prices) and the
+featured banner is the Starter Pack.
+
+- [ ] **One page:** the header (title + ✕) and the chip bar stay put while
+  the page scrolls. Sections in order: ⭐ Featured, 🎟 Passes, ⚡ Boosts,
+  💰 Cash, 🍀 Luck, 🛡 Safe Fusion, then the footer line. Each has a big
+  header row (icon, title, coloured divider).
+- [ ] **Every chip jumps to its section** with a smooth scroll (never
+  filters); the section's header lands at the top of the page (the last
+  sections stop at the end of the page).
+- [ ] **The active chip follows the scroll:** drag / wheel through the page;
+  the chip of the section on screen turns green, the last one at the very
+  bottom.
+- [ ] **Every buy button opens the right prompt** (in Studio: TEST → the
+  THANK YOU card for that exact item). Tapping a tile outside its button
+  does nothing.
+- [ ] **Owned passes sort last:** `/shop grant doublecash`, `/shop grant
+  vip`: both move to the end of Passes with a grey "OWNED ✓" button.
+- [ ] **Cash amounts match `/cash`:** note "+$X" on Pocket Cash, `/shop
+  grant pocketcash`: cash rises by exactly that. Change income (upgrade):
+  the tile updates within 2 s.
+- [ ] **Boost banks:** Quick Boost reads "+15 min · you have 0:00"; grant a
+  Boost: "you have 1:00:00" counting down; at 3 h "Bank full (3 h)".
+  Overclock reads "server has …"; Luck Potion its own bank.
+- [ ] **Sale:** start Admin Abuse (`/admin` → event): Boost is replaced by
+  "Boost · SALE" with "normally ~~N~~ · today M (−X%)" (live prices only)
+  and the featured banner shows the sale with its real end time; after the
+  window the normal Boost is back.
+- [ ] **Contextual offer:** tap an upgrade you can't afford (after the
+  first-session quiet time): the side card has "See all in the shop ›",
+  which opens the shop scrolled to Cash (or Boosts when it offered the
+  Boost).
+- [ ] **Hover / press:** hovering a tile grows it a little (1.03); pressing
+  its button bounces it.
+- [ ] **Icons:** with ids set, each tile shows the store page's icon (the
+  one uploaded with the pass / product); without one, the emoji in a
+  circle.
+- [ ] **Restricted player** (force `restricted = true`): only Passes (2×
+  Cash, VIP, +2 Pedestals, Auto-Fuse, Neon Pink) and its chip; no Boosts,
+  Cash, Luck, Safe, Lucky or Starter Pack, and no empty headers.
+- [ ] **Phone 844×390:** 2 tiles per row; the chip bar scrolls sideways
+  and the active chip scrolls into view; every chip and button ≥ 44 px;
+  the whole page is reachable down to the footer.
+- [ ] **Narrow desktop window (< 600 px wide):** 2 tiles per row, 1 pass
+  card per row, the featured banner stacks (icon, text, a full-width buy
+  button).
+- [ ] `/selftest`: PASS for ShopPanel at both scales.

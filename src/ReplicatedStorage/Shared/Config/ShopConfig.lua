@@ -36,9 +36,7 @@ export type Item = {
 	Name: string,
 	Description: string, -- the Creator Hub description
 	Effect: string, -- the one-line effect on the shop tile
-	Tab: string, -- "Deals" | "Boosts" | "Cash" | "Passes" | "Luck"
-	Icon: string,
-	Ribbon: string?, -- "POPULAR" | "BEST VALUE" | "VIP"
+	Icon: string, -- the emoji fallback (the live icon is the store page's)
 	PolicyRestricted: boolean, -- adds cash or luck: hidden for restricted players
 	OneTime: boolean?, -- a product you can buy once (Starter Pack)
 	SaleOf: string?, -- this product is the sale version of that key
@@ -64,7 +62,6 @@ ShopConfig.Items = {
 		Name = "2x Cash",
 		Description = "Double all the cash your lab earns, forever.",
 		Effect = "×2 all income, forever",
-		Tab = "Passes",
 		Icon = "💵",
 		PolicyRestricted = false,
 	}),
@@ -75,7 +72,6 @@ ShopConfig.Items = {
 		Name = "+2 Pedestals",
 		Description = "Two more pedestals in your lab: display 6 items instead of 4.",
 		Effect = "6 pedestals instead of 4",
-		Tab = "Passes",
 		Icon = "🏛",
 		PolicyRestricted = false,
 	}),
@@ -86,9 +82,7 @@ ShopConfig.Items = {
 		Name = "VIP",
 		Description = "+25% income, a gold VIP tag over your head and in chat, and a gold trim on your lab.",
 		Effect = "+25% income · gold VIP tag · gold lab trim",
-		Tab = "Passes",
 		Icon = "👑",
-		Ribbon = "VIP",
 		PolicyRestricted = false,
 	}),
 	AutoFuse = pass({
@@ -98,7 +92,6 @@ ShopConfig.Items = {
 		Name = "Auto-Fuse",
 		Description = "A toggle in the Fuse panel: automatically Fuse All (pairs, Common to Epic, never mutated items) whenever new items arrive.",
 		Effect = "Fuse All by itself when items arrive",
-		Tab = "Passes",
 		Icon = "🔁",
 		PolicyRestricted = false,
 	}),
@@ -109,7 +102,6 @@ ShopConfig.Items = {
 		Name = "Neon Pink Lab",
 		Description = "A Neon Pink theme for your lab's lights, with pink cash balls. Looks only, no power.",
 		Effect = "Neon Pink lab + pink cash balls (looks only)",
-		Tab = "Passes",
 		Icon = "🎨",
 		PolicyRestricted = false,
 	}),
@@ -120,7 +112,6 @@ ShopConfig.Items = {
 		Name = "Lucky",
 		Description = "x1.5 luck forever (stacks with rebirth luck). Every odds display shows it.",
 		Effect = "×1.5 luck, forever",
-		Tab = "Luck",
 		Icon = "🍀",
 		PolicyRestricted = true,
 	}),
@@ -133,7 +124,6 @@ ShopConfig.Items = {
 		Name = "Quick Boost",
 		Description = "x2 income for 15 minutes. Stacks by adding time (up to 3 hours banked).",
 		Effect = "×2 income · 15 min",
-		Tab = "Boosts",
 		Icon = "⚡",
 		PolicyRestricted = true,
 	}),
@@ -144,9 +134,7 @@ ShopConfig.Items = {
 		Name = "Boost",
 		Description = "x2 income for 1 hour. Stacks by adding time (up to 3 hours banked).",
 		Effect = "×2 income · 1 hour",
-		Tab = "Boosts",
 		Icon = "⚡",
-		Ribbon = "POPULAR",
 		PolicyRestricted = true,
 	}),
 	BoostSale = product({
@@ -156,7 +144,6 @@ ShopConfig.Items = {
 		Name = "Boost (Admin Abuse sale)",
 		Description = "x2 income for 1 hour, at the Admin Abuse sale price. Only sold during Admin Abuse.",
 		Effect = "×2 income · 1 hour",
-		Tab = "Boosts",
 		Icon = "⚡",
 		PolicyRestricted = true,
 		SaleOf = "Boost",
@@ -168,7 +155,6 @@ ShopConfig.Items = {
 		Name = "Pocket Cash",
 		Description = "Cash worth 20 minutes of your lab's income (at least $5,000).",
 		Effect = "20 min of your income",
-		Tab = "Cash",
 		Icon = "💰",
 		PolicyRestricted = true,
 	}),
@@ -179,7 +165,6 @@ ShopConfig.Items = {
 		Name = "Cash Crate",
 		Description = "Cash worth 2 hours of your lab's income (at least $50,000).",
 		Effect = "2 h of your income",
-		Tab = "Cash",
 		Icon = "💰",
 		PolicyRestricted = true,
 	}),
@@ -190,9 +175,7 @@ ShopConfig.Items = {
 		Name = "Cash Vault",
 		Description = "Cash worth 8 hours of your lab's income (at least $250,000).",
 		Effect = "8 h of your income",
-		Tab = "Cash",
 		Icon = "🏦",
-		Ribbon = "BEST VALUE",
 		PolicyRestricted = true,
 	}),
 	Overclock = product({
@@ -202,7 +185,6 @@ ShopConfig.Items = {
 		Name = "Server Overclock",
 		Description = "Everyone in the server gets x2 income for 15 minutes. More buys add time, up to 60 minutes.",
 		Effect = "×2 income for EVERYONE here · 15 min",
-		Tab = "Boosts",
 		Icon = "🌐",
 		PolicyRestricted = true,
 	}),
@@ -213,7 +195,6 @@ ShopConfig.Items = {
 		Name = "Luck Potion",
 		Description = "x2 luck for 15 minutes. Stacks by adding time (up to 3 hours banked).",
 		Effect = "×2 luck · 15 min",
-		Tab = "Luck",
 		Icon = "🧪",
 		PolicyRestricted = true,
 	}),
@@ -224,7 +205,6 @@ ShopConfig.Items = {
 		Name = "Safe Fusion",
 		Description = "One Safe Fusion token: arm it in the Fuse panel, and if that fusion fails you keep every orb.",
 		Effect = "1 token · a failed fusion keeps every orb",
-		Tab = "Luck",
 		Icon = "🛡",
 		PolicyRestricted = true,
 	}),
@@ -235,7 +215,6 @@ ShopConfig.Items = {
 		Name = "Safe Fusion x5",
 		Description = "Five Safe Fusion tokens: arm one in the Fuse panel, and if that fusion fails you keep every orb.",
 		Effect = "5 tokens · a failed fusion keeps every orb",
-		Tab = "Luck",
 		Icon = "🛡",
 		PolicyRestricted = true,
 		Parts = { "SafeFusion1", "SafeFusion1", "SafeFusion1", "SafeFusion1", "SafeFusion1" },
@@ -247,7 +226,6 @@ ShopConfig.Items = {
 		Name = "Starter Pack",
 		Description = "One time only: the Neon Pink Lab look, a 1 hour x2 Boost and Pocket Cash.",
 		Effect = "Neon Pink Lab + 1 h Boost + Pocket Cash",
-		Tab = "Deals",
 		Icon = "🎁",
 		PolicyRestricted = true,
 		OneTime = true,
@@ -260,14 +238,12 @@ ShopConfig.Items = {
 		Name = "Double Offline Cash",
 		Description = "Doubles the cash your lab earned while you were away (the welcome-back card's COLLECT x2).",
 		Effect = "×2 your welcome-back cash",
-		Tab = "Cash",
 		Icon = "🌙",
 		PolicyRestricted = true,
 	}),
 } :: { [string]: Item }
 
--- Display order inside the shop's tabs (Deals collects the bundles, the
--- live sale and the best value).
+-- Every key the shop knows (HasAnyOffer walks it).
 ShopConfig.Order = {
 	"StarterPack",
 	"BoostSale",
@@ -289,16 +265,51 @@ ShopConfig.Order = {
 	"SafeFusion5",
 }
 
-ShopConfig.Tabs = {
-	{ Id = "Deals", Label = "🔥 Deals" },
-	{ Id = "Boosts", Label = "⚡ Boosts" },
-	{ Id = "Cash", Label = "💰 Cash" },
-	{ Id = "Passes", Label = "🎟 Passes" },
-	{ Id = "Luck", Label = "🍀 Luck" },
-}
+--[[ The one scrolling shop (UI/ShopPanel): sections in order, each with a
+	header row and its chip in the sticky chip bar. Featured is one banner
+	(Starter Pack until bought, then a live sale, then the best value); the
+	rest list their keys in order. A sale product (BoostSale) takes its
+	normal key's place while its window is live. OfflineDouble lives only on
+	the welcome-back card; StarterPack only in the banner. ]]
+export type Section = { Id: string, Icon: string, Title: string, Chip: string, Gradient: string, Keys: { string } }
+ShopConfig.Sections = {
+	{ Id = "Featured", Icon = "⭐", Title = "Featured", Chip = "⭐ Featured", Gradient = "ShopFeatured", Keys = {} },
+	{
+		Id = "Passes",
+		Icon = "🎟",
+		Title = "Passes",
+		Chip = "🎟 Passes",
+		Gradient = "Blue",
+		Keys = { "DoubleCash", "VIP", "ExtraPedestals", "AutoFuse", "LabStyle", "Lucky" },
+	},
+	{ Id = "Boosts", Icon = "⚡", Title = "Boosts", Chip = "⚡ Boosts", Gradient = "Violet", Keys = { "QuickBoost", "Boost", "Overclock" } },
+	{ Id = "Cash", Icon = "💰", Title = "Cash", Chip = "💰 Cash", Gradient = "Green", Keys = { "PocketCash", "CashCrate", "CashVault" } },
+	{ Id = "Luck", Icon = "🍀", Title = "Luck", Chip = "🍀 Luck", Gradient = "Teal", Keys = { "LuckPotion" } },
+	{ Id = "Safe", Icon = "🛡", Title = "Safe Fusion", Chip = "🛡 Safe", Gradient = "Shield", Keys = { "SafeFusion1", "SafeFusion5" } },
+} :: { Section }
 
--- The item shown when nothing else wins the featured banner.
-ShopConfig.BestValueKey = "CashVault"
+-- The cash pack giving the most $ per Robux right now: `amountOf(key)` is
+-- what it pays this player, `priceOf(key)` its LIVE price. nil unless at
+-- least two packs are listed and every one has a live price (no "BEST
+-- VALUE" claim without the numbers).
+function ShopConfig.GetBestValueKey(keys: { string }, amountOf: (string) -> number, priceOf: (string) -> number?): string?
+	if #keys < 2 then
+		return nil
+	end
+	local best: string? = nil
+	local bestRatio = -math.huge
+	for _, key in keys do
+		local price = priceOf(key)
+		if not price or price <= 0 then
+			return nil
+		end
+		local ratio = amountOf(key) / price
+		if ratio > bestRatio then
+			best, bestRatio = key, ratio
+		end
+	end
+	return best
+end
 
 --[[ Effects ------------------------------------------------------------------ ]]
 

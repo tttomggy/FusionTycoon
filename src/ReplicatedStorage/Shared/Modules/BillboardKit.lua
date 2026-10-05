@@ -147,7 +147,8 @@ function BillboardKit.Chip(parent: Instance, props: ChipProps): Chip
 	else
 		fill.BackgroundColor3 = Colors.Panel
 	end
-	local label = scaledLabel(fill, "Text", Fonts.Display, props.TextColor or Colors.Text, 0.12, 0.76)
+	-- The contrast rule: white with the ink stroke on a warm fill.
+	local label = scaledLabel(fill, "Text", Fonts.Display, UITheme.TextOn(pair, props.TextColor), 0.12, 0.76)
 	label.Position = UDim2.fromScale(0.06, 0.12)
 	label.Size = UDim2.fromScale(0.88, 0.76)
 	label.Text = props.Text
@@ -163,8 +164,7 @@ export type PadProps = {
 	TitleColor: Color3,
 	Pill: string,
 	PillGradient: UITheme.GradientPair,
-	PillTextColor: Color3?,
-	PillTextStroke: boolean?, -- default true; the gold pill turns it off
+	PillTextColor: Color3?, -- ignored on a warm pill (always white + ink stroke)
 	Detail: string?,
 	StudsOffset: Vector3?,
 	MaxDistance: number?,
@@ -226,10 +226,9 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 	gradient(pill, props.PillGradient.Top, props.PillGradient.Bottom)
 	corner(pill, UDim.new(0.5, 0))
 	borderStroke(pill, 3)
-	local pillText = scaledLabel(pill, "Text", Fonts.Display, props.PillTextColor or Colors.Text, 0.12, 0.76)
-	if props.PillTextStroke ~= false then
-		textStroke(pillText, 2)
-	end
+	-- Pill text: white with the ink stroke on warm fills (the contrast rule).
+	local pillText = scaledLabel(pill, "Text", Fonts.Display, UITheme.TextOn(props.PillGradient, props.PillTextColor), 0.12, 0.76)
+	textStroke(pillText, 2)
 	pillText.Text = props.Pill
 
 	local secondPill: Frame? = nil
@@ -246,7 +245,9 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 		gradient(frame, secondGradient.Top, secondGradient.Bottom)
 		corner(frame, UDim.new(0.5, 0))
 		borderStroke(frame, 3)
-		secondText = scaledLabel(frame, "Text", Fonts.Display, props.SecondPillTextColor or Colors.Text, 0.12, 0.76)
+		local text = scaledLabel(frame, "Text", Fonts.Display, UITheme.TextOn(secondGradient, props.SecondPillTextColor), 0.12, 0.76)
+		textStroke(text, 2)
+		secondText = text
 		secondPill = frame
 	end
 
@@ -277,6 +278,9 @@ function BillboardKit.Pad(parent: Instance, props: PadProps): PadLabel
 			local g = pill:FindFirstChildOfClass("UIGradient")
 			if g then
 				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
+			end
+			if UITheme.IsWarmPair(pair) then
+				pillText.TextColor3 = UITheme.WarmText
 			end
 		end,
 	}
@@ -314,6 +318,9 @@ function BillboardKit.FindPadLabel(gui: BillboardGui): PadLabel?
 			local g = pill:FindFirstChildOfClass("UIGradient")
 			if g then
 				g.Color = ColorSequence.new(pair.Top, pair.Bottom)
+			end
+			if UITheme.IsWarmPair(pair) and pillText:IsA("TextLabel") then
+				pillText.TextColor3 = UITheme.WarmText
 			end
 		end,
 	}

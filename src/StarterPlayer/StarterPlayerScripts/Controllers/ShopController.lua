@@ -19,6 +19,9 @@
 	  ShopController.OfferForShortfall(label, cost, fromOverlay?)
 	                                     the contextual offer (rules below)
 	  ShopController.Purchased           fires (payload) on every ShopPurchased
+	  ShopController.OpenShop(section?)  opens the shop (scrolled to a
+	                                     ShopConfig.Sections id); ShopPanel
+	                                     registers itself with SetShopOpener
 
 	Contextual offer, only when the player TAPS something they can't afford
 	(an upgrade or MAX, a pull or Pull x10, the Multiplier Pad, REBIRTH):
@@ -72,10 +75,25 @@ local REFUSAL_TOASTS: { [string]: string } = {
 	Unknown = "Couldn't do that, try again",
 }
 
+local shopOpener: ((section: string?) -> ())? = nil
+
 local joinedAt = os.clock()
 local lastOfferAt = -math.huge
 local lastLossAt = -math.huge
 local starterShown = false
+
+--[[ Opening the shop ---------------------------------------------------------------- ]]
+
+-- ShopPanel requires this module, so it hands its Open in at Init.
+function ShopController.SetShopOpener(opener: (section: string?) -> ())
+	shopOpener = opener
+end
+
+function ShopController.OpenShop(section: string?)
+	if shopOpener then
+		shopOpener(section)
+	end
+end
 
 --[[ Availability + prices ------------------------------------------------------------ ]]
 
@@ -92,6 +110,18 @@ function ShopController.IsAvailable(key: string): boolean
 		return false
 	end
 	return true
+end
+
+-- Anything in the shop right now (offered, or an owned pass to show)? A
+-- live game with no product ids set yet has nothing: the HUD hides SHOP
+-- rather than open an empty panel.
+function ShopController.HasAnyOffer(): boolean
+	for _, key in ShopConfig.Order do
+		if ShopController.IsAvailable(key) or ShopController.IsOwned(key) then
+			return true
+		end
+	end
+	return false
 end
 
 function ShopController.IsOwned(key: string): boolean
@@ -208,11 +238,15 @@ function ShopController.OfferForShortfall(label: string, cost: number, fromOverl
 		Footnote = waitText(gap),
 		BuyText = ShopController.GetPriceText(offerKey),
 		DismissText = "Not now",
+		MoreText = "See all in the shop ›",
 	}, function()
 		ShopController.Track("OfferAccepted", offerKey)
 		ShopController.Buy(offerKey)
 	end, function()
 		ShopController.Track("OfferDismissed", offerKey)
+	end, function()
+		-- Opens the shop scrolled to the section the offer came from.
+		ShopController.OpenShop(if ShopConfig.CashPacks[offerKey] then "Cash" else "Boosts")
 	end)
 	ShopController.Track("OfferShown", offerKey)
 end

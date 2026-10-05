@@ -51,6 +51,7 @@ local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
 type WorldServiceModule = typeof(require(script.Parent.WorldService))
@@ -164,6 +165,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "InvalidGenerator" })
 		return
 	end
+	-- Fast tapping is fine (10/s); a script firing 50/s is just dropped.
+	if not RemoteGuard.Allow(player, "RequestUpgrade", 10, 12) then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "TooFast", GeneratorId = rawGeneratorId })
+		return
+	end
 	local generatorId = rawGeneratorId :: string
 
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -211,6 +217,11 @@ local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
 	end
 	if not all and not (singleId and TycoonConfig.GetGeneratorById(singleId)) then
 		reject("InvalidGenerator")
+		return
+	end
+	-- Each MAX loops up to MaxUpgradeSteps levels: a few per second at most.
+	if not RemoteGuard.Allow(player, "RequestUpgradeMax", 3, 4) then
+		reject("TooFast")
 		return
 	end
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -541,8 +552,6 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		TitleColor = UITheme.Colors.GoldLabel,
 		Pill = "",
 		PillGradient = UITheme.Gradients.Gold,
-		PillTextColor = UITheme.Colors.GoldText,
-		PillTextStroke = false,
 		Detail = getOddsText(getLuck(player)),
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 		TallDetail = true,
@@ -650,6 +659,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				NewIndex = #newIndexItems > 0,
 				IndexTierComplete = tiersCompleted[1],
 				Caption = caption,
+				Reward = true, -- revealed once the daily card / Gifts panel close
 			})
 		else
 			RemoteEvents.GachaMultiPullResult:FireClient(player, {
@@ -658,6 +668,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				NewIndexItems = newIndexItems,
 				IndexTiersCompleted = tiersCompleted,
 				Title = caption,
+				Reward = true,
 			})
 		end
 		for _, item in items do
@@ -723,7 +734,6 @@ local function createMultiplierStation(plot: Model, origin: CFrame, player: Play
 		PillGradient = UITheme.Gradients.Violet,
 		-- The price, in the same Gold pill as the Gacha's "$483 / pull".
 		SecondPillGradient = UITheme.Gradients.Gold,
-		SecondPillTextColor = UITheme.Colors.GoldText,
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
 	local prompt = newPrompt(pad, "UpgradePrompt", "Upgrade", "Cash Multiplier", PlotLayout.Station.PromptDistance)
@@ -924,8 +934,6 @@ local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
 		TitleColor = UITheme.Colors.GoldLabel,
 		Pill = "+$0/s",
 		PillGradient = UITheme.Gradients.Gold,
-		PillTextColor = UITheme.Colors.GoldText,
-		PillTextStroke = false,
 		StudsOffset = Vector3.new(0, c.LabelOffsetY, 0),
 		MaxDistance = c.LabelMaxDistance,
 		OwnerOnly = true,

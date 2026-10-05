@@ -42,7 +42,7 @@ local SLIDER_TRACK_HEIGHT = 10
 local SLIDER_KNOB = 28
 local MUTE_SIZE = UITheme.MinTapSize
 
-type Segment = { Button: TextButton, Label: TextLabel, Stroke: UIStroke }
+type Segment = { Button: TextButton, Label: TextLabel, LabelStroke: UIStroke }
 
 local modal: UIKit.Modal
 local list: ScrollingFrame
@@ -80,9 +80,10 @@ local function refresh()
 	for tier, row in segments do
 		for value, segment in row do
 			local selected = rule[tier] == value
-			segment.Button.BackgroundColor3 = if selected then Colors.ShieldTeal else Colors.Panel3
+			-- Selected = the UPGRADES green with white text (UIKit).
+			UIKit.SetSelectedFill(segment.Button, selected)
 			segment.Label.TextColor3 = if selected then Colors.Text else Colors.Muted
-			segment.Stroke.Color = if selected then Colors.Text else Colors.Ink
+			segment.LabelStroke.Enabled = selected
 		end
 	end
 end
@@ -169,7 +170,7 @@ local function tierRow(tier: string)
 		button.ZIndex = z + 2
 		button.Parent = control
 		UIKit.Corner(button, 10)
-		local stroke = UIKit.Stroke(button, 2)
+		UIKit.Stroke(button, 2)
 		local label = UIKit.Label({
 			Name = "Label",
 			Text = SettingsConfig.RevealLabels[value] or value,
@@ -186,12 +187,15 @@ local function tierRow(tier: string)
 		local cap = Instance.new("UITextSizeConstraint")
 		cap.MaxTextSize = 14
 		cap.Parent = label
+		local labelStroke = UIKit.TextStroke(label, 1.5)
+		labelStroke.Enabled = false
 		UIKit.AttachPress(button)
 		button.Activated:Connect(function()
+			UIKit.SelectFeedback(button)
 			TycoonController.SetRevealRule(tier, value)
 			refresh()
 		end)
-		segments[tier][value] = { Button = button, Label = label, Stroke = stroke }
+		segments[tier][value] = { Button = button, Label = label, LabelStroke = labelStroke }
 	end
 end
 

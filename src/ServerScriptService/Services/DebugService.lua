@@ -20,6 +20,11 @@ local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local SoundConfig = require(ReplicatedStorage.Shared.Config.SoundConfig)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
+local LogService = game:GetService("LogService")
+local Workspace = game:GetService("Workspace")
 
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -100,12 +105,175 @@ local DAILY_COMMAND = "/daily"
 -- "/gifts reset" also re-locks every gift.
 local GIFTS_COMMAND = "/gifts"
 
+--[[ /selftest ------------------------------------------------------------------
+	Runs the Bug Hunt invariants against the real services and prints one
+	PASS / FAIL line each (server Output; the client half's lines arrive in
+	its report). Studio only (this whole service is), and it refuses to run
+	unless saves go to the mock store or FT_StudioTest_1: it never touches a
+	live save. Run it outside events (a Power Surge strike can legitimately
+	change an item mid-fuzz).
+]]
+local SELFTEST_COMMAND = "/selftest"
+local SELFTEST_REPORT_TIMEOUT = 90
+local SELFTEST_SLOT_COUNT = 200
+local selfTestReports: { [number]: { any } } = {}
+
+local NUMBER_FORMAT_CASES: { { any } } = {
+	{ 0, "$0" },
+	{ 999, "$999" },
+	{ 1000, "$1K" },
+	{ 1234567, "$1.23M" },
+	{ 1e33, "$1Dc" },
+	{ 1e36, "$1.00e36" },
+	{ 1e300, "$1.00e300" },
+	{ math.huge, "$∞" },
+	{ -math.huge, "$-∞" },
+	{ 0 / 0, "$0" },
+	{ -1234, "$-1.23K" },
+}
+
+local function waitForReport(player: Player, stage: string): any?
+	local started = os.clock()
+	while os.clock() - started < SELFTEST_REPORT_TIMEOUT and player.Parent do
+		local queue = selfTestReports[player.UserId]
+		if queue then
+			for index, report in queue do
+				if report.Stage == stage then
+					table.remove(queue, index)
+					return report
+				end
+			end
+		end
+		task.wait(0.2)
+	end
+	return nil
+end
+
+local function runSelfTest(player: Player)
+	local passed, failed = 0, 0
+	local function result(ok: boolean, name: string, detail: string?)
+		if ok then
+			passed += 1
+			print(("[SelfTest] PASS %s"):format(name))
+		else
+			failed += 1
+			warn(("[SelfTest] FAIL %s%s"):format(name, if detail then ": " .. detail else ""))
+		end
+	end
+	local storeKind = PlayerDataService.GetStoreKind()
+	if storeKind == "Live" then
+		warn("[SelfTest] refused: saves go to the LIVE store")
+		return
+	end
+	print(("[SelfTest] running for %s (store: %s)"):format(player.Name, storeKind))
+	local eventId = Workspace:GetAttribute("EventId")
+	if typeof(eventId) == "string" and eventId ~= "" then
+		print(("[SelfTest] note: %s is running; an event can change items during the fuzz"):format(eventId))
+	end
+
+	-- 1. Layout assertions (they run at require time).
+	for _, name in { "PlotLayout", "StreetLayout" } do
+		local ok, err = pcall(require, ReplicatedStorage.Shared.Config:FindFirstChild(name))
+		result(ok, name .. " assertions", if ok then nil else tostring(err))
+	end
+
+	-- 2. NumberFormat edge cases (never throws, exact text).
+	for _, case in NUMBER_FORMAT_CASES do
+		local ok, text = pcall(NumberFormat.Money, case[1])
+		result(ok and text == case[2], ("NumberFormat.Money(%s)"):format(tostring(case[1])), if ok then ("got %q, want %q"):format(tostring(text), case[2]) else tostring(text))
+	end
+	local multOk = pcall(NumberFormat.Multiplier, 1e40) and pcall(NumberFormat.Multiplier, math.huge)
+	result(multOk, "NumberFormat.Multiplier(1e40 / inf) doesn't throw")
+
+	-- 3. Sound slots: an empty id or an rbxassetid (the client loads them).
+	local badIds = {}
+	for slot, config in SoundConfig.Slots do
+		if config.Id ~= "" and not config.Id:match("^rbxassetid://%d+$") then
+			table.insert(badIds, slot)
+		end
+	end
+	result(#badIds == 0, "SoundConfig ids well-formed", table.concat(badIds, ", "))
+
+	-- 4. Event schedule determinism: same slots, same lineup, twice here and
+	-- on the client.
+	local slots = {}
+	local base = (os.time() // EventConfig.SlotSeconds) * EventConfig.SlotSeconds
+	for i = 0, SELFTEST_SLOT_COUNT - 1 do
+		table.insert(slots, base + i * EventConfig.SlotSeconds)
+	end
+	local function lineup(): string
+		local ids = {}
+		for _, slot in slots do
+			table.insert(ids, EventConfig.GetEventForSlot(slot).Id)
+		end
+		return table.concat(ids, ",")
+	end
+	local serverLineup = lineup()
+	result(serverLineup == lineup(), "event schedule repeatable (server)")
+
+	-- 5. Data round trip (in memory only).
+	local roundOk, roundDetail = PlayerDataService.SelfTestRoundTrip(player)
+	result(roundOk, "data round trip (toDisk -> reconcile -> toDisk)", roundDetail)
+
+	-- 6. Remote fuzz (client fires junk): no server error, no state change.
+	local other = 1
+	for _, p in Players:GetPlayers() do
+		if p ~= player then
+			other = p.UserId
+		end
+	end
+	selfTestReports[player.UserId] = {}
+	RemoteGuard.Reset(player)
+	local before = PlayerDataService.SelfTestFingerprint(player)
+	local cashBefore = PlayerDataService.GetCash(player)
+	local serverErrors = {}
+	local logConnection = LogService.MessageOut:Connect(function(message: string, kind: Enum.MessageType)
+		if kind == Enum.MessageType.MessageError then
+			table.insert(serverErrors, message)
+		end
+	end)
+	RemoteEvents.SelfTest:FireClient(player, { OtherUserId = other, Slots = slots })
+	local fuzzReport = waitForReport(player, "Fuzz")
+	logConnection:Disconnect()
+	if not fuzzReport then
+		result(false, "remote fuzz", "no report from the client")
+	else
+		result(#serverErrors == 0, ("remote fuzz: no server errors (%d junk calls)"):format(fuzzReport.Fired or 0), table.concat(serverErrors, " | "))
+		result(PlayerDataService.SelfTestFingerprint(player) == before, "remote fuzz: no state change")
+		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
+	end
+	RemoteGuard.Reset(player)
+
+	-- 7. The client's half: schedule, panels, sounds, client errors.
+	local done = waitForReport(player, "Done")
+	if not done then
+		result(false, "client half", "no report from the client")
+	else
+		result(done.ScheduleHash == serverLineup, "event schedule: client matches server")
+		for _, line in (if typeof(done.Panels) == "table" then done.Panels else {}) do
+			if typeof(line) == "string" then
+				result(line:sub(1, 4) == "PASS", line:sub(6))
+			end
+		end
+		local sounds = if typeof(done.FailedSounds) == "table" then done.FailedSounds else {}
+		result(#sounds == 0, "every SoundConfig slot loads", table.concat(sounds, ", "))
+		local clientErrors = if typeof(done.ClientErrors) == "table" then done.ClientErrors else {}
+		result(#clientErrors == 0, "no client errors during the test", table.concat(clientErrors, " | "))
+	end
+	selfTestReports[player.UserId] = nil
+	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
+end
+
 local function onPlayerChatted(player: Player, message: string)
 	if not PlayerDataService.IsDataLoaded(player) then
 		return
 	end
 	local lower = message:lower()
 	local command, argument = lower:match("^(%S+)%s*(.*)$")
+	if command == SELFTEST_COMMAND then
+		task.spawn(runSelfTest, player)
+		return
+	end
 
 	if command == RESET_MULTIPLIER_COMMAND then
 		PlayerDataService.SetCashMultiplierLevel(player, 0)
@@ -336,8 +504,14 @@ function DebugService:Init()
 		connectPlayer(player)
 	end
 	table.insert(state.connections, Players.PlayerAdded:Connect(connectPlayer))
+	table.insert(state.connections, RemoteEvents.SelfTestReport.OnServerEvent:Connect(function(player: Player, report: unknown)
+		local queue = selfTestReports[player.UserId]
+		if queue and typeof(report) == "table" then
+			table.insert(queue, report)
+		end
+	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()

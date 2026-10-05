@@ -33,7 +33,6 @@ UITheme.Colors = {
 
 	-- One-off accents the design calls for by exact value.
 	CoinText = hex("#0B3D1E"), -- "$" on the green HUD coin
-	GoldText = hex("#3B2300"), -- text on the gold Gacha pill
 	GoldLabel = hex("#FFD566"), -- "PULLED", GACHA title
 	VioletLight = hex("#C9A9FF"), -- "purple pad", MULTIPLIER title, odds title
 	VioletPill = hex("#6A3FE0"), -- multiplier pill fill
@@ -93,7 +92,7 @@ UITheme.Gradients = {
 	Red = { Top = hex("#FF7A8E"), Bottom = hex("#E0304E") }, -- close (X), error toasts
 	Gold = { Top = hex("#FFD566"), Bottom = hex("#F0A100") }, -- gacha, goal bar
 	Orange = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") }, -- rebirth button, pills, bars
-	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button, selected Index tab
+	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
@@ -108,6 +107,38 @@ UITheme.Gradients = {
 	VoidMoon = { Top = hex("#A47BFF"), Bottom = hex("#2A1550") },
 	Rainbow = { Top = hex("#FF5470"), Bottom = hex("#A47BFF") },
 } :: { [string]: GradientPair }
+
+--[[ Contrast rule ----------------------------------------------------------
+	On any gold, yellow or orange fill, text is WHITE with the ink stroke
+	(the UPGRADES / ITEMS / INDEX look), never dark brown or gold-on-gold.
+	UIKit.Button / SetButton / Pill and BillboardKit's pills read IsWarm*
+	and pick that by themselves.
+]]
+UITheme.WarmText = UITheme.Colors.Text
+UITheme.WarmTextStroke = 2 -- px of Ink on the glyphs
+
+-- Gold, yellow or orange (hue 7°–65°, saturated, bright).
+function UITheme.IsWarm(color: Color3): boolean
+	local h, s, v = color:ToHSV()
+	return h >= 0.02 and h <= 0.18 and s >= 0.4 and v >= 0.6
+end
+
+-- A gradient is warm when either end is (ShopFeatured: orange -> pink).
+function UITheme.IsWarmPair(pair: GradientPair?): boolean
+	return pair ~= nil and (UITheme.IsWarm(pair.Top) or UITheme.IsWarm(pair.Bottom))
+end
+
+-- The text colour for a fill: white on warm, else `default` (or Text).
+function UITheme.TextOn(fill: GradientPair | Color3 | nil, default: Color3?): Color3
+	if typeof(fill) == "Color3" then
+		if UITheme.IsWarm(fill) then
+			return UITheme.WarmText
+		end
+	elseif fill ~= nil and UITheme.IsWarmPair(fill :: GradientPair) then
+		return UITheme.WarmText
+	end
+	return default or UITheme.Colors.Text
+end
 
 -- HOW TO HEIST's 3D scenes (UI/HeistScenes, ViewportFrames). Viewports
 -- ignore lights, so the look comes from these: tuned to read like the lab

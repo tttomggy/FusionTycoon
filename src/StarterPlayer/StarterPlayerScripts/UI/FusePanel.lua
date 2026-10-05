@@ -296,13 +296,18 @@ local function refreshChamber()
 		local current = chipCount == count
 		-- Each count its own chip (one row, a 6 px gap between them): the
 		-- count small on top, its chance bold under it. The count matching
-		-- the chamber is highlighted; a Void Moon tints every chip purple.
+		-- the chamber is highlighted in the selected green (UIKit); a Void
+		-- Moon tints every other chip purple.
 		local chip = Instance.new("Frame")
 		chip.Name = "Chip" .. chipCount
-		chip.BackgroundColor3 = if current then Colors.VioletPill elseif bonus > 0 then UITheme.TowardInk(UITheme.Mutation.Void, 0.45) else Colors.Panel2
 		chip.LayoutOrder = chipCount
 		chip.Size = UDim2.new(1 / chipTotal, -CHIP_GAP * (chipTotal - 1) / chipTotal, 1, 0)
 		chip.ZIndex = chipsRow.ZIndex + 1
+		UIKit.SetSelectedFill(
+			chip,
+			current,
+			if bonus > 0 then UITheme.TowardInk(UITheme.Mutation.Void, 0.45) else Colors.Panel2
+		)
 		UIKit.Corner(chip, 12)
 		UIKit.Stroke(chip, if current then 3 else 2, if current then Colors.White else nil)
 		UIKit.Label({
@@ -316,6 +321,7 @@ local function refreshChamber()
 			Size = UDim2.new(1, 0, 0, 14),
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = chip.ZIndex + 1,
+			Stroke = if current then 1 else nil,
 			Parent = chip,
 		})
 		local chanceLabel = UIKit.Label({
@@ -512,10 +518,11 @@ local function refreshTabs()
 	for tier, button in tabButtons do
 		local needed = rebirthsNeeded(tier)
 		local current = tier == selectedTier
+		-- Selected = green + white; the rest the muted panel colour (white
+		-- text while fusable, Muted while locked).
+		UIKit.SetSelected(button, current, if needed then Colors.Muted else Colors.Text)
 		UIKit.SetButton(button, {
-			Style = if current then "Violet" elseif needed then "Disabled" else "Blue",
 			SubText = if needed then "🔒" else tostring(#InventoryController.GetFusableItemsByTier(tier)),
-			TextColor3 = if needed and not current then Colors.Muted else Colors.Text,
 		})
 	end
 end
@@ -792,7 +799,7 @@ local function buildPicker(column: Frame)
 		tabButtons[tier] = UIKit.Button({
 			Name = tier .. "Tab",
 			Parent = tabsFrame,
-			Style = "Blue",
+			Style = UIKit.UNSELECTED_STYLE,
 			Text = tier,
 			SubText = "0",
 			TextSize = 14,
@@ -802,6 +809,7 @@ local function buildPicker(column: Frame)
 			ShadowOffset = UITheme.SmallShadowOffset,
 			ZIndex = tabsFrame.ZIndex + 1,
 			OnClick = function()
+				UIKit.SelectFeedback(tabButtons[tier])
 				local needed = rebirthsNeeded(tier)
 				if needed then
 					ToastController.Show(("Rebirth %d to fuse %ss"):format(needed, tier), "Neutral")
@@ -957,6 +965,12 @@ function FusePanel.Open()
 	end
 	refreshAll()
 	modal.Open()
+end
+
+function FusePanel.Close()
+	if modal then
+		modal.Close()
+	end
 end
 
 function FusePanel.IsOpen(): boolean

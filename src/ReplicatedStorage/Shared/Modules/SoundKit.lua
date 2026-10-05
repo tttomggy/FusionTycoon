@@ -141,6 +141,44 @@ function SoundKit.SetVolume(volume: number)
 	end
 end
 
+-- Studio /selftest (client, yields): loads every slot's sound now and
+-- returns the slots whose id failed ("" ids are silent on purpose, skipped).
+function SoundKit.CheckAll(): { string }
+	local failed: { string } = {}
+	local slotsById: { [string]: { string } } = {}
+	local assets: { Sound } = {}
+	for slot, config in SoundConfig.Slots do
+		if config.Id ~= "" then
+			if not slotsById[config.Id] then
+				slotsById[config.Id] = {}
+				local probe = Instance.new("Sound")
+				probe.SoundId = config.Id
+				table.insert(assets, probe)
+			end
+			table.insert(slotsById[config.Id], slot)
+		end
+	end
+	local ok, err = pcall(function()
+		ContentProvider:PreloadAsync(assets, function(contentId: string, status: Enum.AssetFetchStatus)
+			if status == Enum.AssetFetchStatus.Failure then
+				local slots = slotsById[contentId]
+				if slots then
+					for _, slot in slots do
+						table.insert(failed, slot)
+					end
+				end
+			end
+		end)
+	end)
+	if not ok then
+		table.insert(failed, "PreloadAsync: " .. tostring(err))
+	end
+	for _, probe in assets do
+		probe:Destroy()
+	end
+	return failed
+end
+
 -- Client only (PreloadAsync does nothing useful on the server).
 function SoundKit.Preload()
 	if not RunService:IsClient() then

@@ -207,6 +207,9 @@ function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model
 	local model = Instance.new("Model")
 	model.Name = GeneratorKit.GetModelName(id)
 	model:SetAttribute(GeneratorKit.ID_ATTRIBUTE, id)
+	-- Streams in as one piece, so a client never sees half a generator
+	-- (or a part-less model whose pivot is the world origin).
+	model.ModelStreamingMode = Enum.ModelStreamingMode.Atomic
 
 	local body = PartKit.Part({
 		Name = "Body",

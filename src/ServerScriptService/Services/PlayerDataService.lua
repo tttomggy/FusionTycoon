@@ -37,6 +37,7 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
@@ -361,8 +362,8 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw) ~= "table" then
 		return data
 	end
-	if typeof(raw.Cash) == "number" then
-		data.Cash = raw.Cash
+	if typeof(raw.Cash) == "number" and raw.Cash == raw.Cash and raw.Cash ~= math.huge then
+		data.Cash = math.clamp(raw.Cash, 0, 1e300)
 	end
 	if typeof(raw.Inventory) == "table" then
 		data.Inventory = raw.Inventory
@@ -497,6 +498,92 @@ local isStudio = RunService:IsStudio()
 local studioSaves = isStudio and ServerScriptService:GetAttribute(STUDIO_SAVES_ATTRIBUTE) == true
 local profileStore = ProfileStore.New(if studioSaves then STUDIO_STORE_NAME else STORE_NAME, toDisk(DEFAULT_DATA))
 local store = if isStudio and not studioSaves then profileStore.Mock else profileStore
+
+--[[ /selftest support (DebugService, Studio only) -------------------------- ]]
+
+-- Which store this server's profiles live in: "Mock" (plain Studio),
+-- "StudioTest" (FT_StudioSaves) or "Live". /selftest refuses "Live".
+function PlayerDataService.GetStoreKind(): string
+	if isStudio and not studioSaves then
+		return "Mock"
+	end
+	return if studioSaves then "StudioTest" else "Live"
+end
+
+-- A canonical string of any plain value: sorted keys, exact numbers, so
+-- two equal tables always print the same.
+local function canonical(value: any, skip: { [string]: boolean }?): string
+	local kind = typeof(value)
+	if kind == "table" then
+		local keys = {}
+		for key in value do
+			if not (skip and skip[tostring(key)]) then
+				table.insert(keys, key)
+			end
+		end
+		table.sort(keys, function(a, b)
+			return tostring(a) < tostring(b)
+		end)
+		local parts = {}
+		for _, key in keys do
+			table.insert(parts, ("%s=%s"):format(tostring(key), canonical(value[key])))
+		end
+		return "{" .. table.concat(parts, ",") .. "}"
+	elseif kind == "number" then
+		return ("%.17g"):format(value)
+	end
+	return kind .. ":" .. tostring(value)
+end
+
+-- Disk -> session -> disk must be lossless: toDisk(data), reconcile it back,
+-- toDisk again, compare (LastOnline is stamped per call, so skipped). In
+-- memory only: no profile is read or written.
+function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false, "no data loaded"
+	end
+	local skip = { LastOnline = true }
+	local first = toDisk(data)
+	local second = toDisk(reconcile(deepCopy(first)))
+	local a, b = canonical(first, skip), canonical(second, skip)
+	if a == b then
+		return true, nil
+	end
+	-- Name the first top-level field that differs.
+	for key in first do
+		if key ~= "LastOnline" and canonical(first[key]) ~= canonical(second[key]) then
+			return false, ("field %s changed"):format(tostring(key))
+		end
+	end
+	return false, "a field was added"
+end
+
+-- Everything a bad remote must NOT change (cash is checked separately: the
+-- income tick only ever raises it). Gifts.PlaySeconds and Boosts tick.
+function PlayerDataService.SelfTestFingerprint(player: Player): string
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return ""
+	end
+	return canonical({
+		Inventory = data.Inventory,
+		PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays),
+		Generators = data.Generators,
+		CashMultiplierLevel = data.CashMultiplierLevel,
+		Rebirths = data.Rebirths,
+		GachaPulls = data.GachaPulls,
+		FreePulls = data.FreePulls,
+		Settings = data.Settings,
+		Tips = data.Tips,
+		Daily = data.Daily,
+		GiftsClaimed = data.Gifts.Claimed,
+		SafeFusionTokens = data.SafeFusionTokens,
+		Receipts = data.Receipts,
+		Index = data.Index,
+		Cosmetics = data.Cosmetics,
+	})
+end
 
 -- Pays offline earnings still pending into the save (leaving, shutdown):
 -- never lost.
@@ -646,12 +733,23 @@ function PlayerDataService.GetCash(player: Player): number
 end
 
 -- Mirrors the authoritative Cash value onto the player's leaderstats display.
+-- A StringValue ("$1.2Qa"), not an IntValue: late-game cash passes the
+-- int64 range (~9.2e18), and assigning that to an IntValue would break the
+-- income tick for every player after this one.
 local function updateLeaderstatsCash(player: Player)
 	local leaderstats = player:FindFirstChild("leaderstats")
 	local cashValue = leaderstats and leaderstats:FindFirstChild("Cash")
-	if cashValue and cashValue:IsA("IntValue") then
-		cashValue.Value = math.floor(PlayerDataService.GetCash(player))
+	if cashValue and cashValue:IsA("StringValue") then
+		cashValue.Value = NumberFormat.Money(PlayerDataService.GetCash(player))
 	end
+end
+
+-- Cash stays finite and saveable: a DataStore can't hold inf / NaN, and
+-- NumberFormat reads up to 1e300.
+local MAX_CASH = 1e300
+
+local function isFinite(n: number): boolean
+	return n == n and n ~= math.huge and n ~= -math.huge
 end
 
 local function updateLeaderstatsRebirths(player: Player)
@@ -668,14 +766,21 @@ function PlayerDataService.AddCash(player: Player, amount: number)
 	if not data then
 		return
 	end
-	data.Cash = math.max(0, data.Cash + amount)
+	-- A NaN amount used to zero the cash (math.max(0, NaN) is 0) and an
+	-- inf one made every later save fail. Refuse both, loudly.
+	if not isFinite(amount) then
+		warn(("PlayerDataService: refused non-finite AddCash(%s) for %s"):format(tostring(amount), player.Name))
+		return
+	end
+	data.Cash = math.clamp(data.Cash + amount, 0, MAX_CASH)
 	updateLeaderstatsCash(player)
 end
 
 -- Atomically checks-and-deducts; fails (no mutation) if funds are insufficient.
 function PlayerDataService.SpendCash(player: Player, amount: number): boolean
 	local data = state.sessionCache[player.UserId]
-	if not data or data.Cash < amount then
+	-- A NaN cost turned cash into NaN; a negative one added money.
+	if not data or not isFinite(amount) or amount < 0 or data.Cash < amount then
 		return false
 	end
 	data.Cash -= amount
@@ -1386,6 +1491,21 @@ function PlayerDataService.SetPendingOffline(player: Player, amount: number, awa
 	end
 end
 
+-- Re-prices still-unclaimed offline earnings from the CURRENT base income.
+-- The payout is computed on load, before MonetizationService's async pass
+-- check has run, so 2x Cash / VIP owners were paid at the no-pass rate.
+-- MonetizationService calls this once passes are known; never lowers it.
+function PlayerDataService.RecomputePendingOffline(player: Player)
+	local pending = state.pendingOffline[player.UserId]
+	if not pending then
+		return
+	end
+	local amount = OfflineConfig.Compute(PlayerDataService.GetBasePassiveCashPerSecond(player), pending.AwaySeconds)
+	if amount > pending.Amount then
+		pending.Amount = amount
+	end
+end
+
 -- Clears the pending offline earnings and returns the amount (0 if none).
 -- The caller pays it; taking and paying happen with no yield between them.
 function PlayerDataService.TakePendingOffline(player: Player): number
@@ -1457,9 +1577,9 @@ local function createLeaderstats(player: Player)
 	rebirthsValue.Value = 0
 	rebirthsValue.Parent = leaderstats
 
-	local cashValue = Instance.new("IntValue")
+	local cashValue = Instance.new("StringValue")
 	cashValue.Name = "Cash"
-	cashValue.Value = 0
+	cashValue.Value = NumberFormat.Money(0)
 	cashValue.Parent = leaderstats
 
 	leaderstats.Parent = player
@@ -1578,7 +1698,14 @@ function PlayerDataService:Init()
 			local changed = false
 			if request.Key == "RevealRule" then
 				changed = PlayerDataService.SetRevealRule(player, request.Tier, request.Value)
-			elseif request.Key == "SfxVolume" and typeof(request.Value) == "number" then
+			-- Finite numbers only: SanitizeSfxVolume maps NaN / inf to the
+			-- default, so a junk value silently reset the player's volume.
+			elseif
+				request.Key == "SfxVolume"
+				and typeof(request.Value) == "number"
+				and request.Value == request.Value
+				and math.abs(request.Value) ~= math.huge
+			then
 				changed = PlayerDataService.SetSfx(player, request.Value, nil)
 			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
 				changed = PlayerDataService.SetSfx(player, nil, request.Value)

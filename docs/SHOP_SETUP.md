@@ -6,6 +6,13 @@ Products), using exactly the name, price and description here. Then paste
 its id into `src/ReplicatedStorage/Shared/Config/ShopConfig.lua`, in that
 item's `Id = 0` line (the `Key` column says which one).
 
+**Icons:** `marketing/shop_icons/<Key>.png` (512 × 512, one per row below;
+pass images are shown as a circle, so everything sits inside it). Upload
+each one AS the pass / product's icon in Creator Hub: the in-game shop reads
+it from the same `GetProductInfo` call as the price (`IconImageAssetId`), so
+the tile always matches the store page. Until it loads (and in Studio) the
+tile shows the item's emoji in a circle.
+
 - **An item with `Id = 0` is hidden in live games.** In Studio it still
   shows in the shop, and tapping it runs a free test grant.
 - **Prices are read live from Roblox** (`MarketplaceService:GetProductInfo`).

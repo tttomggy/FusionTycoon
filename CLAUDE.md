@@ -162,7 +162,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/daily miss <days>` (as if you missed that many days: 1 = the free
   skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
   (today's play time), `/gifts reset`,
-  `/wipe` (fails your active steals first).
+  `/wipe` (fails your active steals first). **`/selftest`** runs the Bug
+  Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
+  round trip, a junk-remote fuzz with no error / state change, every panel
+  at both scales with no leftover instances) and prints PASS / FAIL lines;
+  it refuses unless saves go to the mock store or `FT_StudioTest_1`.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
@@ -368,10 +372,25 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     strips and pink cash balls (plot attribute `LabStyle`). Looks only.
   - **Shop UI:** the HUD's gold "🛒 SHOP" button (left, above the LOCK
     chip; wiggles every 20 s; red SALE tag only while a real sale is live;
-    timed-effect pills beside it) opens `UI/ShopPanel` (featured banner
-    with a shine sweep: Starter Pack until bought, then the live sale,
-    then the best value; tabs; 4 / 2 column tiles; cash tiles show what
-    you'd get right now; the honest footer).
+    timed-effect pills beside it) opens `UI/ShopPanel`: **one scrolling
+    page** (Shop 2). Sticky header + a sticky chip bar (sideways-scrolling)
+    of `ShopConfig.Sections`: ⭐ Featured (one banner with a shine sweep:
+    Starter Pack until bought, then the live sale, then the best value),
+    🎟 Passes (big cards; an owned pass is a grey "OWNED ✓" and sorts
+    last), ⚡ Boosts (BoostSale replaces Boost while live; "+1 h · you have
+    0:42" from the real bank), 💰 Cash (what you'd get right now; "BEST
+    VALUE" = most $ per Robux, `ShopConfig.GetBestValueKey`, live prices
+    only, else no tag), 🍀 Luck, 🛡 Safe ("SAVE N%" live); empty sections and
+    their chips are left out; the honest footer. A chip tweens the scroll
+    (never filters); the chip of the section on screen is green. Tiles 4
+    per row (2 on phones / under 560 px), the section's colour, a green
+    buy button with the live price, hover 1.03, press bounce. Icons: the
+    store page's `IconImageAssetId` (`ShopPrices.GetIcon`, same cached
+    `GetProductInfo`), else the emoji in a circle; art in
+    `marketing/shop_icons/<Key>.png` (never uploaded from code). No fake
+    ribbons: no "POPULAR", no hard-coded "BEST VALUE". The offer card's
+    "See all in the shop ›" opens it at Cash / Boosts
+    (`ShopController.OpenShop`).
   - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
     the player taps something they can't afford (upgrade / MAX, pull /
     ×10, Multiplier Pad, Rebirth). One non-modal side card: what they
@@ -418,7 +437,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   Client: `DailyController` opens `UI/DailyCard` once per session when
   claimable, 2 s after the first sync and only when no other card is open
   (UIKit overlays, shop side cards), so never over the welcome-back card;
-  the 7-tile row (claimed dim ✓, today gold glowing "TODAY", Day 7 purple),
+  the 7-tile row (claimed: 50% dim + a small green ✓ badge top-right,
+  today gold glowing "TODAY", Day 7 purple),
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
 - **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
@@ -622,6 +642,8 @@ src/ServerScriptService/
                            only PlayerDataService requires it
     Modules/AnalyticsKit.lua   the one AnalyticsService wrapper (not a
                            service; required directly)
+    Modules/RemoteGuard.lua    remote arg checks (`Int`: finite whole numbers
+                           in range) and the per-player rate limit (`Allow`)
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
                            WorldService builds ground, street, Event Boards
@@ -674,6 +696,32 @@ src/StarterPlayer/StarterPlayerScripts/
   `UIScale` (0.8 under 500 px tall). Phone layouts react to
   `UIKit.LayoutChanged`. Keep the top-left 170×60 px clear (Roblox top bar)
   **after** that scale, and every tap target ≥ 44 px.
+- **Pills:** `UIKit.Pill` always builds a fill Frame (layout props,
+  colour or gradient, corner, stroke) with the clear TextLabel inside, and
+  returns the label (set `.Text` on it). Show / hide / lay out / parent a
+  hit area to the pill through `UIKit.PillRoot(pill)` or
+  `UIKit.SetPillVisible(pill, visible)`; never `pill.Visible` or
+  `pill.Parent` from the caller's side of the pill. `UIKit.MutationPill`
+  returns the fill Frame. (Plain-colour pills used to BE the label, so
+  hiding `.Parent` hid the SHOP button and the whole SHOP / GIFTS row.)
+- **Contrast rule:** on any gold, yellow or orange fill, text is **white**
+  with the ink stroke (the UPGRADES / ITEMS / INDEX look), never dark brown
+  or gold-on-gold. `UITheme.IsWarm` / `IsWarmPair` / `TextOn` decide it;
+  `UIKit.Button` / `SetButton` / `Pill` and BillboardKit's `Pad` / `Chip`
+  pills apply it by themselves (a warm Style ignores `TextColor3`). A
+  hand-built label on a warm fill uses `UITheme.WarmText` +
+  `WarmTextStroke`. There is no dark "gold text" token.
+- **Selected state:** a tab / chip / segment row's selected item is the
+  UPGRADES green with white text, the rest the muted panel colour:
+  `UIKit.SetSelected(button, selected)` for a UIKit.Button,
+  `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
+  a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
+  `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
+- **Chat-safe top (desktop):** centred cards start below `UIKit.TOP_SAFE`
+  (Roblox top bar 58 + chat 180) so their title is never under chat;
+  `UIKit.Modal` and `UIKit.FitHeight` (on a card centred at 0.5, 0.5) do it
+  through `UIKit.GetTopSafe()` (0 on phones, the top bar alone when the chat
+  window is off).
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per
@@ -791,7 +839,8 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
 `ShopAnalytics` (C→S `{ Event, Key? }`, analytics only), `ClaimDaily`
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
-`GiftResult` (S→C),
+`GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
+only),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
 Legendary+).
@@ -806,6 +855,13 @@ themselves. It is a plain callback list on purpose: a BindableEvent handler
 would run deferred, after the snapshot was already sent.
 
 ### Server authority
+
+Remote handlers validate numbers with `RemoteGuard.Int` (a NaN or ±inf
+passes `math.floor` + a range check) and rate-limit anything that syncs
+or loops with `RemoteGuard.Allow`. Cash only moves through
+`PlayerDataService.AddCash` / `SpendCash`, which refuse non-finite and
+negative amounts and keep cash in [0, 1e300]; the leaderstats Cash column
+is a StringValue (an IntValue overflows past int64).
 
 Services never trust client-supplied ownership, tiers, or instance references.
 Resolve everything server-side from the requesting `Player` and validate before
