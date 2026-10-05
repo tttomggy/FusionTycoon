@@ -126,7 +126,7 @@ local function refreshRow(generator: TycoonConfig.GeneratorDef, cash: number, le
 	row.Progress.Visible = lockState == "locked"
 	row.Icon.Visible = lockState == "unlocked"
 	row.LockWell.Visible = lockState ~= "unlocked"
-	row.LevelPill.Visible = lockState == "unlocked"
+	UIKit.SetPillVisible(row.LevelPill, lockState == "unlocked")
 
 	if lockState == "unlocked" then
 		row.Name.Text = generator.Name

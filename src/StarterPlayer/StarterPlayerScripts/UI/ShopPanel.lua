@@ -194,7 +194,7 @@ local function iconOrb(parent: Instance, icon: string, size: number, position: U
 end
 
 local function ribbon(parent: Instance, text: string, z: number)
-	local pill = UIKit.Pill({
+	UIKit.Pill({
 		Name = "Ribbon",
 		Parent = parent,
 		Text = text,
@@ -208,7 +208,6 @@ local function ribbon(parent: Instance, text: string, z: number)
 		ZIndex = z,
 		TextStroke = if text == "VIP" then nil else 1.5,
 	})
-	pill.Rotation = 0
 end
 
 --[[ Featured banner ------------------------------------------------------------------ ]]

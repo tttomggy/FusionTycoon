@@ -1287,3 +1287,16 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
   area stays clear. Computed: no overlaps among top bar, event chip (with
   pulse + glow), cash card, goal tracker, SHOP, SALE, GIFTS (bounce),
   badge, next pill, effect pills, LOCK row.
+- [ ] **Pills always own their fill (SHOP / GIFTS root cause).** Every
+  `UIKit.Pill` is now a fill Frame with the label inside, colour or
+  gradient alike. Desktop and phone (844 × 390), no sale running: the
+  SHOP button shows, with no SALE tag. `/gifts time 15`: SHOP and GIFTS
+  both stay, GIFTS bounces with its badge, the "next in" pill hides and
+  comes back once all ready gifts are open. Also check every plain-colour
+  pill still looks the same: the HUD multiplier pill (tap it: the income
+  breakdown opens, the tap area is the pill's own ≥ 44 px), Upgrades
+  panel LV pills (hidden on locked generators), the Inventory filter chips
+  (tap each), mutation pills on result cards / inventory cards / the
+  event info card (in their list order), "OWNED 3" on Safe Fusion tiles,
+  the daily card's skip chip, and the HOW TO HEIST scene labels (they
+  follow the 3D scene and hide when off-screen).

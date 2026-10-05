@@ -354,7 +354,7 @@ local function buildCashCard(): Frame
 		ZIndex = z,
 		TextStroke = 1.5,
 	})
-	local rebirthFill = rebirthPill.Parent :: Frame
+	local rebirthFill = UIKit.PillRoot(rebirthPill)
 	rebirthFill.Visible = false
 	-- The pill is small; this clear button gives it a >= 44 px hit area.
 	local hit = Instance.new("TextButton")
@@ -389,7 +389,7 @@ local function buildCashCard(): Frame
 	multiplierHit.Position = UDim2.fromScale(0.5, 0.5)
 	multiplierHit.Size = UDim2.new(1, 16, 0, UITheme.MinTapSize)
 	multiplierHit.ZIndex = z + 2
-	multiplierHit.Parent = multiplierPill.Parent
+	multiplierHit.Parent = UIKit.PillRoot(multiplierPill)
 	multiplierHit.Activated:Connect(function()
 		HudController.ToggleIncomeBreakdown()
 	end)
@@ -1014,7 +1014,7 @@ local function buildShopRow()
 			LayoutOrder = order,
 			TextStroke = 1.5,
 		})
-		local fill = label.Parent :: Frame
+		local fill = UIKit.PillRoot(label)
 		fill.Visible = false
 		return label
 	end
@@ -1041,7 +1041,7 @@ end
 -- Once a second: the effect pills' timers and the SALE tag.
 local function refreshShopRow()
 	local function setPill(label: TextLabel, seconds: number, format: string)
-		local fill = label.Parent :: Frame
+		local fill = UIKit.PillRoot(label)
 		fill.Visible = seconds > 0
 		if seconds > 0 then
 			label.Text = format:format(EventState.FormatTimer(seconds))
@@ -1136,7 +1136,7 @@ local function refreshAll()
 	end
 	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
 	local rebirths = TycoonController.GetRebirths()
-	local rebirthFill = rebirthPill.Parent :: Frame
+	local rebirthFill = UIKit.PillRoot(rebirthPill)
 	rebirthFill.Visible = rebirths > 0
 	rebirthPill.Text = ("⟳ %d · %s"):format(rebirths, NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)))
 	refreshBadge()

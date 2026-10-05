@@ -489,73 +489,58 @@ export type PillProps = {
 	TextStroke: number?,
 }
 
--- Auto-width rounded capsule. Returns the TextLabel itself (Text is live).
+-- Auto-width rounded capsule. ALWAYS two instances: a fill Frame (takes
+-- the layout props, carries the colour or gradient, corner and stroke) and
+-- the clear TextLabel inside it, which is what this returns (set .Text on
+-- it). So `pill.Parent` is always the pill's own fill, never the caller's
+-- container: show / hide / move / hit-area a pill through
+-- UIKit.PillRoot(pill) (or UIKit.SetPillVisible).
 function UIKit.Pill(props: PillProps): TextLabel
+	local fill = Instance.new("Frame")
+	fill.Name = props.Name or "Pill"
+	fill.BorderSizePixel = 0
+	fill.AutomaticSize = Enum.AutomaticSize.X
+	fill.Size = UDim2.fromOffset(0, props.Height or 24)
+	fill.Position = props.Position or UDim2.new()
+	fill.AnchorPoint = props.AnchorPoint or Vector2.zero
+	fill.LayoutOrder = props.LayoutOrder or 0
+	fill.ZIndex = props.ZIndex or 1
+	UIKit.Corner(fill, 999)
+	UIKit.Stroke(fill, props.StrokeThickness or 2)
+	if props.Gradient then
+		-- On the Frame: a UIGradient on the label would tint its text too.
+		fill.BackgroundColor3 = Colors.White
+		UIKit.PairGradient(fill, props.Gradient)
+	else
+		fill.BackgroundColor3 = props.Color or Colors.Panel2
+	end
+
 	local pill = UIKit.Label({
-		Name = props.Name or "Pill",
+		Name = "Text",
 		Text = props.Text or "",
 		Font = props.Font or Fonts.BodyHeavy,
 		TextSize = props.TextSize or 13,
 		TextColor3 = props.TextColor3 or Colors.Text,
 		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, props.Height or 24),
-		Position = props.Position or UDim2.new(),
-		AnchorPoint = props.AnchorPoint or Vector2.zero,
-		LayoutOrder = props.LayoutOrder or 0,
-		ZIndex = props.ZIndex or 1,
+		Size = UDim2.fromScale(0, 1),
+		ZIndex = fill.ZIndex + 1,
 		TextXAlignment = Enum.TextXAlignment.Center,
-		BackgroundTransparency = 0,
 		Stroke = props.TextStroke,
 	})
 	UIKit.Padding(pill, 0, 10, 0, 10)
-
-	if not props.Gradient then
-		pill.BackgroundColor3 = props.Color or Colors.Panel2
-		UIKit.Corner(pill, 999)
-		UIKit.Stroke(pill, props.StrokeThickness or 2)
-		pill.Parent = props.Parent
-		return pill
-	end
-
-	-- A UIGradient on the label would tint its text too, so the gradient,
-	-- corner and stroke go on an auto-sized Frame and the (clear) label sits
-	-- inside it. The Frame takes the layout props; the label is returned so
-	-- callers can still set .Text.
-	local fill = Instance.new("Frame")
-	fill.Name = pill.Name
-	fill.BackgroundColor3 = Colors.White
-	fill.AutomaticSize = Enum.AutomaticSize.X
-	fill.Size = pill.Size
-	fill.Position = pill.Position
-	fill.AnchorPoint = pill.AnchorPoint
-	fill.LayoutOrder = pill.LayoutOrder
-	fill.ZIndex = pill.ZIndex
-	UIKit.Corner(fill, 999)
-	UIKit.Stroke(fill, props.StrokeThickness or 2)
-	UIKit.PairGradient(fill, props.Gradient)
-
-	pill.Name = "Text"
-	pill:SetAttribute("PillFill", true)
-	pill.BackgroundTransparency = 1
-	pill.Position = UDim2.new()
-	pill.AnchorPoint = Vector2.zero
-	pill.LayoutOrder = 0
-	pill.ZIndex = fill.ZIndex + 1
 	pill.Parent = fill
 	fill.Parent = props.Parent
 	return pill
 end
 
--- Shows / hides a pill from UIKit.Pill. A gradient pill's label sits in a
--- fill Frame (hide that); a plain one IS the label. Never hide `.Parent`
--- blindly: for a plain pill that is whatever it was parented to.
+-- The pill's fill Frame (what to show, hide, move or parent a hit area to).
+function UIKit.PillRoot(pill: TextLabel): Frame
+	return pill.Parent :: Frame
+end
+
+-- Shows / hides a pill from UIKit.Pill (its fill, label and all).
 function UIKit.SetPillVisible(pill: TextLabel, visible: boolean)
-	local fill = pill.Parent
-	if pill:GetAttribute("PillFill") == true and fill and fill:IsA("GuiObject") then
-		fill.Visible = visible
-	else
-		pill.Visible = visible
-	end
+	UIKit.PillRoot(pill).Visible = visible
 end
 
 --[[ Mutation marks ------------------------------------------------------------
@@ -627,7 +612,9 @@ function UIKit.MutationPill(props: {
 		AnchorPoint = props.AnchorPoint,
 		ZIndex = props.ZIndex,
 	})
-	local outline = pill:FindFirstChildOfClass("UIStroke")
+	-- The outline is on the pill's fill Frame (UIKit.Pill).
+	local root = UIKit.PillRoot(pill)
+	local outline = root:FindFirstChildOfClass("UIStroke")
 	if outline then
 		outline.Color = if rainbow then Colors.White else color
 		if rainbow then
@@ -638,7 +625,8 @@ function UIKit.MutationPill(props: {
 		-- Intended tinting: white text under the rainbow.
 		rainbowGradient(pill, false)
 	end
-	return pill
+	-- The fill Frame, so callers can lay it out (LayoutOrder, Visible).
+	return root
 end
 
 -- A 3 px outline in the mutation colour round a card body (its existing

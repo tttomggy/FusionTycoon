@@ -675,6 +675,14 @@ src/StarterPlayer/StarterPlayerScripts/
   `UIScale` (0.8 under 500 px tall). Phone layouts react to
   `UIKit.LayoutChanged`. Keep the top-left 170×60 px clear (Roblox top bar)
   **after** that scale, and every tap target ≥ 44 px.
+- **Pills:** `UIKit.Pill` always builds a fill Frame (layout props,
+  colour or gradient, corner, stroke) with the clear TextLabel inside, and
+  returns the label (set `.Text` on it). Show / hide / lay out / parent a
+  hit area to the pill through `UIKit.PillRoot(pill)` or
+  `UIKit.SetPillVisible(pill, visible)`; never `pill.Visible` or
+  `pill.Parent` from the caller's side of the pill. `UIKit.MutationPill`
+  returns the fill Frame. (Plain-colour pills used to BE the label, so
+  hiding `.Parent` hid the SHOP button and the whole SHOP / GIFTS row.)
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per
