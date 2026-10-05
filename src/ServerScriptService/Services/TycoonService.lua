@@ -51,6 +51,7 @@ local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
 type WorldServiceModule = typeof(require(script.Parent.WorldService))
@@ -164,6 +165,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "InvalidGenerator" })
 		return
 	end
+	-- Fast tapping is fine (10/s); a script firing 50/s is just dropped.
+	if not RemoteGuard.Allow(player, "RequestUpgrade", 10, 12) then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "TooFast", GeneratorId = rawGeneratorId })
+		return
+	end
 	local generatorId = rawGeneratorId :: string
 
 	if not PlayerDataService.IsDataLoaded(player) then
@@ -211,6 +217,11 @@ local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
 	end
 	if not all and not (singleId and TycoonConfig.GetGeneratorById(singleId)) then
 		reject("InvalidGenerator")
+		return
+	end
+	-- Each MAX loops up to MaxUpgradeSteps levels: a few per second at most.
+	if not RemoteGuard.Allow(player, "RequestUpgradeMax", 3, 4) then
+		reject("TooFast")
 		return
 	end
 	if not PlayerDataService.IsDataLoaded(player) then

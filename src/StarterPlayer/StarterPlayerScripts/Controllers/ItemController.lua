@@ -42,6 +42,7 @@ local REJECTION_TOASTS: { [string]: string } = {
 	NoPlot = "Your lab isn't ready yet, try again",
 	DataNotLoaded = "Your lab isn't ready yet, try again",
 	PedestalLocked = "That spot needs the +2 Pedestals pass",
+	TooFast = "Slow down a little",
 }
 local FALLBACK_REJECTION_TOAST = "Couldn't do that, try again"
 -- True once this player's plot is claimed (its pedestals then exist).

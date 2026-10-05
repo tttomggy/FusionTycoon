@@ -23,6 +23,8 @@ local ItemConfig = require(Config.ItemConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -86,13 +88,22 @@ local function syncAll(player: Player)
 	PlayerDataService.SyncTycoon(player)
 end
 
+-- Place / remove share one spam guard (each accepted call syncs).
+local ITEM_OPS_PER_SECOND = 6
+local ITEM_OPS_BURST = 8
+local MAX_UID_LENGTH = 64
+
 local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIndex: unknown)
-	if typeof(rawUid) ~= "string" or typeof(rawPedestalIndex) ~= "number" then
+	local pedestalIndex = RemoteGuard.Int(rawPedestalIndex, 1, PlotLayout.PEDESTAL_COUNT)
+	if typeof(rawUid) ~= "string" or #(rawUid :: string) > MAX_UID_LENGTH or not pedestalIndex then
 		reject(player, "InvalidArguments", nil, true)
 		return
 	end
 	local uid = rawUid :: string
-	local pedestalIndex = math.floor(rawPedestalIndex :: number)
+	if not RemoteGuard.Allow(player, "ItemOps", ITEM_OPS_PER_SECOND, ITEM_OPS_BURST) then
+		reject(player, "TooFast", pedestalIndex)
+		return
+	end
 
 	if not PlayerDataService.IsDataLoaded(player) then
 		reject(player, "DataNotLoaded", pedestalIndex)
@@ -168,11 +179,15 @@ local function onRequestPlaceItem(player: Player, rawUid: unknown, rawPedestalIn
 end
 
 local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
-	if typeof(rawPedestalIndex) ~= "number" then
+	local pedestalIndex = RemoteGuard.Int(rawPedestalIndex, 1, PlotLayout.PEDESTAL_COUNT)
+	if not pedestalIndex then
 		reject(player, "InvalidArguments", nil, true)
 		return
 	end
-	local pedestalIndex = math.floor(rawPedestalIndex :: number)
+	if not RemoteGuard.Allow(player, "ItemOps", ITEM_OPS_PER_SECOND, ITEM_OPS_BURST) then
+		reject(player, "TooFast", pedestalIndex)
+		return
+	end
 
 	if not PlayerDataService.IsDataLoaded(player) then
 		reject(player, "DataNotLoaded", pedestalIndex)

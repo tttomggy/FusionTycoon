@@ -258,6 +258,9 @@ end
 function RewardService:Init()
 	table.insert(state.connections, RemoteEvents.ClaimDaily.OnServerEvent:Connect(onClaimDaily))
 	table.insert(state.connections, RemoteEvents.ClaimGift.OnServerEvent:Connect(onClaimGift))
+	table.insert(state.connections, Players.PlayerRemoving:Connect(function(player: Player)
+		state.lastRequest[player.UserId] = nil
+	end))
 	table.insert(state.connections, RunService.Heartbeat:Connect(function(dt: number)
 		-- Nothing to tick until Start has resolved PlayerDataService.
 		if PlayerDataService then
