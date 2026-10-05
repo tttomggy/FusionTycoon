@@ -499,6 +499,92 @@ local studioSaves = isStudio and ServerScriptService:GetAttribute(STUDIO_SAVES_A
 local profileStore = ProfileStore.New(if studioSaves then STUDIO_STORE_NAME else STORE_NAME, toDisk(DEFAULT_DATA))
 local store = if isStudio and not studioSaves then profileStore.Mock else profileStore
 
+--[[ /selftest support (DebugService, Studio only) -------------------------- ]]
+
+-- Which store this server's profiles live in: "Mock" (plain Studio),
+-- "StudioTest" (FT_StudioSaves) or "Live". /selftest refuses "Live".
+function PlayerDataService.GetStoreKind(): string
+	if isStudio and not studioSaves then
+		return "Mock"
+	end
+	return if studioSaves then "StudioTest" else "Live"
+end
+
+-- A canonical string of any plain value: sorted keys, exact numbers, so
+-- two equal tables always print the same.
+local function canonical(value: any, skip: { [string]: boolean }?): string
+	local kind = typeof(value)
+	if kind == "table" then
+		local keys = {}
+		for key in value do
+			if not (skip and skip[tostring(key)]) then
+				table.insert(keys, key)
+			end
+		end
+		table.sort(keys, function(a, b)
+			return tostring(a) < tostring(b)
+		end)
+		local parts = {}
+		for _, key in keys do
+			table.insert(parts, ("%s=%s"):format(tostring(key), canonical(value[key])))
+		end
+		return "{" .. table.concat(parts, ",") .. "}"
+	elseif kind == "number" then
+		return ("%.17g"):format(value)
+	end
+	return kind .. ":" .. tostring(value)
+end
+
+-- Disk -> session -> disk must be lossless: toDisk(data), reconcile it back,
+-- toDisk again, compare (LastOnline is stamped per call, so skipped). In
+-- memory only: no profile is read or written.
+function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false, "no data loaded"
+	end
+	local skip = { LastOnline = true }
+	local first = toDisk(data)
+	local second = toDisk(reconcile(deepCopy(first)))
+	local a, b = canonical(first, skip), canonical(second, skip)
+	if a == b then
+		return true, nil
+	end
+	-- Name the first top-level field that differs.
+	for key in first do
+		if key ~= "LastOnline" and canonical(first[key]) ~= canonical(second[key]) then
+			return false, ("field %s changed"):format(tostring(key))
+		end
+	end
+	return false, "a field was added"
+end
+
+-- Everything a bad remote must NOT change (cash is checked separately: the
+-- income tick only ever raises it). Gifts.PlaySeconds and Boosts tick.
+function PlayerDataService.SelfTestFingerprint(player: Player): string
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return ""
+	end
+	return canonical({
+		Inventory = data.Inventory,
+		PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays),
+		Generators = data.Generators,
+		CashMultiplierLevel = data.CashMultiplierLevel,
+		Rebirths = data.Rebirths,
+		GachaPulls = data.GachaPulls,
+		FreePulls = data.FreePulls,
+		Settings = data.Settings,
+		Tips = data.Tips,
+		Daily = data.Daily,
+		GiftsClaimed = data.Gifts.Claimed,
+		SafeFusionTokens = data.SafeFusionTokens,
+		Receipts = data.Receipts,
+		Index = data.Index,
+		Cosmetics = data.Cosmetics,
+	})
+end
+
 -- Pays offline earnings still pending into the save (leaving, shutdown):
 -- never lost.
 local function payPendingOffline(userId: number)

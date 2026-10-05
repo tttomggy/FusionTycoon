@@ -959,6 +959,12 @@ function FusePanel.Open()
 	modal.Open()
 end
 
+function FusePanel.Close()
+	if modal then
+		modal.Close()
+	end
+end
+
 function FusePanel.IsOpen(): boolean
 	return modal ~= nil and modal.IsOpen()
 end

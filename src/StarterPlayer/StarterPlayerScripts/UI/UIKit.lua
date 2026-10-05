@@ -892,7 +892,13 @@ local function viewportHeight(): number
 	return if camera then camera.ViewportSize.Y else 720
 end
 
+-- /selftest: pretend to be (or not be) a phone; nil = the real viewport.
+local forcedPhone: boolean? = nil
+
 function UIKit.IsPhone(): boolean
+	if forcedPhone ~= nil then
+		return forcedPhone
+	end
 	return viewportHeight() < UITheme.PhoneHeightThreshold
 end
 
@@ -924,6 +930,12 @@ local function refreshLayout()
 		lastIsPhone = isPhone
 		layoutChanged:Fire(isPhone)
 	end
+end
+
+-- Studio /selftest only: build every panel at both scales.
+function UIKit.SetForcedPhone(value: boolean?)
+	forcedPhone = value
+	refreshLayout()
 end
 
 local function watchCamera(camera: Camera?)

@@ -343,6 +343,12 @@ function HowToHeistPanel.Open()
 	modal.Open()
 end
 
+function HowToHeistPanel.Close()
+	if modal then
+		modal.Close()
+	end
+end
+
 function HowToHeistPanel.Init()
 	build()
 	-- The rigs are built from HumanoidDescriptions (network); start now so
