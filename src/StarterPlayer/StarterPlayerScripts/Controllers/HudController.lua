@@ -481,9 +481,11 @@ function HudController.GetCashTarget(): Vector2
 end
 
 -- Shows `amount` on the counter for `seconds` (the coins are in the air),
--- then it ticks up to the real cash as usual.
+-- then it ticks up to the real cash as usual (seconds 0 = release now).
 function HudController.HoldCash(amount: number, seconds: number)
-	displayedCash = math.max(0, amount)
+	if seconds > 0 then
+		displayedCash = math.max(0, amount)
+	end
 	cashHoldUntil = os.clock() + seconds
 end
 

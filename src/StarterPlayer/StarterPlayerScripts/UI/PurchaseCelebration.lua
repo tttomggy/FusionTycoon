@@ -643,10 +643,6 @@ function PurchaseCelebration.Show(payload: any)
 			card:Destroy()
 			backdrop:Destroy()
 		end)
-		local hooks = hud
-		if hooks then
-			hooks.HoldCash(0, 0)
-		end
 	end
 	closeCurrent = close
 

@@ -41,6 +41,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -66,7 +67,7 @@ local HEADER_HEIGHT = 44
 local FEATURED_HEIGHT = 170
 local FEATURED_NARROW_HEIGHT = 262
 local PASS_HEIGHT = 140
-local TILE_HEIGHT = 244
+local TILE_HEIGHT = 272 -- the icon is ~45% of it (120 px)
 local GRID_GAP = 12
 local NARROW_WIDTH = 560 -- logical px of page width under which tiles go 2-up
 local REFRESH_SECONDS = 1
@@ -77,7 +78,7 @@ local BOB_SECONDS = 1.1
 local SCROLL_TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local HOVER_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local PRESS_INFO = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local HOVER_SCALE = 1.03
+local HOVER_SCALE = 1.04
 local PRESS_SCALE = 0.96
 local ACTIVE_LINE = 60 -- px below the page top where a header counts as "on screen"
 
@@ -230,7 +231,8 @@ local function tileLines(key: string): (string, string)
 	local entry = item(key)
 	local pack = ShopConfig.CashPacks[key]
 	if pack then
-		return UIKit.Colored("+" .. NumberFormat.Money(ShopController.GetCashAmount(key)), Colors.Cash),
+		-- White on the vivid green tile (green-on-green would vanish).
+		return "+" .. NumberFormat.Money(ShopController.GetCashAmount(key)),
 			("%s of your income"):format(span(pack.Minutes * 60))
 	end
 	if entry.SaleOf then
@@ -358,6 +360,27 @@ local function cornerTag(parent: Instance, text: string, z: number): TextLabel
 	})
 end
 
+-- "NEW!" (top-left) on an item that really went on sale this week
+-- (ShopConfig.IsNew).
+local function newTag(parent: Frame, entry: ShopConfig.Item)
+	local today = RewardConfig.GetUtcDay(math.floor(workspace:GetServerTimeNow()))
+	if not ShopConfig.IsNew(entry, today) then
+		return
+	end
+	UIKit.Pill({
+		Name = "New",
+		Parent = parent,
+		Text = "NEW!",
+		Gradient = UITheme.Gradients.Red,
+		Font = Fonts.Display,
+		TextSize = 12,
+		Height = 22,
+		TextStroke = 1.5,
+		Position = UDim2.fromOffset(8, 10),
+		ZIndex = parent.ZIndex + 5,
+	})
+end
+
 -- The chunky rounded panel every tile / card sits on: a light gradient in
 -- the section colour, a coloured outline, a gloss, the ink shadow. The
 -- holder hovers to 1.03 and bounces on press.
@@ -371,7 +394,8 @@ local function tilePanel(parent: Instance, name: string, order: number, pair: UI
 	local scale = Instance.new("UIScale")
 	scale.Name = "HoverScale"
 	scale.Parent = holder
-	local stops: { { any } } = { { 0, UITheme.TowardInk(pair.Top, 0.35) }, { 1, UITheme.TowardInk(pair.Bottom, 0.62) } }
+	-- The section's own vivid gradient (white text with the ink stroke on it).
+	local stops: { { any } } = { { 0, pair.Top }, { 1, pair.Bottom } }
 	local body = UIKit.Panel({
 		Name = "Fill",
 		Parent = holder,
@@ -402,11 +426,21 @@ local function tilePanel(parent: Instance, name: string, order: number, pair: UI
 	band.Parent = body
 	UIKit.Corner(band, 3)
 	UIKit.PairGradient(band, pair, 0)
+	-- Hover: 1.04 and a white glow stroke.
+	local stroke = body:FindFirstChildOfClass("UIStroke")
 	body.MouseEnter:Connect(function()
 		TweenService:Create(scale, HOVER_INFO, { Scale = HOVER_SCALE }):Play()
+		if stroke then
+			stroke.Color = Colors.White
+			stroke.Thickness = 4
+		end
 	end)
 	body.MouseLeave:Connect(function()
 		TweenService:Create(scale, HOVER_INFO, { Scale = 1 }):Play()
+		if stroke then
+			stroke.Color = Colors.Ink
+			stroke.Thickness = 3
+		end
 	end)
 	return body, holder, scale
 end
@@ -465,9 +499,29 @@ local function sectionHeader(section: ShopConfig.Section, order: number)
 	layout.Padding = UDim.new(0, 12)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = row
+	-- The icon on a pill in the section's colour.
+	local iconPill = Instance.new("Frame")
+	iconPill.Name = "IconPill"
+	iconPill.Size = UDim2.fromOffset(52, 36)
+	iconPill.BackgroundColor3 = Colors.White
+	iconPill.LayoutOrder = 0
+	iconPill.ZIndex = row.ZIndex
+	iconPill.Parent = row
+	UIKit.Corner(iconPill, 999)
+	UIKit.Stroke(iconPill, 3)
+	UIKit.PairGradient(iconPill, sectionPair(section))
+	UIKit.Label({
+		Name = "Icon",
+		Text = section.Icon,
+		TextSize = 22,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = row.ZIndex + 1,
+		Parent = iconPill,
+	})
 	UIKit.Label({
 		Name = "Title",
-		Text = ("%s %s"):format(section.Icon, section.Title),
+		Text = section.Title,
 		Font = Fonts.Display,
 		TextSize = 26,
 		AutomaticSize = Enum.AutomaticSize.X,
@@ -759,6 +813,7 @@ end
 local function buildPassCard(parent: Frame, section: ShopConfig.Section, key: string, order: number)
 	local entry = item(key)
 	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
+	newTag(body, entry)
 	iconView(body, key, 88, UDim2.new(0, 16, 0.5, 0), Vector2.new(0, 0.5), body.ZIndex + 2)
 	textLabel(body, "Title", {
 		Text = entry.Name,
@@ -791,16 +846,17 @@ end
 local function buildTile(parent: Frame, section: ShopConfig.Section, key: string, order: number, best: string?)
 	local entry = item(key)
 	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
-	iconView(body, key, 72, UDim2.new(0.5, 0, 0, 16), Vector2.new(0.5, 0), body.ZIndex + 2)
+	iconView(body, key, 120, UDim2.new(0.5, 0, 0, 10), Vector2.new(0.5, 0), body.ZIndex + 2)
 	local tag = tagText(key, best)
 	if tag then
 		cornerTag(body, tag, body.ZIndex + 5)
 	end
+	newTag(body, entry)
 	textLabel(body, "Title", {
 		Text = if entry.SaleOf then item(entry.SaleOf).Name .. " · SALE" else entry.Name,
 		Font = Fonts.Display,
 		TextSize = 19,
-		Position = UDim2.fromOffset(8, 96),
+		Position = UDim2.fromOffset(8, 134),
 		Size = UDim2.new(1, -16, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextTruncate = Enum.TextTruncate.AtEnd,
@@ -814,7 +870,7 @@ local function buildTile(parent: Frame, section: ShopConfig.Section, key: string
 		Font = if isCash then Fonts.Display else Fonts.BodyHeavy,
 		TextSize = if isCash then 20 else 13,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 120),
+		Position = UDim2.fromOffset(8, 158),
 		Size = UDim2.new(1, -16, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		Stroke = 1.5,
@@ -824,13 +880,12 @@ local function buildTile(parent: Frame, section: ShopConfig.Section, key: string
 		RichText = true,
 		Font = Fonts.Body,
 		TextSize = 12,
-		TextColor3 = Colors.Muted,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 144),
-		Size = UDim2.new(1, -16, 0, 30),
+		Position = UDim2.fromOffset(8, 182),
+		Size = UDim2.new(1, -16, 0, 26),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Top,
-		Stroke = 1,
+		Stroke = 1.5,
 	})
 	local button = buyButton(body, key, scale, {
 		AnchorPoint = Vector2.new(0.5, 1),
@@ -1189,6 +1244,14 @@ local function build()
 	})
 	modal.Title.TextColor3 = Colors.GoldLabel
 	modal.Title.TextSize = 34
+	-- A soft shine sweeping the header now and then.
+	local shineStrip = Instance.new("Frame")
+	shineStrip.Name = "HeaderShine"
+	shineStrip.BackgroundTransparency = 1
+	shineStrip.Size = UDim2.new(1, -60, 1, 0)
+	shineStrip.ZIndex = modal.Header.ZIndex
+	shineStrip.Parent = modal.Header
+	addShine(shineStrip)
 	-- A radial-looking violet glow behind the title.
 	local glow = Instance.new("Frame")
 	glow.Name = "Glow"

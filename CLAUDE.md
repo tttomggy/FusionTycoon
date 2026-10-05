@@ -338,7 +338,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `RequestShopPurchase { Key }`: the server re-checks (set up, policy,
     owned, one-time, sale window, something to double) and only then
     prompts; `ShopPurchased { Key, Result, Reason?, Lines?, Test? }` comes
-    back (THANK YOU card or a refusal toast). Studio: `/shop grant <key>`
+    back (the purchase celebration or a refusal toast). Studio: `/shop grant <key>`
     runs the real grant path without Robux.
   - **One luck number:** `PlayerDataService.GetLuck(player)` = rebirth ×
     admin luck × `ShopConfig.GetLuckMultiplier` (Lucky ×1.5, Luck Potion
@@ -395,7 +395,36 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `marketing/shop_icons/<Key>.png` (never uploaded from code). No fake
     ribbons: no "POPULAR", no hard-coded "BEST VALUE". The offer card's
     "See all in the shop ›" opens it at Cash / Boosts
-    (`ShopController.OpenShop`).
+    (`ShopController.OpenShop`). Shop 3 look: each section its own vivid
+    gradient (Passes blue, Boosts orange, Cash green, Luck teal, Safe
+    indigo, Deal pink), 120 px icons on 272 px tiles, hover 1.04 + a white
+    glow stroke, a coloured pill behind each section icon, a header shine;
+    "NEW!" only within `ShopConfig.NewForDays` (7) of an item's
+    `AddedUtcDay`. No server-wide "X bought Y" messages.
+  - **Purchase celebration** (`UI/PurchaseCelebration`, replaces the THANK
+    YOU card): on `ShopPurchased` Granted, client-side: dim + rays + glow +
+    ~60 confetti + RevealMajor, the store icon pops in (260 / 180 px),
+    "THANK YOU!" + the name, then each of the server's structured
+    `Effects` in turn (Cash: count-up + 15 coins into the HUD counter;
+    Boost / Luck / Overclock: the time flies into its HUD pill, $/s counts
+    up if it just switched on; Pass: "✓ ACTIVE" stamp + its live change;
+    Tokens: shields drop into the count). Skippable after 0.6 s; AWESOME!
+    closes. HUD hooks come in through `PurchaseCelebration.SetHud`.
+  - **Rotating deals** (`DealConfig`, `DealState`): bundles sold as their
+    own products (`Deal = true`, `Parts`: DealPowerHour / DealFusionKit /
+    DealRichLab), one per 6-hour UTC slot, deterministic from the slot
+    start (`EventConfig.Hash32`; each slot steps 1..n-1 from the last, so
+    no back-to-back repeat). Shown only while the LIVE saving is ≥ 15%
+    (`ShopController.GetDeal`), never to restricted players. The server
+    refuses a non-current deal (`DealOver`; a receipt is honoured 10 min
+    after a prompt made inside the slot) and grants its parts through
+    their own grants. Shop: a 🔥 DEAL banner + chip first ("normally
+    ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: a 🔥 badge under
+    SHOP / GIFTS (pulses on a new slot, opens the shop at the deal); a "New
+    deal!" side card once per slot under the contextual offer's guards and
+    shared 5-min limit, never while carrying or being stolen from.
+    Analytics DealShown / DealOpened / DealDismissed. Studio: `/deal slot
+    <offsetHours>` (Workspace `DealClockOffset`), `/deal pop`.
   - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
     the player taps something they can't afford (upgrade / MAX, pull /
     ×10, Multiplier Pad, Rebirth). One non-modal side card: what they
@@ -626,7 +655,8 @@ src/ReplicatedStorage/Shared/
                  RewardConfig — free reward kinds and their labels,
                  DailyConfig — the 7-day daily reward and streak,
                  GiftConfig — the playtime gifts,
-                 TrailerConfig — the /trailer shots and camera, …)
+                 TrailerConfig — the /trailer shots and camera,
+                 DealConfig — the rotating deals, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -636,7 +666,8 @@ src/ReplicatedStorage/Shared/
                  ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
                  ShopPrices (live Robux prices), ShopState (Server
-                 Overclock, real sale windows),
+                 Overclock, real sale windows), DealState (the current
+                 deal on the UTC clock),
                  NumberFormat
     Network/     RemoteEvents.lua — single source of truth for remotes
     VFX/         SparkleEmitter, ImportedEffects, imported *.rbxm VFX assets
@@ -683,7 +714,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   AdminPanel (built only on the server's AdminOpen),
                   SettingsPanel (the ⚙ button: reveal-card rules),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
-                  THANK YOU cards),
+                  deal side cards), PurchaseCelebration (the reveal after
+                  a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),

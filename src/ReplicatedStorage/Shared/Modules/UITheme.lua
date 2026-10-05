@@ -47,7 +47,7 @@ UITheme.Colors = {
 	RankGold = hex("#8A6A12"), -- leaderboard row tint: rank 1
 	RankSilver = hex("#5E6378"), -- rank 2
 	RankBronze = hex("#7A4A26"), -- rank 3
-	ShopTop = hex("#4A1F8E"), -- the SHOP panel header (violet)
+	ShopTop = hex("#6A3FE0"), -- the SHOP panel header (bright violet)
 	ShopGlow = hex("#A47BFF"), -- the SHOP header's radial glow
 	Sale = hex("#FF3355"), -- the red SALE tag on the HUD SHOP button
 	MythicBannerLeft = hex("#6E0F24"), -- server Mythic banner gradient left
@@ -97,7 +97,8 @@ UITheme.Gradients = {
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 	ShopFeatured = { Top = hex("#FFB347"), Bottom = hex("#E0306E") }, -- the shop's featured banner (warm)
-	Pink = { Top = hex("#FF8AD8"), Bottom = hex("#E02F9E") }, -- the HUD GIFTS button
+	Pink = { Top = hex("#FF8AD8"), Bottom = hex("#E02F9E") }, -- the HUD GIFTS button, the shop's Deal
+	Indigo = { Top = hex("#8C96FF"), Bottom = hex("#3A3FB8") }, -- the shop's Safe Fusion tiles
 	-- Events (HUD chip, start banner, Event Board). Rainbow Storm also
 	-- runs the full Mutation.RainbowStops where a multi-stop gradient fits.
 	GoldRain = { Top = hex("#FFD566"), Bottom = hex("#C98A00") },

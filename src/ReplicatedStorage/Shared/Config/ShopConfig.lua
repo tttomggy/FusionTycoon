@@ -244,6 +244,7 @@ ShopConfig.Items = {
 		Icon = "⚡",
 		PolicyRestricted = true,
 		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
 		Parts = { "Boost", "LuckPotion" },
 	}),
 	DealFusionKit = product({
@@ -256,6 +257,7 @@ ShopConfig.Items = {
 		Icon = "🛡",
 		PolicyRestricted = true,
 		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
 		Parts = { "SafeFusion1", "SafeFusion1", "SafeFusion1", "LuckPotion" },
 	}),
 	DealRichLab = product({
@@ -268,6 +270,7 @@ ShopConfig.Items = {
 		Icon = "💰",
 		PolicyRestricted = true,
 		Deal = true,
+		AddedUtcDay = 20731, -- 2026-10-05
 		Parts = { "CashCrate", "QuickBoost" },
 	}),
 	OfflineDouble = product({
@@ -326,11 +329,20 @@ ShopConfig.Sections = {
 		Gradient = "Blue",
 		Keys = { "DoubleCash", "VIP", "ExtraPedestals", "AutoFuse", "LabStyle", "Lucky" },
 	},
-	{ Id = "Boosts", Icon = "⚡", Title = "Boosts", Chip = "⚡ Boosts", Gradient = "Violet", Keys = { "QuickBoost", "Boost", "Overclock" } },
+	{ Id = "Boosts", Icon = "⚡", Title = "Boosts", Chip = "⚡ Boosts", Gradient = "Orange", Keys = { "QuickBoost", "Boost", "Overclock" } },
 	{ Id = "Cash", Icon = "💰", Title = "Cash", Chip = "💰 Cash", Gradient = "Green", Keys = { "PocketCash", "CashCrate", "CashVault" } },
 	{ Id = "Luck", Icon = "🍀", Title = "Luck", Chip = "🍀 Luck", Gradient = "Teal", Keys = { "LuckPotion" } },
-	{ Id = "Safe", Icon = "🛡", Title = "Safe Fusion", Chip = "🛡 Safe", Gradient = "Shield", Keys = { "SafeFusion1", "SafeFusion5" } },
+	{ Id = "Safe", Icon = "🛡", Title = "Safe Fusion", Chip = "🛡 Safe", Gradient = "Indigo", Keys = { "SafeFusion1", "SafeFusion5" } },
 } :: { Section }
+
+-- "NEW!" only on items that really went on sale in the last NewForDays
+-- (their AddedUtcDay, RewardConfig.GetUtcDay).
+ShopConfig.NewForDays = 7
+
+function ShopConfig.IsNew(item: Item, utcDay: number): boolean
+	local added = item.AddedUtcDay
+	return added ~= nil and utcDay >= added and utcDay - added < ShopConfig.NewForDays
+end
 
 -- The cash pack giving the most $ per Robux right now: `amountOf(key)` is
 -- what it pays this player, `priceOf(key)` its LIVE price. nil unless at
