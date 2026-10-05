@@ -1057,6 +1057,9 @@ local function refreshShopRow()
 		end
 	end
 	UIKit.SetPillVisible(saleTag, saleLive)
+	-- Live with no product ids set yet: nothing to sell, so no SHOP button
+	-- (GIFTS slides left); it appears once any item is set up.
+	shopHolder.Visible = ShopController.HasAnyOffer()
 
 	-- GIFTS: the ready count (green badge + bounce) or "next in 3:12".
 	local ready, nextIn = GiftsPanel.GetStatus()

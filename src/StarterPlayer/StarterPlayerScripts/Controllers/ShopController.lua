@@ -94,6 +94,18 @@ function ShopController.IsAvailable(key: string): boolean
 	return true
 end
 
+-- Anything in the shop right now (offered, or an owned pass to show)? A
+-- live game with no product ids set yet has nothing: the HUD hides SHOP
+-- rather than open an empty panel.
+function ShopController.HasAnyOffer(): boolean
+	for _, key in ShopConfig.Order do
+		if ShopController.IsAvailable(key) or ShopController.IsOwned(key) then
+			return true
+		end
+	end
+	return false
+end
+
 function ShopController.IsOwned(key: string): boolean
 	local item = ShopConfig.GetItem(key)
 	if not item then
