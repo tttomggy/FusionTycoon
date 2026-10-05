@@ -63,8 +63,8 @@ local LAYOUT = {
 		ButtonTextSize = 22,
 	},
 	Phone = {
-		-- Under the cash card and its shadow (76 + 96 + 4 + 8 gap); 154 sat
-		-- 22 px over the card's bottom.
+		-- Unused on a phone: the goal tracker follows the SHOP and LOCK rows
+		-- in the left column (applyLayout).
 		GoalPosition = UDim2.fromOffset(10, 184),
 		GoalWidth = 168,
 		GoalBarHeight = 10,
@@ -74,12 +74,6 @@ local LAYOUT = {
 	},
 }
 local CASH_CARD_SIZE = Vector2.new(260, 96)
--- Phone: the SHOP / GIFTS row (beside the cash card) drops this far below
--- the card's top, so the GIFTS badge and SALE tag (they poke ~8 px above
--- their buttons, more while GIFTS bounces) clear the pulsing top-centre
--- event chip and its glow (ends at y ~66 at 844 x 390, i.e. 1055 x 487.5
--- after the 0.8 scale).
-local PHONE_SHOP_ROW_DROP = 8
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
@@ -1088,16 +1082,16 @@ end
 local function applyLayout(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
-	-- Under the cash card on desktop; beside it on a phone (the goal
-	-- tracker sits under it there).
-	-- The SHOP row on the left, above the LOCK row: under the cash card on
-	-- desktop; beside it on a phone (the goal tracker sits under it there).
-	local shopTop = if isPhone
-		then layout.CashPosition + UDim2.fromOffset(CASH_CARD_SIZE.X + LOCK_BUTTON_GAP, PHONE_SHOP_ROW_DROP)
-		else layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + LOCK_BUTTON_GAP)
+	-- The left column, desktop and phone alike: cash card, then the SHOP /
+	-- GIFTS / timed-pill row, then the LOCK row (on a phone the goal
+	-- tracker follows them; on desktop it sits above the cash card).
+	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
-	lockRow.Position = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
-	goalHolder.Position = layout.GoalPosition
+	local lockTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	lockRow.Position = lockTop
+	goalHolder.Position = if isPhone
+		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+		else layout.GoalPosition
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)

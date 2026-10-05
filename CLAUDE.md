@@ -723,11 +723,17 @@ src/StarterPlayer/StarterPlayerScripts/
   `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
   a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
   `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
-- **Chat-safe top (desktop):** centred cards start below `UIKit.TOP_SAFE`
-  (Roblox top bar 58 + chat 180) so their title is never under chat;
-  `UIKit.Modal` and `UIKit.FitHeight` (on a card centred at 0.5, 0.5) do it
-  through `UIKit.GetTopSafe()` (0 on phones, the top bar alone when the chat
-  window is off).
+- **Card placement:** every `UIKit.Modal` and centred card is
+  **top-anchored** at `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also
+  past the 170 × 60 Roblox buttons after the 0.8 scale: 79 logical),
+  horizontally centred, down to the HUD's bottom row
+  (`UIKit.GetCardBottom()`: 99 / 95 logical), never over it. The desktop
+  chat (`UIKit.CHAT_WIDTH` 400 px) only slides a card right when its left
+  edge overlaps it and there's room (`GetCardShift`); never down.
+  `FitContent` modals (Fuse, Daily, Rebirth, How to Heist, welcome-back)
+  keep their design height and shrink as a whole; centred result cards do
+  the same through `UIKit.FitHeight`. Every modal's DisplayOrder is above
+  the HUD's (`/selftest` checks it).
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per

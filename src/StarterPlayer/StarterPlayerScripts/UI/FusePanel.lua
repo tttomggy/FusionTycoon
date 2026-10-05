@@ -915,6 +915,7 @@ local function build()
 		Title = "FUSE",
 		DisplayOrder = DISPLAY_ORDER,
 		MaxSize = MAX_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.FuseAllTop,
 	})
 	local content = modal.Content

@@ -783,39 +783,116 @@ local function onScrolled()
 	setActive(sectionOnScreen())
 end
 
--- Canvas offset (logical px) that puts `id`'s header at the page top.
-local function sectionTarget(id: string): number?
+--[[ Chip jumps ---------------------------------------------------------------------
+	A chip puts its section's header right under the chip bar (the page's
+	top padding), within 2 px. The target comes from the header's position
+	inside the canvas; the screen px per CanvasPosition unit (1, or the
+	effective UIScale, depending on how the engine counts under a UIScale)
+	is measured from each move and kept, so one nudge after the tween lands
+	it exactly. The end of the canvas clamps: the last sections may not be
+	able to reach the top. ]]
+local SCROLL_PAD_TOP = 4 -- the page's UIPadding top
+local JUMP_TOLERANCE = 2 -- logical px
+local canvasUnitRatio: number? = nil -- measured screen px per canvas unit, / effective scale
+
+local function canvasUnit(): number
+	local scale = UIKit.EffectiveScale(scroller)
+	return scale * (canvasUnitRatio or 1)
+end
+
+-- Screen px from where `id`'s header is to where it should be.
+local function headerResidual(id: string): number?
 	local header = headers[id]
 	if not header then
 		return nil
 	end
 	local scale = UIKit.EffectiveScale(scroller)
-	return math.max(0, scroller.CanvasPosition.Y + (header.AbsolutePosition.Y - scroller.AbsolutePosition.Y) / scale)
+	return header.AbsolutePosition.Y - (scroller.AbsolutePosition.Y + SCROLL_PAD_TOP * scale)
+end
+
+-- The furthest CanvasPosition.Y the canvas allows.
+local function maxCanvas(): number
+	local overflow = scroller.AbsoluteCanvasSize.Y - scroller.AbsoluteWindowSize.Y
+	return math.max(0, overflow / canvasUnit())
+end
+
+local function sectionTarget(id: string): number?
+	local residual = headerResidual(id)
+	if not residual then
+		return nil
+	end
+	return math.clamp(scroller.CanvasPosition.Y + residual / canvasUnit(), 0, maxCanvas())
+end
+
+-- Learns the unit from a move: the header went from s0 to s1 (screen) while
+-- the canvas went from p0 to p1.
+local function learnUnit(p0: number, s0: number, p1: number, s1: number)
+	local moved = p1 - p0
+	if math.abs(moved) > 8 then
+		local ratio = ((s0 - s1) / moved) / UIKit.EffectiveScale(scroller)
+		if ratio > 0.2 and ratio < 5 then
+			canvasUnitRatio = ratio
+		end
+	end
+end
+
+-- Verify and nudge once (synchronously).
+local function nudge(id: string)
+	local target = sectionTarget(id)
+	if target and math.abs(target - scroller.CanvasPosition.Y) * canvasUnit() > 1 then
+		scroller.CanvasPosition = Vector2.new(0, target)
+	end
 end
 
 -- Tweens (or jumps) the page to a section; it never filters anything.
 local function scrollTo(id: string, animate: boolean)
+	local header = headers[id]
 	local target = sectionTarget(id)
-	if not target then
+	if not header or not target then
 		return
 	end
 	setActive(id)
+	local p0, s0 = scroller.CanvasPosition.Y, header.AbsolutePosition.Y
 	if not animate then
 		scroller.CanvasPosition = Vector2.new(0, target)
+		RunService.Heartbeat:Wait()
+		learnUnit(p0, s0, scroller.CanvasPosition.Y, header.AbsolutePosition.Y)
+		nudge(id)
 		return
 	end
-	scrollLockUntil = os.clock() + SCROLL_TWEEN.Time + 0.1
+	scrollLockUntil = os.clock() + SCROLL_TWEEN.Time + 0.2
 	local tween = TweenService:Create(scroller, SCROLL_TWEEN, { CanvasPosition = Vector2.new(0, target) })
 	tween:Play()
 	tween.Completed:Once(function()
-		-- One correction pass (the canvas may have moved while tweening).
-		local again = sectionTarget(id)
-		if again and math.abs(again - scroller.CanvasPosition.Y) > 2 then
-			scroller.CanvasPosition = Vector2.new(0, again)
+		RunService.Heartbeat:Wait()
+		if header.Parent then
+			learnUnit(p0, s0, scroller.CanvasPosition.Y, header.AbsolutePosition.Y)
+			nudge(id)
 		end
 		scrollLockUntil = 0
 		onScrolled()
 	end)
+end
+
+-- /selftest: jumps to every chip; PASS when the header lands within 2 px of
+-- the top, or the canvas end stopped it short.
+function ShopPanel.SelfTestChipJumps(label: string): { string }
+	local lines: { string } = {}
+	for _, id in sectionOrder do
+		scrollTo(id, false)
+		RunService.Heartbeat:Wait()
+		RunService.Heartbeat:Wait()
+		local residual = headerResidual(id)
+		local scale = UIKit.EffectiveScale(scroller)
+		local off = if residual then residual / scale else math.huge
+		local clamped = off > 0 and scroller.CanvasPosition.Y >= maxCanvas() - 1
+		if math.abs(off) <= JUMP_TOLERANCE or clamped then
+			table.insert(lines, ("PASS chip %s (%s)%s"):format(id, label, if clamped and math.abs(off) > JUMP_TOLERANCE then " · canvas end" else ""))
+		else
+			table.insert(lines, ("FAIL chip %s (%s): header %.1f px from the top"):format(id, label, off))
+		end
+	end
+	return lines
 end
 
 local function buildChips()
@@ -1080,10 +1157,10 @@ function ShopPanel.Open(section: string?)
 	end
 	setActive(sectionOrder[1])
 	if section then
-		-- Wait for the layout to place the sections, then jump.
+		-- Wait for the layout and the pop-in (its UIScale skews positions),
+		-- then jump.
 		task.spawn(function()
-			RunService.Heartbeat:Wait()
-			RunService.Heartbeat:Wait()
+			task.wait(0.25)
 			if modal.IsOpen() then
 				scrollTo(section, true)
 			end

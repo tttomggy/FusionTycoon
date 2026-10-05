@@ -987,24 +987,105 @@ function UIKit.IsPhone(): boolean
 	return viewportHeight() < UITheme.PhoneHeightThreshold
 end
 
--- A fixed-size card (offset layout) taller than the screen: shrink it as a
--- whole (through its PopScale, so PopIn / PopOut keep working) to leave
--- `margin` px above and below. Call before PopIn. Uses the logical height
--- (after the phone UIScale). A card centred at (0.5, 0.5) also moves down
--- below UIKit.GetTopSafe() (desktop chat). Returns the scale used.
-function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): number
-	local logical = viewportHeight() / (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
-	local top = 0
-	local position = holder.Position
-	if holder.AnchorPoint.Y == 0.5 and position.Y.Scale == 0.5 then
-		top = UIKit.GetTopSafe()
-		holder.Position = UDim2.new(position.X.Scale, position.X.Offset, 0.5, top / 2)
+--[[ Card placement -------------------------------------------------------------------
+	Every UIKit.Modal and centred card is TOP-ANCHORED just under the Roblox
+	top bar, horizontally centred, and uses the height down to the HUD's
+	bottom button row (never covering it). On a phone the top also clears
+	the Roblox top-left buttons (60 px after the 0.8 scale). The desktop chat
+	window only matters when the card's left edge overlaps its ~400 px span:
+	then the card slides right if there's room, else the overlap stays (chat
+	is collapsible). Cards are never pushed down for chat.
+]]
+UIKit.TOP_BAR_HEIGHT = 58 -- the Roblox top bar (IgnoreGuiInset guis)
+UIKit.CARD_TOP_GAP = 8
+UIKit.CHAT_WIDTH = 400 -- screen px from the left the desktop chat window spans
+UIKit.CARD_CHAT_GAP = 8
+-- The HUD's bottom button row (HudController: 22 margin + button + 5 shadow)
+-- plus an 8 px gap: cards stop above it.
+UIKit.BOTTOM_BAR_RESERVE = { Desktop = 22 + 64 + 5 + 8, Phone = 22 + 60 + 5 + 8 }
+local TOP_LEFT_CLEAR_PX = 60 -- the 170 x 60 Roblox buttons, in screen px
+
+local function currentScale(): number
+	return if UIKit.IsPhone() then UITheme.PhoneScale else 1
+end
+
+local function viewportSize(): Vector2
+	local camera = Workspace.CurrentCamera
+	return if camera then camera.ViewportSize else Vector2.new(1280, 720)
+end
+
+-- The viewport in logical px (after the phone UIScale).
+function UIKit.GetLogicalViewport(): Vector2
+	return viewportSize() / currentScale()
+end
+
+-- Logical y where a card's top goes.
+function UIKit.GetCardTop(): number
+	return math.max(UIKit.TOP_BAR_HEIGHT + UIKit.CARD_TOP_GAP, math.ceil(TOP_LEFT_CLEAR_PX / currentScale()) + 4)
+end
+
+-- Logical px a card leaves free at the bottom (the HUD button row).
+function UIKit.GetCardBottom(): number
+	return if UIKit.IsPhone() then UIKit.BOTTOM_BAR_RESERVE.Phone else UIKit.BOTTOM_BAR_RESERVE.Desktop
+end
+
+local function chatWindowOn(): boolean
+	if UIKit.IsPhone() or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
+		return false
 	end
-	local fit = math.clamp((logical - top - 2 * (margin or 12)) / height, 0.5, 1)
+	local ok, on = pcall(function()
+		return TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
+			and TextChatService.ChatWindowConfiguration.Enabled
+	end)
+	return ok and on == true
+end
+
+-- Logical x offset that slides a centred card of `width` (logical px) clear
+-- of the desktop chat window, when it overlaps it and there's room; else 0.
+function UIKit.GetCardShift(width: number): number
+	if not chatWindowOn() then
+		return 0
+	end
+	local view = UIKit.GetLogicalViewport()
+	local left = (view.X - width) / 2
+	local chatRight = UIKit.CHAT_WIDTH / currentScale() + UIKit.CARD_CHAT_GAP
+	if left >= chatRight or chatRight + width > view.X - UIKit.CARD_CHAT_GAP then
+		return 0
+	end
+	return chatRight - left
+end
+
+-- A fixed-size card (offset layout). A card centred at (0.5, 0.5) is
+-- top-anchored at UIKit.GetCardTop() (and slid clear of chat), then shrunk
+-- as a whole (through its PopScale, so PopIn / PopOut keep working) to fit
+-- above the HUD's bottom row. Any other card just shrinks to leave `margin`
+-- px above and below. Call before PopIn. Returns the scale used.
+function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): number
+	local view = UIKit.GetLogicalViewport()
+	local position = holder.Position
+	local centred = holder:GetAttribute("CardPlaced") == true
+		or (holder.AnchorPoint.Y == 0.5 and position.Y.Scale == 0.5)
+	local fit: number
+	if centred then
+		local top = UIKit.GetCardTop()
+		fit = math.clamp((view.Y - top - UIKit.GetCardBottom()) / height, 0.5, 1)
+		local width = holder.Size.X.Offset
+		if width <= 0 then
+			width = holder.AbsoluteSize.X / currentScale()
+		end
+		holder:SetAttribute("CardPlaced", true)
+		holder.AnchorPoint = Vector2.new(holder.AnchorPoint.X, 0)
+		holder.Position = UDim2.new(position.X.Scale, 0, 0, top) + UDim2.fromOffset(UIKit.GetCardShift(width * fit), 0)
+	else
+		fit = math.clamp((view.Y - 2 * (margin or 12)) / height, 0.5, 1)
+	end
 	holder:SetAttribute("FitScale", fit)
 	getPopScale(holder).Scale = fit
 	return fit
 end
+
+-- Re-placed on every viewport change (UIKit.Modal registers here).
+local cardPlacers: { () -> () } = {}
 
 local layoutChanged = Instance.new("BindableEvent")
 -- Fires (isPhone) whenever the viewport crosses the phone threshold.
@@ -1017,6 +1098,9 @@ local function refreshLayout()
 	local isPhone = UIKit.IsPhone()
 	for _, scale in scales do
 		scale.Scale = if isPhone then UITheme.PhoneScale else 1
+	end
+	for _, place in cardPlacers do
+		task.spawn(place)
 	end
 	if isPhone ~= lastIsPhone then
 		lastIsPhone = isPhone
@@ -1149,6 +1233,9 @@ export type ModalProps = {
 	MaxSize: Vector2,
 	HeaderTop: Color3, -- gradient top colour (fades to Panel at 22%)
 	OnClose: (() -> ())?,
+	-- Fixed layout (no scrolling): keep the design height and shrink the
+	-- whole card to fit instead of squashing it.
+	FitContent: boolean?,
 }
 
 export type Modal = {
@@ -1164,41 +1251,24 @@ export type Modal = {
 	IsOpen: () -> boolean,
 }
 
---[[ Top safe area (desktop) ------------------------------------------------------
-	On desktop the Roblox chat window sits under the top bar, over the
-	top-left of anything centred (the Daily card's title was hidden behind
-	it). Centred modals start below TOP_SAFE there. Phones are unchanged
-	(their chat is a collapsed button).
-]]
-UIKit.TOP_BAR_HEIGHT = 58 -- the Roblox top bar
-UIKit.CHAT_HEIGHT = 180 -- the default desktop chat window under it
-UIKit.TOP_SAFE = UIKit.TOP_BAR_HEIGHT + UIKit.CHAT_HEIGHT
-local BOTTOM_SAFE = 12
-
--- Px a centred card must keep clear at the top right now: TOP_SAFE on
--- desktop with the chat window on, the top bar on desktop without it, 0 on
--- phones.
-function UIKit.GetTopSafe(): number
-	-- Phones and tablets keep the old centring (their chat is a button).
-	if UIKit.IsPhone() or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
-		return 0
-	end
-	local ok, chatOn = pcall(function()
-		return TextChatService.ChatVersion == Enum.ChatVersion.TextChatService
-			and TextChatService.ChatWindowConfiguration.Enabled
-	end)
-	return if ok and chatOn then UIKit.TOP_SAFE else UIKit.TOP_BAR_HEIGHT
-end
-
 -- Centered modal: dim backdrop, 92% wide on phone, capped at MaxSize by a
 -- UISizeConstraint, header gradient, title and red close button. The panel
 -- sits inside a CanvasGroup so PopOut can fade it; the group is a few px
 -- larger than the panel so the 4 px stroke and the shadow aren't clipped.
--- On desktop it centres in the area below UIKit.GetTopSafe().
+-- Placed by the card rule above (top-anchored; FitContent modals keep
+-- their design height and shrink as a whole instead).
 local MODAL_MARGIN = 4
+
+-- Every modal's ScreenGui (/selftest: each must draw over the HUD).
+local modalGuis: { ScreenGui } = {}
+
+function UIKit.GetModalGuis(): { ScreenGui }
+	return table.clone(modalGuis)
+end
 
 function UIKit.Modal(props: ModalProps): Modal
 	local gui = UIKit.Screen(props.Name, props.DisplayOrder)
+	table.insert(modalGuis, gui)
 	gui.Enabled = false
 
 	local backdrop = Instance.new("TextButton")
@@ -1212,23 +1282,33 @@ function UIKit.Modal(props: ModalProps): Modal
 
 	local root = Instance.new("CanvasGroup")
 	root.Name = "Root"
-	root.AnchorPoint = Vector2.new(0.5, 0.5)
+	root.AnchorPoint = Vector2.new(0.5, 0)
 	root.BackgroundTransparency = 1
 	root.ZIndex = 2
 	root.Parent = gui
+	local chrome = Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
 	local function placeRoot()
-		local top = UIKit.GetTopSafe()
-		if top > 0 then
-			-- Centred in [top, height - BOTTOM_SAFE].
-			root.Position = UDim2.new(0.5, 0, 0.5, (top - BOTTOM_SAFE) / 2)
-			root.Size = UDim2.new(0.92, 0, 1, -(top + BOTTOM_SAFE))
+		local view = UIKit.GetLogicalViewport()
+		local top = UIKit.GetCardTop()
+		local available = math.max(120, view.Y - top - UIKit.GetCardBottom())
+		local width = math.min(view.X * 0.92, props.MaxSize.X + chrome.X)
+		local fit = 1
+		if props.FitContent then
+			-- Its layout needs its design height: keep it, shrink to fit.
+			local design = math.min(props.MaxSize.Y + chrome.Y, view.Y * 0.9)
+			root.Size = UDim2.new(0.92, 0, 0, design)
+			fit = math.clamp(available / design, 0.5, 1)
 		else
-			root.Position = UDim2.fromScale(0.5, 0.5)
-			root.Size = UDim2.fromScale(0.92, 0.9)
+			root.Size = UDim2.new(0.92, 0, 0, available)
+		end
+		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, top)
+		root:SetAttribute("FitScale", fit)
+		if gui.Enabled then
+			getPopScale(root).Scale = fit
 		end
 	end
 	placeRoot()
-	UIKit.LayoutChanged:Connect(placeRoot)
+	table.insert(cardPlacers, placeRoot)
 	local constraint = Instance.new("UISizeConstraint")
 	constraint.MaxSize = props.MaxSize + Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
 	constraint.Parent = root

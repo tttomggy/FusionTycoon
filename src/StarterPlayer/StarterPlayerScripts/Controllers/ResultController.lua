@@ -1748,6 +1748,7 @@ local function buildWelcome(): UIKit.Modal
 		Title = "WELCOME BACK!",
 		DisplayOrder = WELCOME_DISPLAY_ORDER,
 		MaxSize = WELCOME_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.WelcomeTop,
 	})
 	local content = modal.Content

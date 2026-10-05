@@ -167,6 +167,7 @@ local function build()
 		Title = "HOW TO HEIST",
 		DisplayOrder = DISPLAY_ORDER,
 		MaxSize = MAX_SIZE,
+		FitContent = true,
 		HeaderTop = Colors.MythicBannerLeft,
 		OnClose = destroyScenes,
 	})
