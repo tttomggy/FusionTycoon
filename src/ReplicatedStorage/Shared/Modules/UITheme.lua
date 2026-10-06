@@ -79,6 +79,13 @@ UITheme.World = {
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
 	AccentPink = hex("#FF5CC8"), -- the Neon Pink Lab (LabStyle): wall + sign strips, cash balls
+	-- Combat (CombatService tools, CombatController FX)
+	WeaponWood = hex("#C98A4B"), -- the Bat
+	WeaponLaser = hex("#FF3B6B"), -- the Laser Gun's beam (a thin Neon cylinder seen from the side)
+	WeaponBody = hex("#5B5F7A"), -- gun / ray bodies
+	Ice = hex("#8FE3FF"), -- the Freeze Ray beam and a frozen player's tint
+	Banana = hex("#FFE14D"), -- the Banana Peel
+	GloveRed = hex("#E8323C"), -- the Slap Glove
 	VipGold = hex("#FFD23F"), -- the VIP pass: sign border, wall trims, head tag
 	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
 }

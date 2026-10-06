@@ -44,6 +44,7 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
@@ -126,6 +127,8 @@ export type PlayerData = {
 	DealPopupSlot: number,
 	-- The first-time tutorial (TutorialConfig / TutorialService).
 	Tutorial: TutorialState,
+	-- Earned weapons (CombatConfig ids -> true; CombatService grants them).
+	Weapons: { [string]: boolean },
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
@@ -322,6 +325,7 @@ local DEFAULT_DATA: PlayerData = {
 	Cosmetics = {},
 	Sessions = 0,
 	DealPopupSlot = 0,
+	Weapons = {},
 	Tutorial = {
 		Step = 0,
 		Done = false,
@@ -494,6 +498,13 @@ local function reconcile(raw: any): PlayerData
 		data.Sessions = math.floor(raw.Sessions)
 	end
 	data.Tutorial = sanitizeTutorial(raw.Tutorial)
+	if typeof(raw.Weapons) == "table" then
+		for id, owned in raw.Weapons do
+			if owned == true and CombatConfig.GetWeapon(id) then
+				data.Weapons[id] = true
+			end
+		end
+	end
 	-- A slot start: a finite whole number of seconds (NaN fails >= 0).
 	if typeof(raw.DealPopupSlot) == "number" and raw.DealPopupSlot >= 0 and raw.DealPopupSlot < math.huge then
 		data.DealPopupSlot = math.floor(raw.DealPopupSlot)
@@ -666,6 +677,7 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		Cosmetics = data.Cosmetics,
 		DealPopupSlot = data.DealPopupSlot,
 		Tutorial = data.Tutorial,
+		Weapons = data.Weapons,
 	})
 end
 
@@ -1405,6 +1417,28 @@ function PlayerDataService.MarkDealPopup(player: Player, slot: number): boolean
 	return true
 end
 
+-- CombatService: the earned weapons, and granting one (true if it's new).
+function PlayerDataService.GetWeapons(player: Player): { [string]: boolean }
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Weapons else {}
+end
+
+function PlayerDataService.GrantWeapon(player: Player, id: string): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data or not CombatConfig.GetWeapon(id) or data.Weapons[id] then
+		return false
+	end
+	data.Weapons[id] = true
+	return true
+end
+
+function PlayerDataService.ResetWeapons(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Weapons = {}
+	end
+end
+
 -- The pad's free tutorial pull (TycoonService): takes one if any are left.
 function PlayerDataService.TakeTutorialFreePull(player: Player): boolean
 	local data = state.sessionCache[player.UserId]
@@ -1528,6 +1562,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
+		Weapons = indexKeys(data and data.Weapons or {}),
 		Tutorial = if data
 			then {
 				Step = data.Tutorial.Step,

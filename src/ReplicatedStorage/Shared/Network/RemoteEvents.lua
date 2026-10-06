@@ -28,6 +28,10 @@ local REMOTE_EVENT_NAMES = {
 	"EventNotice", -- server -> client: an event toast for one player; { Text, Big? } ("⚡ Your <item> got CHARGED!", "Too slow!")
 	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
+	"RequestHit", -- client -> server: { Weapon, TargetUserId?, Origin, Direction } a weapon swing / shot / peel (all re-checked)
+	"HitReceived", -- server -> the target: { Impulse, Seconds, Freeze? } ragdoll (or freeze) yourself now
+	"HitFx", -- server -> all: { Weapon, Position, From?, To?, Kind } the bonk / beam / freeze / slip effect
+	"WeaponUnlocked", -- server -> client: { Weapon } a weapon was just earned (the unlock card)
 	"TutorialAdvance", -- client -> server: { Step } a tutorial Card / Open / Arrive step was done (re-checked), or { Replay = true } (Settings)
 	"MarkDealPopup", -- client -> server: the "New deal!" card showed; { Slot } (the current deal slot only; saved as DealPopupSlot)
 	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)

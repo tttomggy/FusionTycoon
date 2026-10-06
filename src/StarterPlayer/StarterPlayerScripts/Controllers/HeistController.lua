@@ -118,6 +118,7 @@ local LOCK_ICON_PULSE = 1.18
 -- Rejection reason -> toast. Unlisted reasons (exploit-only) stay silent.
 local REJECT_MESSAGES: { [string]: string } = {
 	Guarded = "The owner is guarding it!",
+	Ragdolled = "You're seeing stars!",
 	AlreadyCarrying = "You're already carrying something!",
 	Shielded = "Their shield is up",
 	LabCapped = "This lab has been robbed enough for now",
@@ -132,12 +133,14 @@ local REJECT_MESSAGES: { [string]: string } = {
 local LOCK_REJECT_MESSAGES: { [string]: string } = {
 	TooFar = "Get to your LOCK button inside your gate!",
 	Carrying = "Not while carrying!",
+	Ragdolled = "Get up first!",
 	AlreadyLocked = "Your lab is already locked",
 	Protected = "New labs are protected until Rebirth 1",
 }
 
 local THIEF_FAIL_TOASTS: { [string]: string } = {
 	Saved = "Caught!",
+	Knocked = "BONK! You dropped it!",
 	Timeout = "Too slow!",
 	Died = "You dropped it!",
 	Left = "The heist was called off",
@@ -416,7 +419,8 @@ local function refreshVisual(player: Player)
 	end
 	local visual = visuals[player]
 	local returnTo = player:GetAttribute("HeistReturnTo")
-	if visual and player:GetAttribute("HeistOutcome") == "Saved" and typeof(returnTo) == "Vector3" then
+	local outcome = player:GetAttribute("HeistOutcome")
+	if visual and (outcome == "Saved" or outcome == "Knocked") and typeof(returnTo) == "Vector3" then
 		visuals[player] = nil
 		for _, connection in visual.Connections do
 			connection:Disconnect()
@@ -751,7 +755,7 @@ local function onHeistEnded(payload: any)
 					ToastController.Show(LOCK_AFTER_LOSS_TIP, "Neutral", { Big = true })
 				end)
 			end
-		elseif payload.Outcome == "Saved" then
+		elseif payload.Outcome == "Saved" or payload.Outcome == "Knocked" then
 			ToastController.Show(("SAVED! You got your %s back"):format(tostring(item.Name)), "Neutral")
 		else
 			ToastController.Show(("Your %s is back!"):format(tostring(item.Name)), "Neutral")

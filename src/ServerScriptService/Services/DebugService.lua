@@ -42,6 +42,7 @@ type ItemServiceModule = typeof(require(script.Parent.ItemService))
 type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 type FusionServiceModule = typeof(require(script.Parent.FusionService))
+type CombatServiceModule = typeof(require(script.Parent.CombatService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -63,6 +64,7 @@ local ItemService: ItemServiceModule
 local TutorialService: TutorialServiceModule
 local TycoonService: TycoonServiceModule
 local FusionService: FusionServiceModule
+local CombatService: CombatServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -91,6 +93,9 @@ local STEALABLE_COMMAND = "/stealable"
 -- "/tutorial reset" starts it over (free pulls and fusion again);
 -- "/tutorial step <n>" jumps to step n.
 local TUTORIAL_COMMAND = "/tutorial"
+-- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
+-- takes them all (rebirth ones come back on the next sync).
+local WEAPONS_COMMAND = "/weapons"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
 -- length); "/event off" ends what's on. "/eventclock 15" shifts the event
 -- clock 15 min ahead so the schedule can be walked through.
@@ -517,6 +522,14 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
+	elseif command == WEAPONS_COMMAND then
+		if argument == "all" or argument == "reset" then
+			CombatService.DebugSetAll(player, argument == "all")
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: %s's weapons -> %s"):format(player.Name, argument))
+		else
+			warn("DebugService: /weapons all | /weapons reset")
+		end
 	elseif command == TUTORIAL_COMMAND then
 		local verb, rawStep = argument:match("^(%S+)%s*(%S*)$")
 		if verb == "reset" then
@@ -729,7 +742,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -741,6 +754,7 @@ function DebugService:Start()
 	TutorialService = require(script.Parent.TutorialService)
 	TycoonService = require(script.Parent.TycoonService)
 	FusionService = require(script.Parent.FusionService)
+	CombatService = require(script.Parent.CombatService)
 end
 
 return DebugService

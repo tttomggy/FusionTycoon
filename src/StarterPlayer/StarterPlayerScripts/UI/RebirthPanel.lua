@@ -190,7 +190,7 @@ local function refresh()
 		UIKit.Colored(percent(luckBonus(nextNumber)), Colors.Rebirth)
 	)
 
-	local unlock = RebirthConfig.Unlocks[nextNumber]
+	local unlock = RebirthConfig.GetUnlockText(nextNumber)
 	unlockHolder.Visible = unlock ~= nil
 	unlockText.Text = if unlock then ("UNLOCKS · %s"):format(unlock) else ""
 

@@ -10,6 +10,8 @@
 
 	Mirrored in tools/econ_sim.py (REBIRTH_*); change both together.
 ]]
+local CombatConfig = require(script.Parent.CombatConfig)
+
 local RebirthConfig = {}
 
 RebirthConfig.BaseCost = 15_000_000 -- cash price of the 1st rebirth
@@ -20,6 +22,20 @@ RebirthConfig.SecretFusionRebirths = 1 -- Mythic -> Secret fusion unlocks at thi
 RebirthConfig.Unlocks = { -- rebirth number -> what it unlocks (shown in the Rebirth panel)
 	[1] = "Stealing + Mythic → Secret fusion",
 } :: { [number]: string }
+
+-- Everything rebirth `n` unlocks: Unlocks[n] plus its weapons
+-- (CombatConfig), "Stealing + Mythic → Secret fusion · 🏏 Bat".
+function RebirthConfig.GetUnlockText(n: number): string?
+	local parts = {}
+	if RebirthConfig.Unlocks[n] then
+		table.insert(parts, RebirthConfig.Unlocks[n])
+	end
+	local weapons = CombatConfig.GetUnlockText(n)
+	if weapons then
+		table.insert(parts, weapons)
+	end
+	return if #parts > 0 then table.concat(parts, " · ") else nil
+end
 
 -- Cash price of the next rebirth after `rebirths` so far.
 function RebirthConfig.GetCost(rebirths: number): number

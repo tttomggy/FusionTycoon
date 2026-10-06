@@ -59,6 +59,13 @@ SoundConfig.Slots = {
 	Toast = { Id = asset(15675059323), Volume = 0.35 },
 	-- RBLX UI Purchase (SFX): a station purchase (Multiplier Pad, gacha).
 	Station = { Id = asset(10066947742), Volume = 0.5 },
+	-- Combat (CombatController). EMPTY until picked from the Creator Store
+	-- (creator id 1): a cartoon bonk, a laser zap, an ice crackle, a
+	-- banana slip. Silent meanwhile (an empty Id is no error).
+	Bonk = { Id = "", Volume = 0.6, SpeedJitter = { 0.9, 1.1 }, RollOffMaxDistance = 120 },
+	Laser = { Id = "", Volume = 0.5, RollOffMaxDistance = 150 },
+	Freeze = { Id = "", Volume = 0.5, RollOffMaxDistance = 120 },
+	Slip = { Id = "", Volume = 0.6, RollOffMaxDistance = 120 },
 } :: { [string]: Slot }
 
 -- At most this many sounds of one slot play at once; extra plays are
