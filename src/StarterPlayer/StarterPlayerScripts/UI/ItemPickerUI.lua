@@ -11,7 +11,9 @@
 
 	Identical ItemIds are grouped into one card with a count. Entries are
 	{Uid, ItemId, Name, Tier, InUse}; callers pass every owned item, including
-	ones on pedestals (shown with an ON PEDESTAL tag).
+	ones on pedestals (shown with an ON DISPLAY tag). The pedestals fill
+	themselves (ItemService.Arrange), so the ITEMS button only browses;
+	pedestal mode has no caller now.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -317,7 +319,7 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 		UIKit.Pill({
 			Name = "OnPedestal",
 			Parent = body,
-			Text = "ON PEDESTAL",
+			Text = "ON DISPLAY",
 			Color = Colors.Cash,
 			TextColor3 = Colors.Ink,
 			Font = Fonts.BodyHeavy,

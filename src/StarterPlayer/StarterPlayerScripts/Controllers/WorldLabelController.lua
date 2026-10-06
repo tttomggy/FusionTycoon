@@ -2,7 +2,7 @@
 	WorldLabelController
 	--------------------
 	Hides world labels and prompts that only a plot's owner should see - the
-	CLAIM label, the EMPTY pedestal labels and the pedestal DisplayPrompts
+	CLAIM label, the EMPTY pedestal labels and the pedestal UnlockPrompts
 	(all marked OwnerOnly) - on every plot that isn't the local player's.
 
 	The server toggles the EMPTY label's Enabled as items are placed and
@@ -47,9 +47,9 @@ local watched: { [Instance]: boolean } = {}
 local proximityLabels: { [BillboardGui]: boolean } = {}
 -- Every pedestal StealPrompt (EnemyOnly) on any plot.
 local stealPrompts: { [ProximityPrompt]: boolean } = {}
--- This player's own pedestal DisplayPrompts: off while a thief carries that
--- pedestal's item (BeingStolen), so it can't be picked up mid-heist.
-local ownDisplayPrompts: { [ProximityPrompt]: boolean } = {}
+-- This player's own pedestal UnlockPrompts: on only on a locked spot (5-6
+-- without the +2 Pedestals pass); pedestals fill themselves otherwise.
+local ownUnlockPrompts: { [ProximityPrompt]: boolean } = {}
 local stealCheckAccumulator = 0
 
 local function getOwnerUserId(instance: Instance): number?
@@ -224,9 +224,9 @@ local function updateStealPrompts()
 	for prompt in stealPrompts do
 		applyStealMode(prompt, stealMode(prompt, rebirths, carrying))
 	end
-	for prompt in ownDisplayPrompts do
+	for prompt in ownUnlockPrompts do
 		local pedestal = prompt.Parent
-		local enabled = not (pedestal and pedestal:GetAttribute("BeingStolen") == true)
+		local enabled = pedestal ~= nil and pedestal:GetAttribute("Locked") == true
 		if prompt.Enabled ~= enabled then
 			prompt.Enabled = enabled
 		end
@@ -252,11 +252,11 @@ local function consider(instance: Instance)
 		trackStealPrompt(instance)
 		return
 	end
-	if instance:IsA("ProximityPrompt") and instance.Name == "DisplayPrompt" and getOwnerUserId(instance) == localUserId then
+	if instance:IsA("ProximityPrompt") and instance.Name == "UnlockPrompt" and getOwnerUserId(instance) == localUserId then
 		local prompt = instance
-		ownDisplayPrompts[prompt] = true
+		ownUnlockPrompts[prompt] = true
 		prompt.Destroying:Connect(function()
-			ownDisplayPrompts[prompt] = nil
+			ownUnlockPrompts[prompt] = nil
 		end)
 	end
 	if instance:IsA("BillboardGui") then

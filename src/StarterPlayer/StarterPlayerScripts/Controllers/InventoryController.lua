@@ -11,6 +11,10 @@ local inventory: { any } = {}
 -- it). IsInUse trusts either source, so a stale item.InUse can never offer
 -- a displayed copy.
 local displayedUids: { [string]: boolean } = {}
+-- Uids a thief is carrying right now (snapshot CarriedUids): the only
+-- items that can't go into the machine (displayed ones can: the pedestals
+-- re-arrange themselves after the fusion).
+local carriedUids: { [string]: boolean } = {}
 
 local inventoryChanged = Instance.new("BindableEvent")
 InventoryController.InventoryChanged = inventoryChanged.Event
@@ -23,6 +27,14 @@ end
 -- Every client check for "free" goes through this, never item.InUse alone.
 function InventoryController.IsInUse(item: any): boolean
 	return item.InUse == true or displayedUids[item.Uid] == true
+end
+
+function InventoryController.IsCarried(item: any): boolean
+	return carriedUids[item.Uid] == true
+end
+
+function InventoryController.SetCarriedUids(uids: { [string]: boolean })
+	carriedUids = uids
 end
 
 -- Called by TycoonController with the snapshot's displayed Uids; fires
@@ -55,20 +67,27 @@ function InventoryController.GetItemsByTier(tier: string): { any }
 	return results
 end
 
--- Items of `tier` that can go into the Fusion Machine: anything not on a
--- pedestal. Counting displayed items here used to make the machine offer a
--- pair that included a displayed item, which the server then rejected.
+-- Items of `tier` that can go into the Fusion Machine: anything a thief
+-- isn't carrying (displayed items too: the pedestals re-fill themselves).
 -- Sorted normal first, then by mutation rank, so the machine pairs plain
--- items before it touches a mutated one.
+-- items before it touches a mutated one; spare copies before displayed ones.
 function InventoryController.GetFusableItemsByTier(tier: string): { any }
 	local results = {}
 	for _, item in inventory do
-		if item.Tier == tier and not InventoryController.IsInUse(item) then
+		if item.Tier == tier and not InventoryController.IsCarried(item) then
 			table.insert(results, item)
 		end
 	end
 	table.sort(results, function(a, b)
-		return MutationConfig.GetRank(a.Mutation) < MutationConfig.GetRank(b.Mutation)
+		local rankA, rankB = MutationConfig.GetRank(a.Mutation), MutationConfig.GetRank(b.Mutation)
+		if rankA ~= rankB then
+			return rankA < rankB
+		end
+		local shownA, shownB = InventoryController.IsInUse(a), InventoryController.IsInUse(b)
+		if shownA ~= shownB then
+			return shownB
+		end
+		return a.Uid < b.Uid
 	end)
 	return results
 end

@@ -159,12 +159,12 @@ local function isSelected(uid: string): boolean
 	return table.find(selected, uid) ~= nil
 end
 
--- Drops selections that are gone, on a pedestal, or of another tier.
+-- Drops selections that are gone, carried off by a thief, or of another tier.
 local function pruneSelection()
 	local byUid = itemsByUid()
 	for index = #selected, 1, -1 do
 		local item = byUid[selected[index]]
-		if not item or InventoryController.IsInUse(item) or item.Tier ~= selectedTier then
+		if not item or InventoryController.IsCarried(item) or item.Tier ~= selectedTier then
 			table.remove(selected, index)
 		end
 	end
@@ -556,7 +556,7 @@ local function matchingUids(mutation: string?): { string }
 	end
 	local uids = {}
 	for _, item in InventoryController.GetInventory() do
-		if item.Tier == selectedTier and item.Mutation == mutation and not InventoryController.IsInUse(item) then
+		if item.Tier == selectedTier and item.Mutation == mutation and not InventoryController.IsCarried(item) then
 			table.insert(uids, item.Uid)
 		end
 	end

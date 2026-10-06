@@ -57,7 +57,5 @@ task.spawn(WorldLabelController.Init)
 -- Also waits for the plots folder, then animates every nearby factory line.
 task.spawn(FactoryController.Init)
 
--- ItemController waits on the local player's own Pedestals folder, which
--- only exists after they claim their plot - possibly much later than
--- startup - so it runs on its own thread instead of blocking this script.
+-- ItemController answers the locked pedestal spots' Unlock prompt.
 task.spawn(ItemController.Init)

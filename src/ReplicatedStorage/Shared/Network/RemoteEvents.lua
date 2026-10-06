@@ -12,9 +12,6 @@ local REMOTE_EVENT_NAMES = {
 	"RequestUpgradeMax", -- client -> server: { GeneratorId } or { All = true }: buy every level cash allows
 	"UpgradeMaxResult", -- server -> client: { Success, Levels, Spent, PerGenerator, NewLevels, Reason?, NextCost? }
 	"SyncTycoon", -- server -> client: authoritative cash + generator-level snapshot
-	"RequestPlaceItem", -- client -> server: attempt to display an owned item (by Uid) on one of the player's own pedestals
-	"PlaceItemResult", -- server -> client: validated outcome of a place-item or remove-item attempt
-	"RequestRemoveItem", -- client -> server: attempt to pick an item back up off one of the player's own pedestals
 	"RareFusionAnnouncement", -- server -> all clients: a Legendary/Mythic item was just displayed
 	"MultiplierUpgraded", -- server -> client: a Multiplier Pad purchase; {Success = true, OldMultiplier, NewMultiplier} or {Success = false, Reason, Cost}
 	"GachaPullResult", -- server -> client: validated outcome of a gacha pull, fired when the pad's Touched handler resolves one (new item or rejection)

@@ -30,7 +30,9 @@ GoalConfig.Goals = {
 	{ Id = "upgrade_basic", Text = "Upgrade your Basic Generator", Reward = 60, Target = "Generator_basic_generator" },
 	{ Id = "basic_lv5", Text = "Get Basic Generator to LV 5", Reward = 100, Unit = "Basic LV", Target = "Generator_basic_generator" },
 	{ Id = "gacha_pull", Text = "Pull from the Gacha Pad", Reward = 150, Target = "GachaStation" },
-	{ Id = "display_item", Text = "Put an item on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
+	-- Automatic now (your best items fill the pedestals): it completes with
+	-- the first pull. Kept (not removed) so saved GoalIndex values still line up.
+	{ Id = "display_item", Text = "Your best orb goes on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
 	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine" },
 	{ Id = "own_rare", Text = "Own a Rare item", Reward = 400, Unit = "Rare", Target = "FusionMachine" },
 	{ Id = "upgrade_multiplier", Text = "Upgrade your Multiplier", Reward = 1500, Target = "MultiplierStation" },

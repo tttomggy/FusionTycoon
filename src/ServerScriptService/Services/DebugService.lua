@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
@@ -301,6 +302,53 @@ local function runSelfTest(player: Player)
 		result(#clientErrors == 0, "no client errors during the test", table.concat(clientErrors, " | "))
 	end
 	selfTestReports[player.UserId] = nil
+
+	-- 8. Auto-display: 6 random items -> the pedestals hold the best by $/s,
+	-- in order, in the same sync; then a new best item (what a fusion adds)
+	-- lands on pedestal 1 in the same sync. The test items are removed after.
+	local added: { string } = {}
+	local tiers = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+	local mutations = { nil, "Golden", "Diamond" }
+	for _ = 1, 6 do
+		local tier = tiers[math.random(1, #tiers)]
+		local def = ItemConfig.PickRandomOfTier(tier)
+		if def then
+			local item = PlayerDataService.AddItem(player, def.Id, tier, mutations[math.random(1, 3)])
+			if item then
+				table.insert(added, item.Uid)
+			end
+		end
+	end
+	PlayerDataService.SyncTycoon(player)
+	local function rate(uid: string?): number
+		local item = uid and PlayerDataService.GetItemByUid(player, uid)
+		return if item then TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) else -1
+	end
+	local displays = PlayerDataService.GetPedestalDisplays(player)
+	local count = PlayerDataService.GetPedestalCount(player)
+	local best = -1
+	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in inventory do
+		if not PlayerDataService.IsItemCarried(player, item.Uid) then
+			best = math.max(best, TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation))
+		end
+	end
+	local ordered = rate(displays[1]) == best
+	for index = 2, count do
+		if displays[index] and rate(displays[index]) > rate(displays[index - 1]) then
+			ordered = false
+		end
+	end
+	result(ordered, ("auto-display: pedestals 1-%d hold the best by $/s, in order"):format(count))
+	local def = ItemConfig.PickRandomOfTier("Secret")
+	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
+	if top then
+		table.insert(added, top.Uid)
+		PlayerDataService.SyncTycoon(player)
+		result(PlayerDataService.GetPedestalDisplays(player)[1] == top.Uid, "auto-display: a new best item is on pedestal 1 in the same sync")
+	end
+	PlayerDataService.RemoveItemsByUid(player, added)
+	PlayerDataService.SyncTycoon(player)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 

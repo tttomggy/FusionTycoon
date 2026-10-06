@@ -858,10 +858,12 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player)
 		})
 		PartKit.MakeDecorative(lip)
 
-		-- Always enabled: the owner's client handles it (picker or remove) and
-		-- every other client hides it (WorldLabelController, OwnerOnly).
-		local prompt = newPrompt(pedestal, "DisplayPrompt", "Display", ("Pedestal %d"):format(index), p.PromptDistance)
+		-- The locked spots' "Unlock" (+2 Pedestals pass), owner only: the
+		-- owner's client enables it on a locked spot (pedestals fill
+		-- themselves, ItemService.Arrange, so nothing else needs a prompt).
+		local prompt = newPrompt(pedestal, "UnlockPrompt", "Unlock", "+2 Pedestals", p.PromptDistance)
 		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+		prompt.Enabled = false
 
 		-- Hold E to steal (HeistService). Enemy-only: each client enables it
 		-- only for an eligible non-owner (WorldLabelController); the server

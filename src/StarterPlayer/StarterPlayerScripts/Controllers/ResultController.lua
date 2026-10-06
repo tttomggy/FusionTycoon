@@ -48,8 +48,6 @@ local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
 local TycoonController = require(script.Parent.TycoonController)
-local ItemController = require(script.Parent.ItemController)
-local HudController = require(script.Parent.HudController)
 local ToastController = require(script.Parent.ToastController)
 local ShopController = require(script.Parent.ShopController)
 
@@ -158,14 +156,6 @@ local function buildSunburst(body: Frame)
 	sunburstConnection = RunService.RenderStepped:Connect(function(dt: number)
 		spinner.Rotation = (spinner.Rotation + SUNBURST_DEGREES_PER_SECOND * dt) % 360
 	end)
-end
-
-local function onDisplayIt(uid: string)
-	closeBigCard()
-	if not ItemController.PlaceOnFirstEmpty(uid) then
-		HudController.OpenInventory()
-		ToastController.Show("Pedestals full · remove one first", "Error")
-	end
 end
 
 type BigCardInfo = {
@@ -312,27 +302,14 @@ local function showBigCard(info: BigCardInfo)
 	layout.Padding = UDim.new(0, 12)
 	layout.Parent = buttons
 
-	local uid = info.Item.Uid :: string
-	UIKit.Button({
-		Name = "DisplayIt",
-		Parent = buttons,
-		Style = "Green",
-		Text = "DISPLAY IT",
-		TextSize = 20,
-		Size = UDim2.fromOffset(170, 52),
-		LayoutOrder = 1,
-		ZIndex = z,
-		OnClick = function()
-			onDisplayIt(uid)
-		end,
-	})
+	-- No DISPLAY IT: your best items go on the pedestals by themselves.
 	UIKit.Button({
 		Name = "Nice",
 		Parent = buttons,
-		Style = "Disabled",
-		Text = "NICE",
-		TextSize = 20,
-		Size = UDim2.fromOffset(120, 52),
+		Style = "Green",
+		Text = "NICE!",
+		TextSize = 22,
+		Size = UDim2.fromOffset(170, 52),
 		LayoutOrder = 2,
 		ZIndex = z,
 		OnClick = closeBigCard,
@@ -509,27 +486,13 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, 12)
 	layout.Parent = buttons
-	local uid = item.Uid :: string
-	UIKit.Button({
-		Name = "DisplayIt",
-		Parent = buttons,
-		Style = "Green",
-		Text = "DISPLAY",
-		TextSize = 20,
-		Size = UDim2.fromOffset(170, 52),
-		LayoutOrder = 1,
-		ZIndex = z,
-		OnClick = function()
-			onDisplayIt(uid)
-		end,
-	})
 	UIKit.Button({
 		Name = "Ok",
 		Parent = buttons,
-		Style = "Disabled",
+		Style = "Green",
 		Text = "OK",
-		TextSize = 20,
-		Size = UDim2.fromOffset(120, 52),
+		TextSize = 22,
+		Size = UDim2.fromOffset(170, 52),
 		LayoutOrder = 2,
 		ZIndex = z,
 		OnClick = closeBigCard,
@@ -1213,29 +1176,13 @@ local function showFuseAllCard(result: any)
 	buttonLayout.Padding = UDim.new(0, 12)
 	buttonLayout.Parent = buttons
 
-	if typeof(best) == "table" and typeof(best.Uid) == "string" then
-		local uid = best.Uid :: string
-		UIKit.Button({
-			Name = "DisplayBest",
-			Parent = buttons,
-			Style = "Green",
-			Text = "DISPLAY BEST",
-			TextSize = 18,
-			Size = UDim2.fromOffset(180, 52),
-			LayoutOrder = 1,
-			ZIndex = z,
-			OnClick = function()
-				onDisplayIt(uid)
-			end,
-		})
-	end
 	UIKit.Button({
 		Name = "Ok",
 		Parent = buttons,
-		Style = "Disabled",
+		Style = "Green",
 		Text = "OK",
-		TextSize = 20,
-		Size = UDim2.fromOffset(110, 52),
+		TextSize = 22,
+		Size = UDim2.fromOffset(170, 52),
 		LayoutOrder = 2,
 		ZIndex = z,
 		OnClick = closeBigCard,

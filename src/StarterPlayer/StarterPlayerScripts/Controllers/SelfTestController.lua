@@ -66,8 +66,6 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { Uids = { "nope-1", "nope-2" } } },
 			{ { Uids = { BIG_STRING, "b" } } },
 		},
-		RequestPlaceItem = { {}, { 5, "x" }, { "nope", NAN }, { "nope", INF }, { BIG_STRING, 1 }, { "nope", 1 } },
-		RequestRemoveItem = { {}, { "x" }, { NAN }, { INF }, { -1 }, { 99 }, { 1.5 } },
 		RequestUpgrade = { {}, { 5 }, { "no_such_generator" }, { BIG_STRING } },
 		RequestUpgradeMax = { {}, { "x" }, { { GeneratorId = 5 } }, { { GeneratorId = "no_such_generator" } } },
 		RequestSteal = {
@@ -97,7 +95,6 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
 		table.insert(cases.MarkDealPopup, { { Slot = n } })
-		table.insert(cases.RequestRemoveItem, { n })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
 	return cases
@@ -116,7 +113,7 @@ local function fuzz(otherUserId: number): number
 	end
 	-- Spam: 50 junk calls in one second.
 	for _ = 1, 50 do
-		RemoteEvents.RequestRemoveItem:FireServer(99)
+		RemoteEvents.RequestSteal:FireServer({ OwnerUserId = otherUserId, PedestalIndex = 99 })
 		fired += 1
 		task.wait(0.02)
 	end
