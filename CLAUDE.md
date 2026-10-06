@@ -47,6 +47,38 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
   inventory view (ON DISPLAY tags); the owner prompt left on a pedestal is
   the locked spots' `UnlockPrompt`. Displayed items can be fused (spare
   copies first); only a carried one can't (`ItemCarried`).
+- **Combat** (`CombatService`, every number in `CombatConfig`;
+  `CombatController` client). Cartoon bonks: **no health, damage or
+  deaths**. Weapons are **earned, never sold** (the "never" list): Bat
+  (Rebirth 1, melee 7 studs, 1.2 s, knockback 60), Laser Gun (Rebirth 2,
+  hitscan 60, 3 s, 35), Freeze Ray (Rebirth 3, 40 studs, 6 s, 40% speed for
+  3 s, no ragdoll), Slap Glove (quest: melee 6, 2.5 s, 120) and Banana Peel
+  (quest: one out, 10 s, lasts 20 s, the first enemy to step on it slips).
+  `PlayerData.Weapons` (a set, sanitised, snapshot `Weapons`); an OnSync
+  hook grants rebirth weapons + `WeaponUnlocked` (the tutorial-style card);
+  Roblox `Tool`s in the Backpack, given on every spawn; the default Backpack
+  bar is replaced by glyph circles above the bottom buttons (1–5 / tap,
+  cooldown wipe, unearned rebirth weapons greyed "R1"–"R3", greyed while
+  carrying). **Rules:** only Rebirth 1+ vs Rebirth 1+; no hits for 5 s after
+  spawning; a hit ragdolls 1.5 s with knockback (+ an upward kick), then 3 s
+  immune (a shimmer). **Server authority:** `RequestHit { Weapon,
+  TargetUserId?, Origin, Direction }` (C→S) is re-checked: owned AND
+  equipped, the server cooldown (`TakeCooldown`), both sides' eligibility
+  (`WhyNotHittable`), the attacker not carrying / ragdolled, melee range
+  from the server roots + `RangeSlack` and in front, ranged by a server
+  raycast; `RemoteGuard` numbers and rate limit. The server owns Player
+  attributes `RagdollUntil` / `ImmuneUntil` / `FrozenUntil` /
+  `SpawnProtectUntil` (server time), swaps Motor6Ds for
+  BallSocketConstraints (replicated) and restores them; `HitReceived
+  { Impulse, Seconds, Freeze? }` (S→target: Physics state + impulse, prompts
+  off) and `HitFx` (S→all: BONK! / SLIP! / FROZEN! pops, a thin Neon
+  cylinder beam). **Heist:** a hit on a carrying thief →
+  `HeistService.KnockCarrier` (outcome `Knocked`: the orb flies home, the
+  owner sees SAVED); a ragdolled player can't steal, LOCK (`Ragdolled`) or
+  guard, so a bonk can open a steal. Analytics `Hit` (weapon),
+  `ThiefKnocked`, `GuardKnocked`. The Rebirth panel lists each rebirth's
+  weapons (`RebirthConfig.GetUnlockText`). Studio `/weapons all | reset`.
+  Sound slots Bonk / Laser / Freeze / Slip are empty until picked.
 - **Tutorial** (mandatory, first time; `TutorialConfig` steps + copy,
   `TutorialService` server, `TutorialController` + `UI/TutorialCards` +
   `Effects/TutorialPath` client). 14 steps: Welcome · Claim · Upgrade ·
@@ -209,7 +241,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
-  `/tutorial step <n>`,
+  `/tutorial step <n>`, `/weapons all | reset`,
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
   `/shop grant <key>` (any ShopConfig key, the real grant path, no Robux),
@@ -237,7 +269,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   last part drives a reset tutorial through every step on the real
   handlers (upgrade, tutorial pulls, fusion, `TutorialService.Advance`),
   checks no shop / deal pop-up showed and that a mid-way save resumes, then
-  restores the tester's own tutorial state.
+  restores the tester's own tutorial state. Then combat: a Rebirth-0
+  player can't be hit, the server cooldown, and (with a second player) a
+  knocked carry returns the orb with both inventories unchanged.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
@@ -739,7 +773,8 @@ src/ReplicatedStorage/Shared/
                  GiftConfig — the playtime gifts,
                  TrailerConfig — the /trailer shots and camera,
                  DealConfig — the rotating deals,
-                 TutorialConfig — the tutorial steps and "?" help, …)
+                 TutorialConfig — the tutorial steps and "?" help,
+                 CombatConfig — weapons, ragdoll and hit rules, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -770,6 +805,7 @@ src/ServerScriptService/
                            and FREE LAB placeholders; EventService runs the
                            event clock; AdminService runs Admin Abuse;
                            TutorialService the first-time tutorial;
+                           CombatService weapons, hits and ragdoll;
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards)
 src/StarterPlayer/StarterPlayerScripts/
@@ -934,6 +970,7 @@ calls left in `Services/`.
 | `RewardService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -976,7 +1013,8 @@ stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`),
-`TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`) (no lock remote: LOCK is the console
+`TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`), `RequestHit` (C→S),
+`HitReceived` (S→target), `HitFx` (S→all), `WeaponUnlocked` (S→C) (no lock remote: LOCK is the console
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),

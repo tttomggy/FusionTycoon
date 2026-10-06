@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
@@ -169,6 +170,56 @@ local function waitForReport(player: Player, stage: string): any?
 		task.wait(0.2)
 	end
 	return nil
+end
+
+local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local data = PlayerDataService.GetData(player)
+	if data then
+		local rebirths = data.Rebirths
+		data.Rebirths = 0
+		local why = CombatService.WhyNotHittable(player)
+		data.Rebirths = rebirths
+		result(why == "NeedsRebirth", "combat: a Rebirth-0 player can't be hit", tostring(why))
+	end
+
+	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
+	CombatService.ResetCooldowns(player)
+	local first = CombatService.TakeCooldown(player, bat)
+	local second = CombatService.TakeCooldown(player, bat)
+	CombatService.ResetCooldowns(player)
+	result(first and not second, "combat: the cooldown is enforced on the server", ("first %s, second %s"):format(tostring(first), tostring(second)))
+
+	local other: Player? = nil
+	for _, candidate in Players:GetPlayers() do
+		if candidate ~= player and PlayerDataService.IsDataLoaded(candidate) then
+			other = candidate
+		end
+	end
+	if not other then
+		result(true, "combat: knocking a thief returns the orb (skipped: needs a second player)")
+		return
+	end
+	local victim = other :: Player
+	local function count(p: Player): number
+		local items: { any } = PlayerDataService.GetInventory(p) or {}
+		return #items
+	end
+	local thiefBefore, victimBefore = count(player), count(victim)
+	local uid = HeistService.SelfTestCarry(player, victim)
+	if not uid then
+		result(true, "combat: knocking a thief returns the orb (skipped: the second player has nothing on display)")
+		return
+	end
+	local from = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	CombatService.ApplyHit(victim, player, bat, if from and from:IsA("BasePart") then from.Position + Vector3.new(0, 0, 3) else Vector3.zero)
+	local stillCarrying = HeistService.IsCarrying(player)
+	local back = PlayerDataService.GetItemByUid(victim, uid) ~= nil
+	local unchanged = count(player) == thiefBefore and count(victim) == victimBefore
+	result(
+		not stillCarrying and back and unchanged,
+		"combat: knocking a thief returns the orb, inventories unchanged",
+		("carrying %s, back %s, counts %d/%d -> %d/%d"):format(tostring(stillCarrying), tostring(back), thiefBefore, victimBefore, count(player), count(victim))
+	)
 end
 
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
@@ -461,6 +512,11 @@ local function runSelfTest(player: Player)
 	-- while it runs, and a save left mid-way resumes at its step. The
 	-- tester's own tutorial state is restored after.
 	runTutorialSelfTest(player, result)
+
+	-- 10. Combat: a Rebirth-0 player is never hittable; the cooldown is the
+	-- server's; a hit on a carrying thief sends the orb home with both
+	-- inventories unchanged (needs a second player: Test -> 2 players).
+	runCombatSelfTest(player, result)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 

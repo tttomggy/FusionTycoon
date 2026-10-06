@@ -1705,3 +1705,33 @@ Heist, the result cards, the celebration):
   "How it works" (H) at the LOCK console and the Gacha Pad: ◀ ▶ and OK.
 - [ ] `/selftest`: PASS "tutorial: every step completes in order", "no shop
   or deal pop-up while it runs", "a save left mid-way resumes at its step".
+
+## 38. Combat
+
+Studio: Test → 2 players. `/rebirths 3` on both (Laser and Freeze Ray need
+Rebirth 2–3), `/weapons all` for the Slap Glove and Banana Peel.
+
+- [ ] Rebirth 0: the weapon bar shows 🏏 🔫 🥶 greyed with R1 / R2 / R3; a
+  tap says "Unlocks at Rebirth N". Nobody can hit you and you can't hit.
+- [ ] Rebirth 1: the card "🏏 You got a Bat!" (after the tutorial); 1 / a
+  tap equips it, again unequips; the equipped circle has a gold ring.
+- [ ] Bat a player in front of you: they ragdoll with a hop and a
+  "💫 BONK! 💫", stand up after 1.5 s, shimmer for 3 s (can't be hit). The
+  cooldown wipe empties over 1.2 s; spamming does nothing extra.
+- [ ] Right after spawning (5 s) nobody can hit you.
+- [ ] Laser Gun: aim (mouse / screen centre on touch) at a runner 30+
+  studs away: a thin red beam, they ragdoll; through a wall: no hit.
+- [ ] Freeze Ray: the target turns icy blue and walks at 40% for 3 s.
+- [ ] Banana Peel: it lands in front of you; the first enemy to step on
+  it slips (SLIP!); one out at a time, gone after 20 s.
+- [ ] Bat a thief mid-carry: the orb flies home, the owner sees "SAVED!",
+  the thief "BONK! You dropped it!"; both inventories unchanged.
+- [ ] Knock an owner off their pedestal: GUARDED drops, the steal works.
+- [ ] While carrying: the bar is greyed, swings say "Hands full".
+- [ ] While ragdolled: no prompts, LOCK says "Get up first!", a steal is
+  refused.
+- [ ] The Rebirth panel's unlock line lists 🏏 Bat / 🔫 Laser Gun / 🥶 Freeze
+  Ray at Rebirth 1 / 2 / 3.
+- [ ] `/selftest`: PASS "a Rebirth-0 player can't be hit", "the cooldown is
+  enforced on the server", "knocking a thief returns the orb" (2 players),
+  and the junk-remote fuzz (RequestHit) with no error or change.

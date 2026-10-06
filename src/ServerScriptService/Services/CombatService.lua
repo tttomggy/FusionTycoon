@@ -164,6 +164,11 @@ function CombatService.TakeCooldown(player: Player, weapon: CombatConfig.Weapon)
 	return true
 end
 
+-- /selftest: forget every swing, so the cooldown test starts clean.
+function CombatService.ResetCooldowns(player: Player)
+	state.lastSwing[player.UserId] = nil
+end
+
 --[[ Ragdoll --------------------------------------------------------------------------- ]]
 
 local function restoreJoints(userId: number)
