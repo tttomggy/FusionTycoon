@@ -11,6 +11,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
@@ -37,6 +40,10 @@ type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
 type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
 type ItemServiceModule = typeof(require(script.Parent.ItemService))
+type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
+type FusionServiceModule = typeof(require(script.Parent.FusionService))
+type CombatServiceModule = typeof(require(script.Parent.CombatService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -55,6 +62,10 @@ local HeistService: HeistServiceModule
 local EventService: EventServiceModule
 local MonetizationService: MonetizationServiceModule
 local ItemService: ItemServiceModule
+local TutorialService: TutorialServiceModule
+local TycoonService: TycoonServiceModule
+local FusionService: FusionServiceModule
+local CombatService: CombatServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -80,6 +91,12 @@ local GIVE_COMMAND = "/give"
 local SHIELD_COMMAND = "/shield"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
+-- "/tutorial reset" starts it over (free pulls and fusion again);
+-- "/tutorial step <n>" jumps to step n.
+local TUTORIAL_COMMAND = "/tutorial"
+-- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
+-- takes them all (rebirth ones come back on the next sync).
+local WEAPONS_COMMAND = "/weapons"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
 -- length); "/event off" ends what's on. "/eventclock 15" shifts the event
 -- clock 15 min ahead so the schedule can be walked through.
@@ -153,6 +170,146 @@ local function waitForReport(player: Player, stage: string): any?
 		task.wait(0.2)
 	end
 	return nil
+end
+
+local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local data = PlayerDataService.GetData(player)
+	if data then
+		local rebirths = data.Rebirths
+		data.Rebirths = 0
+		local why = CombatService.WhyNotHittable(player)
+		data.Rebirths = rebirths
+		result(why == "NeedsRebirth", "combat: a Rebirth-0 player can't be hit", tostring(why))
+	end
+
+	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
+	CombatService.ResetCooldowns(player)
+	local first = CombatService.TakeCooldown(player, bat)
+	local second = CombatService.TakeCooldown(player, bat)
+	CombatService.ResetCooldowns(player)
+	result(first and not second, "combat: the cooldown is enforced on the server", ("first %s, second %s"):format(tostring(first), tostring(second)))
+
+	local other: Player? = nil
+	for _, candidate in Players:GetPlayers() do
+		if candidate ~= player and PlayerDataService.IsDataLoaded(candidate) then
+			other = candidate
+		end
+	end
+	if not other then
+		result(true, "combat: knocking a thief returns the orb (skipped: needs a second player)")
+		return
+	end
+	local victim = other :: Player
+	local function count(p: Player): number
+		local items: { any } = PlayerDataService.GetInventory(p) or {}
+		return #items
+	end
+	local thiefBefore, victimBefore = count(player), count(victim)
+	local uid = HeistService.SelfTestCarry(player, victim)
+	if not uid then
+		result(true, "combat: knocking a thief returns the orb (skipped: the second player has nothing on display)")
+		return
+	end
+	local from = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+	CombatService.ApplyHit(victim, player, bat, if from and from:IsA("BasePart") then from.Position + Vector3.new(0, 0, 3) else Vector3.zero)
+	local stillCarrying = HeistService.IsCarrying(player)
+	local back = PlayerDataService.GetItemByUid(victim, uid) ~= nil
+	local unchanged = count(player) == thiefBefore and count(victim) == victimBefore
+	result(
+		not stillCarrying and back and unchanged,
+		"combat: knocking a thief returns the orb, inventories unchanged",
+		("carrying %s, back %s, counts %d/%d -> %d/%d"):format(tostring(stillCarrying), tostring(back), thiefBefore, victimBefore, count(player), count(victim))
+	)
+end
+
+local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
+	local popups = 0
+	local watch = RemoteEvents.ShopAnalytics.OnServerEvent:Connect(function(sender: Player, payload: unknown)
+		local event = typeof(payload) == "table" and (payload :: any).Event
+		if sender == player and (event == "OfferShown" or event == "DealShown") then
+			popups += 1
+		end
+	end)
+	TutorialService.DebugReset(player)
+	PlayerDataService.SyncTycoon(player)
+	local function tutorial(): any
+		local data = PlayerDataService.GetData(player)
+		return data and data.Tutorial
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local home = if root and root:IsA("BasePart") then root.CFrame else nil
+	local order: { string } = {}
+	local stuck: string? = nil
+	for _ = 1, #TutorialConfig.Steps + 2 do
+		local t = tutorial()
+		if not t or t.Done then
+			break
+		end
+		local index = t.Step
+		local step = TutorialConfig.GetStep(index)
+		if not step then
+			break
+		end
+		table.insert(order, step.Id)
+		if step.Id == "upgrade" then
+			PlayerDataService.AddCash(player, 1e6)
+			TycoonService.HandleUpgradeRequest(player, "basic_generator")
+		elseif step.Id == "pull" then
+			for _ = 1, TutorialConfig.FreePulls do
+				TycoonService.TutorialPull(player)
+			end
+		elseif step.Id == "fuse" then
+			local commons = {}
+			local owned: { any } = PlayerDataService.GetInventory(player) or {}
+			for _, item in owned do
+				if item.Tier == TutorialConfig.FreePullTier and #commons < 2 and not PlayerDataService.IsItemCarried(player, item.Uid) then
+					table.insert(commons, item.Uid)
+				end
+			end
+			FusionService.HandleFusionRequest(player, { Uids = commons })
+		elseif step.Id == "multiplier" then
+			-- The "come back when you have $X" branch: OK completes it.
+			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
+			TutorialService.Advance(player, index)
+		elseif step.Kind == "Arrive" then
+			local plot = TycoonService.GetPlotForPlayer(player)
+			local slot = plot and plot:GetAttribute("SlotIndex")
+			if root and root:IsA("BasePart") and typeof(slot) == "number" then
+				root.CFrame = CFrame.new(PlotLayout.GetSlotCFrame(slot):PointToWorldSpace(PlotLayout.LOCK_CONSOLE) + Vector3.new(0, 4, 3))
+			end
+			TutorialService.Advance(player, index)
+		elseif step.Kind == "Action" then
+			-- claim: only reached on an unclaimed plot (claimed skips it).
+			stuck = step.Id .. " (needs a claimed lab)"
+			break
+		else
+			TutorialService.Advance(player, index)
+		end
+		PlayerDataService.SyncTycoon(player)
+		local after = tutorial()
+		if after and not after.Done and after.Step == index then
+			stuck = step.Id
+			break
+		end
+	end
+	if home and root and root:IsA("BasePart") then
+		root.CFrame = home
+	end
+	local t = tutorial()
+	result(t ~= nil and t.Done == true and stuck == nil, "tutorial: every step completes in order", ("%s; stuck at %s"):format(table.concat(order, " > "), tostring(stuck)))
+	task.wait(1)
+	watch:Disconnect()
+	result(popups == 0, "tutorial: no shop or deal pop-up while it runs", ("%d shown"):format(popups))
+
+	TutorialService.DebugSetStep(player, 6)
+	local resumeOk, resumeDetail = PlayerDataService.SelfTestTutorialRoundTrip(player)
+	local resumed = tutorial()
+	result(resumeOk and resumed ~= nil and resumed.Step == 6, "tutorial: a save left mid-way resumes at its step", resumeDetail)
+
+	PlayerDataService.SelfTestSwapTutorial(player, saved)
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function runSelfTest(player: Player)
@@ -349,6 +506,17 @@ local function runSelfTest(player: Player)
 	end
 	PlayerDataService.RemoveItemsByUid(player, added)
 	PlayerDataService.SyncTycoon(player)
+
+	-- 9. The tutorial, driven step by step on the real paths (the remote's
+	-- own handlers): every step completes in order, no shop / deal pop-up
+	-- while it runs, and a save left mid-way resumes at its step. The
+	-- tester's own tutorial state is restored after.
+	runTutorialSelfTest(player, result)
+
+	-- 10. Combat: a Rebirth-0 player is never hittable; the cooldown is the
+	-- server's; a hit on a carrying thief sends the orb home with both
+	-- inventories unchanged (needs a second player: Test -> 2 players).
+	runCombatSelfTest(player, result)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 
@@ -410,6 +578,26 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
+	elseif command == WEAPONS_COMMAND then
+		if argument == "all" or argument == "reset" then
+			CombatService.DebugSetAll(player, argument == "all")
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: %s's weapons -> %s"):format(player.Name, argument))
+		else
+			warn("DebugService: /weapons all | /weapons reset")
+		end
+	elseif command == TUTORIAL_COMMAND then
+		local verb, rawStep = argument:match("^(%S+)%s*(%S*)$")
+		if verb == "reset" then
+			TutorialService.DebugReset(player)
+		elseif verb == "step" and tonumber(rawStep) then
+			TutorialService.DebugSetStep(player, tonumber(rawStep) :: number)
+		else
+			warn("DebugService: /tutorial reset | /tutorial step <n>")
+			return
+		end
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: %s's tutorial -> %s"):format(player.Name, argument))
 	elseif command == STEALABLE_COMMAND then
 		local stealable = not stealableToggles[player.UserId]
 		stealableToggles[player.UserId] = stealable
@@ -610,7 +798,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -619,6 +807,10 @@ function DebugService:Start()
 	EventService = require(script.Parent.EventService)
 	MonetizationService = require(script.Parent.MonetizationService)
 	ItemService = require(script.Parent.ItemService)
+	TutorialService = require(script.Parent.TutorialService)
+	TycoonService = require(script.Parent.TycoonService)
+	FusionService = require(script.Parent.FusionService)
+	CombatService = require(script.Parent.CombatService)
 end
 
 return DebugService

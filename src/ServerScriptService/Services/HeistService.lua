@@ -76,7 +76,9 @@ local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 
-export type Outcome = "Delivered" | "Saved" | "Timeout" | "Left" | "Died" | "Failed"
+-- "Knocked": a weapon hit the carrying thief (CombatService): it goes back,
+-- the owner sees SAVED.
+export type Outcome = "Delivered" | "Saved" | "Knocked" | "Timeout" | "Left" | "Died" | "Failed"
 
 -- What a client needs to show the item (the orb, the name).
 type ItemInfo = {
@@ -202,7 +204,17 @@ local function flatDistance(a: Vector3, b: Vector3): number
 end
 
 -- The owner is standing guard at this pedestal (within OwnerBlockRadius).
+-- A ragdolled player (CombatService, Player attribute RagdollUntil, server
+-- time) can't steal, LOCK or guard.
+local function isRagdolled(player: Player): boolean
+	local untilTime = player:GetAttribute("RagdollUntil")
+	return typeof(untilTime) == "number" and untilTime > serverNow()
+end
+
 local function isGuarded(owner: Player, pedestal: BasePart): boolean
+	if isRagdolled(owner) then
+		return false
+	end
 	local root = getRoot(owner)
 	return root ~= nil and flatDistance(root.Position, pedestal.Position) <= HeistConfig.OwnerBlockRadius
 end
@@ -452,10 +464,10 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 	if outcome == "Delivered" and thief then
 		AnalyticsKit.Funnel(thief, "FirstSteal")
 		AnalyticsKit.Custom(thief, "StealDelivered", nil, carry.Item.Tier)
-	elseif outcome == "Saved" and victim then
+	elseif (outcome == "Saved" or outcome == "Knocked") and victim then
 		AnalyticsKit.Custom(victim, "StealSaved", nil, carry.Item.Tier)
 	end
-	if isFeedTier(carry.Item.Tier) and (outcome == "Delivered" or outcome == "Saved") then
+	if isFeedTier(carry.Item.Tier) and (outcome == "Delivered" or outcome == "Saved" or outcome == "Knocked") then
 		RemoteEvents.HeistFeed:FireAllClients({
 			Kind = if outcome == "Delivered" then "Stole" else "Caught",
 			Thief = carry.ThiefName,
@@ -470,6 +482,40 @@ end
 
 -- Fails every carry `player` is part of, as thief or victim. Used on
 -- leaving and shutdown (OnRelease) and by /wipe, always before any save.
+-- Defined below (onRequestSteal's recording step).
+local startCarry: (Player, Player, BasePart, number, string, any, Humanoid) -> ()
+
+-- A weapon hit the carrying thief (CombatService): the orb goes straight
+-- back through the normal "it goes back" path. True if they were carrying.
+function HeistService.KnockCarrier(thief: Player): boolean
+	if not state.carries[thief.UserId] then
+		return false
+	end
+	endCarry(thief.UserId, "Knocked")
+	return true
+end
+
+-- /selftest: `thief` grabs `victim`'s first displayed item with none of
+-- the steal checks (shields, protection, range), so a two-player test can
+-- knock the carry. Returns the item's Uid, or nil.
+function HeistService.SelfTestCarry(thief: Player, victim: Player): string?
+	local plot = getClaimedPlot(victim)
+	local humanoid = getHumanoid(thief)
+	if not plot or not humanoid or state.carries[thief.UserId] then
+		return nil
+	end
+	for index, uid in PlayerDataService.GetPedestalDisplays(victim) do
+		local pedestal = getPedestal(plot, index)
+		local itemUid = uid :: string
+		local item = PlayerDataService.GetItemByUid(victim, itemUid)
+		if pedestal and item and not state.carriedItems[itemUid] then
+			startCarry(thief, victim, pedestal, index, itemUid, item, humanoid)
+			return itemUid
+		end
+	end
+	return nil
+end
+
 function HeistService.FailCarriesFor(player: Player, outcome: Outcome)
 	endCarry(player.UserId, outcome)
 	for thiefUserId, carry in table.clone(state.carries) do
@@ -499,105 +545,17 @@ local function reject(thief: Player, reason: string, extra: { [string]: any }?)
 	RemoteEvents.HeistEnded:FireClient(thief, payload)
 end
 
-local STEAL_REQUESTS_PER_SECOND = 1
-local STEAL_REQUEST_BURST = 2
-
-local function onRequestSteal(thief: Player, rawPayload: unknown)
-	-- Shape first: the client sends only which pedestal; the server resolves
-	-- the victim, the item and everything else from its own state.
-	if typeof(rawPayload) ~= "table" then
-		reject(thief, "InvalidArguments")
-		return
-	end
-	-- A request rate limit (~1 a second), not a gameplay cooldown: the prompt
-	-- is a 1.5 s hold, so honest grabs never hit it; spam is dropped.
-	if not RemoteGuard.Allow(thief, "RequestSteal", STEAL_REQUESTS_PER_SECOND, STEAL_REQUEST_BURST) then
-		return
-	end
-	local payload = rawPayload :: { [string]: unknown }
-	-- Whole, finite numbers only: NaN / ±inf / 1.5 would slip past a range
-	-- check, and GetPlayerByUserId errors on a value it can't cast.
-	local ownerUserId = RemoteGuard.Int(payload.OwnerUserId, 1, 2 ^ 53)
-	local pedestalIndex = RemoteGuard.Int(payload.PedestalIndex, 1, PlotLayout.PEDESTAL_COUNT)
-	if not ownerUserId or not pedestalIndex then
-		reject(thief, "InvalidArguments")
-		return
-	end
-	local victim = Players:GetPlayerByUserId(ownerUserId)
-	if not victim then
-		reject(thief, "NoVictim")
-		return
-	end
-	if victim == thief then
-		reject(thief, "OwnLab")
-		return
-	end
-
-	-- 1. Data loaded for both.
-	if not PlayerDataService.IsDataLoaded(thief) or not PlayerDataService.IsDataLoaded(victim) then
-		reject(thief, "DataNotLoaded")
-		return
-	end
-	-- 2. Not already carrying (there is no thief cooldown: the victim's
-	-- shield after a loss and LossCap stop a lab being farmed).
-	if state.carries[thief.UserId] then
-		reject(thief, "AlreadyCarrying")
-		return
-	end
-	-- 3. Both at MinRebirths (or the victim /stealable in Studio).
-	if PlayerDataService.GetRebirths(thief) < HeistConfig.MinRebirths then
-		reject(thief, "NeedsRebirth")
-		return
-	end
-	if HeistService.IsProtected(victim) then
-		reject(thief, "Protected")
-		return
-	end
-	-- 4. Shield down, loss cap not hit.
-	if HeistService.IsShielded(victim) then
-		reject(thief, "Shielded")
-		return
-	end
-	if HeistService.IsLossCapped(victim) then
-		reject(thief, "LabCapped")
-		return
-	end
-	-- 5. Pedestal filled with an item the victim owns, InUse.
-	local plot = getClaimedPlot(victim)
-	local pedestal = plot and getPedestal(plot, pedestalIndex)
-	if not pedestal then
-		reject(thief, "Empty")
-		return
-	end
-	local uid = PlayerDataService.GetPedestalDisplays(victim)[pedestalIndex]
-	local item = uid and PlayerDataService.GetItemByUid(victim, uid)
-	if not uid or not item or not item.InUse then
-		reject(thief, "Empty")
-		return
-	end
-	-- 6. Close enough (prompt distance plus slack), and alive.
-	local root = getRoot(thief)
-	local humanoid = getHumanoid(thief)
-	if not root or not humanoid or humanoid.Health <= 0 then
-		reject(thief, "NoCharacter")
-		return
-	end
-	if (root.Position - pedestal.Position).Magnitude > HeistConfig.PromptDistance + HeistConfig.GrabRangeSlack then
-		reject(thief, "TooFar")
-		return
-	end
-	-- The owner standing guard at it blocks the grab (readable defence).
-	if isGuarded(victim, pedestal) then
-		reject(thief, "Guarded")
-		return
-	end
-	-- 7. Not already being carried.
-	if state.carriedItems[uid] then
-		reject(thief, "AlreadyStolen")
-		return
-	end
-
-	-- Record the carry. Neither inventory changes until delivery.
+-- Records a carry and tells both sides (onRequestSteal, after every check;
+-- /selftest's SelfTestCarry). Neither inventory changes until delivery.
+startCarry = function(
+	thief: Player,
+	victim: Player,
+	pedestal: BasePart,
+	pedestalIndex: number,
+	uid: string,
+	item: any,
+	humanoid: Humanoid
+)
 	local def = ItemConfig.GetItemById(item.ItemId)
 	local info: ItemInfo = {
 		ItemId = item.ItemId,
@@ -672,6 +630,111 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	end
 end
 
+local STEAL_REQUESTS_PER_SECOND = 1
+local STEAL_REQUEST_BURST = 2
+
+local function onRequestSteal(thief: Player, rawPayload: unknown)
+	-- Shape first: the client sends only which pedestal; the server resolves
+	-- the victim, the item and everything else from its own state.
+	if typeof(rawPayload) ~= "table" then
+		reject(thief, "InvalidArguments")
+		return
+	end
+	-- A request rate limit (~1 a second), not a gameplay cooldown: the prompt
+	-- is a 1.5 s hold, so honest grabs never hit it; spam is dropped.
+	if not RemoteGuard.Allow(thief, "RequestSteal", STEAL_REQUESTS_PER_SECOND, STEAL_REQUEST_BURST) then
+		return
+	end
+	local payload = rawPayload :: { [string]: unknown }
+	-- Whole, finite numbers only: NaN / ±inf / 1.5 would slip past a range
+	-- check, and GetPlayerByUserId errors on a value it can't cast.
+	local ownerUserId = RemoteGuard.Int(payload.OwnerUserId, 1, 2 ^ 53)
+	local pedestalIndex = RemoteGuard.Int(payload.PedestalIndex, 1, PlotLayout.PEDESTAL_COUNT)
+	if not ownerUserId or not pedestalIndex then
+		reject(thief, "InvalidArguments")
+		return
+	end
+	local victim = Players:GetPlayerByUserId(ownerUserId)
+	if not victim then
+		reject(thief, "NoVictim")
+		return
+	end
+	if victim == thief then
+		reject(thief, "OwnLab")
+		return
+	end
+
+	-- 1. Data loaded for both.
+	if not PlayerDataService.IsDataLoaded(thief) or not PlayerDataService.IsDataLoaded(victim) then
+		reject(thief, "DataNotLoaded")
+		return
+	end
+	if isRagdolled(thief) then
+		reject(thief, "Ragdolled")
+		return
+	end
+	-- 2. Not already carrying (there is no thief cooldown: the victim's
+	-- shield after a loss and LossCap stop a lab being farmed).
+	if state.carries[thief.UserId] then
+		reject(thief, "AlreadyCarrying")
+		return
+	end
+	-- 3. Both at MinRebirths (or the victim /stealable in Studio).
+	if PlayerDataService.GetRebirths(thief) < HeistConfig.MinRebirths then
+		reject(thief, "NeedsRebirth")
+		return
+	end
+	if HeistService.IsProtected(victim) then
+		reject(thief, "Protected")
+		return
+	end
+	-- 4. Shield down, loss cap not hit.
+	if HeistService.IsShielded(victim) then
+		reject(thief, "Shielded")
+		return
+	end
+	if HeistService.IsLossCapped(victim) then
+		reject(thief, "LabCapped")
+		return
+	end
+	-- 5. Pedestal filled with an item the victim owns, InUse.
+	local plot = getClaimedPlot(victim)
+	local pedestal = plot and getPedestal(plot, pedestalIndex)
+	if not pedestal then
+		reject(thief, "Empty")
+		return
+	end
+	local uid = PlayerDataService.GetPedestalDisplays(victim)[pedestalIndex]
+	local item = uid and PlayerDataService.GetItemByUid(victim, uid)
+	if not uid or not item or not item.InUse then
+		reject(thief, "Empty")
+		return
+	end
+	-- 6. Close enough (prompt distance plus slack), and alive.
+	local root = getRoot(thief)
+	local humanoid = getHumanoid(thief)
+	if not root or not humanoid or humanoid.Health <= 0 then
+		reject(thief, "NoCharacter")
+		return
+	end
+	if (root.Position - pedestal.Position).Magnitude > HeistConfig.PromptDistance + HeistConfig.GrabRangeSlack then
+		reject(thief, "TooFar")
+		return
+	end
+	-- The owner standing guard at it blocks the grab (readable defence).
+	if isGuarded(victim, pedestal) then
+		reject(thief, "Guarded")
+		return
+	end
+	-- 7. Not already being carried.
+	if state.carriedItems[uid] then
+		reject(thief, "AlreadyStolen")
+		return
+	end
+
+	startCarry(thief, victim, pedestal, pedestalIndex, uid, item, humanoid)
+end
+
 --[[ Carry loop -------------------------------------------------------------- ]]
 
 local function stepCarries()
@@ -709,7 +772,7 @@ end
 
 --[[ LOCK: the one way an owner raises their shield on purpose ----------- ]]
 
-export type LockReason = "Protected" | "Carrying" | "AlreadyLocked" | "Recharging" | "TooFar"
+export type LockReason = "Protected" | "Carrying" | "Ragdolled" | "AlreadyLocked" | "Recharging" | "TooFar"
 
 -- Is `player`'s root within reach of their own LOCK console (prompt
 -- distance + LockReachSlack, flat)? A client can fire a prompt from
@@ -736,6 +799,9 @@ function HeistService.TryLock(player: Player): (boolean, LockReason?, number?)
 	end
 	if state.carries[player.UserId] then
 		return false, "Carrying"
+	end
+	if isRagdolled(player) then
+		return false, "Ragdolled"
 	end
 	if HeistService.IsShielded(player) then
 		return false, "AlreadyLocked"

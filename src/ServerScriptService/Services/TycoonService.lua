@@ -34,6 +34,7 @@ local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
 local ItemConfig = require(Config.ItemConfig)
+local TutorialConfig = require(Config.TutorialConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
@@ -370,6 +371,20 @@ local function newPrompt(parent: Instance, name: string, actionText: string, obj
 	return prompt
 end
 
+-- The owner's "How it works" (H): the client opens that topic's tutorial
+-- cards (TutorialConfig.Help, TutorialController). Offset so it doesn't
+-- cover the station's E / R prompts.
+local HELP_PROMPT_OFFSET_PX = 140
+local function addHelpPrompt(parent: Instance, topic: string, distance: number)
+	local prompt = newPrompt(parent, "HelpPrompt", "How it works", "?", distance)
+	prompt.KeyboardKeyCode = Enum.KeyCode.H
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonL1
+	prompt.UIOffset = Vector2.new(0, HELP_PROMPT_OFFSET_PX)
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+	prompt:SetAttribute("HelpTopic", topic)
+	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+end
+
 --[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
 
 local function buildShell(plot: Model, origin: CFrame, player: Player)
@@ -568,15 +583,17 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	-- so the nearer Pull could hide it. Nothing disables it: an unaffordable
 	-- x10 still shows and the server answers "Need $X for 10 pulls".
 	multiPrompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+	addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance)
 
 	-- Runs on every sync too (addStationRefresh): price, odds at the
 	-- player's luck (so a rebirth updates them), and the x10 cost.
 	local function refreshLabel()
 		local pulls = PlayerDataService.GetGachaPulls(player)
 		local cost = TycoonConfig.GetGachaPullCost(pulls)
-		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
+		local free = PlayerDataService.GetTutorialFreePulls(player)
+		padLabel.SetPill(if free > 0 then ("FREE · %d left"):format(free) else ("%s / pull"):format(NumberFormat.Money(cost)))
 		padLabel.SetDetail(getOddsText(getLuck(player)))
-		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
+		prompt.ActionText = if free > 0 then "Pull (FREE)" else ("Pull (%s)"):format(NumberFormat.Money(cost))
 		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
 	end
 	refreshLabel()
@@ -602,6 +619,15 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 		if PlayerDataService.IsCarrying(player) then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
+			return
+		end
+		-- The tutorial's free pulls: a guaranteed plain Common each, through
+		-- the free path (the pad price doesn't move).
+		if PlayerDataService.GetTutorialFreePulls(player) > 0 then
+			debounce = true
+			TycoonService.TutorialPull(player)
+			task.wait(STATION_DEBOUNCE_SECONDS)
+			debounce = false
 			return
 		end
 		local rolled = rollPulls(1, getLuck(player))
@@ -910,6 +936,7 @@ local function createLockConsole(plot: Model, origin: CFrame)
 	local _, post = LockKit.Build(origin, plot)
 	local prompt = newPrompt(post, LockKit.PROMPT_NAME, "Lock lab", ("%ds shield"):format(HeistConfig.ShieldSeconds), L.PromptDistance)
 	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	addHelpPrompt(post, "Lock", L.PromptDistance)
 	BillboardKit.Pad(post, {
 		Name = "LockLabel",
 		Title = "🔒 LOCK LAB",
@@ -1059,10 +1086,24 @@ end
 -- `count` free pulls at the player's luck (daily / gift rewards): the real
 -- pull path and reveal, paid by the game, not raising the pad price. False
 -- if the player has no plot yet (nothing is given).
-function TycoonService.GrantFreePulls(player: Player, count: number, caption: string): boolean
+-- `forcedTier`: every pull is a plain item of that tier (the tutorial's
+-- guaranteed Commons), no roll.
+function TycoonService.GrantFreePulls(player: Player, count: number, caption: string, forcedTier: string?): boolean
 	local puller = rewardPullersByUserId[player.UserId]
 	local pulls = math.max(1, math.floor(count))
-	local rolled = puller and rollPulls(pulls, getLuck(player))
+	local rolled: { PulledItem }?
+	if forcedTier then
+		local forced: { PulledItem } = {}
+		for _ = 1, pulls do
+			local def = ItemConfig.PickRandomOfTier(forcedTier, gachaRng)
+			if def then
+				table.insert(forced, { Def = def, Mutation = nil })
+			end
+		end
+		rolled = if #forced == pulls then forced else nil
+	else
+		rolled = puller and rollPulls(pulls, getLuck(player))
+	end
 	if not puller or not rolled then
 		return false
 	end
@@ -1074,6 +1115,25 @@ function TycoonService.GrantFreePulls(player: Player, count: number, caption: st
 	end
 	AnalyticsKit.Funnel(player, "FirstPull")
 	return true
+end
+
+-- One of the tutorial's free pulls (the pad's E while any are left; also
+-- what /selftest drives): a plain Common through the free path. False if
+-- none are left or it couldn't be given (the pull is refunded).
+function TycoonService.TutorialPull(player: Player): boolean
+	if not PlayerDataService.TakeTutorialFreePull(player) then
+		return false
+	end
+	if not TycoonService.GrantFreePulls(player, 1, "Tutorial pull", TutorialConfig.FreePullTier) then
+		PlayerDataService.RefundTutorialFreePull(player)
+		return false
+	end
+	return true
+end
+
+-- The RequestUpgrade remote's own handler (/selftest drives it).
+function TycoonService.HandleUpgradeRequest(player: Player, generatorId: unknown)
+	onRequestUpgrade(player, generatorId)
 end
 
 -- One item of `tier` with the normal pull mutation roll (the Day 7 / gift

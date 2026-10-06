@@ -5,6 +5,7 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -30,6 +31,11 @@ local pendingOffline = 0
 local carriedUids: { [string]: boolean } = {}
 -- One-time tips/cards already seen (saved; TipConfig ids).
 local tipsSeen: { [string]: boolean } = {}
+-- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
+export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Replay: boolean, ReplayHint: boolean }
+local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
+-- Earned weapon ids (snapshot Weapons; CombatService grants them).
+local weapons: { string } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
@@ -89,6 +95,9 @@ local pendingSfxMuted: boolean? = nil
 -- The Auto-Fuse pass's toggle (Settings.AutoFuse), optimistic like the rest.
 local autoFuse = false
 local pendingAutoFuse: boolean? = nil
+-- The goal path's setting (Settings.GoalPath), optimistic like the rest.
+local goalPath: string = "Auto"
+local pendingGoalPath: string? = nil
 
 local function applySfx()
 	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
@@ -182,6 +191,20 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 end
 
 -- A one-time tip/card was already shown to this account.
+function TycoonController.GetWeapons(): { string }
+	return weapons
+end
+
+function TycoonController.GetTutorial(): TutorialView
+	return tutorial
+end
+
+-- The tutorial is running: shop side cards, deal pop-ups, the Daily card
+-- and one-time tips wait (TutorialController holds them).
+function TycoonController.IsTutorialActive(): boolean
+	return hasSynced and not tutorial.Done
+end
+
 function TycoonController.HasSeenTip(id: string): boolean
 	return tipsSeen[id] == true
 end
@@ -238,6 +261,24 @@ function TycoonController.SetSfxMuted(muted: boolean)
 	pendingSfxMuted = muted
 	applySfx()
 	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
+end
+
+-- The lit path to the current goal: the 👣 toggle, else on for the first
+-- TutorialConfig.GoalPathSessions sessions.
+function TycoonController.IsGoalPathOn(): boolean
+	if goalPath == "On" then
+		return true
+	elseif goalPath == "Off" then
+		return false
+	end
+	return shop.Sessions <= TutorialConfig.GoalPathSessions
+end
+
+function TycoonController.SetGoalPath(on: boolean)
+	goalPath = if on then "On" else "Off"
+	pendingGoalPath = goalPath
+	RemoteEvents.SetSetting:FireServer({ Key = "GoalPath", Value = goalPath })
+	tycoonChanged:Fire()
 end
 
 function TycoonController.IsAutoFuseOn(): boolean
@@ -409,6 +450,26 @@ local function onSyncTycoon(snapshot: any)
 		end
 		tipsSeen = fresh
 	end
+	if typeof(snapshot.Weapons) == "table" then
+		local fresh: { string } = {}
+		for _, id in snapshot.Weapons do
+			if typeof(id) == "string" then
+				table.insert(fresh, id)
+			end
+		end
+		table.sort(fresh)
+		weapons = fresh
+	end
+	local rawTutorial = snapshot.Tutorial
+	if typeof(rawTutorial) == "table" then
+		tutorial = {
+			Step = if typeof(rawTutorial.Step) == "number" then rawTutorial.Step else 0,
+			Done = rawTutorial.Done == true,
+			FreePulls = if typeof(rawTutorial.FreePulls) == "number" then rawTutorial.FreePulls else 0,
+			Replay = rawTutorial.Replay == true,
+			ReplayHint = rawTutorial.ReplayHint == true,
+		}
+	end
 	carriedUids = {}
 	if typeof(snapshot.CarriedUids) == "table" then
 		for _, uid in snapshot.CarriedUids do
@@ -438,6 +499,10 @@ local function onSyncTycoon(snapshot: any)
 	if pendingAutoFuse ~= nil and settings.AutoFuse == pendingAutoFuse then
 		pendingAutoFuse = nil
 	end
+	if pendingGoalPath ~= nil and settings.GoalPath == pendingGoalPath then
+		pendingGoalPath = nil
+	end
+	goalPath = pendingGoalPath or settings.GoalPath
 	if pendingAutoFuse ~= nil then
 		autoFuse = pendingAutoFuse
 	else

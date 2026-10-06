@@ -43,6 +43,7 @@ local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ToastController = require(Controllers.ToastController)
 local FusionController = require(Controllers.FusionController)
+local TutorialCards = require(script.Parent.TutorialCards)
 local UIKit = require(script.Parent.UIKit)
 
 local IndexPanel = {}
@@ -541,9 +542,12 @@ local function build()
 		HeaderTop = Colors.PanelTop,
 		OnClose = stopRainbow,
 	})
+	UIKit.AddHelpButton(modal, function()
+		TutorialCards.ShowTopic("Index")
+	end)
 	modal.Title.TextSize = 30
 	modal.Subtitle.Visible = true
-	modal.Subtitle.Size = UDim2.new(1, -(UITheme.MinTapSize + 200), 0, 16)
+	modal.Subtitle.Size = UDim2.new(1, -(UITheme.MinTapSize * 2 + 208), 0, 16)
 	modal.Subtitle.TextTruncate = Enum.TextTruncate.AtEnd
 	bonusPill = UIKit.Pill({
 		Name = "Bonus",
@@ -554,7 +558,8 @@ local function build()
 		TextSize = 15,
 		Height = 28,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -(UITheme.MinTapSize + 12), 0, 6),
+		-- Left of the "?" and the ✕.
+		Position = UDim2.new(1, -(UITheme.MinTapSize * 2 + 20), 0, 6),
 		ZIndex = modal.Header.ZIndex,
 		TextStroke = 1.5,
 	})
@@ -736,6 +741,10 @@ function IndexPanel.ToastBatch(result: any)
 end
 
 --[[ Public ------------------------------------------------------------------- ]]
+
+function IndexPanel.IsOpen(): boolean
+	return modal ~= nil and modal.IsOpen()
+end
 
 function IndexPanel.Toggle()
 	if modal.IsOpen() then

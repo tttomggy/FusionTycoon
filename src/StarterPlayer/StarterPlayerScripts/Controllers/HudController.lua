@@ -102,6 +102,7 @@ local goalRewardLabel: TextLabel
 local goalTextLabel: TextLabel
 local goalBar: Frame
 local goalCountLabel: TextLabel
+local goalPathButton: TextButton? = nil
 
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
@@ -158,6 +159,24 @@ local function buildGoalTracker()
 	goalBody = body
 	-- Hidden until the server sends a goal (and after the last one).
 	holder.Visible = false
+
+	-- 👣: the lit path to the goal (TutorialPath), on by default for the
+	-- first sessions (TycoonController.IsGoalPathOn); beside the card.
+	local pathButton = UIKit.Button({
+		Name = "GoalPathToggle",
+		Parent = holder,
+		Style = "Green",
+		Text = "👣",
+		TextSize = 22,
+		AnchorPoint = Vector2.new(0, 0),
+		Position = UDim2.new(1, 6, 0, 0),
+		Size = UDim2.fromOffset(UITheme.MinTapSize, UITheme.MinTapSize),
+		ShadowOffset = UITheme.SmallShadowOffset,
+		OnClick = function()
+			TycoonController.SetGoalPath(not TycoonController.IsGoalPathOn())
+		end,
+	})
+	goalPathButton = pathButton
 
 	UIKit.Padding(body, 12, 14, 12, 14)
 	local layout = Instance.new("UIListLayout")
@@ -1467,7 +1486,16 @@ local function refreshGoal()
 	})
 end
 
+local function refreshGoalPathButton()
+	local button = goalPathButton
+	if button then
+		local on = TycoonController.IsGoalPathOn()
+		UIKit.SetButton(button, { Style = if on then "Green" else "Disabled", TextColor3 = if on then Colors.Text else Colors.Muted })
+	end
+end
+
 local function refreshAll()
+	refreshGoalPathButton()
 	incomeLabel.Text = ("+%s%s"):format(
 		NumberFormat.Money(getIncomePerSecond()),
 		UIKit.Colored("/s", Colors.Muted)
@@ -1520,6 +1548,17 @@ function HudController.ToggleIncomeBreakdown()
 			breakdownHolder.Visible = false
 		end
 	end)
+end
+
+-- What the tutorial's coach ring wraps: a bottom-bar button (Upgrades,
+-- Items, Index, Rebirth, Settings), "Gifts", or "Income" (the $/s line).
+function HudController.GetCoachTarget(name: string): GuiObject?
+	if name == "Gifts" then
+		return giftsButton
+	elseif name == "Income" then
+		return incomeLabel
+	end
+	return buttonsByName[name]
 end
 
 function HudController.Init()

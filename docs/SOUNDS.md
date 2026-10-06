@@ -45,3 +45,7 @@ needs to change.
 | `RevealMinor` | 15675055424 | Roblox_UI_Cute_Pop | 0.45 | Other fusion reveals (RevealEffects), skipped-card pulls (ResultController) | picked by Claude |
 | `Toast` | 15675059323 | Roblox_UI_Bright_Click | 0.35 | Top announcement banners (AnnouncementController); the Settings volume preview | picked by Claude |
 | `Station` | 10066947742 | RBLX UI Purchase (SFX) | 0.5 | A station purchase: Multiplier Pad, gacha (TycoonService, at the pad) | server-played, still follows each player's volume; picked by Claude |
+| `Bonk` | **empty** | (pick: a cartoon bonk) | 0.6 | A Bat / Slap Glove / Laser hit lands, at the target (CombatController, `PlayAt`) | positional, RollOffMaxDistance 120, PlaybackSpeed 0.9–1.1; silent until an id is set |
+| `Laser` | **empty** | (pick: a short laser zap) | 0.5 | A Laser Gun shot, at the shooter | positional, RollOffMaxDistance 150; silent until an id is set |
+| `Freeze` | **empty** | (pick: an ice crackle) | 0.5 | A Freeze Ray shot and the freeze | positional, RollOffMaxDistance 120; silent until an id is set |
+| `Slip` | **empty** | (pick: a cartoon slip) | 0.6 | Someone steps on a Banana Peel | positional, RollOffMaxDistance 120; silent until an id is set |

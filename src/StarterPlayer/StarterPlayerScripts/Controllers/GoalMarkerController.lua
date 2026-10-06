@@ -78,6 +78,12 @@ local movingTarget: BasePart? = nil
 type Override = { Target: Instance, Text: string, Danger: boolean, Pulse: boolean }
 local override: Override? = nil
 local eventOverride: Override? = nil
+-- The tutorial's layer (TutorialController): while it's active the goal
+-- arrow is replaced by the current step's target (resolved by name each
+-- refresh, since stations appear on claim), or by nothing on a UI step.
+-- Heist > tutorial > event > goal.
+type TutorialLayer = { Name: string?, Text: string }
+local tutorialLayer: TutorialLayer? = nil
 
 -- os.clock() a target name was first missed on a claimed plot; names that
 -- already warned.
@@ -107,6 +113,11 @@ local function resolveTarget(name: string): Instance?
 			end
 		end
 		return nil
+	end
+	local pedestalIndex = name:match("^Pedestal(%d+)$")
+	if pedestalIndex then
+		local pedestals = plot:FindFirstChild("Pedestals")
+		return pedestals and pedestals:FindFirstChild(name)
 	end
 	if name == "NearestEnemyPedestal" then
 		-- The closest pedestal in another lab you could grab right now
@@ -392,6 +403,26 @@ local function setUiTarget(name: string?)
 end
 
 local function refresh()
+	local layer = tutorialLayer
+	if not override and layer then
+		setUiTarget(nil)
+		local target = if layer.Name then resolveTarget(layer.Name) else nil
+		local origin = getPlotOrigin()
+		if not target or not origin then
+			clearWorldMarker()
+			return
+		end
+		local moved = false
+		if target == currentTarget and placedCenter then
+			local center = getBounds(target, origin)
+			moved = center == nil or (center.Position - placedCenter).Magnitude > PLACE_MOVE_STUDS
+		end
+		if target ~= currentTarget or moved or not placedCenter then
+			showWorldMarker(target, layer.Text, nil, nil, origin)
+		end
+		currentGoalIndex = nil
+		return
+	end
 	local active = override or eventOverride
 	if active then
 		setUiTarget(nil)
@@ -499,6 +530,31 @@ function GoalMarkerController.SetEventOverride(target: Instance?, text: string?)
 	clearWorldMarker()
 	currentGoalIndex = nil
 	refresh()
+end
+
+-- The tutorial layer: `targetName` (a plot target, or nil on a UI step)
+-- with `text`; SetTutorialTarget(nil, nil, false) ends it.
+function GoalMarkerController.SetTutorialTarget(targetName: string?, text: string?, active: boolean)
+	local current = tutorialLayer
+	if active and current and current.Name == targetName and current.Text == (text or "") then
+		return
+	end
+	if not active and not current then
+		return
+	end
+	tutorialLayer = if active then { Name = targetName, Text = text or "" } else nil
+	clearWorldMarker()
+	currentGoalIndex = nil
+	refresh()
+end
+
+-- Where the marker points now (the floor under the target), for the lit
+-- path; nil when nothing is marked.
+function GoalMarkerController.GetMarkedPosition(): Vector3?
+	if movingTarget then
+		return movingTarget.Position
+	end
+	return targetPosition
 end
 
 -- A target in your own plot by GoalConfig name ("GachaStation",

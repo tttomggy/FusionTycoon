@@ -61,7 +61,7 @@ local function tryAutoOpen()
 	autoOpened = true
 	task.spawn(function()
 		task.wait(OPEN_DELAY_SECONDS)
-		while UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() do
+		while UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() or TycoonController.IsTutorialActive() do
 			task.wait(RETRY_SECONDS)
 		end
 		DailyController.Open()

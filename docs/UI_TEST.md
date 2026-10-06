@@ -1653,3 +1653,85 @@ Heist, the result cards, the celebration):
 - [ ] A thief carries one of yours: that pedestal stays BeingStolen; after
   the delivery it refills with your next best.
 - [ ] `/selftest`: PASS both "auto-display" lines.
+
+## 37. Tutorial
+
+**New player, 1920×1080** (`/tutorial reset`, or a fresh Studio profile)
+
+- [ ] Welcome card: icon, title, 2 short sentences, green OK; the game is
+  dimmed behind it. Nothing else pops up (no shop / deal / Starter / Daily
+  card, no tips) until the end.
+- [ ] Claim: after OK a glowing path runs from your feet to your lab's
+  claim pad (it follows you as you move), the arrow and the pulsing floor
+  ring mark it; claiming completes it ("✓ Nice!" + sound, next card 0.6 s
+  later).
+- [ ] Upgrade: path to the Basic Generator, UPGRADES ringed; an upgrade
+  from the world prompt OR the panel completes it.
+- [ ] Pull: the pad reads "FREE · 2 left"; two pulls give two plain
+  Commons, the pad price doesn't move; done after the second.
+- [ ] Pedestals: path to pedestal 1 and the $/s line ringed while the card
+  is up; OK completes it.
+- [ ] Fuse: path to the machine; in the Fuse panel the ring walks
+  AUTO-FILL → the odds chips → FUSE; the fusion succeeds (a Rare, big card,
+  then it goes on display); the next card waits for the big card.
+- [ ] Index: INDEX ringed; opening it completes the step.
+- [ ] Multiplier: without the cash the card says "Come back when you have
+  $X" and OK completes it; with the cash, buying level 1 does.
+- [ ] Lab weather (event chip ringed) and Free gifts (GIFTS ringed): OK.
+  No shop step, no shop mention anywhere.
+- [ ] LOCK: path to the console; standing at it completes it; then the
+  Stealing card. Rebirth: REBIRTH ringed; opening the panel completes it.
+- [ ] You're ready: LET'S GO! ends it; held tips show now; the path now
+  follows the current goal; 👣 on the goal card turns it off / on.
+
+**Phone (iPhone emulator)**
+
+- [ ] Cards fit above the bottom bar; coach rings wrap the phone buttons;
+  the path is visible from the phone camera.
+
+**Leave and rejoin**
+
+- [ ] Leave mid-way (e.g. at Fuse) with `FT_StudioSaves`: rejoining shows
+  the same step's card; steps already done (claimed, upgraded) are skipped.
+- [ ] An old save with Rebirth 1+ (or > 20 pulls): no tutorial, one toast
+  "New: replay the tutorial in ⚙ Settings".
+
+**Replay and help**
+
+- [ ] ⚙ Settings → ▶ REPLAY TUTORIAL: every step again as an OK-card, no
+  free pulls.
+- [ ] "?" in Fuse (6 cards: same tier, 2–6 orbs + odds, a fail keeps your
+  best, mutations, Secret at Rebirth 1), Upgrades, Index and Rebirth;
+  "How it works" (H) at the LOCK console and the Gacha Pad: ◀ ▶ and OK.
+- [ ] `/selftest`: PASS "tutorial: every step completes in order", "no shop
+  or deal pop-up while it runs", "a save left mid-way resumes at its step".
+
+## 38. Combat
+
+Studio: Test → 2 players. `/rebirths 3` on both (Laser and Freeze Ray need
+Rebirth 2–3), `/weapons all` for the Slap Glove and Banana Peel.
+
+- [ ] Rebirth 0: the weapon bar shows 🏏 🔫 🥶 greyed with R1 / R2 / R3; a
+  tap says "Unlocks at Rebirth N". Nobody can hit you and you can't hit.
+- [ ] Rebirth 1: the card "🏏 You got a Bat!" (after the tutorial); 1 / a
+  tap equips it, again unequips; the equipped circle has a gold ring.
+- [ ] Bat a player in front of you: they ragdoll with a hop and a
+  "💫 BONK! 💫", stand up after 1.5 s, shimmer for 3 s (can't be hit). The
+  cooldown wipe empties over 1.2 s; spamming does nothing extra.
+- [ ] Right after spawning (5 s) nobody can hit you.
+- [ ] Laser Gun: aim (mouse / screen centre on touch) at a runner 30+
+  studs away: a thin red beam, they ragdoll; through a wall: no hit.
+- [ ] Freeze Ray: the target turns icy blue and walks at 40% for 3 s.
+- [ ] Banana Peel: it lands in front of you; the first enemy to step on
+  it slips (SLIP!); one out at a time, gone after 20 s.
+- [ ] Bat a thief mid-carry: the orb flies home, the owner sees "SAVED!",
+  the thief "BONK! You dropped it!"; both inventories unchanged.
+- [ ] Knock an owner off their pedestal: GUARDED drops, the steal works.
+- [ ] While carrying: the bar is greyed, swings say "Hands full".
+- [ ] While ragdolled: no prompts, LOCK says "Get up first!", a steal is
+  refused.
+- [ ] The Rebirth panel's unlock line lists 🏏 Bat / 🔫 Laser Gun / 🥶 Freeze
+  Ray at Rebirth 1 / 2 / 3.
+- [ ] `/selftest`: PASS "a Rebirth-0 player can't be hit", "the cooldown is
+  enforced on the server", "knocking a thief returns the orb" (2 players),
+  and the junk-remote fuzz (RequestHit) with no error or change.

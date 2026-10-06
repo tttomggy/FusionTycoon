@@ -44,6 +44,7 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
@@ -58,6 +59,17 @@ export type InventoryItem = {
 	InUse: boolean,
 	-- MutationConfig name ("Golden", "Charged", ...); nil = normal.
 	Mutation: string?,
+}
+
+export type TutorialState = {
+	Step: number, -- TutorialConfig.Steps index; 0 = not decided yet
+	Done: boolean,
+	FreeFuse: boolean, -- the once-per-account guaranteed fusion was used
+	FreePulls: number, -- tutorial pulls left (free, plain Commons)
+	PullsGranted: boolean, -- the 2 free pulls were granted (once per account)
+	Base: number, -- the counter (pulls / fusions) when the step started
+	Replay: boolean, -- replayed from Settings: every step is done on OK
+	ReplayHint: boolean, -- an old save skipped it: "replay it in ⚙" once
 }
 
 export type PlayerData = {
@@ -113,6 +125,10 @@ export type PlayerData = {
 	-- The deal slot (DealConfig slot start, UTC) whose "New deal!" card
 	-- already showed: once per deal, across rejoins. 0 = none yet.
 	DealPopupSlot: number,
+	-- The first-time tutorial (TutorialConfig / TutorialService).
+	Tutorial: TutorialState,
+	-- Earned weapons (CombatConfig ids -> true; CombatService grants them).
+	Weapons: { [string]: boolean },
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
@@ -265,6 +281,27 @@ local SETTINGS_SYNC_DELAY_SECONDS = 0.25 -- a burst of SetSettings syncs once
 
 ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTOSAVE_INTERVAL_SECONDS)
 
+-- The tutorial's saved state (TutorialConfig): Step 0 = not decided yet.
+local function sanitizeTutorial(raw: unknown): TutorialState
+	local t = if typeof(raw) == "table" then raw :: any else {}
+	local function whole(value: unknown, max: number): number
+		if typeof(value) == "number" and value == value and value >= 0 and value < math.huge then
+			return math.min(math.floor(value), max)
+		end
+		return 0
+	end
+	return {
+		Step = whole(t.Step, 1000),
+		Done = t.Done == true,
+		FreeFuse = t.FreeFuse == true,
+		FreePulls = whole(t.FreePulls, 10),
+		PullsGranted = t.PullsGranted == true,
+		Base = whole(t.Base, 2 ^ 40),
+		Replay = t.Replay == true,
+		ReplayHint = t.ReplayHint == true,
+	}
+end
+
 local DEFAULT_DATA: PlayerData = {
 	Cash = 0,
 	Inventory = {},
@@ -288,6 +325,17 @@ local DEFAULT_DATA: PlayerData = {
 	Cosmetics = {},
 	Sessions = 0,
 	DealPopupSlot = 0,
+	Weapons = {},
+	Tutorial = {
+		Step = 0,
+		Done = false,
+		FreeFuse = false,
+		FreePulls = 0,
+		PullsGranted = false,
+		Base = 0,
+		Replay = false,
+		ReplayHint = false,
+	},
 	Daily = DailyConfig.Default(),
 	Gifts = GiftConfig.Default(-1),
 	BestIncome = 0,
@@ -449,6 +497,14 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
 	end
+	data.Tutorial = sanitizeTutorial(raw.Tutorial)
+	if typeof(raw.Weapons) == "table" then
+		for id, owned in raw.Weapons do
+			if owned == true and CombatConfig.GetWeapon(id) then
+				data.Weapons[id] = true
+			end
+		end
+	end
 	-- A slot start: a finite whole number of seconds (NaN fails >= 0).
 	if typeof(raw.DealPopupSlot) == "number" and raw.DealPopupSlot >= 0 and raw.DealPopupSlot < math.huge then
 		data.DealPopupSlot = math.floor(raw.DealPopupSlot)
@@ -549,6 +605,32 @@ end
 -- Disk -> session -> disk must be lossless: toDisk(data), reconcile it back,
 -- toDisk again, compare (LastOnline is stamped per call, so skipped). In
 -- memory only: no profile is read or written.
+-- /selftest: a save that left mid-tutorial resumes at its saved step
+-- (disk copy -> reconcile keeps the whole Tutorial state).
+function PlayerDataService.SelfTestTutorialRoundTrip(player: Player): (boolean, string?)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false, "no data loaded"
+	end
+	local before = canonical(data.Tutorial)
+	local after = canonical(reconcile(deepCopy(toDisk(data))).Tutorial)
+	return before == after, if before == after then nil else ("%s became %s"):format(before, after)
+end
+
+-- /selftest saves and restores the tester's own tutorial state around the
+-- drive.
+function PlayerDataService.SelfTestSwapTutorial(player: Player, tutorial: TutorialState?): TutorialState?
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return nil
+	end
+	local old = deepCopy(data.Tutorial)
+	if tutorial then
+		data.Tutorial = deepCopy(tutorial)
+	end
+	return old
+end
+
 function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
 	local data = state.sessionCache[player.UserId]
 	if not data then
@@ -594,6 +676,8 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		Index = data.Index,
 		Cosmetics = data.Cosmetics,
 		DealPopupSlot = data.DealPopupSlot,
+		Tutorial = data.Tutorial,
+		Weapons = data.Weapons,
 	})
 end
 
@@ -1333,6 +1417,62 @@ function PlayerDataService.MarkDealPopup(player: Player, slot: number): boolean
 	return true
 end
 
+-- CombatService: the earned weapons, and granting one (true if it's new).
+function PlayerDataService.GetWeapons(player: Player): { [string]: boolean }
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Weapons else {}
+end
+
+function PlayerDataService.GrantWeapon(player: Player, id: string): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data or not CombatConfig.GetWeapon(id) or data.Weapons[id] then
+		return false
+	end
+	data.Weapons[id] = true
+	return true
+end
+
+function PlayerDataService.ResetWeapons(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Weapons = {}
+	end
+end
+
+-- The pad's free tutorial pull (TycoonService): takes one if any are left.
+function PlayerDataService.TakeTutorialFreePull(player: Player): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data or data.Tutorial.Done or data.Tutorial.FreePulls <= 0 then
+		return false
+	end
+	data.Tutorial.FreePulls -= 1
+	return true
+end
+
+function PlayerDataService.RefundTutorialFreePull(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Tutorial.FreePulls += 1
+	end
+end
+
+function PlayerDataService.GetTutorialFreePulls(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data and not data.Tutorial.Done then data.Tutorial.FreePulls else 0
+end
+
+-- FusionService: the tutorial's first fusion always succeeds (once per
+-- account, only on its Fuse step). True = this fusion is the free one.
+function PlayerDataService.TakeTutorialFreeFuse(player: Player, fuseStep: number): boolean
+	local data = state.sessionCache[player.UserId]
+	local t = data and data.Tutorial
+	if not t or t.Done or t.Replay or t.FreeFuse or t.Step ~= fuseStep then
+		return false
+	end
+	t.FreeFuse = true
+	return true
+end
+
 function PlayerDataService.GetSessions(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.Sessions else 0
@@ -1422,6 +1562,16 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
+		Weapons = indexKeys(data and data.Weapons or {}),
+		Tutorial = if data
+			then {
+				Step = data.Tutorial.Step,
+				Done = data.Tutorial.Done,
+				FreePulls = data.Tutorial.FreePulls,
+				Replay = data.Tutorial.Replay,
+				ReplayHint = data.Tutorial.ReplayHint,
+			}
+			else nil,
 		Settings = SettingsConfig.Sanitize(data and data.Settings or nil),
 		Shop = {
 			OwnedPasses = indexKeys(PlayerDataService.GetOwnedPasses(player)),
@@ -1750,6 +1900,12 @@ function PlayerDataService:Init()
 				changed = PlayerDataService.SetSfx(player, request.Value, nil)
 			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
 				changed = PlayerDataService.SetSfx(player, nil, request.Value)
+			elseif request.Key == "GoalPath" and SettingsConfig.IsGoalPathValue(request.Value) then
+				local data = state.sessionCache[player.UserId]
+				if data then
+					data.Settings.GoalPath = request.Value
+					changed = true
+				end
 			elseif request.Key == "AutoFuse" and typeof(request.Value) == "boolean" then
 				local data = state.sessionCache[player.UserId]
 				if data then

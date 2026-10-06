@@ -89,12 +89,27 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		MarkTipSeen = { {}, { { Id = "nope" } }, { { Id = 5 } }, { { Id = BIG_STRING } } },
 		-- Never the current slot: 0, a wrong slot, junk types.
 		MarkDealPopup = { {}, { "x" }, { { Slot = "1" } }, { { Slot = 1 } }, { { Slot = 1.5 } } },
+		-- Never a real hit: unknown / junk weapons, junk targets and vectors.
+		RequestHit = {
+			{},
+			{ "x" },
+			{ { Weapon = "Nope" } },
+			{ { Weapon = 5 } },
+			{ { Weapon = "Bat", TargetUserId = "x" } },
+			{ { Weapon = "LaserGun", Direction = "x" } },
+			{ { Weapon = "LaserGun", Direction = Vector3.new(NAN, 0, 0) } },
+			{ { Weapon = "FreezeRay", Direction = Vector3.new(INF, 0, 0) } },
+			{ { Weapon = "BananaPeel", Origin = Vector3.new(1e9, 0, 0) } },
+		},
+		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
+		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
 		AdminAction = { {}, { { Action = "Nope" } }, { { Action = "StartEvent", Args = { Id = "Nope" } } } },
 	}
 	for _, n in junkNumbers do
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
 		table.insert(cases.MarkDealPopup, { { Slot = n } })
+		table.insert(cases.RequestHit, { { Weapon = "Bat", TargetUserId = n } })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
 	return cases
