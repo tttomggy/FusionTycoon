@@ -79,7 +79,8 @@ function InventoryController.GetFusableItemsByTier(tier: string): { any }
 		end
 	end
 	table.sort(results, function(a, b)
-		local rankA, rankB = MutationConfig.GetRank(a.Mutation), MutationConfig.GetRank(b.Mutation)
+		local rankA = MutationConfig.GetStackedMultiplier(a.Mutation, a.EventMutations)
+		local rankB = MutationConfig.GetStackedMultiplier(b.Mutation, b.EventMutations)
 		if rankA ~= rankB then
 			return rankA < rankB
 		end
@@ -97,7 +98,7 @@ end
 function InventoryController.GetFuseAllItemsByTier(tier: string): { any }
 	local results = {}
 	for _, item in InventoryController.GetFusableItemsByTier(tier) do
-		if item.Mutation == nil then
+		if item.Mutation == nil and item.EventMutations == nil then
 			table.insert(results, item)
 		end
 	end

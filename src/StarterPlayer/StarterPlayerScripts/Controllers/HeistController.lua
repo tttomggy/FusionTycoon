@@ -63,6 +63,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -310,8 +311,11 @@ local function buildVisual(player: Player)
 		return
 	end
 	local mutation = player:GetAttribute("HeistMutation")
+	local rawEvents = player:GetAttribute("HeistEventMutations")
+	local events = MutationConfig.SanitizeEvents(if typeof(rawEvents) == "string" then rawEvents:split(",") else nil)
 	local center = head.CFrame * CFrame.new(0, head.Size.Y / 2 + CARRY_HEIGHT_ABOVE_HEAD, 0)
-	local group = PedestalVisuals.BuildCarryOrb(tier, if typeof(mutation) == "string" then mutation else nil, center, Workspace)
+	local group =
+		PedestalVisuals.BuildCarryOrb(tier, if typeof(mutation) == "string" then mutation else nil, center, Workspace, events)
 	group.Name = "CarriedOrb_" .. player.UserId
 	attachOrb(group, head)
 	local orb = group.PrimaryPart :: BasePart

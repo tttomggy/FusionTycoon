@@ -775,7 +775,14 @@ end
 
 local function onEventReward(payload: any)
 	if typeof(payload) == "table" and typeof(payload.Caption) == "string" then
-		ResultController.ShowItemCard(payload.Caption, payload.Item, nil, payload.NewIndex == true)
+		ResultController.ShowItemCard(
+			payload.Caption,
+			payload.Item,
+			nil,
+			payload.NewIndex == true,
+			if typeof(payload.Added) == "string" then payload.Added else nil,
+			payload.Stacked == true
+		)
 	end
 end
 

@@ -479,7 +479,7 @@ local function runSelfTest(player: Player)
 	PlayerDataService.SyncTycoon(player)
 	local function rate(uid: string?): number
 		local item = uid and PlayerDataService.GetItemByUid(player, uid)
-		return if item then TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) else -1
+		return if item then TycoonConfig.GetStackCashPerSecond(item) else -1
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
 	local count = PlayerDataService.GetPedestalCount(player)
@@ -487,7 +487,7 @@ local function runSelfTest(player: Player)
 	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
 	for _, item in inventory do
 		if not PlayerDataService.IsItemCarried(player, item.Uid) then
-			best = math.max(best, TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation))
+			best = math.max(best, TycoonConfig.GetStackCashPerSecond(item))
 		end
 	end
 	local ordered = rate(displays[1]) == best

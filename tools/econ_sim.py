@@ -81,6 +81,28 @@ PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # Mutations: (name, income mult, gacha chance, fusion-success chance)
 MUTATIONS = [("Rainbow", 12, 0.001, 0.0005), ("Diamond", 5, 0.008, 0.004), ("Golden", 2, 0.04, 0.02)]
 MUT_MULT = {"None": 1, "Golden": 2, "Charged": 3, "Diamond": 5, "Void": 8, "Rainbow": 12, "Celestial": 20}
+EVENT_ONLY = ("Charged", "Void", "Celestial")
+# Stacking (MutationConfig): an item is a base ("None" / Golden / Diamond /
+# Rainbow) plus a set of event mutations, written "Rainbow+Charged". The
+# multiplier is additive: 1 + sum(mult - 1) (Rainbow + Celestial = 31x).
+
+
+def stack_parts(mu):
+    return [p for p in mu.split("+") if p != "None"]
+
+
+def stack_key(parts):
+    base = [p for p in parts if p not in EVENT_ONLY]
+    events = sorted({p for p in parts if p in EVENT_ONLY}, key=lambda p: MUT_MULT[p])
+    return "+".join(base[:1] + events) or "None"
+
+
+def stack_add(mu, event):
+    return stack_key(stack_parts(mu) + [event])
+
+
+def stack_mult(mu):
+    return 1 + sum(MUT_MULT[p] - 1 for p in stack_parts(mu))
 # Index variants per item: Normal + all six mutations (event-only included),
 # so a full page needs the event mutations too (IndexConfig: 17 x 7 = 119).
 INDEX_VARIANTS = 7
@@ -189,7 +211,10 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     def add(tier, mut):
         inv[(tier, mut)] = inv.get((tier, mut), 0) + 1
         if DEPTH:
-            index.add((tier, rng.randrange(ITEMS_PER_TIER[tier]), mut))
+            # A stacked item fills the entry of EACH of its mutations.
+            item = rng.randrange(ITEMS_PER_TIER[tier])
+            for part in stack_parts(mut) or ["None"]:
+                index.add((tier, item, part))
 
     def mult():
         return 1 if mult_lvl == 0 else MULT_LEVELS[mult_lvl - 1][1]
@@ -210,7 +235,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     def ped_items():
         items = []
         for (tr, mu), n in inv.items():
-            items += [(PEDESTAL_CPS[tr] * MUT_MULT[mu], tr, mu)] * min(n, pedestals)
+            items += [(PEDESTAL_CPS[tr] * stack_mult(mu), tr, mu)] * min(n, pedestals)
         items.sort(reverse=True)
         return items[:pedestals]
 
@@ -268,7 +293,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             if roll < 0:
                 tier = tr
                 break
-        add(tier, "Celestial" if rng.random() < METEOR_CELESTIAL else "None")
+        # The normal pull roll for the base, Celestial stacked on top.
+        base = roll_mut(False)
+        add(tier, stack_add(base, "Celestial") if rng.random() < METEOR_CELESTIAL else base)
 
     def lightning():
         # One strike on a random displayed item in a SERVER_PLAYERS server.
@@ -278,9 +305,12 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         if not shown:
             return
         _, tr, mu = rng.choice(shown)
-        if mu == "None" and rng.random() < LIGHTNING_CHARGE_CHANCE:
-            inv[(tr, "None")] -= 1
-            add(tr, "Charged")
+        # Stacks onto any item that isn't Charged yet (stacking).
+        if "Charged" not in stack_parts(mu) and rng.random() < LIGHTNING_CHARGE_CHANCE:
+            inv[(tr, mu)] -= 1
+            inv[(tr, stack_add(mu, "Charged"))] = inv.get((tr, stack_add(mu, "Charged")), 0) + 1
+            if DEPTH:
+                index.add((tr, rng.randrange(ITEMS_PER_TIER[tr]), "Charged"))
 
     step = 1.0
     while t < horizon:
@@ -361,7 +391,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         for tr in TIERS[1:]:
             if tr in owned: mark(f"first_{tr}")
         for mu in MUT_MULT:
-            if mu != "None" and any(n > 0 and m == mu for (tr, m), n in inv.items()):
+            if mu != "None" and any(n > 0 and mu in stack_parts(m) for (tr, m), n in inv.items()):
                 mark(f"first_{mu}")
         if mult_lvl == len(MULT_LEVELS): mark("mult_max")
         if gen["sing"] >= 10: mark("sing_lv10")

@@ -360,11 +360,18 @@ local function onRareFusionAnnouncement(payload: any)
 	local text: string
 	if typeof(payload.PlayerName) == "string" and typeof(payload.ItemName) == "string" then
 		local who = UIKit.EscapeRichText(payload.PlayerName)
-		local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(payload.ItemName, mutation))
+		-- A stacked item's banner names the whole stack; `mutation` is its top.
+		local events = MutationConfig.SanitizeEvents(payload.EventMutations)
+		local base = if mutation and not MutationConfig.IsEventOnly(mutation) then mutation else nil
+		local name = UIKit.EscapeRichText(
+			if events then MutationConfig.GetDisplayName(payload.ItemName, base, events)
+				else MutationConfig.GetDisplayName(payload.ItemName, mutation)
+		)
 		local mutationColor = UITheme.GetMutationColor(mutation)
 		if payload.Verb == "event" and mutation then
 			-- An event-only mutation: a SERVER banner at any tier, in its colour.
-			local word = UIKit.Colored(mutation:upper(), mutationColor or Colors.Text)
+			local label = if events then MutationConfig.GetStackLabel(base, events) else mutation:upper()
+			local word = UIKit.Colored(UIKit.EscapeRichText(label), mutationColor or Colors.Text)
 			local item = UIKit.EscapeRichText(payload.ItemName)
 			local line = if payload.Source == "VoidMoon"
 				then ("%s got a %s %s under the Void Moon!"):format(who, word, item)
@@ -514,7 +521,13 @@ local function onFusionResolved(result: any)
 	if not ResultController.FusionBannerShows(result) then
 		return
 	end
-	showFusionBanner(newItem, ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource))
+	showFusionBanner(
+		newItem,
+		ResultController.GetMutationSourceLine(
+			MutationConfig.GetStackLabel(newItem.Mutation, newItem.EventMutations),
+			result.MutationSource
+		)
+	)
 end
 
 -- /trailer: your own "FUSION SUCCESS!" banner for a local item (no rule
@@ -528,8 +541,10 @@ end
 showFusionBanner = function(newItem: any, sourceLine: string?)
 	local tier = newItem.Tier :: string
 	local def = ItemConfig.GetItemById(newItem.ItemId)
-	local name = UIKit.EscapeRichText(MutationConfig.GetDisplayName(def and def.Name or tostring(newItem.ItemId), newItem.Mutation))
-	local mutationColor = UITheme.GetMutationColor(newItem.Mutation)
+	local name = UIKit.EscapeRichText(
+		MutationConfig.GetDisplayName(def and def.Name or tostring(newItem.ItemId), newItem.Mutation, newItem.EventMutations)
+	)
+	local mutationColor = UITheme.GetMutationColor(MutationConfig.GetTop(newItem.Mutation, newItem.EventMutations))
 	enqueueInstant({
 		Text = ("FUSION SUCCESS! → %s %s%s"):format(
 			tierWord(tier),

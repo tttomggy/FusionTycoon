@@ -308,7 +308,7 @@ function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 	for index, uid in pedestalDisplays do
 		local item = byUid[uid]
 		if item and index <= count and not carriedUids[uid] then
-			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
+			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation, EventMutations = item.EventMutations })
 		end
 	end
 	return items

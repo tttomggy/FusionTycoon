@@ -77,8 +77,8 @@ end
 -- The order pedestals fill in: $/s, then tier, then whatever is already up
 -- (no needless shuffling between equals), then Uid (stable).
 local function better(a: any, b: any, currentIndex: { [string]: number }): boolean
-	local rateA = TycoonConfig.GetItemCashPerSecond(a.Tier, a.Mutation)
-	local rateB = TycoonConfig.GetItemCashPerSecond(b.Tier, b.Mutation)
+	local rateA = TycoonConfig.GetStackCashPerSecond(a)
+	local rateB = TycoonConfig.GetStackCashPerSecond(b)
 	if rateA ~= rateB then
 		return rateA > rateB
 	end
@@ -182,7 +182,7 @@ function ItemService.Arrange(player: Player)
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
 			if pedestal then
 				if item then
-					PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+					PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 				else
 					PedestalVisuals.Clear(pedestal)
 				end
@@ -224,7 +224,7 @@ function ItemService.RebuildDisplayVisuals(player: Player)
 		local item = PlayerDataService.GetItemByUid(player, uid)
 		-- A carried item's pedestal is HeistService's until the heist ends.
 		if pedestal and item and not PlayerDataService.IsItemCarried(player, uid) then
-			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 		end
 	end
 end

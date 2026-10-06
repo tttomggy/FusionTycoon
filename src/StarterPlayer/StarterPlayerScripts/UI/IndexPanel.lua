@@ -709,7 +709,7 @@ local function toastNew(items: { any }, completedTiers: { string })
 		local item = items[1]
 		ToastController.Show(
 			("NEW IN INDEX · %s · %s"):format(
-				MutationConfig.GetDisplayName(itemName(item.ItemId), item.Mutation),
+				MutationConfig.GetDisplayName(itemName(item.ItemId), item.Mutation, item.EventMutations),
 				percent(IndexConfig.BonusPerEntry)
 			),
 			"Neutral"

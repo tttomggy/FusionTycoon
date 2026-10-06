@@ -57,8 +57,12 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
-	-- MutationConfig name ("Golden", "Charged", ...); nil = normal.
+	-- The BASE mutation (MutationConfig: Golden / Diamond / Rainbow); nil =
+	-- normal.
 	Mutation: string?,
+	-- Stacked event mutations (Charged / Void / Celestial), sorted by rank,
+	-- each at most once; nil = none (MutationConfig.SanitizeEvents).
+	EventMutations: { string }?,
 }
 
 export type TutorialState = {
@@ -412,6 +416,25 @@ end
 
 -- Fills any field missing from an older save with its default, so new
 -- features never index nil on an old profile.
+-- Marks the Index entry of EVERY mutation an item has (a stacked Rainbow +
+-- Charged fills both columns; a plain item fills Normal). Returns whether
+-- any entry was new.
+local function markIndex(data: PlayerData, item: InventoryItem): boolean
+	local isNew = false
+	local list = MutationConfig.List(item.Mutation, item.EventMutations)
+	if #list == 0 then
+		list = { "" }
+	end
+	for _, mutation in list do
+		local key = IndexConfig.GetKey(item.ItemId, if mutation == "" then nil else mutation)
+		if not data.Index[key] then
+			isNew = true
+			data.Index[key] = true
+		end
+	end
+	return isNew
+end
+
 local function reconcile(raw: any): PlayerData
 	local data = deepCopy(DEFAULT_DATA)
 	if typeof(raw) ~= "table" then
@@ -539,12 +562,11 @@ local function reconcile(raw: any): PlayerData
 	for _, item in data.Inventory do
 		item.InUse = displayed[item.Uid] == true
 		-- Old saves have no mutation; an unknown one (renamed/removed) is
-		-- dropped rather than left to break lookups.
-		if item.Mutation ~= nil and not MutationConfig.IsValid(item.Mutation) then
-			item.Mutation = nil
-		end
+		-- dropped rather than left to break lookups. Stacking: an event-only
+		-- base (pre-stacking saves) moves into EventMutations.
+		item.Mutation, item.EventMutations = MutationConfig.Normalize(item.Mutation, item.EventMutations)
 		-- Backfill: everything already owned counts as found.
-		data.Index[IndexConfig.GetKey(item.ItemId, item.Mutation)] = true
+		markIndex(data, item)
 	end
 	return data
 end
@@ -976,24 +998,26 @@ function PlayerDataService.AddItem(
 	player: Player,
 	itemId: string,
 	tier: string,
-	mutation: string?
+	mutation: string?,
+	eventMutations: { string }?
 ): (InventoryItem?, boolean)
 	local data = state.sessionCache[player.UserId]
 	if not data then
 		return nil, false
 	end
 
+	-- An event-only `mutation` lands in the set (callers may hand one name).
+	local base, events = MutationConfig.Normalize(mutation, eventMutations)
 	local entry: InventoryItem = {
 		Uid = HttpService:GenerateGUID(false),
 		ItemId = itemId,
 		Tier = tier,
 		InUse = false,
-		Mutation = if MutationConfig.IsValid(mutation) then mutation else nil,
+		Mutation = base,
+		EventMutations = events,
 	}
 	table.insert(data.Inventory, entry)
-	local key = IndexConfig.GetKey(itemId, entry.Mutation)
-	local isNew = not data.Index[key]
-	data.Index[key] = true
+	local isNew = markIndex(data, entry)
 	return entry, isNew
 end
 
@@ -1124,20 +1148,39 @@ function PlayerDataService.IncrementTotalFusions(player: Player)
 	end
 end
 
--- Changes an owned item's mutation in place (same Uid; Power Surge
--- lightning Charging a displayed item) and marks its Index entry. Returns
--- whether that Index entry is new. The caller re-syncs and restyles.
+-- Changes an owned item's base mutation in place (same Uid; /give, tests)
+-- and marks its Index entries. An event-only name is ADDED to the stack
+-- instead (AddItemEventMutation). Returns whether an Index entry is new.
+-- The caller re-syncs and restyles.
 function PlayerDataService.SetItemMutation(player: Player, uid: string, mutation: string?): boolean
+	if mutation ~= nil and MutationConfig.IsEventOnly(mutation) then
+		local _, isNew = PlayerDataService.AddItemEventMutation(player, uid, mutation)
+		return isNew
+	end
 	local data = state.sessionCache[player.UserId]
 	local item = PlayerDataService.GetItemByUid(player, uid)
 	if not data or not item or (mutation ~= nil and not MutationConfig.IsValid(mutation)) then
 		return false
 	end
 	item.Mutation = mutation
-	local key = IndexConfig.GetKey(item.ItemId, mutation)
-	local isNew = data.Index[key] ~= true
-	data.Index[key] = true
-	return isNew
+	return markIndex(data, item)
+end
+
+-- Stacks an event mutation onto an owned item in place (same Uid; a Power
+-- Surge strike adds Charged). The same one never stacks twice. Returns
+-- (added, isNewIndexEntry).
+function PlayerDataService.AddItemEventMutation(player: Player, uid: string, mutation: string): (boolean, boolean)
+	local data = state.sessionCache[player.UserId]
+	local item = PlayerDataService.GetItemByUid(player, uid)
+	if not data or not item then
+		return false, false
+	end
+	local events, added = MutationConfig.AddEvent(item.EventMutations, mutation)
+	if not added then
+		return false, false
+	end
+	item.EventMutations = events
+	return true, markIndex(data, item)
 end
 
 -- Marks a one-time tip seen (TipConfig ids only).
@@ -1217,7 +1260,7 @@ function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.Ped
 		if uid and index <= count and not (carried and carried[uid]) then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
-				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
+				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation, EventMutations = item.EventMutations })
 			end
 		end
 	end

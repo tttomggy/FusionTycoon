@@ -101,10 +101,20 @@ function TycoonConfig.GetPedestalCashPerSecond(tier: string): number
 end
 
 -- What one item earns on a pedestal, before the income multiplier: its
--- tier's rate x its mutation's multiplier. Every item $/s shown or paid
--- goes through this.
-function TycoonConfig.GetItemCashPerSecond(tier: string, mutation: string?): number
-	return TycoonConfig.GetPedestalCashPerSecond(tier) * MutationConfig.GetMultiplier(mutation)
+-- tier's rate x its STACKED mutation multiplier (1 + sum(mult - 1) over
+-- the base and every event mutation; MutationConfig.GetStackedMultiplier).
+-- `mutations` is the item's base name or the whole list
+-- (MutationConfig.List). Every item $/s shown or paid goes through this.
+function TycoonConfig.GetItemCashPerSecond(tier: string, mutations: (string | { string })?): number
+	local multiplier = if typeof(mutations) == "table"
+		then MutationConfig.GetStackedMultiplier(nil, mutations)
+		else MutationConfig.GetMultiplier(mutations)
+	return TycoonConfig.GetPedestalCashPerSecond(tier) * multiplier
+end
+
+-- The same for an item (anything with Tier / Mutation / EventMutations).
+function TycoonConfig.GetStackCashPerSecond(item: { Tier: string, Mutation: string?, EventMutations: { string }? }): number
+	return TycoonConfig.GetItemCashPerSecond(item.Tier, MutationConfig.List(item.Mutation, item.EventMutations))
 end
 
 export type GeneratorDef = {
@@ -299,7 +309,7 @@ end
 	TycoonController.GetIncomeInputs (client); later features add fields
 	here, so nothing else should assemble one by hand.
 ]]
-export type PedestalItem = { Tier: string, Mutation: string? }
+export type PedestalItem = { Tier: string, Mutation: string?, EventMutations: { string }? }
 
 export type IncomeInputs = {
 	GeneratorLevels: { [string]: number },
@@ -360,7 +370,7 @@ end
 function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
 	local total = baseGeneratorCashPerSecond(inputs.GeneratorLevels) * (inputs.EventGeneratorMultiplier or 1)
 	for _, item in inputs.PedestalItems do
-		total += TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
+		total += TycoonConfig.GetStackCashPerSecond(item)
 	end
 	return total * TycoonConfig.GetIncomeMultiplier(inputs)
 end

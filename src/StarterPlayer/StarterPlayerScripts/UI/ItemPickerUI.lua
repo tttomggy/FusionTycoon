@@ -35,6 +35,7 @@ export type PickerEntry = {
 	Name: string,
 	Tier: string,
 	Mutation: string?,
+	EventMutations: { string }?,
 	InUse: boolean?,
 }
 
@@ -47,6 +48,7 @@ type Card = {
 	Name: string, -- includes the mutation ("Golden Star Core")
 	Tier: string,
 	Mutation: string?,
+	EventMutations: { string }?,
 	Count: number,
 	InUseCount: number,
 	FreeEntries: { PickerEntry },
@@ -90,8 +92,12 @@ local function getMultiplier(): number
 	return TycoonController.GetIncomeMultiplier()
 end
 
-local function earnRate(tier: string, mutation: string?): number
-	return TycoonConfig.GetItemCashPerSecond(tier, mutation) * getMultiplier()
+local function earnRate(card: Card): number
+	return TycoonConfig.GetStackCashPerSecond(card) * getMultiplier()
+end
+
+local function topOf(card: Card): string?
+	return MutationConfig.GetTop(card.Mutation, card.EventMutations)
 end
 
 local function groupCards(entries: { PickerEntry }): { Card }
@@ -100,14 +106,15 @@ local function groupCards(entries: { PickerEntry }): { Card }
 	for _, entry in entries do
 		-- Mutated and normal copies of an item are separate stacks.
 		local id = entry.ItemId or entry.Name
-		local key = ("%s|%s"):format(id, entry.Mutation or "Normal")
+		local key = ("%s|%s"):format(id, MutationConfig.GetStackLabel(entry.Mutation, entry.EventMutations))
 		local card = byId[key]
 		if not card then
 			card = {
 				ItemId = id,
-				Name = MutationConfig.GetDisplayName(entry.Name, entry.Mutation),
+				Name = MutationConfig.GetDisplayName(entry.Name, entry.Mutation, entry.EventMutations),
 				Tier = entry.Tier,
 				Mutation = entry.Mutation,
+				EventMutations = entry.EventMutations,
 				Count = 0,
 				InUseCount = 0,
 				FreeEntries = {},
@@ -125,8 +132,8 @@ local function groupCards(entries: { PickerEntry }): { Card }
 	-- Best items first: what they earn (tier x mutation) descending, then
 	-- tier, then name.
 	table.sort(cards, function(a, b)
-		local rateA = TycoonConfig.GetItemCashPerSecond(a.Tier, a.Mutation)
-		local rateB = TycoonConfig.GetItemCashPerSecond(b.Tier, b.Mutation)
+		local rateA = TycoonConfig.GetStackCashPerSecond(a)
+		local rateB = TycoonConfig.GetStackCashPerSecond(b)
 		if rateA ~= rateB then
 			return rateA > rateB
 		end
@@ -162,12 +169,12 @@ local function refreshFooter()
 		return
 	end
 
-	local orb = UIKit.TierOrb(card.Tier, 44, nil, card.Mutation)
+	local orb = UIKit.TierOrb(card.Tier, 44, nil, topOf(card))
 	orb.ZIndex = footerOrbSlot.ZIndex
 	orb.Parent = footerOrbSlot
 	footerName.Text = card.Name
 	footerDetail.Text = ("Earns %s with your %s · %s"):format(
-		UIKit.Colored(NumberFormat.Money(earnRate(card.Tier, card.Mutation)) .. "/s", Colors.Cash),
+		UIKit.Colored(NumberFormat.Money(earnRate(card)) .. "/s", Colors.Cash),
 		NumberFormat.Multiplier(getMultiplier()),
 		pedestals
 	)
@@ -243,9 +250,9 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 	})
 	-- UIGridLayout sizes the holder; the body already fills it.
 	local z = body.ZIndex + 1
-	UIKit.MutationCardStroke(body, card.Mutation)
+	UIKit.MutationCardStroke(body, topOf(card))
 
-	local orb = UIKit.TierOrb(card.Tier, 74, nil, card.Mutation)
+	local orb = UIKit.TierOrb(card.Tier, 74, nil, topOf(card))
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 16)
 	orb.ZIndex = z
@@ -278,7 +285,7 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 	})
 	UIKit.Label({
 		Name = "Earn",
-		Text = NumberFormat.Money(earnRate(card.Tier, card.Mutation)) .. "/s",
+		Text = NumberFormat.Money(earnRate(card)) .. "/s",
 		Font = Fonts.Body,
 		TextSize = 12,
 		TextColor3 = Colors.Cash,
@@ -290,11 +297,16 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 	})
 
 	-- Mutation tag top-right (×2 / ×5 / ×12); the stack count drops below it.
+	-- A stack is a row of small pills ("RAINBOW" "CHARGED" "×14").
+	local stacked = card.EventMutations ~= nil and #MutationConfig.List(card.Mutation, card.EventMutations) > 1
 	local mutationPill = UIKit.MutationPill({
 		Parent = body,
 		Mutation = card.Mutation,
+		EventMutations = card.EventMutations,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -6, 0, 6),
+		TextSize = if stacked then 9 else nil,
+		Height = if stacked then 16 else nil,
 		ZIndex = z + 2,
 	})
 	local countY = if mutationPill then 28 else 6

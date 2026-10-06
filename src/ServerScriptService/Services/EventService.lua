@@ -233,12 +233,19 @@ export type MutationSource = "VoidMoon" | "Lightning" | "Meteor" | "Debug"
 -- The SERVER banner for an event-only mutation, at any tier: "Har got a
 -- VOID Nova Heart under the Void Moon!" (AnnouncementController, Verb
 -- "event").
-function EventService.AnnounceEventMutation(player: Player, item: { ItemId: string, Tier: string, Mutation: string? }, source: MutationSource)
+function EventService.AnnounceEventMutation(
+	player: Player,
+	item: { ItemId: string, Tier: string, Mutation: string?, EventMutations: { string }? },
+	source: MutationSource
+)
 	local def = ItemConfig.GetItemById(item.ItemId)
+	-- The banner's colour word is the top of the stack; the line names it all.
+	local label = MutationConfig.GetStackLabel(item.Mutation, item.EventMutations)
 	RemoteEvents.RareFusionAnnouncement:FireAllClients({
-		Message = ("%s got a %s %s!"):format(player.DisplayName, tostring(item.Mutation):upper(), def and def.Name or item.ItemId),
+		Message = ("%s got a %s %s!"):format(player.DisplayName, label, def and def.Name or item.ItemId),
 		Tier = item.Tier,
-		Mutation = item.Mutation,
+		Mutation = MutationConfig.GetTop(item.Mutation, item.EventMutations),
+		EventMutations = item.EventMutations,
 		PlayerName = player.DisplayName,
 		Verb = "event",
 		Source = source,
@@ -250,9 +257,9 @@ local function isFeedTier(tier: string): boolean
 	return (ItemConfig.Tiers[tier] or 0) >= (ItemConfig.Tiers[EFFECT_FEED_MIN_TIER] or math.huge)
 end
 
-local function itemName(item: { ItemId: string, Mutation: string? }): string
+local function itemName(item: { ItemId: string, Mutation: string?, EventMutations: { string }? }): string
 	local def = ItemConfig.GetItemById(item.ItemId)
-	return MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
+	return MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation, item.EventMutations)
 end
 
 local function getRoot(player: Player): BasePart?
@@ -514,7 +521,8 @@ local function pickTarget(): Target?
 	return lab[rng:NextInteger(1, #lab)]
 end
 
--- The bolt on a marked target: it may turn a plain item Charged. Returns
+-- The bolt on a marked target: it may STACK Charged onto the item (any
+-- base mutation stays; an item already Charged is skipped). Returns
 -- whether it did.
 local function strike(target: Target): boolean
 	-- Still the same item on that pedestal, and not carried off meanwhile.
@@ -523,12 +531,21 @@ local function strike(target: Target): boolean
 		return false
 	end
 	local item = PlayerDataService.GetItemByUid(target.Owner, target.Uid)
-	if not item or item.Mutation ~= nil or rng:NextNumber() >= EventConfig.LightningChargeChance then
+	if
+		not item
+		or MutationConfig.HasEvent(item.EventMutations, "Charged")
+		or rng:NextNumber() >= EventConfig.LightningChargeChance
+	then
 		return false
 	end
+	-- Something was already on it: the card says "+ CHARGED (stacked!)".
+	local stacked = #MutationConfig.List(item.Mutation, item.EventMutations) > 0
 	-- Charged: inventory, Index, pedestal visuals and labels, then the syncs.
-	local isNew = PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
-	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation)
+	local added, isNew = PlayerDataService.AddItemEventMutation(target.Owner, target.Uid, "Charged")
+	if not added then
+		return false
+	end
+	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation, item.EventMutations)
 	TycoonService.RefreshPedestalLabels(target.Owner)
 	RemoteEvents.SyncInventory:FireClient(target.Owner, PlayerDataService.GetInventory(target.Owner))
 	PlayerDataService.SyncTycoon(target.Owner)
@@ -538,6 +555,8 @@ local function strike(target: Target): boolean
 		Item = item,
 		NewIndex = isNew,
 		Source = "Lightning",
+		Added = "Charged",
+		Stacked = stacked,
 	})
 	EventService.AnnounceEventMutation(target.Owner, item, "Lightning")
 	return true
@@ -597,31 +616,44 @@ local function rollCoreItem(): (string?, string, string?)
 		end
 	end
 	local def = ItemConfig.PickRandomOfTier(tier, rng)
-	local mutation = if rng:NextNumber() < EventConfig.MeteorCelestialChance then "Celestial" else nil
-	return def and def.Id, tier, mutation
+	return def and def.Id, tier
 end
 
 local function grantCore(player: Player)
-	local itemId, tier, mutation = rollCoreItem()
+	local itemId, tier = rollCoreItem()
 	if not itemId then
 		warn(("EventService: no ItemConfig entry for meteor tier %s"):format(tier))
 		return
 	end
-	local entry, isNew = PlayerDataService.AddItem(player, itemId, tier, mutation)
+	-- The normal pull roll for the base, then Celestial ON TOP (stacking).
+	local multipliers: MutationConfig.OddsMultipliers = {}
+	for _, name in MutationConfig.Order do
+		multipliers[name] = EventService.GetMutationOddsMultiplier(name, "Pull")
+	end
+	local base = MutationConfig.Roll(rng, PlayerDataService.GetLuck(player), "Pull", multipliers)
+	local celestial = rng:NextNumber() < EventConfig.MeteorCelestialChance
+	local entry, isNew = PlayerDataService.AddItem(player, itemId, tier, base, if celestial then { "Celestial" } else nil)
 	if not entry then
 		return
 	end
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
-	RemoteEvents.EventReward:FireClient(player, { Caption = "☄ METEOR CORE", Item = entry, NewIndex = isNew, Source = "Meteor" })
-	if mutation and MutationConfig.IsEventOnly(mutation) then
+	RemoteEvents.EventReward:FireClient(player, {
+		Caption = "☄ METEOR CORE",
+		Item = entry,
+		NewIndex = isNew,
+		Source = "Meteor",
+		Added = if celestial then "Celestial" else nil,
+		Stacked = celestial and entry.Mutation ~= nil,
+	})
+	if celestial then
 		EventService.AnnounceEventMutation(player, entry, "Meteor")
 	elseif isFeedTier(tier) then
 		local def = ItemConfig.GetItemById(itemId)
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s grabbed a %s from a meteor!"):format(player.DisplayName, itemName(entry)),
 			Tier = tier,
-			Mutation = mutation,
+			Mutation = base,
 			PlayerName = player.DisplayName,
 			Verb = "grabbed",
 			ItemName = def and def.Name or itemId,
@@ -649,7 +681,13 @@ function EventService.GrantEventMutationItem(player: Player, mutation: string): 
 		then "VoidMoon"
 		elseif mutation == "Charged" then "Lightning"
 		else "Meteor"
-	RemoteEvents.EventReward:FireClient(player, { Caption = "EVENT MUTATION", Item = entry, NewIndex = isNew, Source = source })
+	RemoteEvents.EventReward:FireClient(player, {
+		Caption = "EVENT MUTATION",
+		Item = entry,
+		NewIndex = isNew,
+		Source = source,
+		Added = mutation,
+	})
 	EventService.AnnounceEventMutation(player, entry, source)
 	return true
 end

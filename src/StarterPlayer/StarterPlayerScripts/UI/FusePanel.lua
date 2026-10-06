@@ -116,7 +116,7 @@ end
 
 local function itemName(item: any): string
 	local def = ItemConfig.GetItemById(item.ItemId)
-	return MutationConfig.GetDisplayName(if def then def.Name else tostring(item.ItemId), item.Mutation)
+	return MutationConfig.GetDisplayName(if def then def.Name else tostring(item.ItemId), item.Mutation, item.EventMutations)
 end
 
 local function fusableTiers(): { string }
@@ -189,26 +189,38 @@ local function predictionText(items: { any }, nextTier: string): (string?, boole
 		return nil, false, nil
 	end
 	local mix = FusionConfig.GetMutationMix(items)
-	local best = mix.Best
-	if not best then
+	-- Stacking: the base and the event mutations, "GOLDEN + CHARGED".
+	local function stackWords(base: string?, events: { string }?): string
+		local words = {}
+		for _, name in MutationConfig.List(base, events) do
+			table.insert(words, name:upper())
+		end
+		return table.concat(words, " + ")
+	end
+	local bestTop = MutationConfig.GetTop(mix.Best, mix.AllEvents)
+	if not bestTop then
 		return nil, false, nil
 	end
 	if not mix.Mixed then
-		return ("✨ Keeps %s ×%d, might roll better"):format(best:upper(), MutationConfig.GetMultiplier(best)),
+		return ("✨ Keeps %s ×%d, might roll better"):format(
+			stackWords(mix.Kept, mix.KeptEvents),
+			MutationConfig.GetStackedMultiplier(mix.Kept, mix.KeptEvents)
+		),
 			false,
-			UITheme.GetMutationColor(best)
+			UITheme.GetMutationColor(MutationConfig.GetTop(mix.Kept, mix.KeptEvents))
 	end
+	local bestWords = stackWords(mix.Best, mix.AllEvents)
 	local below = if mix.BelowShared then (mix.BelowMutation or "plain") else "lower"
-	local result = if mix.Kept then mix.Kept else "plain"
-	return ("⚠ %d %s orb%s mixed in: the %s comes out %s, not %s. Use only %s orbs to keep %s."):format(
+	local keptWords = stackWords(mix.Kept, mix.KeptEvents)
+	local result = if keptWords ~= "" then keptWords else "plain"
+	return ("⚠ %d %s orb%s mixed in: the %s comes out %s, not %s. Use only %s orbs to keep it all."):format(
 		mix.BelowCount,
 		below,
 		if mix.BelowCount == 1 then "" else "s",
 		nextTier,
 		result,
-		best,
-		best,
-		best
+		bestWords,
+		bestWords
 	),
 		true,
 		Colors.Text
@@ -254,16 +266,14 @@ local function refreshChamber()
 		end
 		local item = items[index]
 		-- A red ring on every orb dragging the result's mutation down.
-		local dragging = item ~= nil
-			and mix.Mixed
-			and MutationConfig.GetRank(item.Mutation) < MutationConfig.GetRank(mix.Best)
+		local dragging = item ~= nil and FusionConfig.IsDragging(mix, item)
 		local ring = slot:FindFirstChildOfClass("UIStroke")
 		if ring then
 			ring.Color = if dragging then Colors.Danger else Colors.Faint
 			ring.Thickness = if dragging then 4 else 2
 		end
 		if item then
-			local orb = UIKit.TierOrb(item.Tier, hex.Slot - 10, nil, item.Mutation)
+			local orb = UIKit.TierOrb(item.Tier, hex.Slot - 10, nil, MutationConfig.GetTop(item.Mutation, item.EventMutations))
 			orb.Name = "Orb"
 			orb.AnchorPoint = Vector2.new(0.5, 0.5)
 			orb.Position = UDim2.fromScale(0.5, 0.5)
@@ -423,9 +433,10 @@ local function buildCard(item: any, order: number)
 		NoShadow = true,
 		ZIndex = grid.ZIndex + 1,
 	})
-	UIKit.MutationCardStroke(body, item.Mutation)
+	local top = MutationConfig.GetTop(item.Mutation, item.EventMutations)
+	UIKit.MutationCardStroke(body, top)
 	local z = body.ZIndex + 1
-	local orb = UIKit.TierOrb(item.Tier, 48, nil, item.Mutation)
+	local orb = UIKit.TierOrb(item.Tier, 48, nil, top)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 8)
 	orb.ZIndex = z
@@ -447,8 +458,8 @@ local function buildCard(item: any, order: number)
 	-- so it stays legible at 12 px inside the card.
 	UIKit.MutationPill({
 		Parent = body,
-		Mutation = item.Mutation,
-		Label = if item.Mutation then ("×%d"):format(MutationConfig.GetMultiplier(item.Mutation)) else nil,
+		Mutation = top,
+		Label = if top then ("×%d"):format(MutationConfig.GetStackedMultiplier(item.Mutation, item.EventMutations)) else nil,
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -4),
 		TextSize = 12,
@@ -550,15 +561,19 @@ end
 --[[ Actions ------------------------------------------------------------------ ]]
 
 -- Tops the chamber up to 6. Empty chamber: unmutated items, as before.
--- Otherwise only items with the SAME mutation as the first orb in, so a
--- fill never drags a mutation down.
-local function matchingUids(mutation: string?): { string }
-	if mutation == nil then
+-- Otherwise only items with the SAME stack (base and event set) as the
+-- first orb in, so a fill never drags a mutation down.
+local function matchingUids(first: any?): { string }
+	if first == nil or MutationConfig.GetTop(first.Mutation, first.EventMutations) == nil then
 		return FusionController.GetAutoFill(selectedTier)
 	end
 	local uids = {}
 	for _, item in InventoryController.GetInventory() do
-		if item.Tier == selectedTier and item.Mutation == mutation and not InventoryController.IsCarried(item) then
+		if
+			item.Tier == selectedTier
+			and MutationConfig.SameStack(item.Mutation, item.EventMutations, first.Mutation, first.EventMutations)
+			and not InventoryController.IsCarried(item)
+		then
 			table.insert(uids, item.Uid)
 		end
 	end
@@ -570,7 +585,7 @@ local function autoFill()
 		return
 	end
 	local first = selectedItems()[1]
-	for _, uid in matchingUids(if first then first.Mutation else nil) do
+	for _, uid in matchingUids(first) do
 		if #selected >= FusionConfig.MaxFusionInputs then
 			break
 		end

@@ -164,7 +164,7 @@ local function requestFusion(uids: { string }?, safe: boolean?)
 		RevealEffects.PlayReveal(handles, {
 			AccentColor = FusionConfig.TierAccentColors[resultTier] or Color3.new(1, 1, 1),
 			-- A failed roll never gets the big treatment, even on a high tier.
-			IsMajor = result.Upgraded == true and FusionConfig.IsMajorReveal(resultTier, result.NewItem.Mutation),
+			IsMajor = result.Upgraded == true and FusionConfig.IsMajorReveal(resultTier, result.NewItem.Mutation, result.NewItem.EventMutations),
 		})
 	end
 

@@ -60,7 +60,7 @@ type WorldServiceModule = typeof(require(script.Parent.WorldService))
 local FusionMachineService: FusionMachineServiceModule
 local WorldService: WorldServiceModule
 
-type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string? }
+type PulledItem = { Def: ItemConfig.ItemDef, Mutation: string?, EventMutations: { string }? }
 
 -- Run after every successful pull (FusionService: Auto-Fuse). A plain list
 -- so FusionService can subscribe without this service referencing it.
@@ -490,7 +490,10 @@ local function announcePull(player: Player, item: PlayerDataService.InventoryIte
 	local def = ItemConfig.GetItemById(item.ItemId)
 	local itemName = if def then def.Name else item.ItemId
 	RemoteEvents.RareFusionAnnouncement:FireAllClients({
-		Message = ("%s pulled a %s!"):format(player.DisplayName, MutationConfig.GetDisplayName(itemName, item.Mutation)),
+		Message = ("%s pulled a %s!"):format(
+			player.DisplayName,
+			MutationConfig.GetDisplayName(itemName, item.Mutation, item.EventMutations)
+		),
 		Tier = item.Tier,
 		Mutation = item.Mutation,
 		PlayerName = player.DisplayName,
@@ -508,13 +511,15 @@ local function rollPulls(count: number, luck: number): { PulledItem }?
 	local pullMultipliers = EventState.GetMutationMultipliers("Pull")
 	for _ = 1, count do
 		local tier = FusionConfig.RollGachaTier(gachaRng, luck)
+		-- The base roll, then the event roll stacked on top (stacking).
 		local mutation = MutationConfig.Roll(gachaRng, luck, "Pull", pullMultipliers)
+		local events = MutationConfig.RollEvents(gachaRng, luck, "Pull", pullMultipliers)
 		local def = ItemConfig.PickRandomOfTier(tier, gachaRng)
 		if not def then
 			warn(("TycoonService: no ItemConfig entry found for tier %s"):format(tier))
 			return nil
 		end
-		table.insert(pulls, { Def = def, Mutation = mutation })
+		table.insert(pulls, { Def = def, Mutation = mutation, EventMutations = events })
 	end
 	return pulls
 end
@@ -532,7 +537,7 @@ local function grantPulls(
 		if not free then
 			PlayerDataService.IncrementGachaPulls(player)
 		end
-		local entry, isNew = PlayerDataService.AddItem(player, pull.Def.Id, pull.Def.Tier, pull.Mutation)
+		local entry, isNew = PlayerDataService.AddItem(player, pull.Def.Id, pull.Def.Tier, pull.Mutation, pull.EventMutations)
 		if entry then
 			table.insert(items, entry)
 			if isNew then
@@ -918,7 +923,7 @@ local function restoreSavedPedestals(plot: Model, player: Player)
 		local pedestal = folder:FindFirstChild("Pedestal" .. pedestalIndex)
 		local item = uid and PlayerDataService.GetItemByUid(player, uid)
 		if pedestal and pedestal:IsA("BasePart") and item then
-			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 		elseif uid and not item then
 			-- Points at an item that no longer exists; free the slot.
 			PlayerDataService.SetPedestalDisplay(player, pedestalIndex, nil)
@@ -1144,8 +1149,10 @@ function TycoonService.GrantRewardItem(player: Player, tier: string, caption: st
 	if not puller or not def then
 		return false
 	end
-	local mutation = MutationConfig.Roll(gachaRng, getLuck(player), "Pull", EventState.GetMutationMultipliers("Pull"))
-	return puller({ { Def = def, Mutation = mutation } }, caption)
+	local multipliers = EventState.GetMutationMultipliers("Pull")
+	local mutation = MutationConfig.Roll(gachaRng, getLuck(player), "Pull", multipliers)
+	local events = MutationConfig.RollEvents(gachaRng, getLuck(player), "Pull", multipliers)
+	return puller({ { Def = def, Mutation = mutation, EventMutations = events } }, caption)
 end
 
 -- Registers `callback(player)` to run after every successful pull (Pull
@@ -1193,11 +1200,12 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 			pedestal:SetAttribute("Filled", item ~= nil)
 			if item then
 				local def = ItemConfig.GetItemById(item.ItemId)
-				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
-				local rate = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier
+				local name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation, item.EventMutations)
+				local rate = TycoonConfig.GetStackCashPerSecond(item) * multiplier
 				BillboardKit.SetPedestalLabel(pedestal, {
 					Tier = item.Tier,
 					Mutation = item.Mutation,
+					EventMutations = item.EventMutations,
 					ItemName = name,
 					Rate = rate,
 					Stolen = PlayerDataService.IsItemCarried(player, item.Uid),

@@ -560,6 +560,7 @@ local function buildBrowseEntries(): { any }
 			Name = def and def.Name or item.ItemId,
 			Tier = item.Tier,
 			Mutation = item.Mutation,
+			EventMutations = item.EventMutations,
 			InUse = InventoryController.IsInUse(item),
 		})
 	end
