@@ -34,6 +34,8 @@ local tipsSeen: { [string]: boolean } = {}
 -- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
 export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Replay: boolean, ReplayHint: boolean }
 local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
+-- Earned weapon ids (snapshot Weapons; CombatService grants them).
+local weapons: { string } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
@@ -189,6 +191,10 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 end
 
 -- A one-time tip/card was already shown to this account.
+function TycoonController.GetWeapons(): { string }
+	return weapons
+end
+
 function TycoonController.GetTutorial(): TutorialView
 	return tutorial
 end
@@ -443,6 +449,16 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 		tipsSeen = fresh
+	end
+	if typeof(snapshot.Weapons) == "table" then
+		local fresh: { string } = {}
+		for _, id in snapshot.Weapons do
+			if typeof(id) == "string" then
+				table.insert(fresh, id)
+			end
+		end
+		table.sort(fresh)
+		weapons = fresh
 	end
 	local rawTutorial = snapshot.Tutorial
 	if typeof(rawTutorial) == "table" then

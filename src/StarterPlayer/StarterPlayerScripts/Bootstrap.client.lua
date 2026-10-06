@@ -26,6 +26,7 @@ local DailyController = require(Controllers.DailyController)
 local SelfTestController = require(Controllers.SelfTestController)
 local TrailerController = require(Controllers.TrailerController)
 local TutorialController = require(Controllers.TutorialController)
+local CombatController = require(Controllers.CombatController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -47,6 +48,7 @@ DailyController.Init()
 SelfTestController.Init() -- Studio /selftest only
 TrailerController.Init() -- /trailer (admins; client-only cinematic)
 TutorialController.Init() -- the first-time tutorial (cards, lit path, coach rings)
+CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.
