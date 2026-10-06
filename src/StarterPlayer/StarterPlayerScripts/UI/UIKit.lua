@@ -1029,6 +1029,16 @@ function UIKit.GetCardBottom(): number
 	return if UIKit.IsPhone() then UIKit.BOTTOM_BAR_RESERVE.Phone else UIKit.BOTTOM_BAR_RESERVE.Desktop
 end
 
+-- Logical y for the top of a card `visualHeight` px tall (after its fit
+-- scale): centred in the band between GetCardTop and GetCardBottom, so a
+-- short card on a tall desktop screen sits mid-screen instead of hugging
+-- the top bar; a card that fills the band starts at GetCardTop.
+function UIKit.GetCardY(visualHeight: number): number
+	local top = UIKit.GetCardTop()
+	local available = UIKit.GetLogicalViewport().Y - top - UIKit.GetCardBottom()
+	return top + math.max(0, math.floor((available - visualHeight) / 2))
+end
+
 local function chatWindowOn(): boolean
 	if UIKit.IsPhone() or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
 		return false
@@ -1075,7 +1085,8 @@ function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): nu
 		end
 		holder:SetAttribute("CardPlaced", true)
 		holder.AnchorPoint = Vector2.new(holder.AnchorPoint.X, 0)
-		holder.Position = UDim2.new(position.X.Scale, 0, 0, top) + UDim2.fromOffset(UIKit.GetCardShift(width * fit), 0)
+		holder.Position = UDim2.new(position.X.Scale, 0, 0, UIKit.GetCardY(height * fit))
+			+ UDim2.fromOffset(UIKit.GetCardShift(width * fit), 0)
 	else
 		fit = math.clamp((view.Y - 2 * (margin or 12)) / height, 0.5, 1)
 	end
@@ -1293,15 +1304,19 @@ function UIKit.Modal(props: ModalProps): Modal
 		local available = math.max(120, view.Y - top - UIKit.GetCardBottom())
 		local width = math.min(view.X * 0.92, props.MaxSize.X + chrome.X)
 		local fit = 1
+		local visualHeight: number
 		if props.FitContent then
 			-- Its layout needs its design height: keep it, shrink to fit.
 			local design = math.min(props.MaxSize.Y + chrome.Y, view.Y * 0.9)
 			root.Size = UDim2.new(0.92, 0, 0, design)
 			fit = math.clamp(available / design, 0.5, 1)
+			visualHeight = design * fit
 		else
 			root.Size = UDim2.new(0.92, 0, 0, available)
+			-- The UISizeConstraint below caps it at MaxSize.
+			visualHeight = math.min(available, props.MaxSize.Y + chrome.Y)
 		end
-		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, top)
+		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, UIKit.GetCardY(visualHeight))
 		root:SetAttribute("FitScale", fit)
 		if gui.Enabled then
 			getPopScale(root).Scale = fit

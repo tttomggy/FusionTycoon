@@ -764,11 +764,13 @@ src/StarterPlayer/StarterPlayerScripts/
   `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
   a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
   `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
-- **Card placement:** every `UIKit.Modal` and centred card is
-  **top-anchored** at `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also
-  past the 170 × 60 Roblox buttons after the 0.8 scale: 79 logical),
-  horizontally centred, down to the HUD's bottom row
-  (`UIKit.GetCardBottom()`: 99 / 95 logical), never over it. The desktop
+- **Card placement:** every `UIKit.Modal` and centred card lives in the
+  band from `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also past the
+  170 × 60 Roblox buttons after the 0.8 scale: 79 logical) down to the
+  HUD's bottom row (`UIKit.GetCardBottom()`: 99 / 95 logical), never over
+  it, and is **centred in that band** (`UIKit.GetCardY(visualHeight)`:
+  a short card on a 1080p screen sits mid-screen; a card that fills the
+  band, as on phones, starts at GetCardTop), horizontally centred. The desktop
   chat (`UIKit.CHAT_WIDTH` 400 px) only slides a card right when its left
   edge overlaps it and there's room (`GetCardShift`); never down.
   `FitContent` modals (Fuse, Daily, Rebirth, How to Heist, welcome-back)
