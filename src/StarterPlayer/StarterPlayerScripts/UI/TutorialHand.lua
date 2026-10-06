@@ -23,7 +23,6 @@
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local TweenService = game:GetService("TweenService")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.UIKit)
@@ -45,7 +44,6 @@ local handGui: ScreenGui
 local handRoot: Frame
 local handLabel: TextLabel
 local handShadow: TextLabel
-local handBob: UIScale? = nil
 local target: GuiObject? = nil
 
 local buttonGui: ScreenGui

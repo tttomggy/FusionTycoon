@@ -40,7 +40,6 @@ local TycoonController = require(script.Parent.Parent.Controllers.TycoonControll
 local HudGate = {}
 
 local Colors = UITheme.Colors
-local Fonts = UITheme.Fonts
 
 local NEW_SECONDS = 3
 local SPARKLE_COUNT = 6

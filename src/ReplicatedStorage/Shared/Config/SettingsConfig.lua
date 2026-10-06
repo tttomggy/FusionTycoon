@@ -4,8 +4,9 @@
 	--------------
 	Player settings (PlayerData.Settings, saved; sent as Settings in the
 	snapshot; changed with SetSetting { Key, Tier?, Value }). Sections:
-	which pulls and fusions get the big reveal card, and the sound-effects
-	volume.
+	which BEST OF 10 / ×10 results, Auto-Fuse results and fusions get the big
+	reveal card (a single pull always gets it, at every tier), and the
+	sound-effects volume.
 
 	SfxVolume 0..1 (default 0.8; the server clamps it) and SfxMuted: every
 	SoundKit slot plays at its Volume x SfxVolume (0 when muted), through
