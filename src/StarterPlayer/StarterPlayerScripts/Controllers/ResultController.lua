@@ -1487,6 +1487,11 @@ function ResultController.ShowItemCard(caption: string, item: any, description: 
 end
 
 -- /trailer: closes the big card (or event card) now.
+-- A big result card is on screen (the tutorial waits for it).
+function ResultController.IsBigCardOpen(): boolean
+	return bigHolder ~= nil
+end
+
 function ResultController.CloseCards()
 	closeBigCard()
 end

@@ -16,7 +16,7 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 
 local ToastController = {}
 
-export type ToastKind = "Error" | "Neutral"
+export type ToastKind = "Error" | "Neutral" | "Success"
 
 local Colors = UITheme.Colors
 
@@ -76,7 +76,20 @@ local order = 0
 
 export type ToastOptions = { Big: boolean? }
 
+-- While the tutorial runs, one-time tips (big toasts) wait: `hold` says
+-- whether to hold them now; FlushHeld shows what waited, in order.
+local holdBig: (() -> boolean)? = nil
+local held: { { Text: string, Kind: ToastKind?, Options: ToastOptions? } } = {}
+
+function ToastController.SetBigHold(hold: () -> boolean)
+	holdBig = hold
+end
+
 function ToastController.Show(text: string, kind: ToastKind?, options: ToastOptions?)
+	if options and options.Big and holdBig and holdBig() then
+		table.insert(held, { Text = text, Kind = kind, Options = options })
+		return
+	end
 	local parent = ensureBuilt()
 	order += 1
 	local big = options ~= nil and options.Big == true
@@ -104,7 +117,12 @@ function ToastController.Show(text: string, kind: ToastKind?, options: ToastOpti
 	UIKit.Padding(body, 0, 18, 0, 18)
 	UIKit.Corner(body, UITheme.Radius.Toast)
 	UIKit.Stroke(body, UITheme.Stroke.Default)
-	UIKit.PairGradient(body, if kind == "Neutral" then UITheme.Gradients.Disabled else UITheme.Gradients.Red)
+	UIKit.PairGradient(
+		body,
+		if kind == "Neutral" then UITheme.Gradients.Disabled
+			elseif kind == "Success" then UITheme.Gradients.Green
+			else UITheme.Gradients.Red
+	)
 	UIKit.Label({
 		Name = "Text",
 		Text = text,
@@ -133,6 +151,14 @@ function ToastController.Show(text: string, kind: ToastKind?, options: ToastOpti
 end
 
 -- Raises the toast stack by `inset` px (a bottom result card is showing).
+function ToastController.FlushHeld()
+	local waiting = held
+	held = {}
+	for index, toast in waiting do
+		task.delay((index - 1) * 1.5, ToastController.Show, toast.Text, toast.Kind, toast.Options)
+	end
+end
+
 function ToastController.SetBottomInset(inset: number)
 	bottomInset = inset
 	local frame = ensureBuilt()

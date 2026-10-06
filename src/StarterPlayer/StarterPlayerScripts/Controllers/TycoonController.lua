@@ -30,6 +30,9 @@ local pendingOffline = 0
 local carriedUids: { [string]: boolean } = {}
 -- One-time tips/cards already seen (saved; TipConfig ids).
 local tipsSeen: { [string]: boolean } = {}
+-- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
+export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Replay: boolean, ReplayHint: boolean }
+local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
@@ -182,6 +185,16 @@ function TycoonController.GetPedestalDisplay(pedestalIndex: number): string?
 end
 
 -- A one-time tip/card was already shown to this account.
+function TycoonController.GetTutorial(): TutorialView
+	return tutorial
+end
+
+-- The tutorial is running: shop side cards, deal pop-ups, the Daily card
+-- and one-time tips wait (TutorialController holds them).
+function TycoonController.IsTutorialActive(): boolean
+	return hasSynced and not tutorial.Done
+end
+
 function TycoonController.HasSeenTip(id: string): boolean
 	return tipsSeen[id] == true
 end
@@ -408,6 +421,16 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 		tipsSeen = fresh
+	end
+	local rawTutorial = snapshot.Tutorial
+	if typeof(rawTutorial) == "table" then
+		tutorial = {
+			Step = if typeof(rawTutorial.Step) == "number" then rawTutorial.Step else 0,
+			Done = rawTutorial.Done == true,
+			FreePulls = if typeof(rawTutorial.FreePulls) == "number" then rawTutorial.FreePulls else 0,
+			Replay = rawTutorial.Replay == true,
+			ReplayHint = rawTutorial.ReplayHint == true,
+		}
 	end
 	carriedUids = {}
 	if typeof(snapshot.CarriedUids) == "table" then

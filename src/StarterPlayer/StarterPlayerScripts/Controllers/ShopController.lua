@@ -202,6 +202,10 @@ local function offerBlocked(fromOverlay: string?): string?
 	if not TycoonController.HasSynced() then
 		return "NotSynced"
 	end
+	-- The tutorial never sells anything; nothing pops up over it.
+	if TycoonController.IsTutorialActive() then
+		return "Tutorial"
+	end
 	if now - lastOfferAt < ShopConfig.OfferCooldownSeconds then
 		return "Cooldown"
 	end
@@ -449,7 +453,7 @@ local function maybeShowStarter()
 	if shop.Sessions ~= ShopConfig.StarterOfferSession or not ShopController.IsAvailable("StarterPack") then
 		return
 	end
-	if UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() then
+	if UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() or TycoonController.IsTutorialActive() then
 		-- Try again in a little while rather than landing on another card.
 		task.delay(20, maybeShowStarter)
 		return

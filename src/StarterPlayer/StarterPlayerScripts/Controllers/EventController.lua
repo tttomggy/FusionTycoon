@@ -1274,6 +1274,11 @@ function EventController.StopPreview()
 	onEventChanged(false)
 end
 
+-- The top-centre HUD chip (the tutorial's coach ring points at it).
+function EventController.GetChip(): GuiObject?
+	return chipHolder
+end
+
 function EventController.IsPreviewing(): boolean
 	return previewId ~= nil
 end

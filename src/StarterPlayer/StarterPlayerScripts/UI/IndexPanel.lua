@@ -737,6 +737,10 @@ end
 
 --[[ Public ------------------------------------------------------------------- ]]
 
+function IndexPanel.IsOpen(): boolean
+	return modal ~= nil and modal.IsOpen()
+end
+
 function IndexPanel.Toggle()
 	if modal.IsOpen() then
 		modal.Close()

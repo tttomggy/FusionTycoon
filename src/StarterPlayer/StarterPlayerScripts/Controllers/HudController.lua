@@ -1522,6 +1522,17 @@ function HudController.ToggleIncomeBreakdown()
 	end)
 end
 
+-- What the tutorial's coach ring wraps: a bottom-bar button (Upgrades,
+-- Items, Index, Rebirth, Settings), "Gifts", or "Income" (the $/s line).
+function HudController.GetCoachTarget(name: string): GuiObject?
+	if name == "Gifts" then
+		return giftsButton
+	elseif name == "Income" then
+		return incomeLabel
+	end
+	return buttonsByName[name]
+end
+
 function HudController.Init()
 	screenGui = UIKit.Screen("Hud", 40)
 

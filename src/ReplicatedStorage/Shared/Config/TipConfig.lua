@@ -18,6 +18,7 @@ TipConfig.Ids = {
 	guarded = true, -- you're at a pedestal its owner is guarding
 	catch = true, -- your first time as a victim: "TOUCH THEM!"
 	lockAfterLoss = true, -- after your first real loss
+	tutorialReplay = true, -- an old save skipped the tutorial: "replay it in ⚙ Settings" once
 } :: { [string]: boolean }
 
 -- "event_<EventId>": the HUD event chip pulses until the first tap for

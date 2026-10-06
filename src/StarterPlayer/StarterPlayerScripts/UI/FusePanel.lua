@@ -98,6 +98,7 @@ local predictionLabel: TextLabel
 local tabsFrame: Frame
 local grid: ScrollingFrame
 local fuseButton: TextButton
+local autoFillHolder: Frame? = nil
 local fuseAllButton: TextButton
 local tabButtons: { [string]: TextButton } = {}
 
@@ -857,7 +858,7 @@ local function buildBar(content: Frame)
 	layout.Parent = bar
 
 	local autoWidth, clearWidth, allWidth = 126, 96, 168
-	UIKit.Button({
+	local _, autoHolder = UIKit.Button({
 		Name = "AutoFill",
 		Parent = bar,
 		Style = "Blue",
@@ -868,6 +869,7 @@ local function buildBar(content: Frame)
 		ZIndex = bar.ZIndex,
 		OnClick = autoFill,
 	})
+	autoFillHolder = autoHolder
 	UIKit.Button({
 		Name = "Clear",
 		Parent = bar,
@@ -972,6 +974,23 @@ function FusePanel.Close()
 	if modal then
 		modal.Close()
 	end
+end
+
+-- The tutorial's coach marks: "AutoFill", "Odds" (the count chips) or
+-- "Fuse"; and how many orbs are in the chamber.
+function FusePanel.GetCoachTarget(name: string): GuiObject?
+	if name == "AutoFill" then
+		return autoFillHolder
+	elseif name == "Odds" then
+		return chipsRow
+	elseif name == "Fuse" then
+		return fuseButton
+	end
+	return nil
+end
+
+function FusePanel.GetSelectedCount(): number
+	return #selected
 end
 
 function FusePanel.IsOpen(): boolean
