@@ -28,9 +28,29 @@ factory line along the left wall or in the UPGRADES panel; both fire
 `RequestUpgrade`; the panel's MAX ×N / MAX ALL fire `RequestUpgradeMax`) →
 Gacha Pad pulls → fuse 2–6 same-tier items in the Fuse panel at your plot's
 Fusion Machine (more = better chance, `FusionConfig.SuccessChanceByCount`;
-success = next tier, fail = keep your best input) → display the best
-4 items on pedestals for passive income → Multiplier Pad multiplies ALL income
-→ Rebirth (Portal, back-right corner) → hunt Secrets, mutations and the Index.
+success = next tier, fail = keep your best input) → your best 4 items go on
+the pedestals **by themselves** for passive income → Multiplier Pad
+multiplies ALL income → Rebirth (the bottom bar's REBIRTH button or the
+Portal, back-right corner) → hunt Secrets, mutations and the Index.
+
+- **Auto-display** (Playtest 7): players never choose. `ItemService.Arrange
+  (player)`, the ONE re-arrange, is a `PlayerDataService.OnSync` hook, so
+  every change (pull, fusion, Fuse All / Auto-Fuse, delivery, theft, event
+  mutation, rebirth, reward item, `/give`) lands on the pedestals in the
+  same sync: spots 1 → 4 (→ 6 with the pass) hold the highest
+  `TycoonConfig.GetItemCashPerSecond` (ties: tier, what's already up,
+  Uid). A carried item's pedestal is left alone (`BeingStolen`) until the
+  heist ends. It sets `InUse`, re-applies only changed pedestals, sends
+  `SyncInventory` when ON DISPLAY tags change, announces a newly displayed
+  Legendary+ and fires `FirstDisplay`. No place / remove remotes, no
+  Display prompt, no pedestal picker, no DISPLAY IT; ITEMS is the
+  inventory view (ON DISPLAY tags); the owner prompt left on a pedestal is
+  the locked spots' `UnlockPrompt`. Displayed items can be fused (spare
+  copies first); only a carried one can't (`ItemCarried`).
+- **REBIRTH button:** the bottom bar is UPGRADES · ITEMS · INDEX ·
+  **REBIRTH** · ⚙. Purple, always there, a fill of cash against
+  `GetRebirthCost` and "$2.1M / $15M"; glows and pulses once affordable;
+  opens `RebirthPanel` from anywhere (it replaced the floating REBIRTH!).
 
 Rebirth (`RebirthService`, numbers in `RebirthConfig`) costs cash
 (`RebirthConfig.GetCost`: $15M ×3.2 each time); cash going to 0 pays it. It
@@ -104,7 +124,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   (`ResultController.FusionBannerShows` decides both; other players still
   see the server-wide banner). The client applies a change at once
   (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
-  UI: the **⚙** 56 px button after INDEX opens `UI/SettingsPanel` (620
+  UI: the **⚙** 56 px button after REBIRTH opens `UI/SettingsPanel` (620
   wide, one scrolling list of sections: "Big reveal card" (one 5-segment
   row per tier + a locked Secret row) and "Sound effects" (see Sounds)).
 - **Saves (ProfileStore, session-locked):** PlayerDataService's backend is
@@ -148,7 +168,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/rebirths <n>`, `/give <itemId> [mutation]`, `/offline <minutes>`
   (pending offline earnings as if away that long, then re-sync: the only
   way to test the welcome-back card, since Studio profiles never save),
-  `/shield <s>` (0 drops it), `/heistcd 0` (clears your thief cooldown),
+  `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips),
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
@@ -172,7 +192,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   round trip, a junk-remote fuzz with no error / state change, every panel
   at both scales with no leftover instances in the panels' own modal guis,
   the phone HUD's left group inside the left 40%, the real deal pop-up
-  path) and prints PASS / FAIL lines;
+  path, every panel label's `TextFits` at both scales, hovering things on
+  their plot, auto-display order) and prints PASS / FAIL lines;
   it refuses unless saves go to the mock store or `FT_StudioTest_1`.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
@@ -544,9 +565,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   WalkSpeed 12. Delivered = the thief's root inside their own walls;
   saved = the owner within 5 studs; timeout, thief death, either side
   leaving, the victim's plot going, shutdown or `/wipe` = it goes back.
-  Thief cooldown 60 s after any attempt (published as the Player attribute
-  `HeistCooldownUntil`, server time; `/heistcd 0` clears it); a victim gets a 120 s auto-shield
-  per loss and loses at most 3 per 10 min. **Fairness:** the owner within
+  **No thief cooldown** (Playtest 7; was 60 s): `RequestSteal` only has a
+  request rate limit (`RemoteGuard.Allow`, 1 a second, burst 2). A victim
+  gets a 60 s auto-shield per loss (was 120: every shield, claim / LOCK /
+  loss, is 60 s at most) and loses at most 3 per 10 min (`LossCap`, what
+  stops a lab being farmed). **Fairness:** the owner within
   `OwnerBlockRadius` (6) of the pedestal when the hold completes guards it
   (rejected `Guarded`; pedestal attribute `GuardedByOwner`, the prompt
   reads "Owner is guarding"); no tag for `TagGraceSeconds` (2) after a grab
@@ -594,9 +617,16 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     your walls). It is sized to its text (`AutomaticSize = X`, 44 px tall,
     14 px side padding), the "?" button 8 px to its right. Tapping it points the goal arrow
     at your console for 8 s ("Your LOCK button is just inside your gate";
-    `HudController.SetLockChipHandler`, answered by HeistController). There
-    is **no steal timer chip**: the cooldown shows on enemy pedestals'
-    prompts ("Steal in 42s") and in the toast. While up, a
+    `HudController.SetLockChipHandler`, answered by HeistController).
+    **LOCK is obvious to everyone** (HeistController, all client-side from
+    `ShieldState`, no remote): the fence (`PlotLayout.ShieldFence`, 12
+    studs, `World.ShieldBright` ForceField, a glowing Neon top edge per
+    panel) fades in over 0.3 s and blinks through its last 5 s; a pulsing
+    pink 🔒 hangs in the gate while locked; a **gate sign** every player
+    sees (`BillboardKit.Chip` + `SetChipGradient`, MaxDistance 150):
+    "🛡 LOCKED · 0:42" pink / "🔓 OPEN" red / "🔓 OPEN · can re-lock in 12s"
+    / "🛡 PROTECTED" teal; an enemy pedestal in a locked lab reads "Locked ·
+    0:42" (prompt mode `Shielded`). While up, a
     0.25 s **eject loop** moves any non-owner whose root is inside the walls
     (`PlotLayout.IsInsidePlot`) to the street spawn in front of the gate.
     Owners under Rebirth 1 are **protected** (plot attribute `Protected`,
@@ -627,10 +657,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     `MarkTipSeen`). Tips are big 4 s toasts (`ToastController.Show(text,
     kind, { Big = true })`). `/tips reset` clears them.
   - Client: WorldLabelController sets each StealPrompt's local `Mode`
-    (precedence Hidden > Locked > Cooldown > Guarded > Steal; Locked,
-    Cooldown ("Steal in 42s") and Guarded are no-hold taps that only toast,
-    since Roblox hides disabled prompts; red hand markers stay on during
-    the cooldown); HeistController draws every carrier's orb (`PedestalVisuals.
+    (precedence Hidden > Locked > Shielded > Guarded > Steal; Locked,
+    Shielded ("Locked · 0:42") and Guarded are no-hold taps that only
+    toast, since Roblox hides disabled prompts); HeistController draws every carrier's orb (`PedestalVisuals.
     BuildCarryOrb`, attributes `Heist*` on the Player), the thief/victim
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
     plot's shield fence, drives your LOCK console and shows GUARDED;
@@ -932,7 +961,7 @@ is a StringValue (an IntValue overflows past int64).
 
 Services never trust client-supplied ownership, tiers, or instance references.
 Resolve everything server-side from the requesting `Player` and validate before
-mutating (see `ItemService.onRequestPlaceItem`, `FusionService.onFusionRequest`).
+mutating (see `HeistService`'s `onRequestSteal`, `FusionService.onFusionRequest`).
 
 ### World layout (plot-local space and the slot grid)
 
@@ -964,7 +993,7 @@ checks that no footprints overlap and everything sits inside the walls.
 - **LOCK console:** `PlotLayout.LOCK_CONSOLE` (10, 0, 27), inside the gate
   right of the walkway, facing the gate; 3 × 3 footprint in the assertion
   block; geometry in `PlotLayout.LockConsole`, prompt distance 8.
-- **Pedestal prompts:** the client handles DisplayPrompts through
+- **Pedestal prompts:** the client handles UnlockPrompts through
   `ProximityPromptService` (PromptTriggered/PromptShown), never by looping a
   folder's children once; server containers are built complete and parented
   last.
@@ -973,7 +1002,17 @@ checks that no footprints overlap and everything sits inside the walls.
   prompts carry `OwnerOnly = true` and are disabled on other clients by
   WorldLabelController.
 - **Hover animation:** tag a Part or Model `FT_Hover`
-  (`PartKit.SetHover`); clients animate it. The server never tweens these.
+  (`PartKit.SetHover`, called once it's built at its final position); clients
+  animate it. The server never tweens these. **The rest pose is the
+  `HoverBase` attribute** (a world CFrame `SetHover` stamps;
+  `PartKit.SetHoverBase` re-stamps after a move), never a "first seen"
+  pose: with streaming a Model arrives before its parts, its pivot was
+  the origin, and orbs / cores were dragged to (0, y, 0), the middle of
+  the street. WorldAnimationController places each part relative to
+  HoverBase from the CFrame it arrived with (late or re-streamed parts
+  land right; satellites are the orbit step's), one BulkMoveTo per frame.
+  `/selftest` checks every target sits within its bob of HoverBase and
+  inside a plot slot, before the fuzz and after a pedestal rebuild.
   Likewise client-only: `FT_Orbit` (mutation satellites round a pedestal
   orb; attributes Count/Radius/Period/Tilt, one BulkMoveTo per frame),
   `FT_Rainbow` (hue-cycling shells) and `FT_PortalSwirl`.
