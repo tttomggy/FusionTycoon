@@ -107,7 +107,7 @@ local function resolveTarget(name: string): Instance?
 		if not pedestals then
 			return nil
 		end
-		for index = 1, TycoonController.GetPedestalCount() do
+		for _, index in TycoonController.GetPedestalOrder() do
 			if not TycoonController.GetPedestalDisplay(index) then
 				return pedestals:FindFirstChild("Pedestal" .. index)
 			end

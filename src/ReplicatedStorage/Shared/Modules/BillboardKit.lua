@@ -595,7 +595,10 @@ end
 
 -- A locked spot (the +2 Pedestals pass): the owner-only empty label reads
 -- "🔒 +2 PEDESTALS" instead of "+ EMPTY". Call after SetPedestalLabel(nil).
-function BillboardKit.SetPedestalLocked(pedestal: BasePart, locked: boolean)
+-- `reason`: "Pass" (spots 5-6, the +2 Pedestals pass), "Floor" (the 2nd
+-- floor, Rebirth 2) or nil (unlocked: "+ EMPTY").
+function BillboardKit.SetPedestalLocked(pedestal: BasePart, reason: string?)
+	local locked = reason ~= nil
 	local empty = pedestal:FindFirstChild("EmptyLabel")
 	local panel = empty and empty:FindFirstChild("Panel")
 	if not panel then
@@ -605,7 +608,7 @@ function BillboardKit.SetPedestalLocked(pedestal: BasePart, locked: boolean)
 	local badge = panel:FindFirstChild("Plus")
 	local glyph = badge and badge:FindFirstChild("Glyph")
 	if word and word:IsA("TextLabel") then
-		word.Text = if locked then "+2 PEDESTALS" else "EMPTY"
+		word.Text = if reason == "Floor" then "REBIRTH 2" elseif locked then "+2 PEDESTALS" else "EMPTY"
 		word.TextColor3 = if locked then Colors.GoldLabel else Colors.Muted
 	end
 	if glyph and glyph:IsA("TextLabel") then

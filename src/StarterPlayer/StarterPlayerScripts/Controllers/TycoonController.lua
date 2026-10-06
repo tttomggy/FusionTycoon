@@ -7,6 +7,7 @@ local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
@@ -304,10 +305,10 @@ function TycoonController.GetDisplayedItems(): { TycoonConfig.PedestalItem }
 		byUid[item.Uid] = item
 	end
 	local items = {}
-	local count = ShopConfig.GetPedestalCount(shop.OwnedPasses)
+	local order = TycoonController.GetPedestalOrder()
 	for index, uid in pedestalDisplays do
 		local item = byUid[uid]
-		if item and index <= count and not carriedUids[uid] then
+		if item and table.find(order, index) and not carriedUids[uid] then
 			table.insert(items, { Tier = item.Tier, Mutation = item.Mutation, EventMutations = item.EventMutations })
 		end
 	end
@@ -365,9 +366,19 @@ function TycoonController.GetShopLuckMultiplier(): number
 	return ShopConfig.GetLuckMultiplier(shop.OwnedPasses, TycoonController.GetBoostSecondsLeft("Luck"))
 end
 
--- 4, or 6 with the +2 Pedestals pass.
+-- The pedestals you can use, in auto-display's fill order (the server's
+-- PlayerDataService.GetPedestalOrder): 1-4, 5-6 with the pass, 7-10 from
+-- Rebirth 2.
+function TycoonController.GetPedestalOrder(): { number }
+	return PlotLayout.GetPedestalOrder(
+		ShopConfig.GetPedestalCount(shop.OwnedPasses) > ShopConfig.BasePedestals,
+		RebirthConfig.HasSecondFloor(rebirths)
+	)
+end
+
+-- 4 / 6 / 8 / 10.
 function TycoonController.GetPedestalCount(): number
-	return ShopConfig.GetPedestalCount(shop.OwnedPasses)
+	return #TycoonController.GetPedestalOrder()
 end
 
 -- Pad x rebirth: the multiplier every per-generator/per-item number shows.

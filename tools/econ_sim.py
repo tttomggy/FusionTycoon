@@ -110,6 +110,10 @@ INDEX_VARIANTS = 7
 # stops spending once the rebirth is within SAVE_SECONDS of income.
 REBIRTH_BASE = 1.5e7
 REBIRTH_GROWTH = 3.2
+# The 2nd floor (PlotLayout.Floor2): 4 more pedestals from this many rebirths
+# (RebirthConfig.SecondFloorRebirths).
+SECOND_FLOOR_REBIRTHS = 2
+SECOND_FLOOR_PEDESTALS = 4
 SAVE_SECONDS = 600
 REBIRTH_INCOME_PER = 0.5   # income x(1 + 0.5 * rebirths)
 REBIRTH_LUCK_PER = 0.05    # luck x(1 + 0.05 * rebirths)
@@ -194,7 +198,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         return (ev, slot) if clock - slot * EV_SLOT < EV_DURATION[ev] else None
 
     shop = PAYERS[payer]
-    pedestals = shop["pedestals"]
+    base_pedestals = shop["pedestals"]
     shop_mult = shop["mult"] * (BOOST_MULT if shop["boost"] else 1)
 
     cash = 0.0
@@ -233,6 +237,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult
 
     def ped_items():
+        pedestals = base_pedestals + (SECOND_FLOOR_PEDESTALS if rebirths >= SECOND_FLOOR_REBIRTHS else 0)
         items = []
         for (tr, mu), n in inv.items():
             items += [(PEDESTAL_CPS[tr] * stack_mult(mu), tr, mu)] * min(n, pedestals)

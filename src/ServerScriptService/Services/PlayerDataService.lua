@@ -37,6 +37,7 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
@@ -407,15 +408,17 @@ local function pedestalDisplaysFromDisk(raw: any): { [number]: string? }
 	end
 	for key, uid in raw do
 		local index = tonumber(key)
-		if index and typeof(uid) == "string" then
-			out[math.floor(index)] = uid
+		-- Only real pedestals (1..PEDESTAL_COUNT); anything else is dropped.
+		if index and index == index and typeof(uid) == "string" then
+			local whole = math.floor(index)
+			if whole >= 1 and whole <= PlotLayout.PEDESTAL_COUNT then
+				out[whole] = uid
+			end
 		end
 	end
 	return out
 end
 
--- Fills any field missing from an older save with its default, so new
--- features never index nil on an old profile.
 -- Marks the Index entry of EVERY mutation an item has (a stacked Rainbow +
 -- Charged fills both columns; a plain item fills Normal). Returns whether
 -- any entry was new.
@@ -435,6 +438,8 @@ local function markIndex(data: PlayerData, item: InventoryItem): boolean
 	return isNew
 end
 
+-- Fills any field missing from an older save with its default, so new
+-- features never index nil on an old profile.
 local function reconcile(raw: any): PlayerData
 	local data = deepCopy(DEFAULT_DATA)
 	if typeof(raw) ~= "table" then
@@ -1253,11 +1258,10 @@ end
 function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
 	local items = {}
 	local carried = state.carriedUids[player.UserId]
-	local count = PlayerDataService.GetPedestalCount(player)
 	for index, uid in PlayerDataService.GetPedestalDisplays(player) do
 		-- A pedestal whose item is being carried off earns nothing; spots 5-6
-		-- count only with the +2 Pedestals pass.
-		if uid and index <= count and not (carried and carried[uid]) then
+		-- count only with the +2 Pedestals pass, 7-10 from Rebirth 2.
+		if uid and PlayerDataService.IsPedestalUnlocked(player, index) and not (carried and carried[uid]) then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
 				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation, EventMutations = item.EventMutations })
@@ -1331,9 +1335,25 @@ function PlayerDataService.IsPolicyRestricted(player: Player): boolean
 	return session == nil or session.Restricted
 end
 
--- 4, or 6 with the +2 Pedestals pass.
+-- The pedestals this player can use, in the order auto-display fills them
+-- (PlotLayout.GetPedestalOrder): 1-4, 5-6 with the +2 Pedestals pass, the
+-- 2nd floor's 7-10 from RebirthConfig.SecondFloorRebirths.
+function PlayerDataService.GetPedestalOrder(player: Player): { number }
+	local data = state.sessionCache[player.UserId]
+	local passes = PlayerDataService.GetOwnedPasses(player)
+	return PlotLayout.GetPedestalOrder(
+		ShopConfig.GetPedestalCount(passes) > ShopConfig.BasePedestals,
+		data ~= nil and RebirthConfig.HasSecondFloor(data.Rebirths)
+	)
+end
+
+function PlayerDataService.IsPedestalUnlocked(player: Player, index: number): boolean
+	return table.find(PlayerDataService.GetPedestalOrder(player), index) ~= nil
+end
+
+-- How many pedestals this player can use (4 / 6 / 8 / 10).
 function PlayerDataService.GetPedestalCount(player: Player): number
-	return ShopConfig.GetPedestalCount(PlayerDataService.GetOwnedPasses(player))
+	return #PlayerDataService.GetPedestalOrder(player)
 end
 
 function PlayerDataService.HasReceipt(player: Player, purchaseId: string): boolean

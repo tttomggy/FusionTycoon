@@ -494,7 +494,8 @@ local function playPass(context: Context, key: string)
 			hooks.CountUpIncome(hooks.GetIncomePerSecond() / factor)
 		end
 	elseif key == "ExtraPedestals" then
-		for index = PlotLayout.PEDESTAL_COUNT - 1, PlotLayout.PEDESTAL_COUNT do
+		-- The pass's two spots: the last two ground pedestals (5-6).
+		for index = PlotLayout.GROUND_PEDESTAL_COUNT - 1, PlotLayout.GROUND_PEDESTAL_COUNT do
 			burstOn(plotPart("Pedestal" .. index), UITheme.World.AccentGold, 40)
 		end
 	elseif key == "LabStyle" then

@@ -482,7 +482,8 @@ local function runSelfTest(player: Player)
 		return if item then TycoonConfig.GetStackCashPerSecond(item) else -1
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
-	local count = PlayerDataService.GetPedestalCount(player)
+	local order = PlayerDataService.GetPedestalOrder(player)
+	local count = #order
 	local best = -1
 	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
 	for _, item in inventory do
@@ -491,12 +492,13 @@ local function runSelfTest(player: Player)
 		end
 	end
 	local ordered = rate(displays[1]) == best
-	for index = 2, count do
-		if displays[index] and rate(displays[index]) > rate(displays[index - 1]) then
+	for position = 2, count do
+		local index, previous = order[position], order[position - 1]
+		if displays[index] and rate(displays[index]) > rate(displays[previous]) then
 			ordered = false
 		end
 	end
-	result(ordered, ("auto-display: pedestals 1-%d hold the best by $/s, in order"):format(count))
+	result(ordered, ("auto-display: the %d unlocked pedestals hold the best by $/s, in fill order"):format(count))
 	local def = ItemConfig.PickRandomOfTier("Secret")
 	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
 	if top then

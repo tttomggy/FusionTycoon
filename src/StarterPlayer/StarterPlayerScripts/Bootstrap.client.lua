@@ -27,6 +27,7 @@ local SelfTestController = require(Controllers.SelfTestController)
 local TrailerController = require(Controllers.TrailerController)
 local TutorialController = require(Controllers.TutorialController)
 local CombatController = require(Controllers.CombatController)
+local JumpPadController = require(Controllers.JumpPadController)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -49,6 +50,7 @@ SelfTestController.Init() -- Studio /selftest only
 TrailerController.Init() -- /trailer (admins; client-only cinematic)
 TutorialController.Init() -- the first-time tutorial (cards, lit path, coach rings)
 CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
+JumpPadController.Init() -- the 2nd floor's jump pads launch your own character
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

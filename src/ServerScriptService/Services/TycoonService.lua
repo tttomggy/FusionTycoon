@@ -29,6 +29,7 @@ local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
+local FloorKit = require(ReplicatedStorage.Shared.Modules.FloorKit)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
@@ -858,10 +859,12 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player)
 
 	local p = PlotLayout.Pedestal
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
+		-- 7-10 stand on the 2nd floor's deck (GetPedestalPosition's y).
+		local base = PlotLayout.GetPedestalPosition(index)
 		local pedestal = PartKit.Part({
 			Name = "Pedestal" .. index,
 			Size = p.ColumnSize,
-			CFrame = PartKit.At(origin, PlotLayout.GetPedestalPosition(index), p.ColumnSize.Y / 2),
+			CFrame = PartKit.At(origin, base, base.Y + p.ColumnSize.Y / 2),
 			Color = World.Structure,
 			Parent = folder,
 		})
@@ -892,9 +895,12 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player)
 		-- The locked spots' "Unlock" (+2 Pedestals pass), owner only: the
 		-- owner's client enables it on a locked spot (pedestals fill
 		-- themselves, ItemService.Arrange, so nothing else needs a prompt).
-		local prompt = newPrompt(pedestal, "UnlockPrompt", "Unlock", "+2 Pedestals", p.PromptDistance)
-		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
-		prompt.Enabled = false
+		-- The 2nd floor has no prompts at all (it unlocks with Rebirth 2).
+		if not PlotLayout.IsFloor2Pedestal(index) then
+			local prompt = newPrompt(pedestal, "UnlockPrompt", "Unlock", "+2 Pedestals", p.PromptDistance)
+			prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+			prompt.Enabled = false
+		end
 
 		-- Hold E to steal (HeistService). Enemy-only: each client enables it
 		-- only for an eligible non-owner (WorldLabelController); the server
@@ -1180,14 +1186,22 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
 	local multiplier = PlayerDataService.GetIncomeMultiplier(player)
-	local unlocked = PlayerDataService.GetPedestalCount(player)
+	-- The 2nd floor: dim rails and the owner's lock label until Rebirth 2.
+	local floorLocked = not RebirthConfig.HasSecondFloor(PlayerDataService.GetRebirths(player))
+	local floor = plot:FindFirstChild(FloorKit.MODEL_NAME)
+	if floor and floor:GetAttribute("Locked") ~= floorLocked then
+		FloorKit.SetLocked(floor, floorLocked)
+	end
 	for index = 1, PlotLayout.PEDESTAL_COUNT do
 		local pedestal = folder:FindFirstChild("Pedestal" .. index)
 		if pedestal and pedestal:IsA("BasePart") then
-			-- Spots past 4 need the +2 Pedestals pass: a dim plinth with a
-			-- locked label until then (its prompt offers the pass, client).
-			local locked = index > unlocked
-			pedestal:SetAttribute("Locked", locked)
+			-- Spots 5-6 need the +2 Pedestals pass (a dim plinth with a
+			-- locked label; its prompt offers the pass, client), 7-10 the
+			-- 2nd floor (dim, no prompt, "REBIRTH 2" on the owner's label).
+			local isFloor2 = PlotLayout.IsFloor2Pedestal(index)
+			local locked = not PlayerDataService.IsPedestalUnlocked(player, index)
+			pedestal:SetAttribute("Locked", locked and not isFloor2)
+			pedestal:SetAttribute("FloorLocked", locked and isFloor2)
 			local dim = if locked then PlotLayout.LockedPedestalTransparency else 0
 			pedestal.Transparency = dim
 			local cap = pedestal:FindFirstChild("Cap")
@@ -1220,7 +1234,7 @@ function TycoonService.RefreshPedestalLabels(player: Player)
 				end
 			else
 				BillboardKit.SetPedestalLabel(pedestal, nil)
-				BillboardKit.SetPedestalLocked(pedestal, locked)
+				BillboardKit.SetPedestalLocked(pedestal, if not locked then nil elseif isFloor2 then "Floor" else "Pass")
 				pedestal:SetAttribute("StealLabel", "")
 				if steal and steal:IsA("ProximityPrompt") then
 					steal.ObjectText = ""
@@ -1333,6 +1347,7 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		createMultiplierStation(plot, origin, player)
 		createGachaStation(plot, origin, player)
 		createPedestals(plot, origin, player)
+		FloorKit.Build(origin, plot)
 		restoreSavedPedestals(plot, player)
 		TycoonService.RefreshPedestalLabels(player)
 		TycoonService.ApplyLabLook(player)
