@@ -30,6 +30,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local HudGate = require(script.Parent.Parent.UI.HudGate)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
@@ -1709,15 +1710,68 @@ function HudController.ToggleIncomeBreakdown()
 	end)
 end
 
--- What the tutorial's coach ring wraps: a bottom-bar button (Upgrades,
--- Items, Index, Rebirth, Settings), "Gifts", or "Income" (the $/s line).
+-- What the tutorial's hand points at: a bottom-bar button (Upgrades, Items,
+-- Index, Rebirth, Settings), "Gifts", "Quests", or "Income" (the $/s line).
 function HudController.GetCoachTarget(name: string): GuiObject?
 	if name == "Gifts" then
 		return giftsButton
 	elseif name == "Income" then
 		return incomeLabel
+	elseif name == "Quests" then
+		return questsButton
 	end
 	return buttonsByName[name]
+end
+
+-- The progressive HUD (UI/HudGate): a new player's HUD is the cash card and
+-- the tutorial banner; everything else is registered under its key and pops
+-- in when the step that introduces it begins (TutorialConfig.HudReveal).
+local function registerGate()
+	local function button(name: string): () -> { GuiObject }
+		return function()
+			local body = buttonsByName[name]
+			local holder = body and body.Parent
+			return if holder and holder:IsA("GuiObject") then { holder } else {}
+		end
+	end
+	for key, name in { Upgrades = "Upgrades", Items = "Items", Index = "Index", Rebirth = "Rebirth", Settings = "Settings" } do
+		HudGate.Register(key, { Roots = button(name) })
+	end
+	-- SHOP, GIFTS, QUESTS, the deal badge, the power-ups and every pill
+	-- that hangs off them (on a phone they live in the status stack).
+	HudGate.Register("Shop", {
+		Roots = function()
+			return { shopRow, questRow }
+		end,
+		AlsoHide = function()
+			return { dealHolder, phoneStatus, UIKit.PillRoot(giftsNextPill), effectsFrame }
+		end,
+		ForceShow = false,
+		NewSide = "Right",
+		OnShow = function()
+			shopRow.Visible = true
+			questRow.Visible = true
+			applyLayout(layoutIsPhone)
+			dealHolder.Visible = dealShown
+			refreshShopRow()
+		end,
+	})
+	-- NEXT GOAL and the quest tracker: when the tutorial ends.
+	HudGate.Register("Goal", {
+		Roots = function()
+			return { goalHolder }
+		end,
+		AlsoHide = function()
+			return { questTracker }
+		end,
+		ForceShow = false,
+		NewSide = "Right",
+		OnShow = function()
+			refreshGoal()
+			refreshQuestRow()
+			placeQuestTracker()
+		end,
+	})
 end
 
 function HudController.Init()
@@ -1751,6 +1805,7 @@ function HudController.Init()
 	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
+	registerGate()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		if layoutIsPhone then
