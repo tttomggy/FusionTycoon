@@ -34,6 +34,7 @@ local RebirthConfig = require(Config.RebirthConfig)
 local MutationConfig = require(Config.MutationConfig)
 local IndexConfig = require(Config.IndexConfig)
 local ItemConfig = require(Config.ItemConfig)
+local TutorialConfig = require(Config.TutorialConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
@@ -574,9 +575,10 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	local function refreshLabel()
 		local pulls = PlayerDataService.GetGachaPulls(player)
 		local cost = TycoonConfig.GetGachaPullCost(pulls)
-		padLabel.SetPill(("%s / pull"):format(NumberFormat.Money(cost)))
+		local free = PlayerDataService.GetTutorialFreePulls(player)
+		padLabel.SetPill(if free > 0 then ("FREE · %d left"):format(free) else ("%s / pull"):format(NumberFormat.Money(cost)))
 		padLabel.SetDetail(getOddsText(getLuck(player)))
-		prompt.ActionText = ("Pull (%s)"):format(NumberFormat.Money(cost))
+		prompt.ActionText = if free > 0 then "Pull (FREE)" else ("Pull (%s)"):format(NumberFormat.Money(cost))
 		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
 	end
 	refreshLabel()
@@ -602,6 +604,17 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 		if PlayerDataService.IsCarrying(player) then
 			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
+			return
+		end
+		-- The tutorial's free pulls: a guaranteed plain Common each, through
+		-- the free path (the pad price doesn't move).
+		if PlayerDataService.TakeTutorialFreePull(player) then
+			debounce = true
+			if not TycoonService.GrantFreePulls(player, 1, "Tutorial pull", TutorialConfig.FreePullTier) then
+				PlayerDataService.RefundTutorialFreePull(player)
+			end
+			task.wait(STATION_DEBOUNCE_SECONDS)
+			debounce = false
 			return
 		end
 		local rolled = rollPulls(1, getLuck(player))
@@ -1059,10 +1072,24 @@ end
 -- `count` free pulls at the player's luck (daily / gift rewards): the real
 -- pull path and reveal, paid by the game, not raising the pad price. False
 -- if the player has no plot yet (nothing is given).
-function TycoonService.GrantFreePulls(player: Player, count: number, caption: string): boolean
+-- `forcedTier`: every pull is a plain item of that tier (the tutorial's
+-- guaranteed Commons), no roll.
+function TycoonService.GrantFreePulls(player: Player, count: number, caption: string, forcedTier: string?): boolean
 	local puller = rewardPullersByUserId[player.UserId]
 	local pulls = math.max(1, math.floor(count))
-	local rolled = puller and rollPulls(pulls, getLuck(player))
+	local rolled: { PulledItem }?
+	if forcedTier then
+		local forced: { PulledItem } = {}
+		for _ = 1, pulls do
+			local def = ItemConfig.PickRandomOfTier(forcedTier, gachaRng)
+			if def then
+				table.insert(forced, { Def = def, Mutation = nil })
+			end
+		end
+		rolled = if #forced == pulls then forced else nil
+	else
+		rolled = puller and rollPulls(pulls, getLuck(player))
+	end
 	if not puller or not rolled then
 		return false
 	end

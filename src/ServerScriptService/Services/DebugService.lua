@@ -37,6 +37,7 @@ type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
 type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
 type ItemServiceModule = typeof(require(script.Parent.ItemService))
+type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -55,6 +56,7 @@ local HeistService: HeistServiceModule
 local EventService: EventServiceModule
 local MonetizationService: MonetizationServiceModule
 local ItemService: ItemServiceModule
+local TutorialService: TutorialServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -80,6 +82,9 @@ local GIVE_COMMAND = "/give"
 local SHIELD_COMMAND = "/shield"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
+-- "/tutorial reset" starts it over (free pulls and fusion again);
+-- "/tutorial step <n>" jumps to step n.
+local TUTORIAL_COMMAND = "/tutorial"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
 -- length); "/event off" ends what's on. "/eventclock 15" shifts the event
 -- clock 15 min ahead so the schedule can be walked through.
@@ -410,6 +415,18 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
+	elseif command == TUTORIAL_COMMAND then
+		local verb, rawStep = argument:match("^(%S+)%s*(%S*)$")
+		if verb == "reset" then
+			TutorialService.DebugReset(player)
+		elseif verb == "step" and tonumber(rawStep) then
+			TutorialService.DebugSetStep(player, tonumber(rawStep) :: number)
+		else
+			warn("DebugService: /tutorial reset | /tutorial step <n>")
+			return
+		end
+		PlayerDataService.SyncTycoon(player)
+		print(("DebugService: %s's tutorial -> %s"):format(player.Name, argument))
 	elseif command == STEALABLE_COMMAND then
 		local stealable = not stealableToggles[player.UserId]
 		stealableToggles[player.UserId] = stealable
@@ -610,7 +627,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -619,6 +636,7 @@ function DebugService:Start()
 	EventService = require(script.Parent.EventService)
 	MonetizationService = require(script.Parent.MonetizationService)
 	ItemService = require(script.Parent.ItemService)
+	TutorialService = require(script.Parent.TutorialService)
 end
 
 return DebugService

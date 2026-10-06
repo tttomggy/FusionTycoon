@@ -27,6 +27,8 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local TutorialConfig = require(Config.TutorialConfig)
+local FUSE_STEP = TutorialConfig.IndexOf("fuse") :: number
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -131,8 +133,9 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		return nil, "MaxTier"
 	end
 
-	-- Roll before touching the inventory.
-	local upgraded = rng:NextNumber() < chance
+	-- Roll before touching the inventory. The tutorial's first fusion (its
+	-- Fuse step, once per account) always succeeds.
+	local upgraded = rng:NextNumber() < chance or PlayerDataService.TakeTutorialFreeFuse(player, FUSE_STEP)
 	if not upgraded then
 		local keep = items[1]
 		for _, item in items do
