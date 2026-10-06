@@ -24,7 +24,8 @@
 	    AlsoHide   other elements held hidden with them, never animated
 	    ForceShow  false: the owner decides Visible, OnShow refreshes it
 	    NewSide    where the NEW! pill sits: "Top" (default), "Below", "Right"
-	  IsShown(key)    the state this frame (/selftest checks it per step)
+	  IsShown(key)    the state this frame; IsVisible(key) the element itself
+	                  (/selftest checks both per step)
 	  Init()
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -71,6 +72,20 @@ local function wanted(key: string): boolean
 	end
 	local t = TycoonController.GetTutorial()
 	return TutorialConfig.IsHudShown(key, t.Step, t.Done, t.Replay)
+end
+
+-- Is the element itself on screen (any root Visible)? /selftest.
+function HudGate.IsVisible(key: string): boolean
+	local entry = entries[key]
+	if not entry then
+		return false
+	end
+	for _, root in entry.Roots() do
+		if root.Visible then
+			return true
+		end
+	end
+	return false
 end
 
 function HudGate.IsShown(key: string): boolean

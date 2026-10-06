@@ -265,6 +265,11 @@ function TutorialService.DebugReset(player: Player)
 	enter(player, t, 1)
 end
 
+-- /selftest: as if the current step had begun `seconds` ago (Timed steps).
+function TutorialService.DebugBackdate(player: Player, seconds: number)
+	enteredAt[player] = os.clock() - seconds
+end
+
 function TutorialService.DebugSetStep(player: Player, index: number)
 	local t = tutorialOf(player)
 	if not t then

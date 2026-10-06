@@ -782,6 +782,13 @@ function PlayerDataService.SelfTestMigrateItem(itemId: string, tier: string, mut
 	return item.Mutation, item.EventMutations
 end
 
+-- /selftest: a saved Tutorial table (Tutorial 1's has no Ver) through the
+-- same sanitiser a load uses: the Step it resumes at.
+function PlayerDataService.SelfTestMigrateTutorial(raw: any): (number, number)
+	local migrated = sanitizeTutorial(raw)
+	return migrated.Step, migrated.Ver
+end
+
 -- /selftest: a copy of the quest state and power-ups, and the restore.
 function PlayerDataService.SelfTestSnapshotQuests(player: Player): any
 	local data = state.sessionCache[player.UserId]

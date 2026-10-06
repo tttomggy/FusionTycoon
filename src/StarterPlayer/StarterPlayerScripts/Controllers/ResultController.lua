@@ -1547,6 +1547,13 @@ function ResultController.IsBigCardOpen(): boolean
 	return bigHolder ~= nil
 end
 
+-- The giant word on the open big card ("COMMON ORB!"), or nil (/selftest).
+function ResultController.GetBigCardHeadline(): string?
+	local holder = bigHolder
+	local label = holder and holder:FindFirstChild("TierName", true)
+	return if label and label:IsA("TextLabel") then label.Text else nil
+end
+
 function ResultController.CloseCards()
 	closeBigCard()
 end

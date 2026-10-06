@@ -543,6 +543,119 @@ local function testHudLeftColumn(): { string }
 	return result
 end
 
+--[[ Tutorial probes ---------------------------------------------------------------------
+	The server drives the tutorial step by step (DebugService) and asks, per
+	step, what this client really shows: the banner (the step's own text, at
+	most 6 words), no card of any kind before the claim, exactly the HUD
+	elements of the table (TutorialConfig.HudReveal), the weapon bar off at
+	Rebirth 0. And after a single pull: the big "COMMON ORB!" card.
+]]
+
+type ProbeLine = { Ok: boolean, Name: string, Detail: string? }
+
+local TIMED_REVEAL_WAIT = 3 -- the last step's pop-ins are staggered up to 1.5 s
+
+local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
+	local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
+	local TutorialController = require(script.Parent.TutorialController) :: any
+	local TutorialCards = require(UI.TutorialCards) :: any
+	local TutorialBanner = require(UI.TutorialBanner) :: any
+	local HudGate = require(UI.HudGate) :: any
+	local lines: { ProbeLine } = {}
+	local step = TutorialConfig.GetStep(stepIndex)
+	local started = os.clock()
+	local function presented(): boolean
+		local current = TutorialController.GetPresentedStep()
+		return current ~= nil and current.Id == stepId
+	end
+	while not presented() and os.clock() - started < 8 do
+		task.wait(0.1)
+	end
+	if not presented() or not step then
+		return { { Ok = false, Name = ("tutorial %s: its banner shows"):format(stepId), Detail = "never presented" } }
+	end
+	task.wait(0.5) -- the slide-in
+	local text = TutorialBanner.GetBaseText()
+	local words = #text:split(" ")
+	table.insert(lines, {
+		Ok = text == step.Banner and words <= 6,
+		Name = ("tutorial %s: the banner reads its instruction in 6 words or fewer"):format(stepId),
+		Detail = ("%q (%d words)"):format(text, words),
+	})
+	-- No card of any kind: no tutorial card, and before the claim nothing
+	-- else either (no modal, no result card, no welcome splash yet).
+	local cardOpen = TutorialCards.IsOpen()
+	table.insert(lines, { Ok = not cardOpen, Name = ("tutorial %s: no tutorial card"):format(stepId) })
+	if stepId == "claim" then
+		local UIKit = require(UI.UIKit) :: any
+		local anyCard = cardOpen or UIKit.IsOverlayOpen() or TutorialBanner.IsSplashShown()
+		table.insert(lines, { Ok = not anyCard, Name = "tutorial: no card shows before the claim" })
+	end
+	-- The HUD set: each key shown exactly from the step that introduces it
+	-- (the staggered ones get their time).
+	local deadline = os.clock() + TIMED_REVEAL_WAIT
+	local mismatches: { string } = {}
+	repeat
+		table.clear(mismatches)
+		for _, key in TutorialConfig.HudKeys do
+			local at = TutorialConfig.IndexOf(TutorialConfig.HudReveal[key])
+			local expected = at ~= nil and stepIndex >= at
+			if HudGate.IsShown(key) ~= expected or HudGate.IsVisible(key) ~= expected then
+				table.insert(mismatches, ("%s want %s"):format(key, tostring(expected)))
+			end
+		end
+		if #mismatches > 0 then
+			task.wait(0.15)
+		end
+	until #mismatches == 0 or os.clock() > deadline
+	table.insert(lines, {
+		Ok = #mismatches == 0,
+		Name = ("tutorial %s: the HUD shows exactly its set"):format(stepId),
+		Detail = table.concat(mismatches, ", "),
+	})
+	-- The weapon bar: nothing at Rebirth 0 (no greyed R1 / R2 / R3).
+	local rebirths = require(script.Parent.TycoonController).GetRebirths()
+	local bar = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("WeaponBar")
+	if rebirths == 0 and bar and bar:IsA("ScreenGui") then
+		table.insert(lines, { Ok = not bar.Enabled, Name = "tutorial: no weapon bar before Rebirth 1" })
+	end
+	return lines
+end
+
+local function probeBigCard(expect: string): { ProbeLine }
+	local ResultController = require(script.Parent.ResultController) :: any
+	local started = os.clock()
+	while not ResultController.IsBigCardOpen() and os.clock() - started < 3 do
+		task.wait(0.1)
+	end
+	local headline = ResultController.GetBigCardHeadline()
+	return {
+		{
+			Ok = ResultController.IsBigCardOpen() and headline == expect,
+			Name = "a single pull of a Common opens the big card",
+			Detail = ("headline %s"):format(tostring(headline)),
+		},
+	}
+end
+
+local function probeTutorial(payload: any)
+	local lines: { ProbeLine } = {}
+	local ok, result = pcall(function()
+		if payload.Kind == "Step" then
+			return probeStep(payload.StepIndex, payload.StepId)
+		elseif payload.Kind == "BigCard" then
+			return probeBigCard(payload.Expect)
+		end
+		return {}
+	end)
+	if ok then
+		lines = result
+	else
+		table.insert(lines, { Ok = false, Name = "tutorial probe", Detail = tostring(result) })
+	end
+	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", Lines = lines })
+end
+
 local function run(payload: any)
 	if running then
 		return
@@ -618,7 +731,11 @@ function SelfTestController.Init()
 		return
 	end
 	RemoteEvents.SelfTest.OnClientEvent:Connect(function(payload: any)
-		task.spawn(run, payload)
+		if typeof(payload) == "table" and payload.Stage == "TutorialProbe" then
+			task.spawn(probeTutorial, payload)
+		else
+			task.spawn(run, payload)
+		end
 	end)
 end
 
