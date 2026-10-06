@@ -988,13 +988,19 @@ function UIKit.IsPhone(): boolean
 end
 
 --[[ Card placement -------------------------------------------------------------------
-	Every UIKit.Modal and centred card is TOP-ANCHORED just under the Roblox
-	top bar, horizontally centred, and uses the height down to the HUD's
-	bottom button row (never covering it). On a phone the top also clears
-	the Roblox top-left buttons (60 px after the 0.8 scale). The desktop chat
-	window only matters when the card's left edge overlaps its ~400 px span:
-	then the card slides right if there's room, else the overlap stays (chat
-	is collapsible). Cards are never pushed down for chat.
+	Every UIKit.Modal and centred card lives in the BAND between the Roblox
+	top bar (GetCardTop) and the HUD's bottom button row (GetCardBottom),
+	horizontally centred. What you see (the panel and its shadow) is
+	centred vertically in that band (GetCardY); a card as tall as the band
+	starts at GetCardTop and is shrunk as a whole to fit. On a phone the top
+	also clears the Roblox top-left buttons (60 px after the 0.8 scale). The
+	desktop chat window only matters when the card's left edge overlaps its
+	~400 px span: then the card slides right if there's room, else the
+	overlap stays (chat is collapsible). Cards are never pushed down for
+	chat.
+
+	The *For functions take the viewport and phone flag explicitly, so
+	/selftest can check the real placement at any screen size.
 ]]
 UIKit.TOP_BAR_HEIGHT = 58 -- the Roblox top bar (IgnoreGuiInset guis)
 UIKit.CARD_TOP_GAP = 8
@@ -1019,24 +1025,63 @@ function UIKit.GetLogicalViewport(): Vector2
 	return viewportSize() / currentScale()
 end
 
--- Logical y where a card's top goes.
+-- Logical y where the band (and a card that fills it) starts.
+function UIKit.GetCardTopFor(phone: boolean): number
+	local scale = if phone then UITheme.PhoneScale else 1
+	return math.max(UIKit.TOP_BAR_HEIGHT + UIKit.CARD_TOP_GAP, math.ceil(TOP_LEFT_CLEAR_PX / scale) + 4)
+end
+
 function UIKit.GetCardTop(): number
-	return math.max(UIKit.TOP_BAR_HEIGHT + UIKit.CARD_TOP_GAP, math.ceil(TOP_LEFT_CLEAR_PX / currentScale()) + 4)
+	return UIKit.GetCardTopFor(UIKit.IsPhone())
 end
 
 -- Logical px a card leaves free at the bottom (the HUD button row).
-function UIKit.GetCardBottom(): number
-	return if UIKit.IsPhone() then UIKit.BOTTOM_BAR_RESERVE.Phone else UIKit.BOTTOM_BAR_RESERVE.Desktop
+function UIKit.GetCardBottomFor(phone: boolean): number
+	return if phone then UIKit.BOTTOM_BAR_RESERVE.Phone else UIKit.BOTTOM_BAR_RESERVE.Desktop
 end
 
--- Logical y for the top of a card `visualHeight` px tall (after its fit
--- scale): centred in the band between GetCardTop and GetCardBottom, so a
--- short card on a tall desktop screen sits mid-screen instead of hugging
--- the top bar; a card that fills the band starts at GetCardTop.
+function UIKit.GetCardBottom(): number
+	return UIKit.GetCardBottomFor(UIKit.IsPhone())
+end
+
+-- Logical y for the top of a card `visualHeight` px tall (what you see,
+-- after its fit scale) on a viewport `viewY` logical px tall: centred in
+-- the band, so a short card on a full-screen desktop sits mid-screen; a
+-- card that fills the band starts at its top.
+function UIKit.GetCardYFor(visualHeight: number, viewY: number, phone: boolean): number
+	local top = UIKit.GetCardTopFor(phone)
+	local band = viewY - top - UIKit.GetCardBottomFor(phone)
+	return top + math.max(0, (band - visualHeight) / 2)
+end
+
 function UIKit.GetCardY(visualHeight: number): number
-	local top = UIKit.GetCardTop()
-	local available = UIKit.GetLogicalViewport().Y - top - UIKit.GetCardBottom()
-	return top + math.max(0, math.floor((available - visualHeight) / 2))
+	return UIKit.GetCardYFor(visualHeight, UIKit.GetLogicalViewport().Y, UIKit.IsPhone())
+end
+
+-- /selftest's rule for a placed card (logical px): nil = it passes, else
+-- why not. Fits the band: its centre within 2 px of the band's centre and
+-- inside the band. Taller: starts at the band's top.
+function UIKit.CheckCardPlacement(top: number, height: number, viewY: number, phone: boolean): string?
+	local bandTop = UIKit.GetCardTopFor(phone)
+	local bandBottom = viewY - UIKit.GetCardBottomFor(phone)
+	if height > bandBottom - bandTop + 0.5 then
+		if math.abs(top - bandTop) > 1 then
+			return ("taller than the band but starts at %d, not %d"):format(math.floor(top), bandTop)
+		end
+		return nil
+	end
+	local centre = top + height / 2
+	local bandCentre = (bandTop + bandBottom) / 2
+	if math.abs(centre - bandCentre) > 2 then
+		return ("centre %d vs band centre %d"):format(math.floor(centre), math.floor(bandCentre))
+	end
+	if top < bandTop - 0.5 then
+		return ("top %d above %d"):format(math.floor(top), bandTop)
+	end
+	if top + height > bandBottom + 0.5 then
+		return ("bottom %d below %d"):format(math.floor(top + height), math.floor(bandBottom))
+	end
+	return nil
 end
 
 local function chatWindowOn(): boolean
@@ -1066,10 +1111,24 @@ function UIKit.GetCardShift(width: number): number
 end
 
 -- A fixed-size card (offset layout). A card centred at (0.5, 0.5) is
--- top-anchored at UIKit.GetCardTop() (and slid clear of chat), then shrunk
--- as a whole (through its PopScale, so PopIn / PopOut keep working) to fit
--- above the HUD's bottom row. Any other card just shrinks to leave `margin`
+-- centred in the card band (GetCardY, shadow included; slid clear of
+-- chat), and shrunk as a whole (through its PopScale, so PopIn / PopOut
+-- keep working) when it's taller than the band. Any other card just shrinks to leave `margin`
 -- px above and below. Call before PopIn. Returns the scale used.
+-- Where a centred card goes: its visible height `visual` (the holder plus
+-- the shadow below it) on a viewport `viewY` tall -> (top, fit scale).
+function UIKit.PlanCardFor(visual: number, viewY: number, phone: boolean): (number, number)
+	local band = viewY - UIKit.GetCardTopFor(phone) - UIKit.GetCardBottomFor(phone)
+	local fit = math.clamp(band / visual, 0.5, 1)
+	return UIKit.GetCardYFor(visual * fit, viewY, phone), fit
+end
+
+-- How far a Panel holder's shadow hangs below it (0 for a plain frame).
+local function shadowBelow(holder: GuiObject): number
+	local shadow = holder:FindFirstChild("Shadow")
+	return if shadow and shadow:IsA("GuiObject") then math.max(0, shadow.Position.Y.Offset) else 0
+end
+
 function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): number
 	local view = UIKit.GetLogicalViewport()
 	local position = holder.Position
@@ -1077,16 +1136,17 @@ function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): nu
 		or (holder.AnchorPoint.Y == 0.5 and position.Y.Scale == 0.5)
 	local fit: number
 	if centred then
-		local top = UIKit.GetCardTop()
-		fit = math.clamp((view.Y - top - UIKit.GetCardBottom()) / height, 0.5, 1)
+		-- Centre what you see: the card and its shadow. The UIScale shrinks
+		-- it about its anchor (top centre), so the top stays put.
+		local top: number
+		top, fit = UIKit.PlanCardFor(height + shadowBelow(holder), view.Y, UIKit.IsPhone())
 		local width = holder.Size.X.Offset
 		if width <= 0 then
 			width = holder.AbsoluteSize.X / currentScale()
 		end
 		holder:SetAttribute("CardPlaced", true)
 		holder.AnchorPoint = Vector2.new(holder.AnchorPoint.X, 0)
-		holder.Position = UDim2.new(position.X.Scale, 0, 0, UIKit.GetCardY(height * fit))
-			+ UDim2.fromOffset(UIKit.GetCardShift(width * fit), 0)
+		holder.Position = UDim2.new(position.X.Scale, 0, 0, top) + UDim2.fromOffset(UIKit.GetCardShift(width * fit), 0)
 	else
 		fit = math.clamp((view.Y - 2 * (margin or 12)) / height, 0.5, 1)
 	end
@@ -1266,12 +1326,50 @@ export type Modal = {
 -- UISizeConstraint, header gradient, title and red close button. The panel
 -- sits inside a CanvasGroup so PopOut can fade it; the group is a few px
 -- larger than the panel so the 4 px stroke and the shadow aren't clipped.
--- Placed by the card rule above (top-anchored; FitContent modals keep
--- their design height and shrink as a whole instead).
+-- Placed by the card rule above (centred in the band; FitContent modals
+-- keep their design height and shrink as a whole instead).
 local MODAL_MARGIN = 4
+UIKit.MODAL_MARGIN = MODAL_MARGIN -- /selftest: the visible panel's inset in the root
 
 -- Every modal's ScreenGui (/selftest: each must draw over the HUD).
 local modalGuis: { ScreenGui } = {}
+
+-- The root is the panel plus MODAL_MARGIN all round and the shadow below:
+-- the visible panel + shadow sits symmetrically inside it, so centring the
+-- root centres what you see.
+local MODAL_CHROME = Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
+
+export type ModalPlan = {
+	RootHeight: number, -- the root's Size.Y offset (before the size cap)
+	Visual: number, -- what you see (logical px, after the cap and the fit)
+	Top: number, -- the root's top (logical px)
+	Fit: number,
+}
+
+-- Where a modal with `maxSize` goes on a `view` (logical px) viewport.
+-- placeRoot uses it, and /selftest runs it at 1920x1080, 1366x768 and the
+-- phone size.
+function UIKit.PlanModalFor(maxSize: Vector2, fitContent: boolean, view: Vector2, phone: boolean): ModalPlan
+	local top = UIKit.GetCardTopFor(phone)
+	local available = math.max(120, view.Y - top - UIKit.GetCardBottomFor(phone))
+	if fitContent then
+		-- Its layout needs its design height: keep it, shrink to fit.
+		local design = math.min(maxSize.Y + MODAL_CHROME.Y, view.Y * 0.9)
+		local fit = math.clamp(available / design, 0.5, 1)
+		return { RootHeight = design, Visual = design * fit, Top = UIKit.GetCardYFor(design * fit, view.Y, phone), Fit = fit }
+	end
+	-- The UISizeConstraint caps the root at MaxSize + chrome.
+	local visual = math.min(available, maxSize.Y + MODAL_CHROME.Y)
+	return { RootHeight = available, Visual = visual, Top = UIKit.GetCardYFor(visual, view.Y, phone), Fit = 1 }
+end
+
+export type ModalSpec = { Name: string, MaxSize: Vector2, FitContent: boolean }
+local modalSpecs: { ModalSpec } = {}
+
+-- Every modal built so far (/selftest's "cards centred" math check).
+function UIKit.GetModalSpecs(): { ModalSpec }
+	return table.clone(modalSpecs)
+end
 
 function UIKit.GetModalGuis(): { ScreenGui }
 	return table.clone(modalGuis)
@@ -1297,26 +1395,14 @@ function UIKit.Modal(props: ModalProps): Modal
 	root.BackgroundTransparency = 1
 	root.ZIndex = 2
 	root.Parent = gui
-	local chrome = Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
+	table.insert(modalSpecs, { Name = props.Name, MaxSize = props.MaxSize, FitContent = props.FitContent == true })
 	local function placeRoot()
 		local view = UIKit.GetLogicalViewport()
-		local top = UIKit.GetCardTop()
-		local available = math.max(120, view.Y - top - UIKit.GetCardBottom())
-		local width = math.min(view.X * 0.92, props.MaxSize.X + chrome.X)
-		local fit = 1
-		local visualHeight: number
-		if props.FitContent then
-			-- Its layout needs its design height: keep it, shrink to fit.
-			local design = math.min(props.MaxSize.Y + chrome.Y, view.Y * 0.9)
-			root.Size = UDim2.new(0.92, 0, 0, design)
-			fit = math.clamp(available / design, 0.5, 1)
-			visualHeight = design * fit
-		else
-			root.Size = UDim2.new(0.92, 0, 0, available)
-			-- The UISizeConstraint below caps it at MaxSize.
-			visualHeight = math.min(available, props.MaxSize.Y + chrome.Y)
-		end
-		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, UIKit.GetCardY(visualHeight))
+		local plan = UIKit.PlanModalFor(props.MaxSize, props.FitContent == true, view, UIKit.IsPhone())
+		local fit = plan.Fit
+		local width = math.min(view.X * 0.92, props.MaxSize.X + MODAL_CHROME.X)
+		root.Size = UDim2.new(0.92, 0, 0, plan.RootHeight)
+		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, plan.Top)
 		root:SetAttribute("FitScale", fit)
 		if gui.Enabled then
 			getPopScale(root).Scale = fit
@@ -1325,7 +1411,7 @@ function UIKit.Modal(props: ModalProps): Modal
 	placeRoot()
 	table.insert(cardPlacers, placeRoot)
 	local constraint = Instance.new("UISizeConstraint")
-	constraint.MaxSize = props.MaxSize + Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
+	constraint.MaxSize = props.MaxSize + MODAL_CHROME
 	constraint.Parent = root
 
 	local body = UIKit.Panel({
