@@ -44,6 +44,7 @@ type ShopView = {
 	StarterPackBought: boolean,
 	Cosmetics: { [string]: boolean },
 	Sessions: number,
+	DealPopupSlot: number, -- the deal slot whose "New deal!" card showed (saved)
 	OfflineDoubleAmount: number,
 	ReceivedAt: number, -- os.clock()
 }
@@ -56,6 +57,7 @@ local shop: ShopView = {
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
+	DealPopupSlot = 0,
 	OfflineDoubleAmount = 0,
 	ReceivedAt = 0,
 }
@@ -475,6 +477,7 @@ local function onSyncTycoon(snapshot: any)
 			StarterPackBought = rawShop.StarterPackBought == true,
 			Cosmetics = cosmetics,
 			Sessions = number(rawShop.Sessions),
+			DealPopupSlot = number(rawShop.DealPopupSlot),
 			OfflineDoubleAmount = number(rawShop.OfflineDoubleAmount),
 			ReceivedAt = os.clock(),
 		}

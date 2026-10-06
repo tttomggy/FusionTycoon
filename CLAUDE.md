@@ -170,7 +170,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   keyframes in `TrailerConfig`; `/trailer <shot>`, `/trailer stop` or F8. **`/selftest`** runs the Bug
   Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
   round trip, a junk-remote fuzz with no error / state change, every panel
-  at both scales with no leftover instances) and prints PASS / FAIL lines;
+  at both scales with no leftover instances in the panels' own modal guis,
+  the phone HUD's left group inside the left 40%, the real deal pop-up
+  path) and prints PASS / FAIL lines;
   it refuses unless saves go to the mock store or `FT_StudioTest_1`.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
@@ -420,11 +422,18 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     after a prompt made inside the slot) and grants its parts through
     their own grants. Shop: a 🔥 DEAL banner + chip first ("normally
     ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: a 🔥 badge under
-    SHOP / GIFTS (pulses on a new slot, opens the shop at the deal); a "New
-    deal!" side card once per slot under the contextual offer's guards and
-    shared 5-min limit, never while carrying or being stolen from.
-    Analytics DealShown / DealOpened / DealDismissed. Studio: `/deal slot
-    <offsetHours>` (Workspace `DealClockOffset`), `/deal pop`.
+    SHOP / GIFTS on its own line, desktop and phone (on a phone it heads
+    the left-column status stack, "next in" and the timed pills under it,
+    never toward the centre; pulses on a new slot, opens the shop at the
+    deal); a "New deal!" side card once per deal under the contextual
+    offer's guards and shared 5-min limit, never while carrying or being
+    stolen from. Once per deal is saved: `PlayerData.DealPopupSlot` (the
+    slot start, sanitised in `reconcile`, snapshot `Shop.DealPopupSlot`),
+    set by remote `MarkDealPopup { Slot }` (C→S, current slot only), so a
+    rejoin in the same slot never shows it again. Analytics DealShown /
+    DealOpened / DealDismissed. Studio: `/deal slot <offsetHours>`
+    (Workspace `DealClockOffset`), `/deal pop` (bypasses EVERY guard and
+    the saving / policy gate, not saved; an Id 0 deal shows "TEST").
   - **Contextual offer** (`ShopController.OfferForShortfall`): ONLY when
     the player taps something they can't afford (upgrade / MAX, pull /
     ×10, Multiplier Pad, Rebirth). One non-modal side card: what they
@@ -877,7 +886,7 @@ in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
-`MarkTipSeen` (C→S `{ Id }`) (no lock remote: LOCK is the console
+`MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`) (no lock remote: LOCK is the console
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),

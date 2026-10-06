@@ -1521,7 +1521,7 @@ Heist, the result cards, the celebration):
 - [ ] `/deal slot 6`, `/deal slot 12`, …: the deal changes each slot and
   never repeats back to back; the countdown jumps to match; `/deal slot 0`
   restores.
-- [ ] HUD 🔥 badge under SHOP / GIFTS (end of that row on a phone) with
+- [ ] HUD 🔥 badge under SHOP / GIFTS on its own line (phone too) with
   the saving and countdown; it pulses once on a new slot; tapping it opens
   the shop at the deal.
 - [ ] `/deal pop`: the "New deal!" side card (icons, saving, Not now / See
@@ -1539,3 +1539,36 @@ Heist, the result cards, the celebration):
 - [ ] `/selftest`: PASS for hud below modals, every chip at both scales,
   the deal schedule (repeatable, no repeats, client matches server) and
   each non-current deal refused.
+
+## 34. Shop 3 fixes
+
+**Phone deal badge (844 × 390 emulator)**
+
+- [ ] The 🔥 DEAL badge sits in the left column on its own line under
+  SHOP / GIFTS, never right of the "next in" pill or near the centre.
+- [ ] "next in 4:22" and the timed pills ("⚡ 2× · 59:47", luck, SERVER)
+  stack under the badge in the left column; the LOCK row and the goal
+  tracker move down to make room and back up when a pill goes.
+- [ ] Desktop unchanged: badge under SHOP / GIFTS, pills right of GIFTS.
+
+**/deal pop**
+
+- [ ] `/deal pop` shows the "New deal!" card at once, desktop and phone,
+  in a first session's first minute, right after another offer, with a
+  panel open, and after Not now in the same slot.
+- [ ] Studio with no live prices: the card shows the contents, "Studio
+  test…" and a "TEST" button; no saving.
+- [ ] With the guards past (second session, 10 min in, no offer in the
+  last 5 min) the card shows by itself once per slot.
+
+**Once per deal (saved)**
+
+- [ ] With `FT_StudioSaves`: see the card, leave, rejoin in the same slot:
+  no card. `/deal slot 6` (next slot): it shows again.
+
+**/selftest**
+
+- [ ] PASS "hud left column (phone…)" and "deal real path".
+- [ ] Three runs in a row with no "panel X: ±N instances" FAIL, one during
+  a Golden Rain (`/event GoldenRain`) and one with a boost running
+  (`/shop grant Boost`).

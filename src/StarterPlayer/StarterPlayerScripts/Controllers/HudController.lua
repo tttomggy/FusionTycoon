@@ -998,12 +998,21 @@ local saleTag: TextLabel
 local giftsButton: TextButton
 local giftsScale: UIScale
 local giftsNextPill: TextLabel
+-- The timed-effect pills' column (in the SHOP row on desktop, in the
+-- phone status stack on a phone).
+local effectsFrame: Frame
+-- Phone only: the left-column stack under SHOP / GIFTS that holds the deal
+-- badge on its own line, then "next in", then the timed-effect pills, so
+-- nothing grows toward the screen centre (applyLayout).
+local phoneStatus: Frame
+local phoneStatusLayout: UIListLayout
+local PHONE_STATUS_GAP = 4
 local giftsBounce: Tween? = nil
 
 -- The 🔥 deal badge (ShopController.GetDeal): the live saving and the real
 -- countdown; it pulses once when a new slot starts; a tap opens the shop at
--- the deal. Under SHOP / GIFTS on desktop, at the end of their row on a
--- phone (the column there is full).
+-- the deal. Under SHOP / GIFTS on its own line, desktop and phone alike (on
+-- a phone it heads the status stack, with the timed pills under it).
 local DEAL_BADGE_SIZE = Vector2.new(176, 40)
 local dealButton: TextButton
 local dealHolder: Frame
@@ -1019,7 +1028,7 @@ local function buildDealBadge()
 		TextSize = 16,
 		Size = UDim2.fromOffset(DEAL_BADGE_SIZE.X, DEAL_BADGE_SIZE.Y + 4),
 		ShadowOffset = UITheme.SmallShadowOffset,
-		LayoutOrder = 9,
+		LayoutOrder = 0,
 		OnClick = function()
 			ShopPanel.Open("Deal")
 		end,
@@ -1028,6 +1037,20 @@ local function buildDealBadge()
 	dealHolder = holder
 	holder.Visible = false
 	holder.Parent = screenGui
+
+	phoneStatus = Instance.new("Frame")
+	phoneStatus.Name = "PhoneStatus"
+	phoneStatus.BackgroundTransparency = 1
+	phoneStatus.AutomaticSize = Enum.AutomaticSize.XY
+	phoneStatus.Size = UDim2.new()
+	phoneStatus.Visible = false
+	phoneStatus.Parent = screenGui
+	phoneStatusLayout = Instance.new("UIListLayout")
+	phoneStatusLayout.FillDirection = Enum.FillDirection.Vertical
+	phoneStatusLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+	phoneStatusLayout.Padding = UDim.new(0, PHONE_STATUS_GAP)
+	phoneStatusLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	phoneStatusLayout.Parent = phoneStatus
 end
 
 local function buildShopRow()
@@ -1107,6 +1130,7 @@ local function buildShopRow()
 	pills.Size = UDim2.new()
 	pills.LayoutOrder = 4
 	pills.Parent = shopRow
+	effectsFrame = pills
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.Padding = UDim.new(0, 4)
 	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -1178,7 +1202,14 @@ local function refreshDealBadge()
 	end
 end
 
+-- /selftest's left-column check holds the forced pills (refreshShopRow
+-- would hide them on its next tick).
+local selfTestHold = false
+
 local function refreshShopRow()
+	if selfTestHold then
+		return
+	end
 	refreshDealBadge()
 	local function setPill(label: TextLabel, seconds: number, format: string)
 		local fill = UIKit.PillRoot(label)
@@ -1190,6 +1221,11 @@ local function refreshShopRow()
 	setPill(effectPills.Income, TycoonController.GetBoostSecondsLeft("Income"), ("⚡ %d× · %%s"):format(ShopConfig.BoostMultiplier))
 	setPill(effectPills.Luck, TycoonController.GetBoostSecondsLeft("Luck"), ("🍀 %d× luck · %%s"):format(ShopConfig.LuckPotionMultiplier))
 	setPill(effectPills.Server, ShopState.GetOverclockSeconds(), ("⚡ SERVER %d× · %%s"):format(ShopConfig.OverclockMultiplier))
+	-- An empty effects column would still take a slot (and a gap) in the
+	-- phone status stack.
+	effectsFrame.Visible = TycoonController.GetBoostSecondsLeft("Income") > 0
+		or TycoonController.GetBoostSecondsLeft("Luck") > 0
+		or ShopState.GetOverclockSeconds() > 0
 	local saleLive = false
 	for _, sale in ShopConfig.Sales do
 		if ShopController.IsAvailable(sale.SaleKey) then
@@ -1226,8 +1262,7 @@ local function refreshShopRow()
 	end
 end
 
-function applyLayout(isPhone: boolean)
-	layoutIsPhone = isPhone
+local function placeColumnFor(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	cashHolder.Position = layout.CashPosition
 	-- The left column, desktop and phone alike: cash card, then the SHOP /
@@ -1236,9 +1271,22 @@ function applyLayout(isPhone: boolean)
 	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
 	local lockTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	phoneStatus.Visible = isPhone
 	if isPhone then
-		dealHolder.Parent = shopRow
+		-- Status stack under SHOP / GIFTS: the deal badge on its own line,
+		-- then "next in" and the timed pills, all stacked down the column.
+		dealHolder.Parent = phoneStatus
+		UIKit.PillRoot(giftsNextPill).Parent = phoneStatus
+		effectsFrame.Parent = phoneStatus
+		phoneStatus.Position = lockTop
+		-- AbsoluteContentSize is in screen px; the offsets are design px.
+		local height = phoneStatusLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneStatus)
+		if height > 0.5 then
+			lockTop += UDim2.fromOffset(0, math.ceil(height) + LOCK_BUTTON_GAP)
+		end
 	else
+		UIKit.PillRoot(giftsNextPill).Parent = shopRow
+		effectsFrame.Parent = shopRow
 		dealHolder.Parent = screenGui
 		dealHolder.Position = lockTop
 		if dealShown then
@@ -1249,11 +1297,85 @@ function applyLayout(isPhone: boolean)
 	goalHolder.Position = if isPhone
 		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 		else layout.GoalPosition
+end
+
+-- Re-places the left column only (the phone status stack changed height:
+-- a pill came or went); no button rebuild.
+local function placeColumn()
+	placeColumnFor(layoutIsPhone)
+end
+
+function applyLayout(isPhone: boolean)
+	layoutIsPhone = isPhone
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	placeColumnFor(isPhone)
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
 	buildButtons(isPhone)
 	layoutRebirthReady(isPhone)
+end
+
+--[[ /selftest ------------------------------------------------------------- ]]
+
+-- The phone Harris tested on (844 × 390): on a wider Studio window the left
+-- group is measured against this width, so a badge drifting to the centre
+-- of a phone still fails.
+local SELFTEST_PHONE_WIDTH = 844
+local SELFTEST_LEFT_SHARE = 0.4
+
+-- Shows the deal badge, "next in" and all three timed pills with long
+-- sample texts, then checks every element of the left group ends inside
+-- the left 40% of the screen. The caller forces the phone layout first.
+function HudController.SelfTestLeftColumn(scaleName: string): { string }
+	selfTestHold = true
+	dealShown = true
+	dealHolder.Visible = true
+	UIKit.SetButton(dealButton, { Text = "🔥 −23% · 5:59:59" })
+	UIKit.SetPillVisible(giftsNextPill, true)
+	giftsNextPill.Text = "next in 59:59"
+	effectPills.Income.Text = "⚡ 2× · 2:59:59"
+	effectPills.Luck.Text = "🍀 2× luck · 2:59:59"
+	effectPills.Server.Text = "⚡ SERVER 2× · 59:59"
+	for _, label in { effectPills.Income, effectPills.Luck, effectPills.Server } do
+		UIKit.PillRoot(label).Visible = true
+	end
+	effectsFrame.Visible = true
+	applyLayout(layoutIsPhone)
+	task.wait(0.3)
+
+	local limit = SELFTEST_LEFT_SHARE * math.min(screenGui.AbsoluteSize.X, SELFTEST_PHONE_WIDTH)
+	local parts: { [string]: GuiObject } = {
+		CashCard = cashHolder,
+		ShopRow = shopRow,
+		PhoneStatus = phoneStatus,
+		DealBadge = dealHolder,
+		GiftsNext = UIKit.PillRoot(giftsNextPill),
+		IncomePill = UIKit.PillRoot(effectPills.Income),
+		LuckPill = UIKit.PillRoot(effectPills.Luck),
+		ServerPill = UIKit.PillRoot(effectPills.Server),
+		LockRow = lockRow,
+		Goal = goalHolder,
+	}
+	local bad: { string } = {}
+	local checked = 0
+	for name, gui in parts do
+		if gui.Visible and gui:IsDescendantOf(screenGui) then
+			checked += 1
+			local right = gui.AbsolutePosition.X + gui.AbsoluteSize.X
+			if right > limit then
+				table.insert(bad, ("%s ends at %d px"):format(name, math.floor(right)))
+			end
+		end
+	end
+
+	selfTestHold = false
+	refreshShopRow()
+	if #bad > 0 then
+		table.sort(bad)
+		return { ("FAIL hud left column (%s): past %d px: %s"):format(scaleName, math.floor(limit), table.concat(bad, ", ")) }
+	end
+	return { ("PASS hud left column (%s, %d elements inside %d px)"):format(scaleName, checked, math.floor(limit)) }
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
@@ -1362,6 +1484,11 @@ function HudController.Init()
 
 	applyLayout(UIKit.IsPhone())
 	UIKit.LayoutChanged:Connect(applyLayout)
+	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		if layoutIsPhone then
+			placeColumn()
+		end
+	end)
 
 	RunService.RenderStepped:Connect(onRenderStep)
 	task.spawn(function()

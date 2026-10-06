@@ -59,7 +59,7 @@ ShopConfig.Items = {
 	--[[ Gamepasses (permanent) ]]
 	DoubleCash = pass({
 		Key = "DoubleCash",
-		Id = 0,
+		Id = 2006841704,
 		Price = 199,
 		Name = "2x Cash",
 		Description = "Double all the cash your lab earns, forever.",
@@ -69,7 +69,7 @@ ShopConfig.Items = {
 	}),
 	ExtraPedestals = pass({
 		Key = "ExtraPedestals",
-		Id = 0,
+		Id = 2006301666,
 		Price = 399,
 		Name = "+2 Pedestals",
 		Description = "Two more pedestals in your lab: display 6 items instead of 4.",
@@ -79,7 +79,7 @@ ShopConfig.Items = {
 	}),
 	VIP = pass({
 		Key = "VIP",
-		Id = 0,
+		Id = 2006613632,
 		Price = 349,
 		Name = "VIP",
 		Description = "+25% income, a gold VIP tag over your head and in chat, and a gold trim on your lab.",
@@ -89,7 +89,7 @@ ShopConfig.Items = {
 	}),
 	AutoFuse = pass({
 		Key = "AutoFuse",
-		Id = 0,
+		Id = 2006865580,
 		Price = 149,
 		Name = "Auto-Fuse",
 		Description = "A toggle in the Fuse panel: automatically Fuse All (pairs, Common to Epic, never mutated items) whenever new items arrive.",
@@ -99,7 +99,7 @@ ShopConfig.Items = {
 	}),
 	LabStyle = pass({
 		Key = "LabStyle",
-		Id = 0,
+		Id = 2006181648,
 		Price = 99,
 		Name = "Neon Pink Lab",
 		Description = "A Neon Pink theme for your lab's lights, with pink cash balls. Looks only, no power.",
@@ -109,7 +109,7 @@ ShopConfig.Items = {
 	}),
 	Lucky = pass({
 		Key = "Lucky",
-		Id = 0,
+		Id = 2004909613,
 		Price = 299,
 		Name = "Lucky",
 		Description = "x1.5 luck forever (stacks with rebirth luck). Every odds display shows it.",
@@ -121,7 +121,7 @@ ShopConfig.Items = {
 	--[[ Developer products (repeatable) ]]
 	QuickBoost = product({
 		Key = "QuickBoost",
-		Id = 0,
+		Id = 3716763273,
 		Price = 29,
 		Name = "Quick Boost",
 		Description = "x2 income for 15 minutes. Stacks by adding time (up to 3 hours banked).",
@@ -131,7 +131,7 @@ ShopConfig.Items = {
 	}),
 	Boost = product({
 		Key = "Boost",
-		Id = 0,
+		Id = 3716763319,
 		Price = 79,
 		Name = "Boost",
 		Description = "x2 income for 1 hour. Stacks by adding time (up to 3 hours banked).",
@@ -141,7 +141,7 @@ ShopConfig.Items = {
 	}),
 	BoostSale = product({
 		Key = "BoostSale",
-		Id = 0,
+		Id = 3716763369,
 		Price = 49,
 		Name = "Boost (Admin Abuse sale)",
 		Description = "x2 income for 1 hour, at the Admin Abuse sale price. Only sold during Admin Abuse.",
@@ -152,7 +152,7 @@ ShopConfig.Items = {
 	}),
 	PocketCash = product({
 		Key = "PocketCash",
-		Id = 0,
+		Id = 3716763441,
 		Price = 49,
 		Name = "Pocket Cash",
 		Description = "Cash worth 20 minutes of your lab's income (at least $5,000).",
@@ -162,7 +162,7 @@ ShopConfig.Items = {
 	}),
 	CashCrate = product({
 		Key = "CashCrate",
-		Id = 0,
+		Id = 3716763488,
 		Price = 199,
 		Name = "Cash Crate",
 		Description = "Cash worth 2 hours of your lab's income (at least $50,000).",
@@ -172,7 +172,7 @@ ShopConfig.Items = {
 	}),
 	CashVault = product({
 		Key = "CashVault",
-		Id = 0,
+		Id = 3716763526,
 		Price = 599,
 		Name = "Cash Vault",
 		Description = "Cash worth 8 hours of your lab's income (at least $250,000).",
@@ -182,7 +182,7 @@ ShopConfig.Items = {
 	}),
 	Overclock = product({
 		Key = "Overclock",
-		Id = 0,
+		Id = 3716763621,
 		Price = 149,
 		Name = "Server Overclock",
 		Description = "Everyone in the server gets x2 income for 15 minutes. More buys add time, up to 60 minutes.",
@@ -192,7 +192,7 @@ ShopConfig.Items = {
 	}),
 	LuckPotion = product({
 		Key = "LuckPotion",
-		Id = 0,
+		Id = 3716763661,
 		Price = 49,
 		Name = "Luck Potion",
 		Description = "x2 luck for 15 minutes. Stacks by adding time (up to 3 hours banked).",
@@ -202,7 +202,7 @@ ShopConfig.Items = {
 	}),
 	SafeFusion1 = product({
 		Key = "SafeFusion1",
-		Id = 0,
+		Id = 3716763719,
 		Price = 25,
 		Name = "Safe Fusion",
 		Description = "One Safe Fusion token: arm it in the Fuse panel, and if that fusion fails you keep every orb.",
@@ -212,7 +212,7 @@ ShopConfig.Items = {
 	}),
 	SafeFusion5 = product({
 		Key = "SafeFusion5",
-		Id = 0,
+		Id = 3716763780,
 		Price = 99,
 		Name = "Safe Fusion x5",
 		Description = "Five Safe Fusion tokens: arm one in the Fuse panel, and if that fusion fails you keep every orb.",
@@ -223,7 +223,7 @@ ShopConfig.Items = {
 	}),
 	StarterPack = product({
 		Key = "StarterPack",
-		Id = 0,
+		Id = 3716763817,
 		Price = 99,
 		Name = "Starter Pack",
 		Description = "One time only: the Neon Pink Lab look, a 1 hour x2 Boost and Pocket Cash.",
@@ -236,7 +236,7 @@ ShopConfig.Items = {
 	--[[ Rotating deals (DealConfig): bundles below their parts' price ]]
 	DealPowerHour = product({
 		Key = "DealPowerHour",
-		Id = 0,
+		Id = 3716763988,
 		Price = 99,
 		Name = "Power Hour Deal",
 		Description = "A x2 income Boost for 1 hour plus a x2 Luck Potion for 15 minutes, for less than buying both.",
@@ -249,7 +249,7 @@ ShopConfig.Items = {
 	}),
 	DealFusionKit = product({
 		Key = "DealFusionKit",
-		Id = 0,
+		Id = 3716764061,
 		Price = 79,
 		Name = "Fusion Kit Deal",
 		Description = "Three Safe Fusion tokens plus a x2 Luck Potion for 15 minutes, for less than buying them one by one.",
@@ -262,7 +262,7 @@ ShopConfig.Items = {
 	}),
 	DealRichLab = product({
 		Key = "DealRichLab",
-		Id = 0,
+		Id = 3716764104,
 		Price = 179,
 		Name = "Rich Lab Deal",
 		Description = "A Cash Crate (2 hours of your lab's income) plus a 15 minute x2 Quick Boost, for less than buying both.",
@@ -275,7 +275,7 @@ ShopConfig.Items = {
 	}),
 	OfflineDouble = product({
 		Key = "OfflineDouble",
-		Id = 0,
+		Id = 3716763912,
 		Price = 25,
 		Name = "Double Offline Cash",
 		Description = "Doubles the cash your lab earned while you were away (the welcome-back card's COLLECT x2).",
