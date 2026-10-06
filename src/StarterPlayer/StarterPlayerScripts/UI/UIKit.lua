@@ -439,6 +439,7 @@ export type ButtonState = {
 	Text: string?,
 	SubText: string?,
 	TextColor3: Color3?,
+	TextSize: number?,
 }
 
 -- Restyles a UIKit.Button in place (state changes: affordable, locked, ...).
@@ -464,6 +465,9 @@ function UIKit.SetButton(button: TextButton, state: ButtonState)
 	local subLabel = column:FindFirstChild("SubLabel") :: TextLabel?
 	if label and state.Text then
 		label.Text = state.Text
+	end
+	if label and state.TextSize then
+		label.TextSize = state.TextSize
 	end
 	if subLabel and state.SubText ~= nil then
 		subLabel.Text = state.SubText

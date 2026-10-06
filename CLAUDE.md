@@ -37,9 +37,12 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
   (player)`, the ONE re-arrange, is a `PlayerDataService.OnSync` hook, so
   every change (pull, fusion, Fuse All / Auto-Fuse, delivery, theft, event
   mutation, rebirth, reward item, `/give`) lands on the pedestals in the
-  same sync: spots 1 → 4 (→ 6 with the pass) hold the highest
-  `TycoonConfig.GetItemCashPerSecond` (ties: tier, what's already up,
-  Uid). A carried item's pedestal is left alone (`BeingStolen`) until the
+  same sync: the unlocked spots in fill order
+  (`PlayerDataService.GetPedestalOrder` / `PlotLayout.GetPedestalOrder`:
+  1 → 4, 5 → 6 with the pass, then the 2nd floor's 7 → 10 from Rebirth 2)
+  hold the highest `TycoonConfig.GetStackCashPerSecond` (ties: tier,
+  what's already up, Uid); a new unlock restyles the spots even when
+  nothing moves. A carried item's pedestal is left alone (`BeingStolen`) until the
   heist ends. It sets `InUse`, re-applies only changed pedestals, sends
   `SyncInventory` when ON DISPLAY tags change, announces a newly displayed
   Legendary+ and fires `FirstDisplay`. No place / remove remotes, no
@@ -47,6 +50,93 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
   inventory view (ON DISPLAY tags); the owner prompt left on a pedestal is
   the locked spots' `UnlockPrompt`. Displayed items can be fused (spare
   copies first); only a carried one can't (`ItemCarried`).
+- **Stacking mutations** (`MutationConfig`; like Grow a Garden). An item
+  has ONE base mutation (`Item.Mutation`: none / Golden / Diamond /
+  Rainbow) plus a set of event mutations (`Item.EventMutations`: Charged /
+  Void / Celestial, sorted by rank, each at most once,
+  `MutationConfig.SanitizeEvents` in `reconcile`; an old save's
+  event-only base moves into the set, `Normalize`). The multiplier is
+  **additive**, `1 + Σ(mult − 1)` (`GetStackedMultiplier`: Rainbow +
+  Celestial = ×31, not ×240), through `TycoonConfig.GetItemCashPerSecond
+  (tier, mutations)` / `GetStackCashPerSecond(item)` everywhere. Sources
+  ADD (`AddEvent`, `PlayerDataService.AddItemEventMutation`): a Power
+  Surge strike stacks Charged on any item not yet Charged, a Void Moon
+  fusion stacks Void on what was kept, a meteor core rolls the normal base
+  then Celestial on top, a pull rolls the base then the event roll
+  (`MutationConfig.RollEvents`; 0 outside events). Fusion success keeps
+  the lowest base AND the event mutations every input shares
+  (`FusionConfig.PredictEventMutations`, the intersection); a fail keeps
+  the input with the best stacked multiplier; Fuse All skips anything
+  mutated. The Fuse panel says "✨ Keeps GOLDEN + CHARGED ×N" or names
+  what a mixed chamber loses, red-ringing every orb that drags it
+  (`FusionConfig.IsDragging`); AUTO-FILL matches the whole stack
+  (`SameStack`). Index: a stacked item fills the entry of EACH mutation
+  it has (119 entries unchanged). Looks: `UIKit.MutationPill({ Mutation,
+  EventMutations })` is a row of pills side by side + an Ink "×N" total;
+  orbs and card strokes use the top mutation (`GetTop`); satellites mix
+  every mutation's colour (top's count + 1 per extra); the reveal card
+  reads "+ CHARGED (stacked!)" (`EventReward` / `FusionResult` carry
+  `Added`, `Stacked`); pedestal chips, banners and heist carries
+  (`HeistEventMutations` "Charged,Void") carry the whole stack. Sim:
+  events +13.3% / +14.6% / +13.6% sooner for Rebirth 1–3 (≤ 15%).
+- **2nd floor** (`PlotLayout.Floor2`, `FloorKit`, Rebirth 2 =
+  `RebirthConfig.SecondFloorRebirths`): every lab builds a mezzanine over
+  the back-left (deck top y 12 over the collector and the belt's end; the
+  Fusion Machine, portal and odds board stay open) with pedestals 7–10
+  (2 × 2), three columns, SmoothPlastic posts with Neon top rails round
+  every edge but a front gap, and a ⬆ jump pad on the floor in front of
+  the gap (SurfaceGui ring face, tag `FT_JumpPad`, world-space
+  `LaunchVelocity`): `JumpPadController` launches the LOCAL character
+  (not while ragdolled / seated, 0.8 s cooldown); jump off to come down.
+  `PlotLayout.CheckFloor2` (at require and in `/selftest`): inside the
+  walls, pedestals on the deck clear of rails, each other and the landing,
+  the pad in front of the gap, columns / pad clear of every floor
+  footprint, headroom over what's under it (belt, collector), the
+  machine / portal / odds board never covered, `INSIDE_MAX_Y` and the
+  shield fence (now 18 studs) above a character on the deck, so heists,
+  LOCK and the eject loop cover it. Under Rebirth 2: dim rails and band
+  (`FloorKit.SetLocked`), dim pedestals (attribute `FloorLocked`, owner
+  label "REBIRTH 2"), no prompts, an owner-only "🔒 2ND FLOOR · Rebirth 2"
+  chip. Rebirth panel: "Rebirth 2: unlocks the 2nd floor (+4 pedestals)
+  and the 🔫 Laser Gun." (`RebirthConfig.GetUnlockLine`). Sim: Rebirth 3
+  free 2:44:32 (was 2:45:59, −0.9%); cost growth unchanged.
+- **Quests & power-ups** (`QuestConfig` numbers + copy, `QuestService`,
+  `UI/QuestsPanel`). **Daily:** 3 per UTC day drawn by a hash of the day
+  (`EventConfig.Hash32`), Rebirth-1+ ones (Steal 1, Knock 3) skipped for
+  newer players: Pull 20, Fuse 5, Get a Golden, Collect 15 Golden Rain
+  coins, Upgrade 25 levels, Reach $X/s (2× base income at hand-out).
+  **Lab chain** (endless, one at a time; claiming #n starts #n+1): Own 10
+  Rares · the Common page (every Common item found) · Fuse a Mythic (🖐
+  Slap Glove) · Own 4 Legendaries · Rebirth 2 · 30 Index entries (🍌
+  Banana Peel) · the Rare page · Own a Secret · Rebirth 3, then Rebirth N
+  / Fuse 50k alternating with bigger stacks (`GetChainQuest`). **Progress
+  is server-side only**: `PlayerData.Stats` (Pulls, Goldens, RainCoins,
+  UpgradeLevels, Knocks, Fused_<Tier>; bumped at the real sources via
+  `PlayerDataService.AddStat`), TotalFusions, TotalSteals, the inventory,
+  the Index, rebirths, base income; counted kinds measure growth from a
+  Base taken when the quest started. An OnSync hook hands out, measures,
+  latches `Done` and publishes the status (`SetQuestStatus` → snapshot
+  `Quests`, plus `PowerUps` and `Armed`). `PlayerData.Quests = { UtcDay,
+  Daily = { { Id, Target, Base, Done, Claimed } }, Chain, ChainBase,
+  ChainDone }`, sanitised. Remotes `ClaimQuest { Id }` / `UsePowerUp
+  { Key }` (C→S, rate-limited, re-checked: complete and unclaimed; count
+  and condition) → `QuestResult` / `PowerUpResult`. **Power-ups**
+  (`PlayerData.PowerUps` counts, cap 99; **never sold, not in the
+  shop**): 💸 Cash Burst +5 min in the ×2 income bank, 🍀 Lucky Charm +10
+  min ×2 luck (refused at a full 3 h bank), 👟 Speed Boots ×1.5 for 2 min
+  (Player attribute `SpeedBootsUntil`; a server loop lifts only a
+  normal-speed humanoid, carry / chase / freeze win; refused while
+  carrying), ⚗️ Fusion Spark (armed: +10 points on the next fusion, shown
+  in the Fuse panel's %, spent success or fail), 🧲 Coin Magnet (armed:
+  EventService collects every Golden Rain coin you may take within 20
+  studs through the same path as a touch, then disarms at that rain's
+  end). **HUD:** the amber 📜 QUESTS button under SHOP / GIFTS (green ready
+  badge + bounce), the power-up row beside it (only what you own, count
+  badges, ✓ armed, Speed Boots seconds), a tracker under NEXT GOAL (the
+  nearest unfinished quest; tap opens the panel). Analytics
+  `QuestClaimed` (id), `PowerUpUsed` (key). Sim (`--quests`, 3 dailies
+  per 2 h session-day at 10 / 20 / 30 min, bursts used at once): free
+  Rebirth 1 0:59:01 vs 1:04:17 (−8.2%, within ±10%).
 - **Combat** (`CombatService`, every number in `CombatConfig`;
   `CombatController` client). Cartoon bonks: **no health, damage or
   deaths**. Weapons are **earned, never sold** (the "never" list): Bat
@@ -135,8 +225,9 @@ at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
 successful fusion can roll a **mutation** (`MutationConfig`, ranked by
 multiplier: Golden ×2, Charged ×3, Diamond ×5, Void ×8, Rainbow ×12,
 Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal
-chance, `MutationConfig.IsEventOnly`). Fusion rules: a success keeps the *lowest*
-mutation among all inputs (so every input must share it), then may roll a
+chance, `MutationConfig.IsEventOnly`; they STACK on top of a base, see
+**Stacking mutations**). Fusion rules: a success keeps the *lowest*
+base mutation among all inputs (so every input must share it), then may roll a
 better one; a fail keeps the best input untouched (same Uid) and removes
 the rest; Fuse All (pairs, Common–Epic) never touches mutated items.
 `FusionConfig.PredictMutation(inputs)` (the lowest input mutation) is what
@@ -170,7 +261,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `TycoonController.GetIncomeInputs` (client).
 - Every income display uses `TycoonConfig.GetIncomeMultiplier` (pad ×
   rebirth × Index); `GetCashMultiplierValue` is the pad only. An item's
-  $/s is `TycoonConfig.GetItemCashPerSecond(tier, mutation)`.
+  $/s is `TycoonConfig.GetStackCashPerSecond(item)` (=
+  `GetItemCashPerSecond(tier, MutationConfig.List(base, events))`).
 - Every service syncs the client with `PlayerDataService.SyncTycoon(player)`.
   Do not hand-build SyncTycoon payloads.
 - Each plot builds its own Fusion Machine (`FusionMachineService.Build`,
@@ -241,7 +333,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
-  `/tutorial step <n>`, `/weapons all | reset`,
+  `/tutorial step <n>`, `/weapons all | reset`, `/quest complete <id>`
+  (a daily id or `chain`; the warning lists today's) / `/quest reset`,
+  `/powerup <key> <n>`,
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
   `/shop grant <key>` (any ShopConfig key, the real grant path, no Robux),
@@ -271,7 +365,13 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   checks no shop / deal pop-up showed and that a mid-way save resumes, then
   restores the tester's own tutorial state. Then combat: a Rebirth-0
   player can't be hit, the server cooldown, and (with a second player) a
-  knocked carry returns the orb with both inventories unchanged.
+  knocked carry returns the orb with both inventories unchanged. Last,
+  progression: the stacking helpers, an old save's migration, a live
+  stacked item (refused twice, Void stacks on, each Index entry, ×21, a
+  round trip), the fusion intersection, `PlotLayout.CheckFloor2` + the
+  built floor, a quest claim refused while incomplete and a power-up
+  refused at 0 (the tester's state put back); the fuzz covers ClaimQuest /
+  UsePowerUp.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
@@ -319,11 +419,13 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     - **Power Surge:** generators ×1.25; lightning every 20 s on a target
       picked by lab, then pedestal, marked `LightningWarningSeconds` (3)
       early (pedestal attribute `LightningTarget` + EventFx StrikeWarning);
-      25% of a plain displayed item turns Charged (carried items skipped;
-      inventory, Index, pedestal visuals/labels, SyncInventory).
+      25% of a displayed item not yet Charged gets Charged STACKED on
+      (carried items skipped; inventory, Index, pedestal visuals/labels,
+      SyncInventory; "+ CHARGED (stacked!)" when it had a mutation).
     - **Meteor Shower:** craters on the street (`StreetLayout.MeteorBounds`;
       first finished hold wins a core: Epic 60 / Legendary 30 / Mythic 9 /
-      Secret 1, 15% Celestial; a "Hold E · free item" pill).
+      Secret 1, the normal pull roll for the base and 15% Celestial on
+      top; a "Hold E · free item" pill).
     - **Void Moon:** fusion +5 points, 5% Void replacing the normal roll.
   - **Cleanup:** every object an event makes lives in
     `Workspace.EventObjects.<EventId>` (EventService builds the folders at
@@ -621,7 +723,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   rebirth. `Custom`: ShopOpened, OfferShown / OfferAccepted /
   OfferDismissed (client → remote `ShopAnalytics`, whitelisted,
   rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
-  StealStarted / StealDelivered / StealSaved. Never call AnalyticsService
+  StealStarted / StealDelivered / StealSaved, QuestClaimed (id),
+  PowerUpUsed (key). Never call AnalyticsService
   directly.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
@@ -696,7 +799,7 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     at your console for 8 s ("Your LOCK button is just inside your gate";
     `HudController.SetLockChipHandler`, answered by HeistController).
     **LOCK is obvious to everyone** (HeistController, all client-side from
-    `ShieldState`, no remote): the fence (`PlotLayout.ShieldFence`, 12
+    `ShieldState`, no remote): the fence (`PlotLayout.ShieldFence`, 18 (covers the 2nd floor)
     studs, `World.ShieldBright` ForceField, a glowing Neon top edge per
     panel) fades in over 0.3 s and blinks through its last 5 s; a pulsing
     pink 🔒 hangs in the gate while locked; a **gate sign** every player
@@ -774,14 +877,16 @@ src/ReplicatedStorage/Shared/
                  TrailerConfig — the /trailer shots and camera,
                  DealConfig — the rotating deals,
                  TutorialConfig — the tutorial steps and "?" help,
-                 CombatConfig — weapons, ragdoll and hit rules, …)
+                 CombatConfig — weapons, ragdoll and hit rules,
+                 QuestConfig — daily quests, the lab chain, power-ups, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
                  tagging), PlotKit (plot shell + sign gate), StationKit
                  (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
-                 ball path), PortalKit (the Rebirth Portal), PedestalVisuals,
+                 ball path), PortalKit (the Rebirth Portal), FloorKit (the 2nd
+                 floor), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
                  ShopPrices (live Robux prices), ShopState (Server
                  Overclock, real sale windows), DealState (the current
@@ -805,6 +910,7 @@ src/ServerScriptService/
                            and FREE LAB placeholders; EventService runs the
                            event clock; AdminService runs Admin Abuse;
                            TutorialService the first-time tutorial;
+                           QuestService quests and power-ups;
                            CombatService weapons, hits and ragdoll;
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards)
@@ -822,6 +928,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   GeneratorController (world Buy/Upgrade prompts, upgrade
                   toast + bump), FactoryController (client-only cash balls
                   on every nearby factory line, collector pops),
+                  JumpPadController (the 2nd floor's jump pads),
                   EventController (event banners, sky, FX, HUD chip, Event
                   Boards), AdminController (admin panel + broadcasts),
                   ShopController, DailyController (when the daily card
@@ -840,7 +947,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens),
-                  TutorialCards (tutorial cards + "?" slideshows)
+                  TutorialCards (tutorial cards + "?" slideshows),
+                  QuestsPanel (the 📜 QUESTS panel)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -971,6 +1079,7 @@ calls left in `Services/`.
 | `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService` | `--!strict` |
+| `QuestService` | `:Init()` `:Start()` | `PlayerDataService`, `CombatService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -1014,7 +1123,9 @@ stating direction, then connect it in `:Init()`.
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`),
 `TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`), `RequestHit` (C→S),
-`HitReceived` (S→target), `HitFx` (S→all), `WeaponUnlocked` (S→C) (no lock remote: LOCK is the console
+`HitReceived` (S→target), `HitFx` (S→all), `WeaponUnlocked` (S→C),
+`ClaimQuest` (C→S `{ Id }`) / `QuestResult` (S→C), `UsePowerUp` (C→S
+`{ Key }`) / `PowerUpResult` (S→C) (no lock remote: LOCK is the console
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),

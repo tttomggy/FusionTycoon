@@ -760,6 +760,31 @@ function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
 	return false, "a field was added"
 end
 
+-- /selftest: an old save's item with an event-only base ("Void") through
+-- reconcile; returns its (Mutation, EventMutations) afterwards.
+function PlayerDataService.SelfTestMigrateItem(itemId: string, tier: string, mutation: string): (string?, { string }?)
+	local raw: any = deepCopy(DEFAULT_DATA)
+	raw.Inventory = { { Uid = "selftest-old", ItemId = itemId, Tier = tier, InUse = false, Mutation = mutation } }
+	local data = reconcile(raw)
+	local item = data.Inventory[1]
+	return item.Mutation, item.EventMutations
+end
+
+-- /selftest: a copy of the quest state and power-ups, and the restore.
+function PlayerDataService.SelfTestSnapshotQuests(player: Player): any
+	local data = state.sessionCache[player.UserId]
+	return if data then deepCopy({ Quests = data.Quests, PowerUps = data.PowerUps, Armed = data.Armed }) else nil
+end
+
+function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
+	local data = state.sessionCache[player.UserId]
+	if data and typeof(saved) == "table" then
+		data.Quests = saved.Quests
+		data.PowerUps = saved.PowerUps
+		data.Armed = saved.Armed
+	end
+end
+
 -- Everything a bad remote must NOT change (cash is checked separately: the
 -- income tick only ever raises it). Gifts.PlaySeconds and Boosts tick.
 function PlayerDataService.SelfTestFingerprint(player: Player): string
