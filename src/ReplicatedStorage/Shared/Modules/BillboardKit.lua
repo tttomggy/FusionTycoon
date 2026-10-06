@@ -156,6 +156,19 @@ function BillboardKit.Chip(parent: Instance, props: ChipProps): Chip
 	return { Gui = gui, Label = label }
 end
 
+-- Recolours a chip (the gate sign: LOCKED pink / OPEN red / PROTECTED teal).
+function BillboardKit.SetChipGradient(chip: Chip, pair: UITheme.GradientPair)
+	local fill = chip.Label.Parent
+	local current = fill and fill:FindFirstChildOfClass("UIGradient")
+	if current then
+		current:Destroy()
+	end
+	if fill then
+		gradient(fill, pair.Top, pair.Bottom)
+	end
+	chip.Label.TextColor3 = UITheme.TextOn(pair, nil)
+end
+
 --[[ Pad label --------------------------------------------------------------- ]]
 
 export type PadProps = {

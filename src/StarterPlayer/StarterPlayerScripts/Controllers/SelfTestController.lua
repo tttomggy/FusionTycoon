@@ -25,12 +25,15 @@
 	no no-argument remote (ClaimDaily, RequestRebirth, ...) is fuzzed,
 	since any call to those is a real action.
 ]]
+local CollectionService = game:GetService("CollectionService")
 local LogService = game:GetService("LogService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
@@ -63,8 +66,6 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { Uids = { "nope-1", "nope-2" } } },
 			{ { Uids = { BIG_STRING, "b" } } },
 		},
-		RequestPlaceItem = { {}, { 5, "x" }, { "nope", NAN }, { "nope", INF }, { BIG_STRING, 1 }, { "nope", 1 } },
-		RequestRemoveItem = { {}, { "x" }, { NAN }, { INF }, { -1 }, { 99 }, { 1.5 } },
 		RequestUpgrade = { {}, { 5 }, { "no_such_generator" }, { BIG_STRING } },
 		RequestUpgradeMax = { {}, { "x" }, { { GeneratorId = 5 } }, { { GeneratorId = "no_such_generator" } } },
 		RequestSteal = {
@@ -94,7 +95,6 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
 		table.insert(cases.MarkDealPopup, { { Slot = n } })
-		table.insert(cases.RequestRemoveItem, { n })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
 	return cases
@@ -113,7 +113,7 @@ local function fuzz(otherUserId: number): number
 	end
 	-- Spam: 50 junk calls in one second.
 	for _ = 1, 50 do
-		RemoteEvents.RequestRemoveItem:FireServer(99)
+		RemoteEvents.RequestSteal:FireServer({ OwnerUserId = otherUserId, PedestalIndex = 99 })
 		fired += 1
 		task.wait(0.02)
 	end
@@ -313,6 +313,107 @@ local function testPlacedCards(): { string }
 	return {}
 end
 
+--[[ Hovering things stay home -------------------------------------------
+	Every FT_Hover target sits within its bob of its HoverBase, and (except
+	event objects on the street) inside one of the 12 plot slots; every
+	FT_Orbit model's balls stay round their orb. Run before the fuzz and
+	again after the server rebuilt the pedestal orbs. ]]
+local HOVER_SETTLE_SECONDS = 10
+local startedAt = os.clock()
+
+local function insideAnySlot(position: Vector3): boolean
+	for index = 1, PlotLayout.MAX_PLOT_SLOTS do
+		if PlotLayout.IsInsidePlot(PlotLayout.GetSlotCFrame(index):PointToObjectSpace(position)) then
+			return true
+		end
+	end
+	return false
+end
+
+local function testHover(label: string): { string }
+	local wait = HOVER_SETTLE_SECONDS - (os.clock() - startedAt)
+	if wait > 0 then
+		task.wait(wait)
+	end
+	local eventObjects = workspace:FindFirstChild("EventObjects")
+	local bad: { string } = {}
+	local checked = 0
+	for _, target in CollectionService:GetTagged(PartKit.HOVER_TAG) do
+		local pose = target:IsDescendantOf(workspace) and PartKit.GetRestPose(target)
+		if pose then
+			checked += 1
+			local position = pose.Position
+			local base = target:GetAttribute(PartKit.HOVER_BASE_ATTRIBUTE)
+			local bob = (target:GetAttribute("BobStuds") :: number?) or 0
+			local onStreet = eventObjects ~= nil and target:IsDescendantOf(eventObjects)
+			if typeof(base) ~= "CFrame" then
+				table.insert(bad, target:GetFullName() .. " has no HoverBase")
+			elseif (position - base.Position).Magnitude > math.abs(bob) + 1 then
+				table.insert(bad, ("%s %.0f studs from rest"):format(target:GetFullName(), (position - base.Position).Magnitude))
+			elseif not onStreet and not insideAnySlot(position) then
+				table.insert(bad, ("%s outside every plot at %s"):format(target:GetFullName(), tostring(position)))
+			end
+		end
+	end
+	for _, model in CollectionService:GetTagged(PartKit.ORBIT_TAG) do
+		local group = model.Parent
+		local center = group and group:IsA("Model") and group.PrimaryPart
+		local radius = (model:GetAttribute("Radius") :: number?) or 1
+		if center then
+			for _, ball in model:GetChildren() do
+				if ball:IsA("BasePart") then
+					checked += 1
+					if (ball.Position - center.Position).Magnitude > radius + 1 then
+						table.insert(bad, ball:GetFullName() .. " left its orb")
+					end
+				end
+			end
+		end
+	end
+	if #bad > 0 then
+		return { ("FAIL hovering things stay home (%s): %s"):format(label, table.concat(bad, "; ")) }
+	end
+	return { ("PASS hovering things stay home (%s, %d checked)"):format(label, checked) }
+end
+
+-- Every visible, non-empty TextLabel / TextButton in the open modals must
+-- report TextFits (nothing cut off), at this scale.
+local textFitLines: { string } = {}
+
+local function shownOnScreen(gui: GuiObject, root: Instance): boolean
+	local current: Instance? = gui
+	while current and current ~= root do
+		if current:IsA("GuiObject") and not current.Visible then
+			return false
+		end
+		current = current.Parent
+	end
+	return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
+end
+
+local function checkTextFits(panelName: string, label: string)
+	local bad: { string } = {}
+	local checked = 0
+	for _, gui in UIKit.GetModalGuis() do
+		if gui.Enabled then
+			for _, text in gui:GetDescendants() do
+				if (text:IsA("TextLabel") or text:IsA("TextButton")) and text.Text ~= "" and shownOnScreen(text, gui) then
+					checked += 1
+					if not text.TextFits then
+						table.insert(bad, ("%s %q"):format(text:GetFullName(), text.Text:sub(1, 40)))
+					end
+				end
+			end
+		end
+	end
+	table.insert(
+		textFitLines,
+		if #bad > 0
+			then ("FAIL text fits (%s, %s): %s"):format(panelName, label, table.concat(bad, "; "))
+			else ("PASS text fits (%s, %s, %d labels)"):format(panelName, label, checked)
+	)
+end
+
 local function countGui(): number
 	local guis = UIKit.GetModalGuis()
 	local count = #guis
@@ -338,6 +439,7 @@ local function testPanels(): { string }
 					task.wait(0.3)
 					if cycle == 1 then
 						measureOpenModals(if phone then "phone" else "desktop")
+						checkTextFits(spec.Name, if phone then "phone" else "desktop")
 					end
 					spec.Close()
 					task.wait(0.4)
@@ -440,13 +542,24 @@ local function run(payload: any)
 		table.insert(dealKeys, DealConfig.GetDealForSlot(slot))
 	end
 
+	local hoverLines = testHover("before")
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.
 	task.wait(1.5)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "Fuzz", Fired = fired })
 
 	cardLines = {}
+	textFitLines = {}
 	local panelLines = testPanels()
+	for _, line in textFitLines do
+		table.insert(panelLines, line)
+	end
+	for _, line in hoverLines do
+		table.insert(panelLines, line)
+	end
+	for _, line in testHover("after a pedestal rebuild") do
+		table.insert(panelLines, line)
+	end
 	testPlacedCards()
 	for _, line in cardLines do
 		table.insert(panelLines, line)

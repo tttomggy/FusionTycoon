@@ -103,8 +103,6 @@ type State = {
 	connections: { RBXScriptConnection },
 	-- Server time (GetServerTimeNow) each player's shield is up until.
 	shieldUntil: { [number]: number },
-	-- os.clock() each player's thief cooldown ends.
-	cooldownUntil: { [number]: number },
 	-- os.clock() of each victim's recent losses (pruned to LossWindowSeconds).
 	recentLosses: { [number]: { number } },
 	-- Plots seen claimed (the claim shield is raised once, on the change).
@@ -128,7 +126,6 @@ type State = {
 local state: State = {
 	connections = {},
 	shieldUntil = {},
-	cooldownUntil = {},
 	recentLosses = {},
 	claimSeen = {},
 	rearmAt = {},
@@ -295,12 +292,6 @@ function HeistService.IsLossCapped(player: Player): boolean
 	pruneLosses(player.UserId)
 	local losses = state.recentLosses[player.UserId]
 	return losses ~= nil and #losses >= HeistConfig.LossCap
-end
-
--- Studio /heistcd: clears the thief cooldown (and its published attribute).
-function HeistService.ClearCooldown(player: Player)
-	state.cooldownUntil[player.UserId] = nil
-	player:SetAttribute("HeistCooldownUntil", nil)
 end
 
 -- Studio /stealable: toggles stealable-at-Rebirth-0 for this player's lab.
@@ -508,6 +499,9 @@ local function reject(thief: Player, reason: string, extra: { [string]: any }?)
 	RemoteEvents.HeistEnded:FireClient(thief, payload)
 end
 
+local STEAL_REQUESTS_PER_SECOND = 1
+local STEAL_REQUEST_BURST = 2
+
 local function onRequestSteal(thief: Player, rawPayload: unknown)
 	-- Shape first: the client sends only which pedestal; the server resolves
 	-- the victim, the item and everything else from its own state.
@@ -515,8 +509,9 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		reject(thief, "InvalidArguments")
 		return
 	end
-	-- A spam guard: the prompt is a 1.5 s hold, so honest grabs never hit it.
-	if not RemoteGuard.Allow(thief, "RequestSteal", 2, 4) then
+	-- A request rate limit (~1 a second), not a gameplay cooldown: the prompt
+	-- is a 1.5 s hold, so honest grabs never hit it; spam is dropped.
+	if not RemoteGuard.Allow(thief, "RequestSteal", STEAL_REQUESTS_PER_SECOND, STEAL_REQUEST_BURST) then
 		return
 	end
 	local payload = rawPayload :: { [string]: unknown }
@@ -543,14 +538,10 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		reject(thief, "DataNotLoaded")
 		return
 	end
-	-- 2. Not already carrying, not on cooldown.
+	-- 2. Not already carrying (there is no thief cooldown: the victim's
+	-- shield after a loss and LossCap stop a lab being farmed).
 	if state.carries[thief.UserId] then
 		reject(thief, "AlreadyCarrying")
-		return
-	end
-	local cooldown = state.cooldownUntil[thief.UserId]
-	if cooldown and cooldown > os.clock() then
-		reject(thief, "Cooldown", { Seconds = math.ceil(cooldown - os.clock()) })
 		return
 	end
 	-- 3. Both at MinRebirths (or the victim /stealable in Studio).
@@ -628,9 +619,6 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	}
 	state.carries[thief.UserId] = carry
 	state.carriedItems[uid] = thief.UserId
-	state.cooldownUntil[thief.UserId] = os.clock() + HeistConfig.ThiefCooldownSeconds
-	-- The client's steal timer (HUD chip, "Steal in 42s" prompts), server time.
-	thief:SetAttribute("HeistCooldownUntil", serverNow() + HeistConfig.ThiefCooldownSeconds)
 	PlayerDataService.SetItemCarried(victim, uid, true)
 	PlayerDataService.SetCarrying(thief, true)
 
@@ -854,7 +842,6 @@ local function onPlayerRemoving(player: Player)
 	-- Carries were already failed by the OnRelease hook (before the save).
 	local userId = player.UserId
 	state.shieldUntil[userId] = nil
-	state.cooldownUntil[userId] = nil
 	state.recentLosses[userId] = nil
 	state.claimSeen[userId] = nil
 	state.rearmAt[userId] = nil

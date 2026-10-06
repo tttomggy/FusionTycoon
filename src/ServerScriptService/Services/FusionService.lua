@@ -310,10 +310,10 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 			reject(player, "ItemNotOwned", true)
 			return
 		end
-		-- An item on a pedestal can't also be fused away - the pedestal
-		-- would be left showing an item that no longer exists.
-		if item.InUse then
-			reject(player, "ItemInUse", true)
+		-- A displayed item can be fused (the pedestals re-arrange in the
+		-- sync that follows); one a thief is carrying can't.
+		if PlayerDataService.IsItemCarried(player, uid) then
+			reject(player, "ItemCarried", true)
 			return
 		end
 		if items[1] and item.Tier ~= items[1].Tier then
@@ -382,7 +382,7 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 	end
 end
 
--- The lowest Fuse All tier with at least two items not on a pedestal and
+-- The lowest Fuse All tier with at least two items no thief is carrying and
 -- not mutated, and the first two of them. Mutated items are never
 -- auto-fused.
 local function findFuseAllPair(player: Player): (InventoryItem?, InventoryItem?)
@@ -393,7 +393,7 @@ local function findFuseAllPair(player: Player): (InventoryItem?, InventoryItem?)
 	for _, tier in FusionConfig.GetFuseAllTiers() do
 		local first: InventoryItem? = nil
 		for _, item in inventory do
-			if item.Tier == tier and not item.InUse and item.Mutation == nil then
+			if item.Tier == tier and not PlayerDataService.IsItemCarried(player, item.Uid) and item.Mutation == nil then
 				if first then
 					return first, item
 				end
@@ -503,7 +503,7 @@ end
 
 -- Auto-Fuse (the pass, toggled in the Fuse panel): Fuse All by itself when
 -- new items arrive (TycoonService calls it after a pull). Same rules as
--- Fuse All: pairs, Common-Epic, never mutated, never on a pedestal.
+-- Fuse All: pairs, Common-Epic, never mutated, never a carried item.
 function FusionService.RunAutoFuse(player: Player)
 	if not PlayerDataService.IsDataLoaded(player) or not PlayerDataService.OwnsPass(player, "AutoFuse") then
 		return

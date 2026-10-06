@@ -34,8 +34,9 @@ HeistConfig.OwnerChaseWalkSpeed = 18 -- the owner's speed while one of their ite
 HeistConfig.CarryTickSeconds = 0.1 -- carry loop rate (~10 Hz)
 
 -- Cooldowns and protection
-HeistConfig.ThiefCooldownSeconds = 60 -- after any attempt, success or fail
-HeistConfig.VictimShieldSeconds = 120 -- auto-shield after losing an item
+-- No thief cooldown (Playtest 7: it was 60 s): steal again at once. The
+-- victim's shield after a loss and LossCap keep a lab from being farmed.
+HeistConfig.VictimShieldSeconds = 60 -- auto-shield after losing an item (was 120; every shield is <= 60 s)
 HeistConfig.LossCap = 3 -- at most this many items lost ...
 HeistConfig.LossWindowSeconds = 10 * 60 -- ... per this window; then the lab is unstealable until one ages out
 

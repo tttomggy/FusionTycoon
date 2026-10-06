@@ -417,6 +417,7 @@ local function onSyncTycoon(snapshot: any)
 			end
 		end
 	end
+	InventoryController.SetCarriedUids(carriedUids)
 	local settings = SettingsConfig.Sanitize(snapshot.Settings)
 	local rule = settings.RevealRule
 	for tier, value in pendingReveal do

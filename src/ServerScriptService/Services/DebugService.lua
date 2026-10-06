@@ -11,6 +11,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
@@ -35,6 +36,7 @@ type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
 type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
+type ItemServiceModule = typeof(require(script.Parent.ItemService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -52,6 +54,7 @@ local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
 local EventService: EventServiceModule
 local MonetizationService: MonetizationServiceModule
+local ItemService: ItemServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -75,8 +78,6 @@ local REBIRTHS_COMMAND = "/rebirths"
 local GIVE_COMMAND = "/give"
 -- "/shield 30" raises your shield for 30 s; "/shield 0" drops it.
 local SHIELD_COMMAND = "/shield"
--- "/heistcd 0" clears your thief cooldown.
-local HEIST_COOLDOWN_COMMAND = "/heistcd"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
@@ -279,6 +280,9 @@ local function runSelfTest(player: Player)
 		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
 	end
 	RemoteGuard.Reset(player)
+	-- The client checked every hovering thing before the fuzz; rebuild the
+	-- pedestal orbs now, and it checks again at the end.
+	ItemService.RebuildDisplayVisuals(player)
 
 	-- 7. The client's half: schedule, panels, sounds, client errors.
 	local done = waitForReport(player, "Done")
@@ -298,6 +302,53 @@ local function runSelfTest(player: Player)
 		result(#clientErrors == 0, "no client errors during the test", table.concat(clientErrors, " | "))
 	end
 	selfTestReports[player.UserId] = nil
+
+	-- 8. Auto-display: 6 random items -> the pedestals hold the best by $/s,
+	-- in order, in the same sync; then a new best item (what a fusion adds)
+	-- lands on pedestal 1 in the same sync. The test items are removed after.
+	local added: { string } = {}
+	local tiers = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+	local mutations = { nil, "Golden", "Diamond" }
+	for _ = 1, 6 do
+		local tier = tiers[math.random(1, #tiers)]
+		local def = ItemConfig.PickRandomOfTier(tier)
+		if def then
+			local item = PlayerDataService.AddItem(player, def.Id, tier, mutations[math.random(1, 3)])
+			if item then
+				table.insert(added, item.Uid)
+			end
+		end
+	end
+	PlayerDataService.SyncTycoon(player)
+	local function rate(uid: string?): number
+		local item = uid and PlayerDataService.GetItemByUid(player, uid)
+		return if item then TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) else -1
+	end
+	local displays = PlayerDataService.GetPedestalDisplays(player)
+	local count = PlayerDataService.GetPedestalCount(player)
+	local best = -1
+	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in inventory do
+		if not PlayerDataService.IsItemCarried(player, item.Uid) then
+			best = math.max(best, TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation))
+		end
+	end
+	local ordered = rate(displays[1]) == best
+	for index = 2, count do
+		if displays[index] and rate(displays[index]) > rate(displays[index - 1]) then
+			ordered = false
+		end
+	end
+	result(ordered, ("auto-display: pedestals 1-%d hold the best by $/s, in order"):format(count))
+	local def = ItemConfig.PickRandomOfTier("Secret")
+	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
+	if top then
+		table.insert(added, top.Uid)
+		PlayerDataService.SyncTycoon(player)
+		result(PlayerDataService.GetPedestalDisplays(player)[1] == top.Uid, "auto-display: a new best item is on pedestal 1 in the same sync")
+	end
+	PlayerDataService.RemoveItemsByUid(player, added)
+	PlayerDataService.SyncTycoon(player)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 
@@ -359,9 +410,6 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
-	elseif command == HEIST_COOLDOWN_COMMAND then
-		HeistService.ClearCooldown(player)
-		print(("DebugService: cleared %s's thief cooldown"):format(player.Name))
 	elseif command == STEALABLE_COMMAND then
 		local stealable = not stealableToggles[player.UserId]
 		stealableToggles[player.UserId] = stealable
@@ -562,7 +610,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -570,6 +618,7 @@ function DebugService:Start()
 	HeistService = require(script.Parent.HeistService)
 	EventService = require(script.Parent.EventService)
 	MonetizationService = require(script.Parent.MonetizationService)
+	ItemService = require(script.Parent.ItemService)
 end
 
 return DebugService

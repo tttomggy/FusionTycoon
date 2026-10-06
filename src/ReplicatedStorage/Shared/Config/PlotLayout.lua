@@ -62,14 +62,21 @@ function PlotLayout.IsInsidePlot(localPos: Vector3): boolean
 end
 
 -- The lab shield: ForceField panels just outside all four walls (the front
--- one split around the gate) plus a thin Neon line across the gate gap.
--- Non-colliding: the eject loop does the keeping-out.
+-- one split around the gate) plus a thin Neon line across the gate gap,
+-- each panel topped by a glowing Neon edge. Non-colliding: the eject loop
+-- does the keeping-out. Clients draw the rest (HeistController): the
+-- pulsing lock over the gate and the gate sign every player sees.
 PlotLayout.ShieldFence = {
-	Height = 10,
+	Height = 12, -- taller than a character (was 10), up to the sign posts
 	Thickness = 0.2,
 	OutsetFromWall = 0.4, -- gap between the wall's outer face and the panel
+	TopEdgeHeight = 0.3, -- the glowing Neon strip along each panel's top
 	GateLineThickness = 0.3,
 	GateLineY = 0.5,
+	LockIconY = 7, -- the pulsing lock, in the gate under the sign board
+	GateSignY = 18.8, -- the LOCKED / OPEN sign, above the sign board (top 16.5)
+	GateSignStuds = Vector2.new(12, 2.4),
+	GateSignMaxDistance = 150,
 }
 
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]

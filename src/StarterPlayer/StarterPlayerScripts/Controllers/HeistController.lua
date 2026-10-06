@@ -70,6 +70,7 @@ local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local ShieldState = require(ReplicatedStorage.Shared.Modules.ShieldState)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
@@ -107,6 +108,12 @@ local FENCE_FADE_SECONDS = 0.3
 local FENCE_SHOWN_TRANSPARENCY = 0
 local FENCE_LINE_SHOWN_TRANSPARENCY = 0.2
 local FENCE_CHECK_SECONDS = 0.2
+-- The last seconds of a lock the fence flashes (it's about to drop).
+local FENCE_FLASH_SECONDS = 5
+local FENCE_FLASH_PERIOD = 0.4
+local FENCE_FLASH_DIM = 0.7
+local LOCK_ICON_STUDS = 3.2
+local LOCK_ICON_PULSE = 1.18
 
 -- Rejection reason -> toast. Unlisted reasons (exploit-only) stay silent.
 local REJECT_MESSAGES: { [string]: string } = {
@@ -169,16 +176,6 @@ local LOCK_AFTER_LOSS_TIP = "Tip: hit the LOCK button inside your gate before yo
 local POINT_AT_CONSOLE_SECONDS = 8
 local POINT_AT_CONSOLE_TOAST = "Your LOCK button is just inside your gate"
 local pointToken = 0
-local STEAL_AGAIN_TEXT = "You can steal again in %ds"
-
--- "You can steal again in 42s", from the Player attribute HeistCooldownUntil.
-local function cooldownText(): string
-	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
-	local left = if typeof(untilTime) == "number"
-		then math.max(0, math.ceil(untilTime - Workspace:GetServerTimeNow()))
-		else 0
-	return STEAL_AGAIN_TEXT:format(left)
-end
 local LOSS_TIP_DELAY_SECONDS = 2.5
 -- Set per carry: this is the player's first time as a victim.
 local firstCatch = false
@@ -645,12 +642,11 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
 		return
 	end
-	-- WorldLabelController's local Mode: a guarded pedestal, your steal
-	-- cooldown and the Rebirth-0 teaser are instant taps that only explain
-	-- themselves.
+	-- WorldLabelController's local Mode: a guarded pedestal and the
+	-- Rebirth-0 teaser are instant taps that only explain themselves.
 	local mode = prompt:GetAttribute("Mode")
-	if mode == "Cooldown" then
-		ToastController.Show(cooldownText(), "Neutral")
+	if mode == "Shielded" then
+		ToastController.Show(("This lab is locked · %s"):format(prompt.ActionText:match("· (.+)$") or ""), "Neutral")
 		return
 	elseif mode == "Guarded" then
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
@@ -724,10 +720,6 @@ local function onHeistEnded(payload: any)
 			end
 			return
 		end
-		if payload.Reason == "Cooldown" then
-			ToastController.Show(STEAL_AGAIN_TEXT:format(tonumber(payload.Seconds) or 0), "Neutral")
-			return
-		end
 		local message = REJECT_MESSAGES[payload.Reason]
 		if message then
 			ToastController.Show(message, "Neutral")
@@ -745,7 +737,7 @@ local function onHeistEnded(payload: any)
 	local other = tostring(payload.OtherName)
 	if payload.Role == "Thief" then
 		if payload.Outcome == "Delivered" then
-			ResultController.ShowHeistComplete(item, other, cooldownText())
+			ResultController.ShowHeistComplete(item, other)
 		else
 			ToastController.Show(THIEF_FAIL_TOASTS[payload.Outcome] or "It slipped away", "Error")
 		end
@@ -866,6 +858,119 @@ local function updateConsole()
 	end
 end
 
+-- Every lab's gate: a pulsing lock while it's locked, and the sign every
+-- player sees (ShieldState, counted down here from ShieldUntil, no remote):
+-- "🛡 LOCKED · 0:42" pink, "🔓 OPEN" red (a thief's invitation), "🔓 OPEN ·
+-- can re-lock in 12s", "🛡 PROTECTED" teal (owners under Rebirth 1).
+type GateView = { Chip: BillboardKit.Chip, Icon: BillboardGui, Key: string? }
+local gateViews: { [Instance]: GateView } = {}
+
+local function buildGateView(line: BasePart): GateView
+	local f = PlotLayout.ShieldFence
+	local chip = BillboardKit.Chip(line, {
+		Name = "GateSign",
+		Text = "",
+		Gradient = UITheme.Gradients.Red,
+		Studs = f.GateSignStuds,
+		StudsOffset = Vector3.new(0, f.GateSignY - f.GateLineY, 0),
+		MaxDistance = f.GateSignMaxDistance,
+	})
+	local icon = Instance.new("BillboardGui")
+	icon.Name = "ShieldLockIcon"
+	icon.Size = UDim2.fromScale(LOCK_ICON_STUDS, LOCK_ICON_STUDS)
+	icon.StudsOffset = Vector3.new(0, f.LockIconY - f.GateLineY, 0)
+	icon.MaxDistance = f.GateSignMaxDistance
+	icon.LightInfluence = 0
+	icon.AlwaysOnTop = false
+	icon.Enabled = false
+	local disc = Instance.new("Frame")
+	disc.Name = "Disc"
+	disc.AnchorPoint = Vector2.new(0.5, 0.5)
+	disc.Position = UDim2.fromScale(0.5, 0.5)
+	disc.Size = UDim2.fromScale(0.8, 0.8)
+	disc.BackgroundColor3 = Colors.White
+	disc.Parent = icon
+	UIKit.Corner(disc, 999)
+	UIKit.Stroke(disc, 3)
+	UIKit.PairGradient(disc, UITheme.Gradients.Shield)
+	local glyph = Instance.new("TextLabel")
+	glyph.Name = "Glyph"
+	glyph.BackgroundTransparency = 1
+	glyph.Size = UDim2.fromScale(1, 1)
+	glyph.Text = "🔒"
+	glyph.TextScaled = true
+	glyph.FontFace = Fonts.Display
+	glyph.TextColor3 = Colors.Text
+	glyph.Parent = disc
+	local pulse = Instance.new("UIScale")
+	pulse.Parent = disc
+	TweenService:Create(
+		pulse,
+		TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+		{ Scale = LOCK_ICON_PULSE }
+	):Play()
+	icon.Parent = line
+	return { Chip = chip, Icon = icon, Key = nil }
+end
+
+local function updateGate(plot: Instance)
+	local fence = plot:FindFirstChild("ShieldFence")
+	local line = fence and fence:FindFirstChild("ShieldGateLine")
+	if not line or not line:IsA("BasePart") or plot:GetAttribute("Claimed") ~= true then
+		local old = gateViews[plot]
+		if old then
+			old.Chip.Gui:Destroy()
+			old.Icon:Destroy()
+			gateViews[plot] = nil
+		end
+		return
+	end
+	local view = gateViews[plot]
+	if not view or view.Chip.Gui.Parent ~= line then
+		view = buildGateView(line)
+		gateViews[plot] = view
+	end
+	local state, seconds = ShieldState.Get(plot)
+	local text: string
+	if state == "Locked" then
+		text = ("🛡 LOCKED · %s"):format(EventState.FormatTimer(seconds))
+	elseif state == "Recharging" then
+		text = ("🔓 OPEN · can re-lock in %ds"):format(seconds)
+	elseif state == "Ready" then
+		text = "🔓 OPEN"
+	else
+		text = "🛡 PROTECTED"
+	end
+	if view.Chip.Label.Text ~= text then
+		view.Chip.Label.Text = text
+	end
+	if view.Key ~= state then
+		view.Key = state
+		BillboardKit.SetChipGradient(view.Chip, if state == "Locked"
+			then UITheme.Gradients.Shield
+			elseif state == "Protected" then UITheme.Gradients.Teal
+			else UITheme.Gradients.Red)
+		view.Icon.Enabled = state == "Locked"
+	end
+end
+
+-- The last FENCE_FLASH_SECONDS of a lock: the fence blinks.
+local function flashFence(plot: Instance, now: number)
+	local fence = plot:FindFirstChild("ShieldFence")
+	if not fence then
+		return
+	end
+	local bright = math.floor(now / FENCE_FLASH_PERIOD) % 2 == 0
+	for _, part in fence:GetChildren() do
+		if part:IsA("BasePart") and part:GetAttribute(PlotKit.SHIELD_PART_ATTRIBUTE) then
+			local shownTransparency = if part.Material == Enum.Material.Neon
+				then FENCE_LINE_SHOWN_TRANSPARENCY
+				else FENCE_SHOWN_TRANSPARENCY
+			part.Transparency = if bright then shownTransparency else FENCE_FLASH_DIM
+		end
+	end
+end
+
 local function updateFences()
 	local folder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
 	if not folder then
@@ -877,11 +982,21 @@ local function updateFences()
 		local shown = typeof(shieldUntil) == "number" and shieldUntil > now
 		if (fenceShown[plot] == true) ~= shown then
 			setFence(plot, shown)
+		elseif shown and (shieldUntil :: number) - now <= FENCE_FLASH_SECONDS then
+			flashFence(plot, now)
 		end
+		updateGate(plot)
 	end
 	for plot in fenceShown do
 		if plot.Parent ~= folder then
 			fenceShown[plot] = nil
+		end
+	end
+	for plot, view in gateViews do
+		if plot.Parent ~= folder then
+			view.Chip.Gui:Destroy()
+			view.Icon:Destroy()
+			gateViews[plot] = nil
 		end
 	end
 end
@@ -1039,11 +1154,9 @@ local function updateGuards()
 end
 
 -- Markers on every grabbable enemy pedestal, and the first-visit tip.
--- A pedestal worth a red hand: grabbable now, or after your cooldown (the
--- markers stay up while it runs so you can plan the next target).
-local function isMarkTarget(pedestal: Instance, prompt: Instance): boolean
-	local mode = prompt:GetAttribute("Mode")
-	return mode == "Steal" or (mode == "Cooldown" and pedestal:GetAttribute("GuardedByOwner") ~= true)
+-- A pedestal worth a red hand: grabbable now.
+local function isMarkTarget(_pedestal: Instance, prompt: Instance): boolean
+	return prompt:GetAttribute("Mode") == "Steal"
 end
 
 local function updateTeaching()

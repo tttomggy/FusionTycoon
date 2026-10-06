@@ -134,6 +134,18 @@ function UIKit.Label(props: LabelProps): TextLabel
 	return label
 end
 
+-- Text that must never be cut off (a longer translation, a narrow card):
+-- wraps and scales down from `maxSize` to at least `minSize` to fit its box.
+function UIKit.FitText(label: TextLabel, maxSize: number, minSize: number)
+	label.TextWrapped = true
+	label.TextScaled = true
+	label.TextTruncate = Enum.TextTruncate.None
+	local constraint = label:FindFirstChildOfClass("UITextSizeConstraint") or Instance.new("UITextSizeConstraint")
+	constraint.MaxTextSize = maxSize
+	constraint.MinTextSize = minSize
+	constraint.Parent = label
+end
+
 --[[ Shadow ------------------------------------------------------------------ ]]
 
 -- Product of every UIScale between `gui` and its ScreenGui, so an
@@ -1442,6 +1454,7 @@ function UIKit.Modal(props: ModalProps): Modal
 		Stroke = UITheme.Stroke.Text,
 		Parent = header,
 	})
+	UIKit.FitText(title, 32, 18)
 	local subtitle = UIKit.Label({
 		Name = "Subtitle",
 		Font = Fonts.Body,

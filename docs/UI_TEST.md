@@ -1594,3 +1594,62 @@ Heist, the result cards, the celebration):
   row.
 - [ ] `/trailer pull`: the Gacha Pad puller is the yellow / blue noob (not
   your avatar); no mouse cursor during the run, and it's back after.
+
+## 36. Playtest 7 fixes
+
+**Hovering things stay home (#1)**
+
+- [ ] Join, then claim: the Gacha Pad capsule, Multiplier chevrons,
+  generator cores and pedestal orbs float over their own stations; nothing
+  hangs over the middle of the street.
+- [ ] Rebirth; reset your character; walk far down the street and back
+  (streaming); a second player joins and leaves; `/event GoldenRain`,
+  `/event off`: still nothing in the street.
+- [ ] `/selftest`: PASS "hovering things stay home" before and after the
+  pedestal rebuild.
+
+**How to Heist text (#2)**
+
+- [ ] 1920×1080, 1366×768, 1280×720 and the phone emulator: every slide's
+  title and line show in full (long lines shrink, never cut off); the
+  number badge sits just left of the title.
+- [ ] `/selftest`: every "text fits" line PASSes (any miss is listed by
+  path).
+
+**REBIRTH button (#3)**
+
+- [ ] The bottom bar reads UPGRADES · ITEMS · INDEX · REBIRTH · ⚙; REBIRTH
+  is purple with a fill and "$2.1M / $15M" that grows with your cash.
+- [ ] `/rebirthready`: it glows and pulses; a tap opens the Rebirth panel
+  (keep, income and luck, unlocks, REBIRTH). Without the cash: "Need $X
+  more". The Portal still opens it.
+- [ ] Phone: the bar fits, every button ≥ 44 px.
+
+**Heist tuning (#4)**
+
+- [ ] Steal, deliver, and steal again at once: no "Steal in 42s", no
+  cooldown toast, no HEIST COMPLETE timer.
+- [ ] Spam the steal remote from the command bar: dropped, no errors.
+- [ ] Lose an item: your shield is 60 s; claim / LOCK shields are 60 s.
+
+**LOCK for everyone (#5)**
+
+- [ ] LOCK: the fence fades in tall and bright with a glowing top edge, a
+  pink 🔒 pulses in the gate, and it blinks in the last 5 s.
+- [ ] From the street, every lab's gate sign reads "🛡 LOCKED · 0:42" (pink),
+  "🔓 OPEN" (red), "🔓 OPEN · can re-lock in 12s" or "🛡 PROTECTED"
+  (Rebirth 0), visible from ~150 studs.
+- [ ] An enemy pedestal in a locked lab reads "Locked · 0:42"; tapping it
+  toasts.
+
+**Auto-display (#6)**
+
+- [ ] Pull: the item lands on a pedestal by itself; better items take
+  spot 1 and push the rest along; 4 spots (6 with the pass).
+- [ ] Fuse into a better item: it's on pedestal 1 as the result shows.
+- [ ] No Display / Remove prompt on pedestals; the locked spots 5-6 still
+  offer Unlock. Result cards show NICE! / OK only.
+- [ ] ITEMS shows ON DISPLAY tags; displayed items can be fused.
+- [ ] A thief carries one of yours: that pedestal stays BeingStolen; after
+  the delivery it refills with your next best.
+- [ ] `/selftest`: PASS both "auto-display" lines.
