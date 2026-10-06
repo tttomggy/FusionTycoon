@@ -309,3 +309,4 @@ checks that no footprints overlap and everything sits inside the walls.
 
 - Change files with targeted edits; never rewrite a whole file to change a few lines.
 - Keep replies short: what changed, what to test, nothing else.
+- Branch: commit and push to `world-redesign` (Harris's start-dev pulls that branch). If your session makes you push somewhere else, say so in the FIRST line of your report.
