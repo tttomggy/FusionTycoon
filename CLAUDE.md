@@ -1233,3 +1233,8 @@ checks that no footprints overlap and everything sits inside the walls.
 - A line starting with `(` directly after a statement ending in an expression is
   parsed as a call spanning both lines. Route casts through a local
   (`local x = y :: T`) instead of inline `(y :: T).Field = …`.
+
+## Working style
+
+- Change files with targeted edits; never rewrite a whole file to change a few lines.
+- Keep replies short: what changed, what to test, nothing else.
