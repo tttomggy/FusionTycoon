@@ -106,7 +106,16 @@ local goalCountLabel: TextLabel
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
 local upgradesHolder: Frame? = nil
-local rebirthReadyHolder: Frame
+-- The bottom bar's REBIRTH button (always there): cash vs the next cost.
+local rebirthButton: TextButton? = nil
+local rebirthFill: Frame? = nil
+local rebirthGlow: Frame? = nil
+local rebirthScale: UIScale? = nil
+local rebirthPulse: Tween? = nil
+local rebirthGlowTween: Tween? = nil
+local REBIRTH_FILL_TRANSPARENCY = 0.72
+local REBIRTH_GLOW_PAD = 14
+local REBIRTH_PULSE_SCALE = 1.08
 local buttonsByName: { [string]: TextButton } = {}
 -- Buttons the goal marker wants highlighted; reapplied after a rebuild.
 local highlighted: { [string]: boolean? } = {}
@@ -649,6 +658,53 @@ local function buildButtons(isPhone: boolean)
 		OnClick = IndexPanel.Toggle,
 	})
 
+	-- REBIRTH: always there, a fill of cash against the next rebirth's cost
+	-- and "$2.1M / $15M"; glows and pulses once you can afford it. Opens
+	-- the Rebirth panel from anywhere (the Portal still works too).
+	local rebirth, rebirthHolder = UIKit.Button({
+		Name = "RebirthButton",
+		Parent = buttonRow,
+		Style = "Violet",
+		Text = "REBIRTH",
+		SubText = " ",
+		SubTextSize = if isPhone then 10 else 13,
+		IconStacked = isPhone,
+		Size = size,
+		TextSize = layout.ButtonTextSize,
+		LayoutOrder = 4,
+		OnClick = RebirthPanel.Open,
+	})
+	buttonsByName.Rebirth = rebirth
+	rebirthButton = rebirth
+	local fill = Instance.new("Frame")
+	fill.Name = "RebirthFill"
+	fill.BackgroundColor3 = Colors.White
+	fill.BackgroundTransparency = REBIRTH_FILL_TRANSPARENCY
+	fill.BorderSizePixel = 0
+	fill.Size = UDim2.fromScale(0, 1)
+	fill.ZIndex = rebirth.ZIndex
+	fill.Parent = rebirth
+	UIKit.Corner(fill, UITheme.Radius.Button)
+	rebirthFill = fill
+	local glow = Instance.new("Frame")
+	glow.Name = "RebirthGlow"
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, 0.5)
+	glow.Size = UDim2.new(1, REBIRTH_GLOW_PAD, 1, REBIRTH_GLOW_PAD)
+	glow.BackgroundColor3 = Colors.VioletLight
+	glow.BackgroundTransparency = 1
+	glow.BorderSizePixel = 0
+	glow.ZIndex = math.max(rebirthHolder.ZIndex - 2, 0)
+	glow.Parent = rebirthHolder
+	UIKit.Corner(glow, UITheme.Radius.Button + REBIRTH_GLOW_PAD / 2)
+	rebirthGlow = glow
+	local scale = Instance.new("UIScale")
+	scale.Name = "RebirthPulse"
+	scale.Parent = rebirthHolder
+	rebirthScale = scale
+	rebirthPulse = nil
+	rebirthGlowTween = nil
+
 	-- ⚙ Settings: a 56 px square at the right end of the bar.
 	buttonsByName.Settings = UIKit.Button({
 		Name = "SettingsButton",
@@ -657,7 +713,7 @@ local function buildButtons(isPhone: boolean)
 		Text = "⚙",
 		Size = UDim2.fromOffset(SETTINGS_BUTTON_SIZE, SETTINGS_BUTTON_SIZE),
 		TextSize = 26,
-		LayoutOrder = 4,
+		LayoutOrder = 5,
 		OnClick = SettingsPanel.Toggle,
 	})
 
@@ -687,44 +743,55 @@ local function buildButtonRow()
 	layout.Parent = buttonRow
 end
 
---[[ REBIRTH! button -----------------------------------------------------------
-	Centred above the bottom button row while the player can afford the next
-	rebirth; pulses so it's hard to miss, and opens the Rebirth panel.
+--[[ REBIRTH button (bottom bar) -------------------------------------------------
+	Built with the bar (buildButtons); this keeps its fill, "$2.1M / $15M"
+	and the ready glow + pulse in step with your cash.
 ]]
-local REBIRTH_READY_SIZE = { Desktop = Vector2.new(220, 56), Phone = Vector2.new(170, 48) }
-local REBIRTH_READY_GAP = 14 -- above the button row's top
 
-local function buildRebirthReadyButton()
-	local _, holder = UIKit.Button({
-		Name = "RebirthReady",
-		Parent = screenGui,
-		Style = "Orange",
-		Text = "REBIRTH!",
-		TextSize = 24,
-		AnchorPoint = Vector2.new(0.5, 1),
-		Size = UDim2.fromOffset(REBIRTH_READY_SIZE.Desktop.X, REBIRTH_READY_SIZE.Desktop.Y),
-		OnClick = RebirthPanel.Open,
+local function refreshRebirthButton()
+	local button = rebirthButton
+	local fill = rebirthFill
+	if not button or not fill then
+		return
+	end
+	local cost = TycoonController.GetRebirthCost()
+	local cash = TycoonController.GetCash()
+	local progress = if cost > 0 then math.clamp(cash / cost, 0, 1) else 0
+	fill.Size = UDim2.fromScale(progress, 1)
+	UIKit.SetButton(button, {
+		SubText = ("%s / %s"):format(NumberFormat.Money(math.min(cash, cost)), NumberFormat.Money(cost)),
 	})
-	rebirthReadyHolder = holder
-	holder.Visible = false
-	local scale = Instance.new("UIScale")
-	scale.Name = "PulseScale"
-	scale.Parent = holder
-	TweenService:Create(
-		scale,
-		TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Scale = 1.08 }
-	):Play()
-end
-
-local function layoutRebirthReady(isPhone: boolean)
-	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
-	local size = if isPhone then REBIRTH_READY_SIZE.Phone else REBIRTH_READY_SIZE.Desktop
-	local bottom = BOTTOM_MARGIN + UITheme.ShadowOffset + layout.ButtonSize.Y + REBIRTH_READY_GAP
-	rebirthReadyHolder.Size = UDim2.fromOffset(size.X, size.Y)
-	rebirthReadyHolder.Position = UDim2.new(0.5, 0, 1, -bottom)
-	-- Toasts and bottom cards sit on UITheme.BottomStackOffset, above this slot.
-	assert(bottom + size.Y * 1.08 <= UITheme.BottomStackOffset, "BottomStackOffset must clear REBIRTH!")
+	local ready = TycoonController.IsRebirthReady()
+	if ready and not rebirthPulse and rebirthScale and rebirthGlow then
+		local pulse = TweenService:Create(
+			rebirthScale,
+			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = REBIRTH_PULSE_SCALE }
+		)
+		pulse:Play()
+		rebirthPulse = pulse
+		rebirthGlow.BackgroundTransparency = 0.75
+		local glow = TweenService:Create(
+			rebirthGlow,
+			TweenInfo.new(0.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ BackgroundTransparency = 0.25 }
+		)
+		glow:Play()
+		rebirthGlowTween = glow
+	elseif not ready and rebirthPulse then
+		(rebirthPulse :: Tween):Cancel()
+		rebirthPulse = nil
+		if rebirthGlowTween then
+			rebirthGlowTween:Cancel()
+			rebirthGlowTween = nil
+		end
+		if rebirthScale then
+			rebirthScale.Scale = 1
+		end
+		if rebirthGlow then
+			rebirthGlow.BackgroundTransparency = 1
+		end
+	end
 end
 
 -- Gentle pulse on UPGRADES while something is affordable, so new players notice it.
@@ -1207,6 +1274,8 @@ end
 local selfTestHold = false
 
 local function refreshShopRow()
+	-- Cash ticks between snapshots: keep the REBIRTH fill moving.
+	refreshRebirthButton()
 	if selfTestHold then
 		return
 	end
@@ -1313,7 +1382,7 @@ function applyLayout(isPhone: boolean)
 	goalRewardLabel.Visible = not isPhone
 	goalBar.Size = UDim2.new(1, 0, 0, layout.GoalBarHeight)
 	buildButtons(isPhone)
-	layoutRebirthReady(isPhone)
+	refreshRebirthButton()
 end
 
 --[[ /selftest ------------------------------------------------------------- ]]
@@ -1409,7 +1478,7 @@ local function refreshAll()
 	if breakdownHolder.Visible then
 		HudController.RefreshIncomeBreakdown()
 	end
-	rebirthReadyHolder.Visible = TycoonController.IsRebirthReady()
+	refreshRebirthButton()
 	local rebirths = TycoonController.GetRebirths()
 	local rebirthFill = UIKit.PillRoot(rebirthPill)
 	rebirthFill.Visible = rebirths > 0
@@ -1469,7 +1538,6 @@ function HudController.Init()
 		GetCash = TycoonController.GetCash,
 	})
 	buildButtonRow()
-	buildRebirthReadyButton()
 	buildLockChip()
 	buildShopRow()
 	buildDealBadge()
