@@ -1654,65 +1654,98 @@ Heist, the result cards, the celebration):
   the delivery it refills with your next best.
 - [ ] `/selftest`: PASS both "auto-display" lines.
 
-## 37. Tutorial
+## 37. Tutorial 2
+
+Rebuilt after Harris's Oct 6 playtest ("super confusing"): one instruction
+at a time like the egg games, no OK cards. **Pass = a brand-new player gets
+from spawn to the end reading only the banner.**
 
 **New player, 1920×1080** (`/tutorial reset`, or a fresh Studio profile)
 
-- [ ] Welcome card: icon, title, 2 short sentences, green OK; the game is
-  dimmed behind it. Nothing else pops up (no shop / deal / Starter / Daily
-  card, no tips) until the end.
-- [ ] Claim: after OK a glowing path runs from your feet to your lab's
-  claim pad (it follows you as you move), the arrow and the pulsing floor
-  ring mark it; claiming completes it ("✓ Nice!" + sound, next card 0.6 s
-  later).
-- [ ] Upgrade: path to the Basic Generator, UPGRADES ringed; an upgrade
-  from the world prompt OR the panel completes it.
-- [ ] Pull: the pad reads "FREE · 2 left"; two pulls give two plain
-  Commons, the pad price doesn't move; done after the second.
-- [ ] Pedestals: path to pedestal 1 and the $/s line ringed while the card
-  is up; OK completes it.
-- [ ] Fuse: path to the machine; in the Fuse panel the ring walks
-  AUTO-FILL → the odds chips → FUSE; the fusion succeeds (a Rare, big card,
-  then it goes on display); the next card waits for the big card.
-- [ ] Index: INDEX ringed; opening it completes the step.
-- [ ] Multiplier: without the cash the card says "Come back when you have
-  $X" and OK completes it; with the cash, buying level 1 does.
-- [ ] Lab weather (event chip ringed) and Free gifts (GIFTS ringed): OK.
-  No shop step, no shop mention anywhere.
-- [ ] LOCK: path to the console; standing at it completes it; then the
-  Stealing card. Rebirth: REBIRTH ringed; opening the panel completes it.
-- [ ] You're ready: LET'S GO! ends it; held tips show now; the path now
+- [ ] Spawn: ONLY the cash card and the banner "Claim your lab · 12m". No
+  card, no SHOP / GIFTS / QUESTS / deal / NEXT GOAL, no weapon bar, no
+  UPGRADES / ITEMS / INDEX / REBIRTH / ⚙, no event chip.
+- [ ] A lime dotted line floats from your feet to your claim pad (small
+  round dots, a pulse running toward the pad), 3 big lime chevrons on the
+  floor in front of the pad pointing in, the bouncing goal arrow over it.
+  No thick yellow rails anywhere. The metres count down; at the pad the
+  distance goes.
+- [ ] Claiming: "✓ Claim your lab" + sound, a centred "WELCOME TO YOUR LAB!
+  <NAME>'S LAB" that fades by itself after 2 s (no button), then "Upgrade
+  your generator · 8m" 0.4 s after the ✓.
+- [ ] Upgrade: UPGRADES pops in (bounce, sparkles, "NEW!" for 3 s); path to
+  the Basic Generator; at it a big green UPGRADE button with the 👆 hand
+  on it; tapping it upgrades (the real server path).
+- [ ] Pull: "Pull an orb" + the sub "Your first 2 are free!"; at the pad a
+  big PULL button + hand; a single pull opens the centred big card "YOU
+  GOT A COMMON ORB!" (tier colour, orb, name, +$X/s) that closes by itself
+  after ~2 s or on a tap. "Pull one more!", the hand on PULL again; ITEMS
+  pops in. The pad price doesn't move; both are plain Commons.
+- [ ] "Your orbs make money!": 3 s, path to the pedestals, a floating
+  "+$X/s" over each orb; goes on by itself.
+- [ ] "Fuse 2 orbs": path to the machine, big FUSE button + hand; in the
+  panel the hand goes AUTO-FILL, then FUSE (2 taps, nothing about odds); a
+  Rare big card; INDEX pops in with "New orbs fill your Index!".
+- [ ] "Make more money": path to the Multiplier Pad, BUY when affordable
+  (buying completes it); without the cash the sub says "Come back with $X"
+  and it skips after 3 s.
+- [ ] "Lab weather!": the event chip pops in, the hand on it; tapping it
+  opens the info card and completes the step (else it goes on after 6 s).
+- [ ] "Reach $15M to Rebirth": REBIRTH pops in, the hand on it; opening the
+  panel completes it (else 6 s).
+- [ ] "You're ready!": ⚙, SHOP / GIFTS / QUESTS / deal, then NEXT GOAL and
+  the quest tracker pop in one by one; held tips show now; the path now
   follows the current goal; 👣 on the goal card turns it off / on.
+- [ ] Nothing pops up meanwhile (no shop / deal / Starter / Daily / tips);
+  the hand is never a rectangle and there is only ever one.
+- [ ] At Rebirth 0 there is no weapon bar; at Rebirth 1 it appears with
+  the Bat (R2 / R3 greyed after that).
 
-**Phone (iPhone emulator)**
+**Phone (iPhone emulator, 844 × 390)**
 
-- [ ] Cards fit above the bottom bar; coach rings wrap the phone buttons;
-  the path is visible from the phone camera.
+- [ ] The banner fits the top centre (clear of the top-left Roblox
+  buttons) and stays one or two lines; the big button sits above the
+  bottom bar; the hand points at 44 px+ targets; NEW! pills stay on
+  screen; the dots are visible from the phone camera and don't stutter.
 
 **Leave and rejoin**
 
 - [ ] Leave mid-way (e.g. at Fuse) with `FT_StudioSaves`: rejoining shows
-  the same step's card; steps already done (claimed, upgraded) are skipped.
-- [ ] An old save with Rebirth 1+ (or > 20 pulls): no tutorial, one toast
-  "New: replay the tutorial in ⚙ Settings".
+  the same step's banner (after ~1 s); steps already done (claimed,
+  upgraded) are skipped; the HUD is the set for that step.
+- [ ] A Tutorial 1 save (before this PR) in the middle of its 14 steps
+  resumes at the nearest new step; one that finished stays finished.
+- [ ] An old save with Rebirth 1+ (or > 20 pulls): no tutorial, everything
+  visible, one toast "New: replay the tutorial in ⚙ Settings".
 
 **Replay and help**
 
-- [ ] ⚙ Settings → ▶ REPLAY TUTORIAL: every step again as an OK-card, no
-  free pulls.
-- [ ] "?" in Fuse (6 cards: same tier, 2–6 orbs + odds, a fail keeps your
-  best, mutations, Secret at Rebirth 1), Upgrades, Index and Rebirth;
-  "How it works" (H) at the LOCK console and the Gacha Pad: ◀ ▶ and OK.
-- [ ] `/selftest`: PASS "tutorial: every step completes in order", "no shop
-  or deal pop-up while it runs", "a save left mid-way resumes at its step".
+- [ ] ⚙ Settings → ▶ REPLAY TUTORIAL: the same banners, the whole HUD stays
+  visible, a SKIP › chip under the banner leaves any step, no free pulls.
+- [ ] "?" in Fuse (6 cards), Upgrades, Index and Rebirth; "How it works"
+  (H) at the LOCK console and the Gacha Pad: ◀ ▶ and OK.
+- [ ] Settings: the big-card section says single pulls always get it; BEST
+  OF 10 / fusions follow the rows.
+- [ ] Just in time: the first time a gift is ready the GIFTS button bounces
+  and the hand shows once; likewise the first claimable quest (QUESTS).
+- [ ] `/selftest`: PASS "tutorial: every step completes in order", the
+  per-step "the banner reads its instruction in 6 words or fewer", "no card
+  shows before the claim", "the HUD shows exactly its set", "no weapon bar
+  before Rebirth 1", "a single pull of a Common opens the big card", the
+  "refused before its Ns" lines, "a Tutorial 1 save resumes at the matching
+  step", "no shop or deal pop-up while it runs", "a save left mid-way
+  resumes at its step".
+- [ ] **Harris's test:** a friend who has never seen the game finishes it
+  without asking a single question.
 
 ## 38. Combat
 
 Studio: Test → 2 players. `/rebirths 3` on both (Laser and Freeze Ray need
 Rebirth 2–3), `/weapons all` for the Slap Glove and Banana Peel.
 
-- [ ] Rebirth 0: the weapon bar shows 🏏 🔫 🥶 greyed with R1 / R2 / R3; a
-  tap says "Unlocks at Rebirth N". Nobody can hit you and you can't hit.
+- [ ] Rebirth 0: there is no weapon bar at all. Nobody can hit you and you
+  can't hit. Rebirth 1: the bar appears (🔫 🥶 greyed with R2 / R3; a tap
+  says "Unlocks at Rebirth N").
 - [ ] Rebirth 1: the card "🏏 You got a Bat!" (after the tutorial); 1 / a
   tap equips it, again unequips; the equipped circle has a gold ring.
 - [ ] Bat a player in front of you: they ragdoll with a hop and a
