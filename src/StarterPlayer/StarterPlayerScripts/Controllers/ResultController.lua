@@ -990,7 +990,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 end
 
 -- The thief got home: the item is theirs.
--- `subline`: the steal timer ("You can steal again in 60s").
+-- `subline`: an optional line under the item (default: where it went).
 function ResultController.ShowHeistComplete(item: HeistItem, victimName: string, subline: string?)
 	showHeistCard(
 		"HEIST COMPLETE!",

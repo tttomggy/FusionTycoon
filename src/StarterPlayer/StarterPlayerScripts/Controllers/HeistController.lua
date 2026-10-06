@@ -169,16 +169,6 @@ local LOCK_AFTER_LOSS_TIP = "Tip: hit the LOCK button inside your gate before yo
 local POINT_AT_CONSOLE_SECONDS = 8
 local POINT_AT_CONSOLE_TOAST = "Your LOCK button is just inside your gate"
 local pointToken = 0
-local STEAL_AGAIN_TEXT = "You can steal again in %ds"
-
--- "You can steal again in 42s", from the Player attribute HeistCooldownUntil.
-local function cooldownText(): string
-	local untilTime = localPlayer:GetAttribute("HeistCooldownUntil")
-	local left = if typeof(untilTime) == "number"
-		then math.max(0, math.ceil(untilTime - Workspace:GetServerTimeNow()))
-		else 0
-	return STEAL_AGAIN_TEXT:format(left)
-end
 local LOSS_TIP_DELAY_SECONDS = 2.5
 -- Set per carry: this is the player's first time as a victim.
 local firstCatch = false
@@ -645,14 +635,10 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
 		return
 	end
-	-- WorldLabelController's local Mode: a guarded pedestal, your steal
-	-- cooldown and the Rebirth-0 teaser are instant taps that only explain
-	-- themselves.
+	-- WorldLabelController's local Mode: a guarded pedestal and the
+	-- Rebirth-0 teaser are instant taps that only explain themselves.
 	local mode = prompt:GetAttribute("Mode")
-	if mode == "Cooldown" then
-		ToastController.Show(cooldownText(), "Neutral")
-		return
-	elseif mode == "Guarded" then
+	if mode == "Guarded" then
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
 		return
 	elseif mode == "Locked" then
@@ -724,10 +710,6 @@ local function onHeistEnded(payload: any)
 			end
 			return
 		end
-		if payload.Reason == "Cooldown" then
-			ToastController.Show(STEAL_AGAIN_TEXT:format(tonumber(payload.Seconds) or 0), "Neutral")
-			return
-		end
 		local message = REJECT_MESSAGES[payload.Reason]
 		if message then
 			ToastController.Show(message, "Neutral")
@@ -745,7 +727,7 @@ local function onHeistEnded(payload: any)
 	local other = tostring(payload.OtherName)
 	if payload.Role == "Thief" then
 		if payload.Outcome == "Delivered" then
-			ResultController.ShowHeistComplete(item, other, cooldownText())
+			ResultController.ShowHeistComplete(item, other)
 		else
 			ToastController.Show(THIEF_FAIL_TOASTS[payload.Outcome] or "It slipped away", "Error")
 		end
@@ -1039,11 +1021,9 @@ local function updateGuards()
 end
 
 -- Markers on every grabbable enemy pedestal, and the first-visit tip.
--- A pedestal worth a red hand: grabbable now, or after your cooldown (the
--- markers stay up while it runs so you can plan the next target).
-local function isMarkTarget(pedestal: Instance, prompt: Instance): boolean
-	local mode = prompt:GetAttribute("Mode")
-	return mode == "Steal" or (mode == "Cooldown" and pedestal:GetAttribute("GuardedByOwner") ~= true)
+-- A pedestal worth a red hand: grabbable now.
+local function isMarkTarget(_pedestal: Instance, prompt: Instance): boolean
+	return prompt:GetAttribute("Mode") == "Steal"
 end
 
 local function updateTeaching()

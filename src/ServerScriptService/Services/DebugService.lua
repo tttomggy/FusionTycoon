@@ -77,8 +77,6 @@ local REBIRTHS_COMMAND = "/rebirths"
 local GIVE_COMMAND = "/give"
 -- "/shield 30" raises your shield for 30 s; "/shield 0" drops it.
 local SHIELD_COMMAND = "/shield"
--- "/heistcd 0" clears your thief cooldown.
-local HEIST_COOLDOWN_COMMAND = "/heistcd"
 -- "/stealable" toggles your lab stealable even at Rebirth 0 (heist testing).
 local STEALABLE_COMMAND = "/stealable"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
@@ -364,9 +362,6 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
-	elseif command == HEIST_COOLDOWN_COMMAND then
-		HeistService.ClearCooldown(player)
-		print(("DebugService: cleared %s's thief cooldown"):format(player.Name))
 	elseif command == STEALABLE_COMMAND then
 		local stealable = not stealableToggles[player.UserId]
 		stealableToggles[player.UserId] = stealable
@@ -567,7 +562,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /heistcd 0, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
