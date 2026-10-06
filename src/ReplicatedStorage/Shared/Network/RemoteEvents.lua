@@ -32,6 +32,10 @@ local REMOTE_EVENT_NAMES = {
 	"HitReceived", -- server -> the target: { Impulse, Seconds, Freeze? } ragdoll (or freeze) yourself now
 	"HitFx", -- server -> all: { Weapon, Position, From?, To?, Kind } the bonk / beam / freeze / slip effect
 	"WeaponUnlocked", -- server -> client: { Weapon } a weapon was just earned (the unlock card)
+	"ClaimQuest", -- client -> server: { Id } claim a finished quest ("pull20", ... or "chain"); re-checked complete and unclaimed
+	"QuestResult", -- server -> client: { Id, Result = "Claimed" | "Refused", Reason?, Lines? } the claim and what it paid
+	"UsePowerUp", -- client -> server: { Key } use one power-up (QuestConfig.PowerUps); re-checked count and conditions
+	"PowerUpResult", -- server -> client: { Key, Result = "Used" | "Refused", Reason?, Text? } the toast
 	"TutorialAdvance", -- client -> server: { Step } a tutorial Card / Open / Arrive step was done (re-checked), or { Replay = true } (Settings)
 	"MarkDealPopup", -- client -> server: the "New deal!" card showed; { Slot } (the current deal slot only; saved as DealPopupSlot)
 	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)

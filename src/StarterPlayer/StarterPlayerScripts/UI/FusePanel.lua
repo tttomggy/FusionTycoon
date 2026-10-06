@@ -35,6 +35,7 @@ local Workspace = game:GetService("Workspace")
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -282,11 +283,15 @@ local function refreshChamber()
 		end
 	end
 
-	-- With the live event's success bonus (Void Moon), like the server's roll.
-	local bonus = EventState.GetFusionSuccessBonus()
+	-- With the live event's success bonus (Void Moon) and an armed Fusion
+	-- Spark (quest power-up), like the server's roll.
+	local spark = if TycoonController.IsArmed("FusionSpark")
+		then QuestConfig.PowerUps.FusionSpark.FusionBonus or 0
+		else 0
+	local bonus = EventState.GetFusionSuccessBonus() + spark
 	local chance = FusionConfig.GetFusionChance(selectedTier, math.max(count, FusionConfig.MinFusionInputs), bonus)
 	if count >= FusionConfig.MinFusionInputs then
-		chanceLabel.Text = percent(chance)
+		chanceLabel.Text = percent(chance) .. (if spark > 0 then " ⚗️" else "")
 		chanceLabel.TextColor3 = chanceColor(chance)
 	else
 		chanceLabel.Text = ("Add %d+"):format(FusionConfig.MinFusionInputs)

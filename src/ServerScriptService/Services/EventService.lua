@@ -50,6 +50,7 @@ local Workspace = game:GetService("Workspace")
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -347,12 +348,31 @@ local function payCoin(player: Player, seconds: number, position: Vector3, big: 
 		return
 	end
 	PlayerDataService.AddCash(player, amount)
+	PlayerDataService.AddStat(player, "RainCoins", 1) -- the "Collect 15 coins" quest
 	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, if big then "BigCoin" else "Coin")
 	PlayerDataService.SyncTycoon(player)
 	local tally = (tallies[player.UserId] or 0) + amount
 	tallies[player.UserId] = tally
 	player:SetAttribute("GoldenRainTally", tally)
 	RemoteEvents.EventFx:FireClient(player, { Kind = "Coin", Position = position, Amount = amount, Big = big })
+end
+
+-- Every live coin's rules, so a Coin Magnet (quest power-up) can collect
+-- it through the same path as a touch.
+type CoinRules = { CanTake: (Player) -> boolean, OnTake: (Player, Vector3) -> () }
+local liveCoins: { [BasePart]: CoinRules } = {}
+
+-- Collects `coin` for `player` once (first wins); the caller checked reach.
+local function takeCoin(coin: BasePart, player: Player)
+	local rules = liveCoins[coin]
+	if not rules or coin:GetAttribute("Collected") then
+		return
+	end
+	coin:SetAttribute("Collected", true)
+	liveCoins[coin] = nil
+	local position = coin.Position
+	coin:Destroy()
+	rules.OnTake(player, position)
 end
 
 -- A Neon gold coin on its edge, spinning and bobbing (FT_Hover). `canTake`
@@ -395,10 +415,11 @@ local function buildCoin(
 			return
 		end
 		-- First valid touch wins (street coins are a race).
-		coin:SetAttribute("Collected", true)
-		local position = coin.Position
-		coin:Destroy()
-		onTake(toucher, position)
+		takeCoin(coin, toucher)
+	end)
+	liveCoins[coin] = { CanTake = canTake, OnTake = onTake }
+	coin.Destroying:Connect(function()
+		liveCoins[coin] = nil
 	end)
 	Debris:AddItem(coin, EventConfig.CoinLifetimeSeconds)
 end
@@ -446,12 +467,35 @@ local function spawnStreetCoin()
 	end)
 end
 
+-- Coin Magnet: every armed player pulls in each coin they may take within
+-- the radius. Returns the players whose magnet ran (disarmed at rain end).
+local function runMagnets(used: { [Player]: boolean })
+	local radius = QuestConfig.PowerUps.CoinMagnet.Radius or 0
+	for _, player in Players:GetPlayers() do
+		local root = getRoot(player)
+		if root and PlayerDataService.IsArmed(player, "CoinMagnet") and PlayerDataService.IsDataLoaded(player) then
+			used[player] = true
+			for coin, rules in liveCoins do
+				if coin.Parent and rules.CanTake(player) and (coin.Position - root.Position).Magnitude <= radius then
+					takeCoin(coin, player)
+				end
+			end
+		end
+	end
+end
+
 local function runGoldenRain(myGeneration: number, strength: number)
 	local labInterval = EventConfig.CoinIntervalSeconds / strength
 	local streetInterval = EventConfig.StreetCoinIntervalSeconds / strength
 	local nextLab, nextStreet = 0, os.clock() + streetInterval
+	local nextMagnet = 0
+	local magnetUsers: { [Player]: boolean } = {}
 	while generation == myGeneration do
 		local now = os.clock()
+		if now >= nextMagnet then
+			nextMagnet = now + QuestConfig.MagnetIntervalSeconds
+			runMagnets(magnetUsers)
+		end
 		if now >= nextLab then
 			nextLab = now + labInterval
 			for _, player in Players:GetPlayers() do
@@ -465,7 +509,14 @@ local function runGoldenRain(myGeneration: number, strength: number)
 			nextStreet = now + streetInterval
 			spawnStreetCoin()
 		end
-		task.wait(math.max(0.1, math.min(nextLab, nextStreet) - os.clock()))
+		task.wait(math.max(0.1, math.min(nextLab, nextStreet, nextMagnet) - os.clock()))
+	end
+	-- A magnet lasts one rain: spent on the rain it ran in.
+	for player in magnetUsers do
+		if player.Parent then
+			PlayerDataService.SetArmed(player, "CoinMagnet", false)
+			PlayerDataService.SyncTycoon(player)
+		end
 	end
 end
 

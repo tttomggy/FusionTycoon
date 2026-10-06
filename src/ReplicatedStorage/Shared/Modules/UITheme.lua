@@ -44,6 +44,7 @@ UITheme.Colors = {
 	WelcomeTop = hex("#1B5A3A"), -- welcome-back (offline earnings) card gradient top
 	DailyTop = hex("#6A4A0E"), -- the daily reward card's header (gold)
 	GiftsTop = hex("#6E1F5A"), -- the GIFTS panel's header (pink)
+	QuestsTop = hex("#5A3A12"), -- the QUESTS panel's header (amber)
 	RankGold = hex("#8A6A12"), -- leaderboard row tint: rank 1
 	RankSilver = hex("#5E6378"), -- rank 2
 	RankBronze = hex("#7A4A26"), -- rank 3

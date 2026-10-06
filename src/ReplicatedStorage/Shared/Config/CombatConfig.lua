@@ -10,7 +10,7 @@
 	hit for SpawnProtectSeconds after spawning. Hitting a thief who carries
 	an orb sends it straight home (HeistService, "Knocked").
 
-	Weapons are EARNED (rebirth milestones; quests later), never sold: the
+	Weapons are EARNED (rebirth milestones; lab-chain quests), never sold: the
 	monetization "never" list forbids selling anything that helps a thief
 	or protects a lab.
 
@@ -131,7 +131,8 @@ function CombatConfig.GetWeapon(id: unknown): Weapon?
 	return nil
 end
 
--- The weapons a rebirth count earns on its own (quest weapons come later).
+-- The weapons a rebirth count earns on its own (the Slap Glove and Banana
+-- Peel are lab-chain quest rewards: QuestConfig.Chain, QuestService).
 function CombatConfig.GetUnlockedByRebirths(rebirths: number): { string }
 	local ids = {}
 	for _, weapon in CombatConfig.Weapons do

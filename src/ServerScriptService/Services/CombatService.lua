@@ -268,6 +268,8 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 	end
 	if HeistService.KnockCarrier(target) and attacker then
 		AnalyticsKit.Custom(attacker, "ThiefKnocked")
+		-- The "Knock 3 thieves" quest (QuestService) counts it.
+		PlayerDataService.AddStat(attacker, "Knocks", 1)
 	end
 	if weapon.Kind == "Freeze" then
 		freeze(target)
@@ -358,6 +360,17 @@ local function grantByRebirths(player: Player)
 	if granted then
 		giveTools(player)
 	end
+end
+
+-- A quest reward (QuestService): grants the weapon, the unlock card and
+-- the Tool. Returns whether it was new.
+function CombatService.GrantWeapon(player: Player, id: string): boolean
+	if not PlayerDataService.GrantWeapon(player, id) then
+		return false
+	end
+	RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = id })
+	giveTools(player)
+	return true
 end
 
 -- Studio /weapons all | reset.

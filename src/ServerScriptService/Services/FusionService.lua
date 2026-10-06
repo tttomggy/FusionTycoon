@@ -23,6 +23,7 @@ local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -135,12 +136,13 @@ type FuseOutcome = {
 --            stays untouched, same Uid; all the others go. With `safe` (a
 --            Safe Fusion token, spent by the caller) nothing goes.
 -- Returns the outcome, or (nil, reason) if nothing changed.
-local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?): (FuseOutcome?, string?)
+local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?, spark: number?): (FuseOutcome?, string?)
 	local count = #items
 	local consumedTier = items[1].Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
-	-- Void Moon adds a success bonus (EventService hook; capped at 100%).
-	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus())
+	-- Void Moon adds a success bonus (EventService hook; capped at 100%), an
+	-- armed Fusion Spark (QuestConfig) its own on top.
+	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus() + (spark or 0))
 	if not nextTier or chance <= 0 then
 		return nil, "MaxTier"
 	end
@@ -228,6 +230,7 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		return nil, "DataNotLoaded"
 	end
 	PlayerDataService.IncrementTotalFusions(player)
+	PlayerDataService.AddStat(player, "Fused_" .. rewardItem.Tier, 1) -- the chain's "Fuse a Mythic"
 	AnalyticsKit.Funnel(player, "FirstFuse")
 	return {
 		Upgraded = true,
@@ -379,7 +382,14 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 	if safe then
 		PlayerDataService.UseSafeFusionToken(player)
 	end
-	local outcome, failure = fuseOnce(player, items, safe)
+	-- An armed Fusion Spark (quest power-up) boosts this fusion and is spent
+	-- on it, success or fail; a fusion that changes nothing keeps it armed.
+	local sparkDef = QuestConfig.PowerUps.FusionSpark
+	local spark = if PlayerDataService.IsArmed(player, sparkDef.Key) then sparkDef.FusionBonus or 0 else 0
+	local outcome, failure = fuseOnce(player, items, safe, spark)
+	if outcome and spark > 0 then
+		PlayerDataService.SetArmed(player, sparkDef.Key, false)
+	end
 	if not outcome and safe then
 		PlayerDataService.AddSafeFusionTokens(player, 1)
 	end
@@ -394,6 +404,7 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		Upgraded = outcome.Upgraded,
 		Count = #items,
 		Chance = outcome.Chance,
+		Spark = spark > 0,
 		ConsumedUids = outcome.ConsumedUids,
 		ConsumedTier = tier,
 		NewItem = outcome.Entry,

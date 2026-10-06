@@ -46,6 +46,7 @@ local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
@@ -65,6 +66,8 @@ export type InventoryItem = {
 	-- each at most once; nil = none (MutationConfig.SanitizeEvents).
 	EventMutations: { string }?,
 }
+
+export type QuestState = QuestConfig.QuestState
 
 export type TutorialState = {
 	Step: number, -- TutorialConfig.Steps index; 0 = not decided yet
@@ -134,6 +137,15 @@ export type PlayerData = {
 	Tutorial: TutorialState,
 	-- Earned weapons (CombatConfig ids -> true; CombatService grants them).
 	Weapons: { [string]: boolean },
+	-- Quest power-ups owned (QuestConfig.PowerUps key -> count). Never sold.
+	PowerUps: { [string]: number },
+	-- Armed one-shot power-ups waiting for their moment (FusionSpark: the
+	-- next fusion; CoinMagnet: the current or next Golden Rain).
+	Armed: { [string]: boolean },
+	-- Lifetime counters the quests measure (QuestConfig.StatKeys).
+	Stats: { [string]: number },
+	-- Daily quests and the lab chain (QuestService; QuestConfig).
+	Quests: QuestState,
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
@@ -233,6 +245,8 @@ type State = {
 	releasing: { [number]: boolean },
 	-- Session-only: GoalService's latest progress readout per UserId.
 	goalProgress: { [number]: GoalProgress? },
+	-- Session-only: QuestService's status readout per UserId (snapshot).
+	questStatus: { [number]: any },
 	-- Session-only: offline earnings computed on load, until claimed.
 	pendingOffline: { [number]: PendingOffline },
 	-- Session-only heist flags HeistService sets (it owns the heist state;
@@ -331,6 +345,10 @@ local DEFAULT_DATA: PlayerData = {
 	Sessions = 0,
 	DealPopupSlot = 0,
 	Weapons = {},
+	PowerUps = {},
+	Armed = {},
+	Stats = {},
+	Quests = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false },
 	Tutorial = {
 		Step = 0,
 		Done = false,
@@ -356,6 +374,7 @@ local state: State = {
 	profiles = {},
 	releasing = {},
 	goalProgress = {},
+	questStatus = {},
 	pendingOffline = {},
 	carriedUids = {},
 	carrying = {},
@@ -436,6 +455,67 @@ local function markIndex(data: PlayerData, item: InventoryItem): boolean
 		end
 	end
 	return isNew
+end
+
+local function finiteWhole(value: any, min: number, max: number): number?
+	if typeof(value) ~= "number" or value ~= value or value < min or value > max then
+		return nil
+	end
+	return math.floor(value)
+end
+
+-- Clean copies of the quest fields (QuestConfig): known power-up keys with
+-- counts in [0, MaxPowerUpStack], known armed keys, whitelisted stats, and
+-- a quest state whose entries name real daily quests.
+local function sanitizeQuests(raw: any): ({ [string]: number }, { [string]: boolean }, { [string]: number }, QuestState)
+	local powerUps: { [string]: number } = {}
+	if typeof(raw.PowerUps) == "table" then
+		for key, count in raw.PowerUps do
+			local n = finiteWhole(count, 0, QuestConfig.MaxPowerUpStack)
+			if QuestConfig.GetPowerUp(key) and n and n > 0 then
+				powerUps[key] = n
+			end
+		end
+	end
+	local armed: { [string]: boolean } = {}
+	if typeof(raw.Armed) == "table" then
+		for _, key in { "FusionSpark", "CoinMagnet" } do
+			if raw.Armed[key] == true then
+				armed[key] = true
+			end
+		end
+	end
+	local stats: { [string]: number } = {}
+	if typeof(raw.Stats) == "table" then
+		for key, value in raw.Stats do
+			local n = finiteWhole(value, 0, 1e15)
+			if QuestConfig.IsStatKey(key) and n then
+				stats[key] = n
+			end
+		end
+	end
+	local quests: QuestState = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false }
+	local rq = raw.Quests
+	if typeof(rq) == "table" then
+		quests.UtcDay = finiteWhole(rq.UtcDay, -1, 1e9) or -1
+		quests.Chain = finiteWhole(rq.Chain, 1, 1e6) or 1
+		quests.ChainBase = finiteWhole(rq.ChainBase, 0, 1e15) or 0
+		quests.ChainDone = rq.ChainDone == true
+		if typeof(rq.Daily) == "table" then
+			for _, entry in rq.Daily do
+				if typeof(entry) == "table" and QuestConfig.GetDaily(entry.Id) and #quests.Daily < QuestConfig.DailyCount then
+					table.insert(quests.Daily, {
+						Id = entry.Id,
+						Target = finiteWhole(entry.Target, 0, 1e300) or 0,
+						Base = finiteWhole(entry.Base, 0, 1e15) or 0,
+						Done = entry.Done == true,
+						Claimed = entry.Claimed == true,
+					})
+				end
+			end
+		end
+	end
+	return powerUps, armed, stats, quests
 end
 
 -- Fills any field missing from an older save with its default, so new
@@ -533,6 +613,7 @@ local function reconcile(raw: any): PlayerData
 			end
 		end
 	end
+	data.PowerUps, data.Armed, data.Stats, data.Quests = sanitizeQuests(raw)
 	-- A slot start: a finite whole number of seconds (NaN fails >= 0).
 	if typeof(raw.DealPopupSlot) == "number" and raw.DealPopupSlot >= 0 and raw.DealPopupSlot < math.huge then
 		data.DealPopupSlot = math.floor(raw.DealPopupSlot)
@@ -705,6 +786,9 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		DealPopupSlot = data.DealPopupSlot,
 		Tutorial = data.Tutorial,
 		Weapons = data.Weapons,
+		PowerUps = data.PowerUps,
+		Armed = data.Armed,
+		Quests = data.Quests,
 	})
 end
 
@@ -1023,6 +1107,10 @@ function PlayerDataService.AddItem(
 	}
 	table.insert(data.Inventory, entry)
 	local isNew = markIndex(data, entry)
+	-- The "Get a Golden mutation" quest counts every new Golden-base item.
+	if base == "Golden" then
+		data.Stats.Goldens = (data.Stats.Goldens or 0) + 1
+	end
 	return entry, isNew
 end
 
@@ -1249,6 +1337,89 @@ end
 -- done). Not saved: GoalService recomputes it on every sync.
 function PlayerDataService.SetGoalProgress(player: Player, progress: GoalProgress?)
 	state.goalProgress[player.UserId] = progress
+end
+
+--[[ Public API: quests, power-ups, stats (QuestService) ------------------ ]]
+
+-- QuestService's readout for the next snapshot (set in its sync hook).
+function PlayerDataService.SetQuestStatus(player: Player, status: any)
+	state.questStatus[player.UserId] = status
+end
+
+-- The live quest state (QuestService mutates it; nil until loaded).
+function PlayerDataService.GetQuestState(player: Player): QuestState?
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Quests else nil
+end
+
+function PlayerDataService.ResetQuests(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Quests = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false }
+	end
+end
+
+-- A lifetime counter the quests read (QuestConfig.StatKeys; unknown = 0).
+function PlayerDataService.GetStat(player: Player, key: string): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Stats[key] or 0 else 0
+end
+
+-- Adds to a counter from a real server event (a pull, a coin, a knock...).
+function PlayerDataService.AddStat(player: Player, key: string, amount: number?)
+	local data = state.sessionCache[player.UserId]
+	local n = amount or 1
+	if not data or not QuestConfig.IsStatKey(key) or n ~= n or n <= 0 or n == math.huge then
+		return
+	end
+	data.Stats[key] = (data.Stats[key] or 0) + math.floor(n)
+end
+
+function PlayerDataService.GetPowerUpCount(player: Player, key: string): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.PowerUps[key] or 0 else 0
+end
+
+-- Adds power-ups (quest rewards, /powerup); capped at MaxPowerUpStack.
+function PlayerDataService.AddPowerUp(player: Player, key: string, count: number)
+	local data = state.sessionCache[player.UserId]
+	if not data or not QuestConfig.GetPowerUp(key) or count ~= count then
+		return
+	end
+	local n = math.clamp(math.floor((data.PowerUps[key] or 0) + count), 0, QuestConfig.MaxPowerUpStack)
+	local counts: { [string]: number? } = data.PowerUps
+	counts[key] = if n > 0 then n else nil
+end
+
+-- Spends one; false (nothing changed) at 0.
+function PlayerDataService.TakePowerUp(player: Player, key: string): boolean
+	local data = state.sessionCache[player.UserId]
+	local have = if data then data.PowerUps[key] or 0 else 0
+	if not data or have <= 0 then
+		return false
+	end
+	local counts: { [string]: number? } = data.PowerUps
+	counts[key] = if have > 1 then have - 1 else nil
+	return true
+end
+
+function PlayerDataService.IsArmed(player: Player, key: string): boolean
+	local data = state.sessionCache[player.UserId]
+	return data ~= nil and data.Armed[key] == true
+end
+
+function PlayerDataService.SetArmed(player: Player, key: string, armed: boolean)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		local flags: { [string]: boolean? } = data.Armed
+		flags[key] = if armed then true else nil
+	end
+end
+
+-- The live TotalSteals counter (a quest base).
+function PlayerDataService.GetTotalSteals(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.TotalSteals else 0
 end
 
 --[[ Public API: income + sync -------------------------------------------- ]]
@@ -1626,6 +1797,10 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
 		Weapons = indexKeys(data and data.Weapons or {}),
+		-- Quests (QuestService's status for this sync) and power-ups.
+		Quests = state.questStatus[player.UserId],
+		PowerUps = if data then table.clone(data.PowerUps) else {},
+		Armed = indexKeys(data and data.Armed or {}),
 		Tutorial = if data
 			then {
 				Step = data.Tutorial.Step,
@@ -1869,6 +2044,7 @@ local function onPlayerRemoving(player: Player)
 	state.sessionCache[userId] = nil
 	state.profiles[userId] = nil
 	state.goalProgress[userId] = nil
+	state.questStatus[userId] = nil
 	state.lastSyncRequest[userId] = nil
 	state.shop[userId] = nil
 	state.lastOfflinePaid[userId] = nil

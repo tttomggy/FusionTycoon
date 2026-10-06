@@ -37,6 +37,10 @@ export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Rep
 local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
 -- Earned weapon ids (snapshot Weapons; CombatService grants them).
 local weapons: { string } = {}
+-- Quests (QuestService's status), power-up counts and armed power-ups.
+local quests: any = nil
+local powerUps: { [string]: number } = {}
+local armed: { [string]: boolean } = {}
 -- Marked here but not yet echoed back by a snapshot.
 local pendingTipMarks: { [string]: boolean } = {}
 local awaySeconds = 0
@@ -194,6 +198,21 @@ end
 -- A one-time tip/card was already shown to this account.
 function TycoonController.GetWeapons(): { string }
 	return weapons
+end
+
+-- The server's quest status (QuestService.QuestStatus), nil before the
+-- first sync.
+function TycoonController.GetQuests(): any
+	return quests
+end
+
+function TycoonController.GetPowerUpCount(key: string): number
+	return powerUps[key] or 0
+end
+
+-- A one-shot power-up (FusionSpark, CoinMagnet) waiting for its moment.
+function TycoonController.IsArmed(key: string): boolean
+	return armed[key] == true
 end
 
 function TycoonController.GetTutorial(): TutorialView
@@ -470,6 +489,27 @@ local function onSyncTycoon(snapshot: any)
 		end
 		table.sort(fresh)
 		weapons = fresh
+	end
+	if typeof(snapshot.Quests) == "table" then
+		quests = snapshot.Quests
+	end
+	if typeof(snapshot.PowerUps) == "table" then
+		local fresh: { [string]: number } = {}
+		for key, count in snapshot.PowerUps do
+			if typeof(key) == "string" and typeof(count) == "number" then
+				fresh[key] = count
+			end
+		end
+		powerUps = fresh
+	end
+	if typeof(snapshot.Armed) == "table" then
+		local fresh: { [string]: boolean } = {}
+		for _, key in snapshot.Armed do
+			if typeof(key) == "string" then
+				fresh[key] = true
+			end
+		end
+		armed = fresh
 	end
 	local rawTutorial = snapshot.Tutorial
 	if typeof(rawTutorial) == "table" then

@@ -159,6 +159,7 @@ local function buyOneLevel(player: Player, generatorId: string): (boolean, strin
 	end
 	local newLevel = currentLevel + 1
 	PlayerDataService.SetGeneratorLevel(player, generatorId, newLevel)
+	PlayerDataService.AddStat(player, "UpgradeLevels", 1) -- the "Upgrade 25 levels" quest
 	return true, nil, newLevel
 end
 
@@ -539,6 +540,7 @@ local function grantPulls(
 			PlayerDataService.IncrementGachaPulls(player)
 		end
 		local entry, isNew = PlayerDataService.AddItem(player, pull.Def.Id, pull.Def.Tier, pull.Mutation, pull.EventMutations)
+		PlayerDataService.AddStat(player, "Pulls", 1) -- the "Pull 20 times" quest (free pulls count)
 		if entry then
 			table.insert(items, entry)
 			if isNew then

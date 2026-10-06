@@ -16,6 +16,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
@@ -44,6 +45,7 @@ type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 type FusionServiceModule = typeof(require(script.Parent.FusionService))
 type CombatServiceModule = typeof(require(script.Parent.CombatService))
+type QuestServiceModule = typeof(require(script.Parent.QuestService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -66,6 +68,7 @@ local TutorialService: TutorialServiceModule
 local TycoonService: TycoonServiceModule
 local FusionService: FusionServiceModule
 local CombatService: CombatServiceModule
+local QuestService: QuestServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -97,6 +100,11 @@ local TUTORIAL_COMMAND = "/tutorial"
 -- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
 -- takes them all (rebirth ones come back on the next sync).
 local WEAPONS_COMMAND = "/weapons"
+-- "/quest complete <id>" latches a daily ("pull20", ...) or "chain" done;
+-- "/quest reset" hands today's dailies out again and restarts the chain.
+local QUEST_COMMAND = "/quest"
+-- "/powerup <key> <n>" sets a power-up's count (QuestConfig key, any case).
+local POWERUP_COMMAND = "/powerup"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
 -- length); "/event off" ends what's on. "/eventclock 15" shifts the event
 -- clock 15 min ahead so the schedule can be walked through.
@@ -580,6 +588,40 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
+	elseif command == QUEST_COMMAND then
+		local verb, id = argument:match("^(%S+)%s*(%S*)$")
+		if verb == "complete" and id and id ~= "" then
+			if QuestService.DebugComplete(player, id) then
+				print(("DebugService: %s's quest %s is done"):format(player.Name, id))
+			else
+				warn(("DebugService: /quest complete: %s isn't one of today's quests (%s) or chain"):format(
+					id,
+					table.concat(QuestService.GetDailyIds(player), ", ")
+				))
+			end
+		elseif verb == "reset" then
+			QuestService.DebugReset(player)
+			print(("DebugService: %s's quests reset"):format(player.Name))
+		else
+			warn("DebugService: /quest complete <id> | /quest reset")
+		end
+		PlayerDataService.SyncTycoon(player)
+	elseif command == POWERUP_COMMAND then
+		local rawKey, rawCount = argument:match("^(%S+)%s*(%S*)$")
+		local key: string? = nil
+		for _, candidate in QuestConfig.PowerUpOrder do
+			if rawKey and candidate:lower() == rawKey:lower() then
+				key = candidate
+			end
+		end
+		local count = tonumber(rawCount)
+		if key and count and count == count then
+			PlayerDataService.AddPowerUp(player, key, count - PlayerDataService.GetPowerUpCount(player, key))
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: %s has %d %s"):format(player.Name, PlayerDataService.GetPowerUpCount(player, key), key))
+		else
+			warn(("DebugService: /powerup <%s> <n>"):format(table.concat(QuestConfig.PowerUpOrder, "|")))
+		end
 	elseif command == WEAPONS_COMMAND then
 		if argument == "all" or argument == "reset" then
 			CombatService.DebugSetAll(player, argument == "all")
@@ -800,7 +842,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /quest complete <id>|reset, /powerup <key> <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -813,6 +855,7 @@ function DebugService:Start()
 	TycoonService = require(script.Parent.TycoonService)
 	FusionService = require(script.Parent.FusionService)
 	CombatService = require(script.Parent.CombatService)
+	QuestService = require(script.Parent.QuestService)
 end
 
 return DebugService
