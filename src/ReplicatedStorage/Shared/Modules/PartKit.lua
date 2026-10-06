@@ -104,9 +104,43 @@ PartKit.ORBIT_TAG = "FT_Orbit"
 -- (WorldAnimationController): Rainbow mutation shells.
 PartKit.RAINBOW_TAG = "FT_Rainbow"
 
+-- The resting pose clients animate around (a world CFrame attribute set by
+-- whoever builds the target, at its final position). Clients never trust a
+-- "first seen" pose: a streamed Model arrives before its parts, and its
+-- pivot is then the origin, which drove orbs into the middle of the street.
+PartKit.HOVER_BASE_ATTRIBUTE = "HoverBase"
+
+-- A target's resting CFrame: a Part's CFrame; a Model's PrimaryPart, else
+-- the centre of its parts (axis-aligned, so the spin stays vertical).
+function PartKit.GetRestPose(target: Instance): CFrame?
+	if target:IsA("BasePart") then
+		return target.CFrame
+	elseif target:IsA("Model") then
+		if target.PrimaryPart then
+			return target.PrimaryPart.CFrame
+		end
+		if not target:FindFirstChildWhichIsA("BasePart", true) then
+			return nil
+		end
+		local box = target:GetBoundingBox()
+		return CFrame.new(box.Position)
+	end
+	return nil
+end
+
+-- Re-stamps the resting pose after the builder moved a hovering target.
+function PartKit.SetHoverBase(target: Instance)
+	local pose = PartKit.GetRestPose(target)
+	if pose then
+		target:SetAttribute(PartKit.HOVER_BASE_ATTRIBUTE, pose)
+	end
+end
+
 -- mode "Bob": sine bob of `bob` studs per `period`; "Rise": move up `bob`
--- studs over `period`, then snap back.
+-- studs over `period`, then snap back. Call once the target is built at
+-- its final position (it stamps HoverBase).
 function PartKit.SetHover(target: Instance, spinDegPerSec: number, bob: number, period: number, mode: string)
+	PartKit.SetHoverBase(target)
 	target:SetAttribute("SpinDegPerSec", spinDegPerSec)
 	target:SetAttribute("BobStuds", bob)
 	target:SetAttribute("BobPeriod", period)

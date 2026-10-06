@@ -35,6 +35,7 @@ type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
 type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
+type ItemServiceModule = typeof(require(script.Parent.ItemService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -52,6 +53,7 @@ local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
 local EventService: EventServiceModule
 local MonetizationService: MonetizationServiceModule
+local ItemService: ItemServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -279,6 +281,9 @@ local function runSelfTest(player: Player)
 		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
 	end
 	RemoteGuard.Reset(player)
+	-- The client checked every hovering thing before the fuzz; rebuild the
+	-- pedestal orbs now, and it checks again at the end.
+	ItemService.RebuildDisplayVisuals(player)
 
 	-- 7. The client's half: schedule, panels, sounds, client errors.
 	local done = waitForReport(player, "Done")
@@ -570,6 +575,7 @@ function DebugService:Start()
 	HeistService = require(script.Parent.HeistService)
 	EventService = require(script.Parent.EventService)
 	MonetizationService = require(script.Parent.MonetizationService)
+	ItemService = require(script.Parent.ItemService)
 end
 
 return DebugService

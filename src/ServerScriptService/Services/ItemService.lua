@@ -234,6 +234,24 @@ local function onRequestRemoveItem(player: Player, rawPedestalIndex: unknown)
 	})
 end
 
+-- /selftest: rebuilds every displayed orb of `player` from scratch (new
+-- instances, new hover stamps), so the client can re-check that hovering
+-- things stay on their plot after a rebuild.
+function ItemService.RebuildDisplayVisuals(player: Player)
+	local plot = TycoonService.GetPlotForPlayer(player)
+	if not plot or not PlayerDataService.IsDataLoaded(player) then
+		return
+	end
+	for index, uid in PlayerDataService.GetPedestalDisplays(player) do
+		local pedestal = getPedestalPart(plot, index)
+		local item = PlayerDataService.GetItemByUid(player, uid)
+		-- A carried item's pedestal is HeistService's until the heist ends.
+		if pedestal and item and not PlayerDataService.IsItemCarried(player, uid) then
+			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+		end
+	end
+end
+
 function ItemService:Init()
 	table.insert(state.connections, RemoteEvents.RequestPlaceItem.OnServerEvent:Connect(onRequestPlaceItem))
 	table.insert(state.connections, RemoteEvents.RequestRemoveItem.OnServerEvent:Connect(onRequestRemoveItem))

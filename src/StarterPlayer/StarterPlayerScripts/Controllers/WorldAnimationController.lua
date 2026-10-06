@@ -12,9 +12,15 @@
 	  Mode           "Bob" (smooth up and down) or "Rise" (up over the period,
 	                 then snap back - the multiplier chevrons)
 
-	A tagged Model moves as one group via PivotTo. Each target's resting
-	CFrame is captured when it's first seen; only targets within
-	ANIMATE_RADIUS of the camera are animated.
+	The resting pose is the server's HoverBase attribute (PartKit.SetHover
+	stamps it at the final position), never a "first seen" pose: with
+	streaming a Model arrives before its parts, its pivot was then the
+	origin, and PivotTo dragged pedestal orbs and generator cores into the
+	middle of the street every frame. Each part is placed relative to
+	HoverBase from the CFrame it arrived with (the server never moves it),
+	so parts that stream in late, or out and back, land right; satellites
+	(FT_Orbit) are left to the orbit step. One BulkMoveTo per frame; only
+	targets within ANIMATE_RADIUS of the camera move.
 
 	Mutation satellites (Models tagged FT_Orbit, inside a pedestal's
 	OrbGroup) orbit the orb: Count balls, Radius studs out, one lap per
@@ -48,11 +54,15 @@ local RAINBOW_VALUE = 1
 
 type Entry = {
 	Target: BasePart | Model,
-	Base: CFrame,
+	Base: CFrame?, -- nil until a pose is known (a legacy target with no parts yet)
 	Phase: number, -- desyncs neighbours that share the same timing
+	Parts: { [BasePart]: CFrame }, -- each part relative to Base
+	Connections: { RBXScriptConnection },
 }
 
 local entries: { [Instance]: Entry } = {}
+local moveParts: { BasePart } = {}
+local moveCFrames: { CFrame } = {}
 
 type Swirl = {
 	Sheet: BasePart,
@@ -70,32 +80,95 @@ local orbits: { [Instance]: Orbit } = {}
 local orbitParts: { BasePart } = {}
 local orbitCFrames: { CFrame } = {}
 
-local function getPivot(target: Instance): CFrame?
-	if target:IsA("BasePart") then
-		return target.CFrame
-	elseif target:IsA("Model") then
-		return target:GetPivot()
+-- Satellites (inside an FT_Orbit model) move with the orbit step instead.
+local function inOrbit(part: Instance, root: Instance): boolean
+	local current = part.Parent
+	while current and current ~= root do
+		if current:HasTag(PartKit.ORBIT_TAG) then
+			return true
+		end
+		current = current.Parent
 	end
-	return nil
+	return false
 end
 
-local function track(target: Instance)
-	if entries[target] or not target:IsDescendantOf(Workspace) then
-		return
+local function addPart(entry: Entry, part: BasePart)
+	local base = entry.Base
+	if base and not entry.Parts[part] and not inOrbit(part, entry.Target) then
+		-- The CFrame it arrived with is its rest pose (the server never
+		-- animates it).
+		entry.Parts[part] = base:ToObjectSpace(part.CFrame)
 	end
-	local base = getPivot(target)
-	if not base then
-		return
+end
+
+local function setBase(entry: Entry, base: CFrame)
+	entry.Base = base
+	entry.Phase = (math.abs(base.Position.X) + math.abs(base.Position.Z)) % 7
+	local target = entry.Target
+	if target:IsA("BasePart") then
+		addPart(entry, target)
+	else
+		for _, descendant in target:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				addPart(entry, descendant)
+			end
+		end
 	end
-	entries[target] = {
-		Target = target :: any,
-		Base = base,
-		Phase = (math.abs(base.Position.X) + math.abs(base.Position.Z)) % 7,
-	}
 end
 
 local function untrack(target: Instance)
-	entries[target] = nil
+	local entry = entries[target]
+	if entry then
+		for _, connection in entry.Connections do
+			connection:Disconnect()
+		end
+		entries[target] = nil
+	end
+end
+
+local function track(target: Instance)
+	if entries[target] or not target:IsDescendantOf(Workspace) or not (target:IsA("BasePart") or target:IsA("Model")) then
+		return
+	end
+	local entry: Entry = { Target = target :: any, Base = nil, Phase = 0, Parts = {}, Connections = {} }
+	entries[target] = entry
+	local function readBase()
+		local stamped = target:GetAttribute(PartKit.HOVER_BASE_ATTRIBUTE)
+		if typeof(stamped) == "CFrame" then
+			-- A server move re-stamps it: the parts keep their offsets.
+			setBase(entry, stamped)
+		elseif not entry.Base then
+			-- Legacy (no stamp): only once a part is really here.
+			local pose = PartKit.GetRestPose(target)
+			if pose then
+				setBase(entry, pose)
+			end
+		end
+	end
+	readBase()
+	table.insert(entry.Connections, target:GetAttributeChangedSignal(PartKit.HOVER_BASE_ATTRIBUTE):Connect(readBase))
+	if target:IsA("Model") then
+		table.insert(
+			entry.Connections,
+			target.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("BasePart") then
+					if entry.Base then
+						addPart(entry, descendant)
+					else
+						readBase()
+					end
+				end
+			end)
+		)
+		table.insert(
+			entry.Connections,
+			target.DescendantRemoving:Connect(function(descendant)
+				if descendant:IsA("BasePart") then
+					entry.Parts[descendant] = nil
+				end
+			end)
+		)
+	end
 end
 
 local function offsetFor(target: Instance, t: number): CFrame
@@ -225,15 +298,20 @@ local function step(dt: number)
 	local now = os.clock()
 	stepSwirls(dt, cameraPosition, now)
 	stepRainbows(cameraPosition, now)
+	table.clear(moveParts)
+	table.clear(moveCFrames)
 	for target, entry in entries do
-		if (entry.Base.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
-			local cframe = entry.Base * offsetFor(target, now + entry.Phase)
-			if target:IsA("Model") then
-				target:PivotTo(cframe)
-			elseif target:IsA("BasePart") then
-				target.CFrame = cframe
+		local base = entry.Base
+		if base and (base.Position - cameraPosition).Magnitude <= ANIMATE_RADIUS then
+			local cframe = base * offsetFor(target, now + entry.Phase)
+			for part, relative in entry.Parts do
+				table.insert(moveParts, part)
+				table.insert(moveCFrames, cframe * relative)
 			end
 		end
+	end
+	if #moveParts > 0 then
+		Workspace:BulkMoveTo(moveParts, moveCFrames, Enum.BulkMoveMode.FireCFrameChanged)
 	end
 	stepOrbits(cameraPosition, now)
 end
