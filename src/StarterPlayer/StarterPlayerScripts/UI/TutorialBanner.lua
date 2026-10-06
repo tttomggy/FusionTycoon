@@ -20,6 +20,7 @@
 
 	  Show(text, sub?)       slides in (replaces what's up)
 	  SetDistance(studs?)    " · 24m" after the text (nil: none)
+	  SetSub(text?)          the second line only, no slide
 	  Complete()             ✓ + pop, then out; returns when it is gone
 	  Hide()                 out at once
 	  SetSkip(handler?)      the replay's SKIP chip (nil hides it)
@@ -123,6 +124,12 @@ function TutorialBanner.Show(text: string, sub: string?)
 	slideTo(TOP, 0, SLIDE_SECONDS)
 	rootScale.Scale = 0.92
 	TweenService:Create(rootScale, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+end
+
+-- Changes only the second line (no slide): "Come back with $X" ticks with cash.
+function TutorialBanner.SetSub(sub: string?)
+	subLabel.Text = sub or ""
+	subLabel.Visible = sub ~= nil and sub ~= ""
 end
 
 function TutorialBanner.SetDistance(studs: number?)

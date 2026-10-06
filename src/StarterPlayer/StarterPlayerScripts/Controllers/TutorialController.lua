@@ -275,7 +275,7 @@ local function changeStep(newStep: number?, finished: boolean)
 			end
 			SoundKit.Play("RevealMinor", nil)
 			TutorialBanner.Complete()
-		else
+		elseif not finished then
 			task.wait(FIRST_STEP_DELAY)
 		end
 		if mine ~= seq then
@@ -378,7 +378,7 @@ local function stepFrame()
 	local sub = if shortfall then ("Come back with %s"):format(NumberFormat.Money(shortfall)) else tutorialStep.Sub
 	if sub ~= lastSub then
 		lastSub = sub
-		TutorialBanner.Show(tutorialStep.Banner, sub)
+		TutorialBanner.SetSub(sub)
 	end
 
 	-- The big button, at a world target with a prompt.
