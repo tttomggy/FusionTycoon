@@ -22,6 +22,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
@@ -404,6 +405,30 @@ local function build()
 	sectionTitle("Sound effects")
 	note("Every sound in the game. Music isn't in yet.")
 	soundRow()
+
+	-- Section: Tutorial.
+	sectionTitle("Tutorial")
+	note("Walk through every system again, card by card. Nothing is reset.")
+	local row = Instance.new("Frame")
+	row.Name = "TutorialRow"
+	row.BackgroundTransparency = 1
+	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
+	row.LayoutOrder = nextOrder()
+	row.ZIndex = list.ZIndex + 1
+	row.Parent = list
+	UIKit.Button({
+		Name = "ReplayTutorial",
+		Parent = row,
+		Style = "Teal",
+		Text = "▶ REPLAY TUTORIAL",
+		TextSize = 18,
+		Size = UDim2.fromOffset(240, UITheme.MinTapSize + 4),
+		ZIndex = row.ZIndex,
+		OnClick = function()
+			RemoteEvents.TutorialAdvance:FireServer({ Replay = true })
+			modal.Close()
+		end,
+	})
 end
 
 --[[ Public ------------------------------------------------------------------- ]]

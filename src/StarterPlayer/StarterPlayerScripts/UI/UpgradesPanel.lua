@@ -25,6 +25,7 @@ local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ToastController = require(Controllers.ToastController)
 local ShopController = require(Controllers.ShopController)
+local TutorialCards = require(script.Parent.TutorialCards)
 local UIKit = require(script.Parent.UIKit)
 
 local UpgradesPanel = {}
@@ -625,6 +626,9 @@ local function build()
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.PanelTop,
 	})
+	UIKit.AddHelpButton(modal, function()
+		TutorialCards.ShowTopic("Upgrades")
+	end)
 	local content = modal.Content
 
 	buildIntro(content)

@@ -27,7 +27,14 @@ local MutationConfig = require(script.Parent.MutationConfig)
 local SettingsConfig = {}
 
 export type RevealRule = { [string]: string }
-export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean, AutoFuse: boolean }
+-- GoalPath: the lit path to the current goal (the goal card's 👣):
+-- "Auto" = on for the first TutorialConfig.GoalPathSessions sessions.
+export type GoalPath = "Auto" | "On" | "Off"
+export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean, AutoFuse: boolean, GoalPath: GoalPath }
+
+function SettingsConfig.IsGoalPathValue(value: unknown): boolean
+	return value == "Auto" or value == "On" or value == "Off"
+end
 
 SettingsConfig.DefaultSfxVolume = 0.8
 
@@ -50,6 +57,7 @@ function SettingsConfig.Sanitize(raw: unknown): Settings
 		SfxMuted = source.SfxMuted == true,
 		-- The Auto-Fuse pass's toggle (Fuse panel); off until switched on.
 		AutoFuse = source.AutoFuse == true,
+		GoalPath = if SettingsConfig.IsGoalPathValue(source.GoalPath) then source.GoalPath else "Auto",
 	}
 end
 
@@ -138,6 +146,7 @@ function SettingsConfig.GetDefaultSettings(): Settings
 		SfxVolume = SettingsConfig.DefaultSfxVolume,
 		SfxMuted = false,
 		AutoFuse = false,
+		GoalPath = "Auto",
 	}
 end
 

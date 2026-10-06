@@ -1246,6 +1246,29 @@ function UIKit.CloseButton(props: { Parent: Instance?, Position: UDim2?, AnchorP
 	})
 end
 
+-- A round "?" (>= 44 px) just left of a modal's ✕: re-opens that topic's
+-- tutorial cards (TutorialCards). The title makes room for it.
+function UIKit.AddHelpButton(modal: Modal, onClick: () -> ()): Frame
+	local size = UITheme.MinTapSize
+	local _, holder = UIKit.Button({
+		Name = "Help",
+		Parent = modal.Header,
+		Style = "Teal",
+		Text = "?",
+		TextSize = 24,
+		Size = UDim2.fromOffset(size, size),
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.new(1, -(size + 8), 0, 0),
+		Radius = 999,
+		ShadowOffset = UITheme.SmallShadowOffset,
+		OnClick = onClick,
+		ZIndex = modal.Header.ZIndex,
+	})
+	modal.Title.Size = UDim2.new(1, -(60 + size + 8), 0, 34)
+	modal.Subtitle.Size = UDim2.new(1, -(60 + size + 8), 0, 16)
+	return holder
+end
+
 --[[ Opacity --------------------------------------------------------------------
 	Fades a whole subtree (row opacity 0.92 / 0.7) without a CanvasGroup, which
 	would nest inside the modal's own CanvasGroup. The authored transparency of

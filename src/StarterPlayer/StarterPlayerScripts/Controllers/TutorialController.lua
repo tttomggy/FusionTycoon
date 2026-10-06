@@ -25,6 +25,7 @@
 	end. An old save that skipped it gets "replay it in ⚙ Settings" once.
 ]]
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -247,6 +248,8 @@ local function onTycoonChanged()
 			finishTutorial()
 		end
 		wasActive = false
+		-- After the tutorial the path follows the current goal (👣).
+		TutorialPath.SetEnabled(TycoonController.HasSynced() and t.Done and TycoonController.IsGoalPathOn())
 		return
 	end
 	wasActive = true
@@ -337,6 +340,13 @@ function TutorialController.Init()
 	TutorialPath.Init()
 	TutorialPath.SetTargetSource(GoalMarkerController.GetMarkedPosition)
 	ToastController.SetBigHold(TycoonController.IsTutorialActive)
+	-- The LOCK console's and Gacha Pad's "How it works" (H) prompts.
+	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, triggeringPlayer: Player)
+		local topic = prompt:GetAttribute("HelpTopic")
+		if triggeringPlayer == localPlayer and prompt.Name == "HelpPrompt" and typeof(topic) == "string" then
+			TutorialCards.ShowTopic(topic)
+		end
+	end)
 	TycoonController.TycoonChanged:Connect(onTycoonChanged)
 	RunService.RenderStepped:Connect(step)
 	onTycoonChanged()

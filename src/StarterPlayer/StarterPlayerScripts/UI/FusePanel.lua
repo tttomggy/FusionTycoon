@@ -43,6 +43,7 @@ local InventoryController = require(Controllers.InventoryController)
 local TycoonController = require(Controllers.TycoonController)
 local FusionController = require(Controllers.FusionController)
 local ToastController = require(Controllers.ToastController)
+local TutorialCards = require(script.Parent.TutorialCards)
 local UIKit = require(script.Parent.UIKit)
 
 local FusePanel = {}
@@ -920,6 +921,9 @@ local function build()
 		FitContent = true,
 		HeaderTop = Colors.FuseAllTop,
 	})
+	UIKit.AddHelpButton(modal, function()
+		TutorialCards.ShowTopic("Fuse")
+	end)
 	local content = modal.Content
 	local columnsHeight = UDim2.new(0, 0, 1, -(BAR_HEIGHT + 8))
 

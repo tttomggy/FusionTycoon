@@ -5,6 +5,7 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
+local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -92,6 +93,9 @@ local pendingSfxMuted: boolean? = nil
 -- The Auto-Fuse pass's toggle (Settings.AutoFuse), optimistic like the rest.
 local autoFuse = false
 local pendingAutoFuse: boolean? = nil
+-- The goal path's setting (Settings.GoalPath), optimistic like the rest.
+local goalPath: string = "Auto"
+local pendingGoalPath: string? = nil
 
 local function applySfx()
 	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
@@ -251,6 +255,24 @@ function TycoonController.SetSfxMuted(muted: boolean)
 	pendingSfxMuted = muted
 	applySfx()
 	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
+end
+
+-- The lit path to the current goal: the 👣 toggle, else on for the first
+-- TutorialConfig.GoalPathSessions sessions.
+function TycoonController.IsGoalPathOn(): boolean
+	if goalPath == "On" then
+		return true
+	elseif goalPath == "Off" then
+		return false
+	end
+	return shop.Sessions <= TutorialConfig.GoalPathSessions
+end
+
+function TycoonController.SetGoalPath(on: boolean)
+	goalPath = if on then "On" else "Off"
+	pendingGoalPath = goalPath
+	RemoteEvents.SetSetting:FireServer({ Key = "GoalPath", Value = goalPath })
+	tycoonChanged:Fire()
 end
 
 function TycoonController.IsAutoFuseOn(): boolean
@@ -461,6 +483,10 @@ local function onSyncTycoon(snapshot: any)
 	if pendingAutoFuse ~= nil and settings.AutoFuse == pendingAutoFuse then
 		pendingAutoFuse = nil
 	end
+	if pendingGoalPath ~= nil and settings.GoalPath == pendingGoalPath then
+		pendingGoalPath = nil
+	end
+	goalPath = pendingGoalPath or settings.GoalPath
 	if pendingAutoFuse ~= nil then
 		autoFuse = pendingAutoFuse
 	else

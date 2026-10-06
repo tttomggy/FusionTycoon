@@ -37,6 +37,7 @@ local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ToastController = require(Controllers.ToastController)
 local ShopController = require(Controllers.ShopController)
+local TutorialCards = require(script.Parent.TutorialCards)
 local UIKit = require(script.Parent.UIKit)
 
 local RebirthPanel = {}
@@ -334,6 +335,9 @@ local function build()
 		FitContent = true,
 		HeaderTop = Colors.RebirthBannerLeft,
 	})
+	UIKit.AddHelpButton(modal, function()
+		TutorialCards.ShowTopic("Rebirth")
+	end)
 	local list = Instance.new("ScrollingFrame")
 	list.Name = "List"
 	list.BackgroundTransparency = 1

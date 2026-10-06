@@ -371,6 +371,20 @@ local function newPrompt(parent: Instance, name: string, actionText: string, obj
 	return prompt
 end
 
+-- The owner's "How it works" (H): the client opens that topic's tutorial
+-- cards (TutorialConfig.Help, TutorialController). Offset so it doesn't
+-- cover the station's E / R prompts.
+local HELP_PROMPT_OFFSET_PX = 140
+local function addHelpPrompt(parent: Instance, topic: string, distance: number)
+	local prompt = newPrompt(parent, "HelpPrompt", "How it works", "?", distance)
+	prompt.KeyboardKeyCode = Enum.KeyCode.H
+	prompt.GamepadKeyCode = Enum.KeyCode.ButtonL1
+	prompt.UIOffset = Vector2.new(0, HELP_PROMPT_OFFSET_PX)
+	prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+	prompt:SetAttribute("HelpTopic", topic)
+	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+end
+
 --[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
 
 local function buildShell(plot: Model, origin: CFrame, player: Player)
@@ -569,6 +583,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	-- so the nearer Pull could hide it. Nothing disables it: an unaffordable
 	-- x10 still shows and the server answers "Need $X for 10 pulls".
 	multiPrompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
+	addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance)
 
 	-- Runs on every sync too (addStationRefresh): price, odds at the
 	-- player's luck (so a rebirth updates them), and the x10 cost.
@@ -923,6 +938,7 @@ local function createLockConsole(plot: Model, origin: CFrame)
 	local _, post = LockKit.Build(origin, plot)
 	local prompt = newPrompt(post, LockKit.PROMPT_NAME, "Lock lab", ("%ds shield"):format(HeistConfig.ShieldSeconds), L.PromptDistance)
 	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	addHelpPrompt(post, "Lock", L.PromptDistance)
 	BillboardKit.Pad(post, {
 		Name = "LockLabel",
 		Title = "🔒 LOCK LAB",
