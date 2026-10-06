@@ -13,7 +13,10 @@
 	  Can give:   the mutation pills this event affects (+ a note)
 	  NEXT        the next 2 events with timers, and the Admin Abuse line
 
-	400 px wide under the chip; on a phone 90% of the width (capped at 400).
+	400 px wide, centred in the card band like every card (UIKit.FitHeight:
+	what you see centred between the top bar and the HUD row, shrunk when
+	taller); on a phone 90% of the width (capped at 400). It re-centres
+	whenever its height changes (content, a phone switch).
 	Between events it explains the NEXT one. It only opens on a tap of the
 	chip (EventController); it never opens itself.
 ]]
@@ -275,7 +278,21 @@ local function buildContent(id: string)
 	})
 end
 
-local function ensureBuilt(parent: Instance, top: number): Frame
+-- Centres the card for its current height (design px: AbsoluteSize over
+-- every UIScale above it, its own PopScale included).
+local function place()
+	local frame = holder
+	if not frame or not frame.Visible then
+		return
+	end
+	local height = frame.AbsoluteSize.Y / UIKit.EffectiveScale(frame)
+	if height < 1 then
+		return
+	end
+	UIKit.FitHeight(frame, height)
+end
+
+local function ensureBuilt(parent: Instance): Frame
 	local existing = holder
 	if existing then
 		return existing
@@ -284,7 +301,7 @@ local function ensureBuilt(parent: Instance, top: number): Frame
 		Name = "EventInfoCard",
 		Parent = parent,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, top),
+		Position = UDim2.new(0.5, 0, 0, UIKit.GetCardTop()),
 		Size = UDim2.new(PHONE_WIDTH_SCALE, 0, 0, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Radius = 18,
@@ -300,7 +317,20 @@ local function ensureBuilt(parent: Instance, top: number): Frame
 	layout.Parent = panel
 	body = panel
 	panelHolder.Visible = false
+	-- Placed by UIKit.FitHeight (centred in the card band).
+	panelHolder:SetAttribute("CardPlaced", true)
 	holder = panelHolder
+	local lastHeight = 0
+	panelHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		local height = panelHolder.AbsoluteSize.Y / UIKit.EffectiveScale(panelHolder)
+		-- PopIn / PopOut scale both sides of the ratio; only a real height
+		-- change (content, phone switch) re-centres.
+		if math.abs(height - lastHeight) > 1 then
+			lastHeight = height
+			place()
+		end
+	end)
+	UIKit.LayoutChanged:Connect(place)
 	return panelHolder
 end
 
@@ -337,15 +367,16 @@ function EventInfoCard.Refresh()
 	adminLabel.Text = EventState.GetAdminAbuseText()
 end
 
--- Shows the card for `id` (`now`: it's running; else it's the next one),
--- under the chip at `top` px in `parent`.
-function EventInfoCard.Show(parent: Instance, top: number, id: string, now: boolean)
-	local frame = ensureBuilt(parent, top)
+-- Shows the card for `id` (`now`: it's running; else it's the next one)
+-- in `parent`, centred in the card band.
+function EventInfoCard.Show(parent: Instance, id: string, now: boolean)
+	local frame = ensureBuilt(parent)
 	if shownId ~= id or shownNow ~= now or not frame.Visible then
 		shownId, shownNow = id, now
 		buildContent(id)
 	end
 	frame.Visible = true
+	place()
 	UIKit.PopIn(frame)
 	EventInfoCard.Refresh()
 end

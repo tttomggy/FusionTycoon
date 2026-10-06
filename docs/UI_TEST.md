@@ -1572,3 +1572,25 @@ Heist, the result cards, the celebration):
 - [ ] Three runs in a row with no "panel X: ±N instances" FAIL, one during
   a Golden Rain (`/event GoldenRain`) and one with a boost running
   (`/shop grant Boost`).
+
+## 35. Cards centred (full screen)
+
+- [ ] 1920×1080 full screen: SHOP opens in the middle, equal space above
+  and below.
+- [ ] Same for UPGRADES, ITEMS, INDEX, GIFTS, ⚙ Settings, the Daily card,
+  Fuse, Rebirth (+ its confirm), How to Heist, the welcome-back card
+  (`/offline 30`), a pull's big card, the EVENT-ONLY reveal (`/eventmut
+  void`), a purchase celebration (`/shop grant PocketCash`) and the event
+  info card (tap the event chip): centred between the top bar and the
+  bottom buttons.
+- [ ] 1366×768 window: the same; a card taller than the space starts just
+  under the top bar and shrinks, never covering the bottom buttons.
+- [ ] Phone (844×390 emulator): cards and the HUD's left column look as
+  before (most cards fill the space and start under the top bar).
+- [ ] Side cards (offer, Starter, New deal!) and the fail card stay at the
+  bottom right / bottom.
+- [ ] `/selftest`: every "cards centred" line PASSes (three viewports by
+  the plan, plus each live card at this window's size), three runs in a
+  row.
+- [ ] `/trailer pull`: the Gacha Pad puller is the yellow / blue noob (not
+  your avatar); no mouse cursor during the run, and it's back after.

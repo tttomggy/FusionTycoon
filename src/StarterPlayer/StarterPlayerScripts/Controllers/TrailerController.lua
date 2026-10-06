@@ -245,6 +245,13 @@ local function enterCleanFrame()
 		end
 	end)
 
+	-- No mouse cursor in the recording.
+	local mouseIconWas = UserInputService.MouseIconEnabled
+	UserInputService.MouseIconEnabled = false
+	onRestore(function()
+		UserInputService.MouseIconEnabled = mouseIconWas
+	end)
+
 	local promptsWere = ProximityPromptService.Enabled
 	ProximityPromptService.Enabled = false
 	onRestore(function()
@@ -863,13 +870,14 @@ builders.night = function()
 	}
 end
 
--- 2. A local NPC (your clone) walks onto the Gacha Pad and pulls: the
--- pad's real burst, then the big reveal card for a Rainbow Legendary.
+-- 2. A local NPC (a generic yellow / blue noob, never your own avatar)
+-- walks onto the Gacha Pad and pulls: the pad's real burst, then the big
+-- reveal card for a Rainbow Legendary.
 builders.pull = function()
 	local cfg = TrailerConfig.Pull
 	local station = plot and plot:FindFirstChild("GachaStation")
 	local pad = station and station:FindFirstChild("Pad") :: BasePart?
-	local puller = makeActor("You", folder())
+	local puller = makeActor("Owner", folder())
 	local beat = beats()
 	local item = itemFor(cfg.Item, "pull")
 	return {

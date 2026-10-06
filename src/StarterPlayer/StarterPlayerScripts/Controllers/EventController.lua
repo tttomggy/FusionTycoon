@@ -121,7 +121,6 @@ local POP_MAX_DISTANCE = 150
 local CHIP_Y = 12
 local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44) }
 local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
-local CARD_GAP = 10
 local LINEUP_COUNT = 3
 -- A small ⓘ sits inside the chip's right end. The first time you see an
 -- event type (Tips "event_<Id>" unseen) the chip itself pulses (a scale
@@ -823,10 +822,6 @@ refreshChipPulse = function()
 	end
 end
 local chipStyle: string? = nil
-local function cardTop(): number
-	return CHIP_Y + CHIP_SIZE.Desktop.Y + CARD_GAP
-end
-
 local function eventTitle(id: string): string
 	return ("%s %s"):format(EventConfig.Icons[id] or "", EventConfig.Names[id] or id)
 end
@@ -913,7 +908,7 @@ local function refreshSchedule()
 		if shownNow then
 			EventInfoCard.Hide()
 		else
-			EventInfoCard.Show(hudGui, cardTop(), first.Id, first.Now)
+			EventInfoCard.Show(hudGui, first.Id, first.Now)
 		end
 	end
 	refreshChipPulse()
@@ -944,7 +939,7 @@ local function toggleCard()
 	end
 	local id, now = cardSubject()
 	if id then
-		EventInfoCard.Show(hudGui, cardTop(), id, now)
+		EventInfoCard.Show(hudGui, id, now)
 	end
 end
 
