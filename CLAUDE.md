@@ -248,7 +248,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
     (`BillboardKit.Chip`), faster/brighter factory balls, the two street
     Event Boards (`StreetLayout.EventBoard`, built by WorldService).
   - **Every event explains itself:** the top-centre HUD chip opens the
-    **info card** (`UI/EventInfoCard`, copy from `EventConfig.GetInfo`,
+    **info card** (`UI/EventInfoCard`, centred in the card band like
+    every card, copy from `EventConfig.GetInfo`,
     built from the config numbers; `EventConfig.Blurbs` = the first "what to
     do" sentence). It **never opens itself**: a small ⓘ sits inside the chip's
     right end, and the first time a player sees each event type the chip
@@ -768,9 +769,19 @@ src/StarterPlayer/StarterPlayerScripts/
   band from `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also past the
   170 × 60 Roblox buttons after the 0.8 scale: 79 logical) down to the
   HUD's bottom row (`UIKit.GetCardBottom()`: 99 / 95 logical), never over
-  it, and is **centred in that band** (`UIKit.GetCardY(visualHeight)`:
-  a short card on a 1080p screen sits mid-screen; a card that fills the
-  band, as on phones, starts at GetCardTop), horizontally centred. The desktop
+  it, and is **centred in that band** (`UIKit.GetCardY(visualHeight)`,
+  where visualHeight is what you SEE: the panel plus its shadow, after the
+  size cap and the fit scale; the UIScale shrinks about the top-centre
+  anchor, so the top stays put): a short card on a 1080p screen sits
+  mid-screen; a card that fills the band, as on phones, starts at
+  GetCardTop and shrinks to fit. The math is pure and viewport-explicit
+  (`GetCardYFor`, `PlanModalFor` used by every Modal's placeRoot,
+  `PlanCardFor` used by `FitHeight`), so `/selftest`'s "cards centred"
+  runs it at 1920×1080, 1366×768 and 844×390 and measures the live
+  cards (`CheckCardPlacement`: centre within 2 px, inside the band).
+  The event info card is centred too (FitHeight, re-placed when its
+  height changes); side cards (offer, Starter, deal) and the bottom fail
+  card stay where they are. Horizontally centred. The desktop
   chat (`UIKit.CHAT_WIDTH` 400 px) only slides a card right when its left
   edge overlaps it and there's room (`GetCardShift`); never down.
   `FitContent` modals (Fuse, Daily, Rebirth, How to Heist, welcome-back)
