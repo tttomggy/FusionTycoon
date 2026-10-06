@@ -43,6 +43,8 @@ local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 
@@ -108,6 +110,9 @@ export type PlayerData = {
 	Cosmetics: { [string]: boolean },
 	-- Times this profile has loaded (the Starter Pack offer: session 2).
 	Sessions: number,
+	-- The deal slot (DealConfig slot start, UTC) whose "New deal!" card
+	-- already showed: once per deal, across rejoins. 0 = none yet.
+	DealPopupSlot: number,
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
@@ -185,6 +190,7 @@ export type ShopSnapshot = {
 	StarterPackBought: boolean,
 	Cosmetics: { string },
 	Sessions: number,
+	DealPopupSlot: number,
 	-- Offline cash the welcome-back card's COLLECT x2 can still double.
 	OfflineDoubleAmount: number,
 }
@@ -281,6 +287,7 @@ local DEFAULT_DATA: PlayerData = {
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
+	DealPopupSlot = 0,
 	Daily = DailyConfig.Default(),
 	Gifts = GiftConfig.Default(-1),
 	BestIncome = 0,
@@ -442,6 +449,10 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
 	end
+	-- A slot start: a finite whole number of seconds (NaN fails >= 0).
+	if typeof(raw.DealPopupSlot) == "number" and raw.DealPopupSlot >= 0 and raw.DealPopupSlot < math.huge then
+		data.DealPopupSlot = math.floor(raw.DealPopupSlot)
+	end
 	data.Daily = DailyConfig.Sanitize(raw.Daily)
 	if typeof(raw.FreePulls) == "number" and raw.FreePulls >= 0 then
 		data.FreePulls = math.floor(raw.FreePulls)
@@ -582,6 +593,7 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		Receipts = data.Receipts,
 		Index = data.Index,
 		Cosmetics = data.Cosmetics,
+		DealPopupSlot = data.DealPopupSlot,
 	})
 end
 
@@ -1305,6 +1317,22 @@ function PlayerDataService.GrantCosmetic(player: Player, key: string)
 	end
 end
 
+-- The "New deal!" card showed for `slot`: stored so a rejoin in the same
+-- slot never shows it again. Only the current slot (or the one just
+-- before it, for a card shown on the boundary) is accepted.
+function PlayerDataService.MarkDealPopup(player: Player, slot: number): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	local _, current = DealState.GetCurrent()
+	if slot ~= current and slot ~= current - DealConfig.SlotSeconds then
+		return false
+	end
+	data.DealPopupSlot = slot
+	return true
+end
+
 function PlayerDataService.GetSessions(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.Sessions else 0
@@ -1404,6 +1432,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 			StarterPackBought = data ~= nil and data.StarterPackBought,
 			Cosmetics = indexKeys(if data then data.Cosmetics else {}),
 			Sessions = if data then data.Sessions else 0,
+			DealPopupSlot = if data then data.DealPopupSlot else 0,
 			OfflineDoubleAmount = PlayerDataService.GetOfflineDoubleAmount(player),
 		},
 		Daily = dailySnapshot(data),
@@ -1680,6 +1709,18 @@ function PlayerDataService:Init()
 			local id = typeof(payload) == "table" and (payload :: any).Id or nil
 			if TipConfig.IsValid(id) then
 				PlayerDataService.MarkTipSeen(player, id :: string)
+			end
+		end)
+	)
+
+	-- MarkDealPopup { Slot }: the "New deal!" card showed for that slot
+	-- (the current one only); saved, no reply (the client keeps it too).
+	table.insert(
+		state.connections,
+		RemoteEvents.MarkDealPopup.OnServerEvent:Connect(function(player: Player, payload: unknown)
+			local slot = typeof(payload) == "table" and (payload :: any).Slot or nil
+			if typeof(slot) == "number" and slot == slot and slot >= 0 and slot < math.huge and slot % 1 == 0 then
+				PlayerDataService.MarkDealPopup(player, slot)
 			end
 		end)
 	)

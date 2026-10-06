@@ -282,9 +282,13 @@ export type DealView = {
 	SecondsLeft: number,
 }
 
-function ShopController.GetDeal(): DealView?
+-- The current slot's deal. `gated`: only while it's offered to you and its
+-- live saving reaches DealConfig.MinSavePercent (a Studio Id 0 deal has no
+-- price, so it shows as TEST with no saving). Ungated (Studio /deal pop):
+-- the slot's deal whatever the price or policy says.
+local function dealView(gated: boolean): DealView?
 	local key, slotStart, secondsLeft = DealState.GetCurrent()
-	if not ShopController.IsAvailable(key) then
+	if gated and not ShopController.IsAvailable(key) then
 		return nil
 	end
 	local item = ShopConfig.GetItem(key) :: ShopConfig.Item
@@ -292,7 +296,7 @@ function ShopController.GetDeal(): DealView?
 	local normal = ShopPrices.GetPartsTotal(key)
 	local save = ShopConfig.GetSavePercent(price, normal)
 	local studioTest = item.Id == 0 and RunService:IsStudio()
-	if not studioTest and (not save or save < DealConfig.MinSavePercent) then
+	if gated and not studioTest and (not save or save < DealConfig.MinSavePercent) then
 		return nil
 	end
 	local icons, seen = {}, {}
@@ -316,6 +320,10 @@ function ShopController.GetDeal(): DealView?
 	}
 end
 
+function ShopController.GetDeal(): DealView?
+	return dealView(true)
+end
+
 -- "normally ~~128~~ R$ · now 99 R$ (−23%)", all live (RichText).
 function ShopController.GetDealPriceLine(deal: DealView): string
 	if deal.Price and deal.Normal then
@@ -330,7 +338,9 @@ function ShopController.GetDealPriceLine(deal: DealView): string
 	return "Studio test: live prices appear once the product is set up"
 end
 
-local dealPopSlot: number? = nil -- the slot whose card was shown (or dismissed)
+-- The slot whose card was shown (or dismissed) this session; the saved
+-- copy (snapshot Shop.DealPopupSlot) covers a rejoin in the same slot.
+local dealPopSlot: number? = nil
 
 -- Carrying a stolen item, or one of yours is being carried off.
 local function heistBusy(): boolean
@@ -345,18 +355,18 @@ local function heistBusy(): boolean
 	return false
 end
 
-local function maybeShowDeal(force: boolean?)
-	local deal = ShopController.GetDeal()
-	if not deal or heistBusy() then
-		return
+-- Why the real (unforced) path won't show the card now (nil = it may).
+local function dealBlocked(deal: DealView, ignoreSaved: boolean): string?
+	if heistBusy() then
+		return "Heist"
 	end
-	if not force and dealPopSlot == deal.SlotStart then
-		return
+	if dealPopSlot == deal.SlotStart or (not ignoreSaved and TycoonController.GetShop().DealPopupSlot == deal.SlotStart) then
+		return "ShownThisSlot"
 	end
-	local blocked = offerBlocked(nil)
-	if blocked and not (force and blocked == "Cooldown") then
-		return
-	end
+	return offerBlocked(nil)
+end
+
+local function showDealCard(deal: DealView, track: boolean)
 	dealPopSlot = deal.SlotStart
 	lastOfferAt = os.clock()
 	local key = deal.Key
@@ -366,7 +376,8 @@ local function maybeShowDeal(force: boolean?)
 		Title = deal.Item.Name,
 		Detail = ("%s  ·  %s"):format(deal.Icons, ShopController.GetDealPriceLine(deal)),
 		Footnote = ("New deal in %s"):format(EventState.FormatTimer(deal.SecondsLeft)),
-		BuyText = "See deal",
+		-- A Studio Id 0 deal: "TEST" (no price, no saving).
+		BuyText = if deal.Item.Id == 0 then "TEST" else "See deal",
 		DismissText = "Not now",
 	}, function()
 		ShopController.Track("DealOpened", key)
@@ -374,7 +385,58 @@ local function maybeShowDeal(force: boolean?)
 	end, function()
 		ShopController.Track("DealDismissed", key)
 	end)
-	ShopController.Track("DealShown", key)
+	if track then
+		ShopController.Track("DealShown", key)
+	end
+end
+
+-- The real path: once per deal slot (saved), under the offer guards.
+local function maybeShowDeal()
+	local deal = dealView(true)
+	if not deal or dealBlocked(deal, false) then
+		return
+	end
+	showDealCard(deal, true)
+	RemoteEvents.MarkDealPopup:FireServer({ Slot = deal.SlotStart })
+end
+
+-- Studio /deal pop: bypasses every guard (first session, cooldown, shown
+-- this slot, another card open, heist, policy, no live saving) and shows
+-- the slot's deal now. Not saved, so the real path can still be tested.
+local function forceShowDeal()
+	local deal = dealView(false)
+	if not deal then
+		return
+	end
+	-- ShopCards draw above every panel, so an open one doesn't hide it.
+	showDealCard(deal, false)
+end
+
+-- /selftest: the real path with the clock moved past every time guard
+-- (first session, cooldown, after a loss) and the shown-this-slot marks
+-- cleared, nothing saved. The card must show; everything is restored.
+function ShopController.SelfTestDealPath(): { string }
+	local deal = dealView(true)
+	if not deal then
+		return { "PASS deal real path (skipped: no deal on offer here: policy or no live saving)" }
+	end
+	local savedJoined, savedOffer, savedLoss, savedSlot = joinedAt, lastOfferAt, lastLossAt, dealPopSlot
+	joinedAt = os.clock() - ShopConfig.FirstSessionQuietSeconds - 1
+	lastOfferAt = -math.huge
+	lastLossAt = -math.huge
+	dealPopSlot = nil
+	ShopCards.CloseSide()
+	local blocked = dealBlocked(deal, true)
+	if not blocked then
+		showDealCard(deal, false)
+	end
+	local shown = ShopCards.GetSideName() == "DealOffer"
+	ShopCards.CloseSide()
+	joinedAt, lastOfferAt, lastLossAt, dealPopSlot = savedJoined, savedOffer, savedLoss, savedSlot
+	if blocked then
+		return { ("FAIL deal real path: still blocked by %s with the guards cleared"):format(blocked) }
+	end
+	return { if shown then "PASS deal real path (card shown)" else "FAIL deal real path: no card" }
 end
 
 --[[ Starter Pack (session 2) --------------------------------------------------------------- ]]
@@ -466,16 +528,14 @@ function ShopController.Init()
 	ShopPrices.Prefetch()
 	task.delay(ShopConfig.StarterOfferDelaySeconds, maybeShowStarter)
 	-- The deal card: checked every DEAL_CHECK_SECONDS (a new slot, the quiet
-	-- time ending); Studio /deal pop forces it once (ignores the cooldown).
+	-- time ending); Studio /deal pop forces it once (bypasses every guard).
 	task.spawn(function()
 		while true do
 			task.wait(DEAL_CHECK_SECONDS)
-			maybeShowDeal(false)
+			maybeShowDeal()
 		end
 	end)
-	localPlayer:GetAttributeChangedSignal("DealPopNonce"):Connect(function()
-		maybeShowDeal(true)
-	end)
+	localPlayer:GetAttributeChangedSignal("DealPopNonce"):Connect(forceShowDeal)
 end
 
 return ShopController

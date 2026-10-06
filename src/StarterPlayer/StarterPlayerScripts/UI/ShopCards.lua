@@ -61,6 +61,12 @@ function ShopCards.IsSideOpen(): boolean
 	return sideHolder ~= nil
 end
 
+-- The open side card's Name ("ShopOffer", "DealOffer", ...), for /selftest.
+function ShopCards.GetSideName(): string?
+	local holder = sideHolder
+	return if holder then holder.Name else nil
+end
+
 export type SideCard = {
 	Name: string,
 	Caption: string, -- small line at the top

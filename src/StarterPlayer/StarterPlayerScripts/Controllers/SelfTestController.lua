@@ -13,8 +13,8 @@
 	  2. Hashes the event lineup for the server's slots (determinism:
 	     client and server must agree).
 	  3. Opens and closes every panel twice at phone and desktop scale and
-	     counts PlayerGui instances: a second open/close cycle must not add
-	     any (leftovers = a leak).
+	     counts the panels' own instances (every modal ScreenGui): a second
+	     open/close cycle must not add any (leftovers = a leak).
 	  4. Loads every SoundConfig slot (SoundKit.CheckAll).
 	  5. Checks every UIKit.Modal draws over the HUD (DisplayOrder +
 	     backdrop) and that every shop chip lands its section's header
@@ -84,11 +84,14 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { Key = "AutoFuse", Value = 1 } },
 		},
 		MarkTipSeen = { {}, { { Id = "nope" } }, { { Id = 5 } }, { { Id = BIG_STRING } } },
+		-- Never the current slot: 0, a wrong slot, junk types.
+		MarkDealPopup = { {}, { "x" }, { { Slot = "1" } }, { { Slot = 1 } }, { { Slot = 1.5 } } },
 		AdminAction = { {}, { { Action = "Nope" } }, { { Action = "StartEvent", Args = { Id = "Nope" } } } },
 	}
 	for _, n in junkNumbers do
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
+		table.insert(cases.MarkDealPopup, { { Slot = n } })
 		table.insert(cases.RequestRemoveItem, { n })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
@@ -148,13 +151,23 @@ local function panelSpecs(): { PanelSpec }
 	return specs
 end
 
+-- Instances in the panels' own subtrees: every UIKit.Modal's ScreenGui
+-- (each panel is one) plus how many modal guis exist (a panel that made a
+-- new one per open would leak). Not the whole PlayerGui: the HUD's deal
+-- countdown, timed pills, toasts and event chips churn on their own and
+-- swung the old whole-PlayerGui count by ±3 between cycles.
 local function countGui(): number
-	return #localPlayer:WaitForChild("PlayerGui"):GetDescendants()
+	local guis = UIKit.GetModalGuis()
+	local count = #guis
+	for _, gui in guis do
+		count += #gui:GetDescendants()
+	end
+	return count
 end
 
--- Opens / closes each panel twice per scale; the instance count after the
--- second close must equal the count after the first (the first may build
--- the panel once, which is expected).
+-- Opens / closes each panel twice per scale; the panels' instance count
+-- after the second close must equal the count after the first (the first
+-- may build the panel once, which is expected).
 local function testPanels(): { string }
 	local lines: { string } = {}
 	for _, phone in { false, true } do
@@ -234,6 +247,20 @@ local function testChipJumps(): { string }
 	return lines
 end
 
+-- On the phone layout, every HUD element of the left group stays inside
+-- the left 40% of the screen (deal badge, timed pills included).
+local function testHudLeftColumn(): { string }
+	local hud = require(script.Parent.HudController) :: any
+	UIKit.SetForcedPhone(true)
+	task.wait(0.2)
+	local ok, result = pcall(hud.SelfTestLeftColumn, "phone")
+	UIKit.SetForcedPhone(nil)
+	if not ok then
+		return { "FAIL hud left column: " .. tostring(result) }
+	end
+	return result
+end
+
 local function run(payload: any)
 	if running then
 		return
@@ -260,6 +287,13 @@ local function run(payload: any)
 
 	local panelLines = testPanels()
 	for _, line in testHudOrder() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testHudLeftColumn() do
+		table.insert(panelLines, line)
+	end
+	local shopController = require(script.Parent.ShopController) :: any
+	for _, line in shopController.SelfTestDealPath() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testChipJumps() do
