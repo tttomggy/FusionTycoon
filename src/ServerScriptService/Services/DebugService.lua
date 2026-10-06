@@ -232,6 +232,21 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 	)
 end
 
+-- Asks the client what it shows right now (SelfTestController's probe) and
+-- turns each line it reports into a result.
+local function tutorialProbe(player: Player, payload: { [string]: any }, result: (boolean, string, string?) -> ())
+	payload.Stage = "TutorialProbe"
+	RemoteEvents.SelfTest:FireClient(player, payload)
+	local report = waitForReport(player, "TutorialProbe")
+	if not report or typeof(report.Lines) ~= "table" then
+		result(false, ("tutorial probe (%s)"):format(tostring(payload.Kind)), "no report from the client")
+		return
+	end
+	for _, line in report.Lines do
+		result(line.Ok == true, tostring(line.Name), line.Detail)
+	end
+end
+
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
 	local popups = 0
@@ -241,6 +256,19 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			popups += 1
 		end
 	end)
+
+	-- A save from Tutorial 1 (its 14 steps, no Ver) resumes at the matching step.
+	local function migrates(oldId: number, newId: string): boolean
+		local step = PlayerDataService.SelfTestMigrateTutorial({ Step = oldId, Done = false })
+		return step == TutorialConfig.IndexOf(newId)
+	end
+	result(
+		migrates(2, "claim") and migrates(4, "pull") and migrates(6, "fuse") and migrates(8, "multiplier") and migrates(13, "rebirth") and migrates(14, "finish"),
+		"tutorial: a Tutorial 1 save resumes at the matching step"
+	)
+	local doneStep = PlayerDataService.SelfTestMigrateTutorial({ Step = 9, Done = true })
+	result(doneStep == 9, "tutorial: a finished Tutorial 1 save stays finished")
+
 	TutorialService.DebugReset(player)
 	PlayerDataService.SyncTycoon(player)
 	local function tutorial(): any
@@ -263,12 +291,21 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			break
 		end
 		table.insert(order, step.Id)
+		if step.Kind == "Timed" then
+			-- The server's clock: refused before its Seconds, allowed after.
+			result(not TutorialService.Advance(player, index), ("tutorial: %s is refused before its %ds"):format(step.Id, step.Seconds or 0))
+		end
+		-- What the real client shows for this step: the banner, no card, the
+		-- HUD set of the table, the weapon bar off at Rebirth 0.
+		tutorialProbe(player, { Kind = "Step", StepIndex = index, StepId = step.Id }, result)
 		if step.Id == "upgrade" then
 			PlayerDataService.AddCash(player, 1e6)
 			TycoonService.HandleUpgradeRequest(player, "basic_generator")
-		elseif step.Id == "pull" then
-			for _ = 1, TutorialConfig.FreePulls do
-				TycoonService.TutorialPull(player)
+		elseif step.Id == "pull" or step.Id == "pull2" then
+			TycoonService.TutorialPull(player)
+			if step.Id == "pull" then
+				-- A single pull of a Common opens the big card ("COMMON ORB!").
+				tutorialProbe(player, { Kind = "BigCard", Expect = "COMMON ORB!" }, result)
 			end
 		elseif step.Id == "fuse" then
 			local commons = {}
@@ -280,21 +317,17 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			end
 			FusionService.HandleFusionRequest(player, { Uids = commons })
 		elseif step.Id == "multiplier" then
-			-- The "come back when you have $X" branch: OK completes it.
+			-- The "come back with $X" branch: the skip after SkipSeconds.
 			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
-			TutorialService.Advance(player, index)
-		elseif step.Kind == "Arrive" then
-			local plot = TycoonService.GetPlotForPlayer(player)
-			local slot = plot and plot:GetAttribute("SlotIndex")
-			if root and root:IsA("BasePart") and typeof(slot) == "number" then
-				root.CFrame = CFrame.new(PlotLayout.GetSlotCFrame(slot):PointToWorldSpace(PlotLayout.LOCK_CONSOLE) + Vector3.new(0, 4, 3))
-			end
+			result(not TutorialService.Advance(player, index), "tutorial: the Multiplier Pad can't be skipped at once")
+			TutorialService.DebugBackdate(player, 10)
 			TutorialService.Advance(player, index)
 		elseif step.Kind == "Action" then
 			-- claim: only reached on an unclaimed plot (claimed skips it).
 			stuck = step.Id .. " (needs a claimed lab)"
 			break
 		else
+			TutorialService.DebugBackdate(player, 10)
 			TutorialService.Advance(player, index)
 		end
 		PlayerDataService.SyncTycoon(player)

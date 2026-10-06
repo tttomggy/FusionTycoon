@@ -57,6 +57,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local HudGate = require(script.Parent.Parent.UI.HudGate)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local AnnouncementController = require(script.Parent.AnnouncementController)
 local ResultController = require(script.Parent.ResultController)
@@ -1281,7 +1282,7 @@ function EventController.StopPreview()
 	onEventChanged(false)
 end
 
--- The top-centre HUD chip (the tutorial's coach ring points at it).
+-- The top-centre HUD chip (the tutorial's hand points at it).
 function EventController.GetChip(): GuiObject?
 	return chipHolder
 end
@@ -1292,6 +1293,14 @@ end
 
 function EventController.Init()
 	screenGui = UIKit.Screen("EventBanner", 105)
+	-- The chip is part of the progressive HUD: hidden until the tutorial's
+	-- events step (HudGate; a finished tutorial shows it at once).
+	HudGate.Register("Event", {
+		Roots = function()
+			return { chipHolder }
+		end,
+		NewSide = "Below",
+	})
 	-- Baseline before any event could change it: LightingService runs on the
 	-- server at boot, so it has replicated by the time this script runs.
 	captureBaseline()

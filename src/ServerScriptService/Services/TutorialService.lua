@@ -2,38 +2,44 @@
 --[[
 	TutorialService
 	---------------
-	The mandatory first-time tutorial (TutorialConfig.Steps). Server-owned:
-	the step lives in PlayerData.Tutorial and goes out in every snapshot.
+	The mandatory first-time tutorial (TutorialConfig.Steps, Tutorial 2).
+	Server-owned: the step lives in PlayerData.Tutorial and goes out in
+	every snapshot.
 
 	  * Action steps complete only on the real, server-confirmed action: a
 	    PlayerDataService.OnSync hook checks the step's predicate at the
-	    start of every sync (claim, upgrade, 2 pulls, a fusion, the
-	    Multiplier Pad), so the next step ships in that same snapshot.
-	  * Card / Open / Arrive steps complete through the remote
-	    TutorialAdvance { Step } (C->S), re-checked here: the step must be
-	    the current one and of that kind (Arrive: the player stands within
-	    ArriveDistance of the target; Multiplier: done on OK only while the
-	    player can't afford level 1). TutorialAdvance { Replay = true }
-	    restarts it from Settings: a replay is all OK-cards (no free pulls,
-	    no guaranteed fusion again).
+	    start of every sync (claim, an upgrade, each of the 2 pulls, a
+	    fusion, the Multiplier Pad), so the next step ships in that same
+	    snapshot.
+	  * Timed / Open steps (and the Multiplier Pad's "come back with $X")
+	    complete through the remote TutorialAdvance { Step } (C->S),
+	    re-checked here: the step must be the current one, and a Timed step
+	    needs its Seconds on the server's clock (a step the server has only
+	    just seen is refused once, then timed from there). Open steps are a
+	    UI the server can't watch (the chip, the Rebirth panel), so they are
+	    allowed any time: the worst a lie does is skip a sentence.
+	    TutorialAdvance { Replay = true } restarts it from Settings: a replay
+	    has no free pulls / guaranteed fusion again and every step may be
+	    left with the banner's SKIP.
 	  * Entering a step: the Pull step grants the 2 free pulls (once per
 	    account; the pad takes them, PlayerDataService.TakeTutorialFreePull);
 	    Action steps record the counter they wait on (Base). Steps the save
 	    already satisfies (Skip) are skipped.
 	  * Step 0 (a new field on an old save) is decided on the first sync: a
 	    save with real progress (Rebirth >= 1 or > 20 pulls) is Done with a
-	    one-time "replay it in ⚙" hint; anything else starts at step 1.
+	    one-time "replay it in ⚙" hint; anything else starts at step 1. A
+	    save from Tutorial 1 has its step mapped (PlayerDataService).
 	  * Analytics: Custom "TutorialStep" (the step number) on each completed
 	    step, "TutorialDone" at the end.
 
 	Follows the ServiceTemplate contract: :Init() connects the remote,
 	:Start() resolves PlayerDataService / TycoonService and hooks the sync.
 ]]
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
-local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
@@ -49,11 +55,11 @@ TutorialService.Name = "TutorialService"
 
 local ADVANCE_PER_SECOND = 2
 local ADVANCE_BURST = 4
+local TIMED_SLACK = 0.5 -- the client's timer and the server's clock may differ a little
 
--- Where an Arrive step's target is (plot-local positions, PlotLayout).
-local ARRIVE_POSITIONS: { [string]: Vector3 } = {
-	LockConsole = PlotLayout.LOCK_CONSOLE,
-}
+-- os.clock() each player's current step began (session only). A step the
+-- server hasn't seen begin (a resume) is timed from its first Advance.
+local enteredAt: { [Player]: number } = {}
 
 --[[ Counters and predicates ------------------------------------------------ ]]
 
@@ -80,6 +86,7 @@ end
 local COUNTERS: { [string]: (Player) -> number } = {
 	upgrade = generatorLevels,
 	pull = pullCount,
+	pull2 = pullCount,
 	fuse = function(player: Player): number
 		return PlayerDataService.GetTotalFusions(player)
 	end,
@@ -94,7 +101,10 @@ local PREDICATES: { [string]: (Player, number) -> boolean } = {
 		return generatorLevels(player) > base
 	end,
 	pull = function(player, base)
-		return pullCount(player) >= base + TutorialConfig.FreePulls
+		return pullCount(player) > base
+	end,
+	pull2 = function(player, base)
+		return pullCount(player) > base
 	end,
 	fuse = function(player, base)
 		return PlayerDataService.GetTotalFusions(player) > base
@@ -174,7 +184,7 @@ local function check(player: Player)
 	end
 	for _ = 1, #TutorialConfig.Steps do
 		local step = TutorialConfig.GetStep(t.Step)
-		if not step or t.Done or step.Kind ~= "Action" or t.Replay then
+		if not step or t.Done or step.Kind ~= "Action" then
 			return
 		end
 		local predicate = PREDICATES[step.Id]
@@ -183,20 +193,6 @@ local function check(player: Player)
 		end
 		complete(player, t)
 	end
-end
-
-local function isNear(player: Player, targetName: string): boolean
-	local plot = TycoonService.GetPlotForPlayer(player)
-	local slot = plot and plot:GetAttribute("SlotIndex")
-	local localPosition = ARRIVE_POSITIONS[targetName]
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if typeof(slot) ~= "number" or not localPosition or not root or not root:IsA("BasePart") then
-		return false
-	end
-	local target = PlotLayout.GetSlotCFrame(slot):PointToWorldSpace(localPosition)
-	local flat = Vector3.new(root.Position.X - target.X, 0, root.Position.Z - target.Z)
-	return flat.Magnitude <= TutorialConfig.ArriveDistance
 end
 
 -- The remote's rules (also what /selftest drives): true if it advanced.
@@ -209,13 +205,26 @@ function TutorialService.Advance(player: Player, stepIndex: number): boolean
 	if not step then
 		return false
 	end
-	local allowed = t.Replay or step.Kind == "Card" or step.Kind == "Open"
-	if step.Kind == "Arrive" and not t.Replay then
-		allowed = step.Target ~= nil and isNear(player, step.Target)
-	elseif step.Id == "multiplier" and not t.Replay then
-		-- Done on OK only when level 1 is out of reach right now.
+	local began = enteredAt[player]
+	if not began then
+		-- A resumed step: time it from now (the client asks again).
+		enteredAt[player] = os.clock()
+		return false
+	end
+	local elapsed = os.clock() - began
+	local allowed = false
+	if t.Replay then
+		allowed = true -- SKIP
+	elseif step.Kind == "Open" then
+		allowed = true
+	elseif step.Kind == "Timed" then
+		allowed = elapsed >= (step.Seconds or 0) - TIMED_SLACK
+	elseif step.Id == "multiplier" then
+		-- Out of reach right now ("Come back with $X"): leave after SkipSeconds.
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(PlayerDataService.GetCashMultiplierLevel(player))
-		allowed = cost ~= nil and PlayerDataService.GetCash(player) < cost
+		allowed = cost ~= nil
+			and PlayerDataService.GetCash(player) < cost
+			and elapsed >= (step.SkipSeconds or 0) - TIMED_SLACK
 	end
 	if not allowed then
 		return false
@@ -224,7 +233,7 @@ function TutorialService.Advance(player: Player, stepIndex: number): boolean
 	return true
 end
 
--- Settings' "Replay tutorial": every step again, all OK-cards.
+-- Settings' "Replay tutorial": every step again, each with a SKIP.
 function TutorialService.Replay(player: Player)
 	local t = tutorialOf(player)
 	if not t then
@@ -254,6 +263,11 @@ function TutorialService.DebugReset(player: Player)
 	t.PullsGranted = false
 	t.FreePulls = 0
 	enter(player, t, 1)
+end
+
+-- /selftest: as if the current step had begun `seconds` ago (Timed steps).
+function TutorialService.DebugBackdate(player: Player, seconds: number)
+	enteredAt[player] = os.clock() - seconds
 end
 
 function TutorialService.DebugSetStep(player: Player, index: number)
@@ -286,6 +300,9 @@ end
 
 function TutorialService:Init()
 	RemoteEvents.TutorialAdvance.OnServerEvent:Connect(onAdvance)
+	Players.PlayerRemoving:Connect(function(player: Player)
+		enteredAt[player] = nil
+	end)
 end
 
 function TutorialService:Start()

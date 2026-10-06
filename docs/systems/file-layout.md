@@ -93,6 +93,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens),
-                  TutorialCards (tutorial cards + "?" slideshows),
+                  TutorialCards (the "?" slideshows + weapon unlock card),
+                  TutorialBanner (the instruction banner + welcome splash),
+                  TutorialHand (the pointing hand + the big contextual
+                  button), HudGate (the progressive HUD),
                   QuestsPanel (the 📜 QUESTS panel)
 ```

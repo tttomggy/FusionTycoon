@@ -47,6 +47,7 @@ local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
+local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
@@ -70,6 +71,7 @@ export type InventoryItem = {
 export type QuestState = QuestConfig.QuestState
 
 export type TutorialState = {
+	Ver: number, -- TutorialConfig.DataVersion (no Ver = Tutorial 1's step list)
 	Step: number, -- TutorialConfig.Steps index; 0 = not decided yet
 	Done: boolean,
 	FreeFuse: boolean, -- the once-per-account guaranteed fusion was used
@@ -309,9 +311,16 @@ local function sanitizeTutorial(raw: unknown): TutorialState
 		end
 		return 0
 	end
+	local step = whole(t.Step, 1000)
+	local done = t.Done == true
+	-- A save from Tutorial 1 (its 14 steps): resume at the matching step.
+	if whole(t.Ver, 1000) < TutorialConfig.DataVersion and step > 0 and not done then
+		step = TutorialConfig.MigrateStep(step)
+	end
 	return {
-		Step = whole(t.Step, 1000),
-		Done = t.Done == true,
+		Ver = TutorialConfig.DataVersion,
+		Step = math.min(step, #TutorialConfig.Steps),
+		Done = done,
 		FreeFuse = t.FreeFuse == true,
 		FreePulls = whole(t.FreePulls, 10),
 		PullsGranted = t.PullsGranted == true,
@@ -350,6 +359,9 @@ local DEFAULT_DATA: PlayerData = {
 	Stats = {},
 	Quests = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false },
 	Tutorial = {
+		-- 0 on purpose: ProfileStore's Reconcile fills a missing Ver from this
+		-- template, which would hide a Tutorial 1 save from the migration.
+		Ver = 0,
 		Step = 0,
 		Done = false,
 		FreeFuse = false,
@@ -768,6 +780,13 @@ function PlayerDataService.SelfTestMigrateItem(itemId: string, tier: string, mut
 	local data = reconcile(raw)
 	local item = data.Inventory[1]
 	return item.Mutation, item.EventMutations
+end
+
+-- /selftest: a saved Tutorial table (Tutorial 1's has no Ver) through the
+-- same sanitiser a load uses: the Step it resumes at.
+function PlayerDataService.SelfTestMigrateTutorial(raw: any): (number, number)
+	local migrated = sanitizeTutorial(raw)
+	return migrated.Step, migrated.Ver
 end
 
 -- /selftest: a copy of the quest state and power-ups, and the restore.

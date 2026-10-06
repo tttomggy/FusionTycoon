@@ -19,6 +19,8 @@ TipConfig.Ids = {
 	catch = true, -- your first time as a victim: "TOUCH THEM!"
 	lockAfterLoss = true, -- after your first real loss
 	tutorialReplay = true, -- an old save skipped the tutorial: "replay it in ⚙ Settings" once
+	giftHand = true, -- the hand on GIFTS the first time a gift is ready (TutorialController)
+	questHand = true, -- the hand on QUESTS the first time a quest can be claimed
 } :: { [string]: boolean }
 
 -- "event_<EventId>": the HUD event chip pulses until the first tap for

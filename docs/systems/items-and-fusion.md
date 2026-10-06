@@ -99,8 +99,9 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   the event-only mutations always show** (`SettingsConfig.ShowsBigCard`).
   Remote `SetSetting` (C→S `{ Key = "RevealRule", Tier, Value }`,
   tier/value whitelisted; a coalesced sync 0.25 s later echoes it).
-  `ResultController.ShowsBigCardFor` reads the rule for single pulls,
-  BEST OF 10 and fusion successes (fail cards and Fuse All unchanged); a
+  `ResultController.ShowsBigCardFor` reads the rule for BEST OF 10 and
+  fusion successes (fail cards and Fuse All unchanged); a **single pull
+  always** gets the big card (Tutorial 2); a
   skipped card pops a **small line** above the bottom bar for 2.5 s (orb
   dot, "+ Golden Plasma Orb" in the mutation colour, the tier, "+$X/s";
   max 3, older ones fade) — except your own fusions: their top "FUSION

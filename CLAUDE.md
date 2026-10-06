@@ -79,7 +79,7 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
 | 2nd floor | `docs/systems/second-floor.md` | FloorKit, PlotLayout.Floor2 |
 | Quests & power-ups | `docs/systems/quests.md` | QuestService, QuestConfig |
 | Combat | `docs/systems/combat.md` | CombatService, CombatConfig, CombatController |
-| Tutorial | `docs/systems/tutorial.md` | TutorialService, TutorialConfig, TutorialController |
+| Tutorial 2 (banner, dotted path, hand, progressive HUD) | `docs/systems/tutorial.md` | TutorialService, TutorialConfig, TutorialController, HudGate |
 | Saves & offline earnings | `docs/systems/saves-and-offline.md` | PlayerDataService, OfflineService |
 | Studio commands, `/trailer`, `/selftest` | `docs/systems/studio-commands.md` | DebugService, TrailerController |
 | Events | `docs/systems/events.md` | EventService, EventConfig, EventController |

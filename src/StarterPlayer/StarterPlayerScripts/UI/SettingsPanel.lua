@@ -5,7 +5,7 @@
 	The ⚙ modal (bottom bar, after INDEX). Sections stack in one scrolling
 	list so later ones (music / sound volume) just append a section.
 
-	  Big reveal card   "Pick when a pull or fusion gets the big card…";
+	  Big reveal card   "Single pulls always get it; pick when ×10 / fusions do…";
 	                    one row per tier Common → Mythic: the tier name in its
 	                    colour + a 5-option segmented control (Never / Golden+
 	                    / Diamond+ / Rainbow+ / Always); a locked Secret row.
@@ -395,7 +395,7 @@ local function build()
 
 	-- Section: Big reveal card. (Future sections append below.)
 	sectionTitle("Big reveal card")
-	note("Pick when a pull or fusion gets the big card. Everything else just pops a small line.")
+	note("Single pulls always get the big card. Pick when BEST OF 10, Auto-Fuse and fusions do; the rest pop a small line.")
 	for _, tier in SettingsConfig.RevealTiers do
 		tierRow(tier)
 	end
@@ -408,7 +408,7 @@ local function build()
 
 	-- Section: Tutorial.
 	sectionTitle("Tutorial")
-	note("Walk through every system again, card by card. Nothing is reset.")
+	note("Walk through the first steps again, one instruction at a time. Nothing is reset.")
 	local row = Instance.new("Frame")
 	row.Name = "TutorialRow"
 	row.BackgroundTransparency = 1

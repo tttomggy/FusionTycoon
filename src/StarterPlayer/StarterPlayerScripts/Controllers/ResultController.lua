@@ -64,6 +64,7 @@ local SUNBURST_RAY_LENGTH = 720
 local BOTTOM_CARD_OFFSET = UITheme.BottomStackOffset -- above the HUD buttons and REBIRTH!, same baseline as toasts
 local FAIL_CARD_SIZE = Vector2.new(470, 92)
 local BOTTOM_CARD_SECONDS = 3
+local SINGLE_PULL_AUTO_CLOSE_SECONDS = 2 -- a Common / Rare single pull's big card
 
 local MYTHIC_SHAKE_MAGNITUDE = 0.35
 local MYTHIC_SHAKE_SECONDS = 0.5
@@ -171,6 +172,10 @@ type BigCardInfo = {
 	-- Fusion successes with a mutation: "GOLDEN kept" / "GOLDEN rolled!"
 	-- beside the mutation pill (FusionResult.MutationSource).
 	SourceLine: string?,
+	-- The giant word instead of "COMMON!" (a single pull: "COMMON ORB!").
+	Headline: string?,
+	-- Closes by itself after this long, or on a tap (Common / Rare pulls).
+	AutoCloseSeconds: number?,
 }
 
 local function showBigCard(info: BigCardInfo)
@@ -223,17 +228,19 @@ local function showBigCard(info: BigCardInfo)
 	})
 	UIKit.Label({
 		Name = "TierName",
-		Text = tier:upper() .. "!",
+		Text = info.Headline or (tier:upper() .. "!"),
 		Font = Fonts.Display,
 		TextSize = 64,
 		TextColor3 = tierLight,
-		Position = UDim2.fromOffset(0, 40),
-		Size = UDim2.new(1, 0, 0, 70),
+		Position = UDim2.fromOffset(12, 40),
+		Size = UDim2.new(1, -24, 0, 70),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = z,
 		Stroke = 4,
 		Parent = body,
 	})
+	-- "LEGENDARY ORB!" is wider than the card at 64 px.
+	UIKit.FitText((body:FindFirstChild("TierName") :: TextLabel), 64, 30)
 
 	UIKit.MutationCardStroke(body, topOf(info.Item))
 	local orb = UIKit.TierOrb(tier, 132, nil, topOf(info.Item))
@@ -325,6 +332,23 @@ local function showBigCard(info: BigCardInfo)
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
 	UIKit.FitHeight(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
+	local autoClose = info.AutoCloseSeconds
+	if autoClose then
+		-- Common / Rare pulls: it closes by itself, or on a tap anywhere on it.
+		body.InputBegan:Connect(function(input: InputObject)
+			if
+				bigHolder == holder
+				and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch)
+			then
+				closeBigCard()
+			end
+		end)
+		task.delay(autoClose, function()
+			if bigHolder == holder then
+				closeBigCard()
+			end
+		end)
+	end
 	if tier == "Mythic" or tier == "Secret" then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
 	end
@@ -1523,12 +1547,21 @@ function ResultController.IsBigCardOpen(): boolean
 	return bigHolder ~= nil
 end
 
+-- The giant word on the open big card ("COMMON ORB!"), or nil (/selftest).
+function ResultController.GetBigCardHeadline(): string?
+	local holder = bigHolder
+	local label = holder and holder:FindFirstChild("TierName", true)
+	return if label and label:IsA("TextLabel") then label.Text else nil
+end
+
 function ResultController.CloseCards()
 	closeBigCard()
 end
 
--- The player's RevealRule (SettingsConfig): Secret and event-only
--- mutations always; otherwise per tier (Never / Golden+ / … / Always).
+-- The player's RevealRule (SettingsConfig), for BEST OF 10 / ×10, Auto-Fuse
+-- and fusion results (a single pull always gets the big card): Secret and
+-- event-only mutations always; otherwise per tier (Never / Golden+ / … /
+-- Always).
 function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean
 	return SettingsConfig.ShowsBigCard(tier, mutation, TycoonController.GetRevealRule())
 end
@@ -1646,17 +1679,19 @@ local function onGachaPullResult(payload: any)
 		showEventMutationCard(newItem, payload.NewIndex == true, nil, newItem.Mutation ~= nil)
 		return
 	end
-	if ResultController.ShowsBigCardFor(newItem.Tier, topOf(newItem)) then
-		showBigCard({
-			-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").
-			Caption = if typeof(payload.Caption) == "string" then payload.Caption else "YOU PULLED",
-			Item = newItem,
-			Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
-		})
-	else
-		SoundKit.Play("RevealMinor", nil)
-		showSkippedLine(newItem)
-	end
+	-- Every single pull gets the big card, at every tier and for every
+	-- player (the reveal rule in ⚙ only covers ×10, Auto-Fuse and fusions):
+	-- "YOU GOT A COMMON ORB!". Common / Rare close by themselves.
+	local tier = newItem.Tier :: string
+	local named = typeof(payload.Caption) == "string"
+	showBigCard({
+		-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").
+		Caption = if named then payload.Caption else (if tier:sub(1, 1) == "E" then "YOU GOT AN" else "YOU GOT A"),
+		Headline = if named then nil else (tier:upper() .. " ORB!"),
+		Item = newItem,
+		Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
+		AutoCloseSeconds = if tier == "Common" or tier == "Rare" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,
+	})
 end
 
 --[[ Welcome-back card (offline earnings) ------------------------------------------ ]]

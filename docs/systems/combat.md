@@ -13,7 +13,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   hook grants rebirth weapons + `WeaponUnlocked` (the tutorial-style card);
   Roblox `Tool`s in the Backpack, given on every spawn; the default Backpack
   bar is replaced by glyph circles above the bottom buttons (1–5 / tap,
-  cooldown wipe, unearned rebirth weapons greyed "R1"–"R3", greyed while
+  cooldown wipe, unearned rebirth weapons greyed "R1"–"R3" (the whole bar is off at Rebirth 0), greyed while
   carrying). **Rules:** only Rebirth 1+ vs Rebirth 1+; no hits for 5 s after
   spawning; a hit ragdolls 1.5 s with knockback (+ an upward kick), then 3 s
   immune (a shimmer). **Server authority:** `RequestHit { Weapon,

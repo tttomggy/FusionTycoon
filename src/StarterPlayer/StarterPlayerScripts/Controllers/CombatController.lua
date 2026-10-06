@@ -212,6 +212,9 @@ local function rebuildBar()
 		end
 	end
 	bar.Position = UDim2.new(0.5, 0, 1, -(if UIKit.IsPhone() then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop))
+	-- No bar at all before Rebirth 1: nobody can hit you, you can't hit
+	-- anyone, and three greyed slots are noise for a new player.
+	screenGui.Enabled = TycoonController.GetRebirths() >= 1
 end
 
 local function refreshBar()
