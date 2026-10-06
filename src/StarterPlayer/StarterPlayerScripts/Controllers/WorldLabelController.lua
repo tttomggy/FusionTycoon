@@ -31,6 +31,7 @@ local Workspace = game:GetService("Workspace")
 
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
 local WorldLabelController = {}
@@ -148,10 +149,12 @@ end
 --   Guarded  the owner is standing guard: "Owner is guarding", instant tap
 --            that only toasts, so the thief doesn't waste the 1.5 s hold
 --   Steal    "Steal" / item and $/s, hold to grab
--- Precedence: Hidden > Locked > Guarded > Steal (there is no thief
--- cooldown). Roblox hides a disabled prompt, so Locked and Guarded stay
--- enabled with no hold and HeistController answers the tap with a toast.
-export type StealMode = "Hidden" | "Locked" | "Guarded" | "Steal"
+--   Shielded the lab is LOCKED: "Locked · 0:42" (from its ShieldUntil),
+--            instant tap that toasts, so a thief can wait it out
+-- Precedence: Hidden > Locked > Shielded > Guarded > Steal (there is no
+-- thief cooldown). Roblox hides a disabled prompt, so Locked, Shielded and
+-- Guarded stay enabled with no hold and HeistController answers the tap.
+export type StealMode = "Hidden" | "Locked" | "Shielded" | "Guarded" | "Steal"
 
 local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
 	local owner = prompt:GetAttribute("OwnerUserId")
@@ -166,12 +169,12 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 	if not plot or plot:GetAttribute("Protected") ~= false then
 		return "Hidden"
 	end
-	local shieldUntil = plot:GetAttribute("ShieldUntil")
-	if typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow() then
-		return "Hidden"
-	end
 	if viewerRebirths < HeistConfig.MinRebirths then
 		return "Locked"
+	end
+	local shieldUntil = plot:GetAttribute("ShieldUntil")
+	if typeof(shieldUntil) == "number" and shieldUntil > Workspace:GetServerTimeNow() then
+		return "Shielded"
 	end
 	if pedestal:GetAttribute("GuardedByOwner") == true then
 		return "Guarded"
@@ -187,6 +190,15 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 	if prompt.ObjectText ~= objectText then
 		prompt.ObjectText = objectText
 	end
+	if mode == "Shielded" then
+		local plot = findPlot(prompt)
+		local shieldUntil = plot and plot:GetAttribute("ShieldUntil")
+		local left = if typeof(shieldUntil) == "number" then shieldUntil - Workspace:GetServerTimeNow() else 0
+		local actionText = ("Locked · %s"):format(EventState.FormatTimer(math.ceil(left)))
+		if prompt.ActionText ~= actionText then
+			prompt.ActionText = actionText
+		end
+	end
 	if prompt:GetAttribute("Mode") == mode then
 		return
 	end
@@ -197,6 +209,8 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 		prompt.HoldDuration = 0
 	elseif mode == "Guarded" then
 		prompt.ActionText = "Owner is guarding"
+		prompt.HoldDuration = 0
+	elseif mode == "Shielded" then
 		prompt.HoldDuration = 0
 	else
 		prompt.ActionText = "Steal"

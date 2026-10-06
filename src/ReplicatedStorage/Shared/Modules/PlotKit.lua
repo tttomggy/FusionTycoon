@@ -162,13 +162,25 @@ function PlotKit.BuildShieldFence(origin: CFrame, parent: Instance): Folder
 			Name = panel.Name,
 			Size = panel.Size,
 			CFrame = PartKit.At(origin, panel.Center, f.Height / 2),
-			Color = World.Shield,
+			Color = World.ShieldBright,
 			Material = Enum.Material.ForceField,
 			Transparency = 1,
 			Parent = fence,
 		})
 		PartKit.MakeDecorative(part)
 		part:SetAttribute(PlotKit.SHIELD_PART_ATTRIBUTE, true)
+		-- The glowing top edge, so the wall's height reads from anywhere.
+		local edge = PartKit.Part({
+			Name = panel.Name .. "Top",
+			Size = Vector3.new(panel.Size.X, f.TopEdgeHeight, panel.Size.Z),
+			CFrame = PartKit.At(origin, panel.Center, f.Height - f.TopEdgeHeight / 2),
+			Color = World.Shield,
+			Material = Enum.Material.Neon,
+			Transparency = 1,
+			Parent = fence,
+		})
+		PartKit.MakeDecorative(edge)
+		edge:SetAttribute(PlotKit.SHIELD_PART_ATTRIBUTE, true)
 	end
 	local line = PartKit.Part({
 		Name = "ShieldGateLine",
