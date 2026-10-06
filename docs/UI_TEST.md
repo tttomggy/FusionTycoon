@@ -1653,3 +1653,55 @@ Heist, the result cards, the celebration):
 - [ ] A thief carries one of yours: that pedestal stays BeingStolen; after
   the delivery it refills with your next best.
 - [ ] `/selftest`: PASS both "auto-display" lines.
+
+## 37. Tutorial
+
+**New player, 1920×1080** (`/tutorial reset`, or a fresh Studio profile)
+
+- [ ] Welcome card: icon, title, 2 short sentences, green OK; the game is
+  dimmed behind it. Nothing else pops up (no shop / deal / Starter / Daily
+  card, no tips) until the end.
+- [ ] Claim: after OK a glowing path runs from your feet to your lab's
+  claim pad (it follows you as you move), the arrow and the pulsing floor
+  ring mark it; claiming completes it ("✓ Nice!" + sound, next card 0.6 s
+  later).
+- [ ] Upgrade: path to the Basic Generator, UPGRADES ringed; an upgrade
+  from the world prompt OR the panel completes it.
+- [ ] Pull: the pad reads "FREE · 2 left"; two pulls give two plain
+  Commons, the pad price doesn't move; done after the second.
+- [ ] Pedestals: path to pedestal 1 and the $/s line ringed while the card
+  is up; OK completes it.
+- [ ] Fuse: path to the machine; in the Fuse panel the ring walks
+  AUTO-FILL → the odds chips → FUSE; the fusion succeeds (a Rare, big card,
+  then it goes on display); the next card waits for the big card.
+- [ ] Index: INDEX ringed; opening it completes the step.
+- [ ] Multiplier: without the cash the card says "Come back when you have
+  $X" and OK completes it; with the cash, buying level 1 does.
+- [ ] Lab weather (event chip ringed) and Free gifts (GIFTS ringed): OK.
+  No shop step, no shop mention anywhere.
+- [ ] LOCK: path to the console; standing at it completes it; then the
+  Stealing card. Rebirth: REBIRTH ringed; opening the panel completes it.
+- [ ] You're ready: LET'S GO! ends it; held tips show now; the path now
+  follows the current goal; 👣 on the goal card turns it off / on.
+
+**Phone (iPhone emulator)**
+
+- [ ] Cards fit above the bottom bar; coach rings wrap the phone buttons;
+  the path is visible from the phone camera.
+
+**Leave and rejoin**
+
+- [ ] Leave mid-way (e.g. at Fuse) with `FT_StudioSaves`: rejoining shows
+  the same step's card; steps already done (claimed, upgraded) are skipped.
+- [ ] An old save with Rebirth 1+ (or > 20 pulls): no tutorial, one toast
+  "New: replay the tutorial in ⚙ Settings".
+
+**Replay and help**
+
+- [ ] ⚙ Settings → ▶ REPLAY TUTORIAL: every step again as an OK-card, no
+  free pulls.
+- [ ] "?" in Fuse (6 cards: same tier, 2–6 orbs + odds, a fail keeps your
+  best, mutations, Secret at Rebirth 1), Upgrades, Index and Rebirth;
+  "How it works" (H) at the LOCK console and the Gacha Pad: ◀ ▶ and OK.
+- [ ] `/selftest`: PASS "tutorial: every step completes in order", "no shop
+  or deal pop-up while it runs", "a save left mid-way resumes at its step".

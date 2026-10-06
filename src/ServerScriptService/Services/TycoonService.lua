@@ -623,11 +623,9 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 		-- The tutorial's free pulls: a guaranteed plain Common each, through
 		-- the free path (the pad price doesn't move).
-		if PlayerDataService.TakeTutorialFreePull(player) then
+		if PlayerDataService.GetTutorialFreePulls(player) > 0 then
 			debounce = true
-			if not TycoonService.GrantFreePulls(player, 1, "Tutorial pull", TutorialConfig.FreePullTier) then
-				PlayerDataService.RefundTutorialFreePull(player)
-			end
+			TycoonService.TutorialPull(player)
 			task.wait(STATION_DEBOUNCE_SECONDS)
 			debounce = false
 			return
@@ -1117,6 +1115,25 @@ function TycoonService.GrantFreePulls(player: Player, count: number, caption: st
 	end
 	AnalyticsKit.Funnel(player, "FirstPull")
 	return true
+end
+
+-- One of the tutorial's free pulls (the pad's E while any are left; also
+-- what /selftest drives): a plain Common through the free path. False if
+-- none are left or it couldn't be given (the pull is refunded).
+function TycoonService.TutorialPull(player: Player): boolean
+	if not PlayerDataService.TakeTutorialFreePull(player) then
+		return false
+	end
+	if not TycoonService.GrantFreePulls(player, 1, "Tutorial pull", TutorialConfig.FreePullTier) then
+		PlayerDataService.RefundTutorialFreePull(player)
+		return false
+	end
+	return true
+end
+
+-- The RequestUpgrade remote's own handler (/selftest drives it).
+function TycoonService.HandleUpgradeRequest(player: Player, generatorId: unknown)
+	onRequestUpgrade(player, generatorId)
 end
 
 -- One item of `tier` with the normal pull mutation roll (the Day 7 / gift

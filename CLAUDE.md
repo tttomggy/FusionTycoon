@@ -47,6 +47,44 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
   inventory view (ON DISPLAY tags); the owner prompt left on a pedestal is
   the locked spots' `UnlockPrompt`. Displayed items can be fused (spare
   copies first); only a carried one can't (`ItemCarried`).
+- **Tutorial** (mandatory, first time; `TutorialConfig` steps + copy,
+  `TutorialService` server, `TutorialController` + `UI/TutorialCards` +
+  `Effects/TutorialPath` client). 14 steps: Welcome · Claim · Upgrade ·
+  Pull (2 free plain Commons) · Pedestals · Fuse (first one always
+  succeeds) · Index · Multiplier Pad · Lab weather · Free gifts · LOCK (at
+  the console) · Stealing · Rebirth · You're ready. Each step: a small
+  centred card (icon, title, ≤ 2 sentences, OK; dims the game) → the goal
+  arrow's tutorial layer (`GoalMarkerController.SetTutorialTarget`; heist >
+  tutorial > event > goal) with its pulsing SurfaceGui ring, the lit path
+  (Beams along PathfindingService waypoints, straight-line fallback,
+  rebuilt every 0.3 s) and a coach ring on the HUD element (in the Fuse
+  panel: AUTO-FILL → odds chips → FUSE) → done → "✓ Nice!" + sound → next
+  card 0.6 s later. **Kinds:** `Action` steps complete ONLY on the real
+  server action (an OnSync predicate: claimed, a generator level, 2 pulls,
+  a fusion, Multiplier level 1); `Card` / `Open` (Index / Rebirth panel
+  opened) / `Arrive` (within 14 studs of the LOCK console, server-checked)
+  through remote `TutorialAdvance { Step }` (C→S, re-checked: current step
+  and kind; Multiplier on OK only while level 1 is unaffordable). **Data:**
+  `PlayerData.Tutorial = { Step, Done, FreeFuse, FreePulls, PullsGranted,
+  Base, Replay, ReplayHint }` (sanitised, in the snapshot); saved as each
+  step completes, so a rejoin resumes; satisfied steps are skipped. Step 0
+  is decided on the first sync: Rebirth ≥ 1 or > 20 pulls → Done + a
+  one-time "replay it in ⚙ Settings" toast (tip `tutorialReplay`). Free
+  pulls: the pad takes them first (`TycoonService.TutorialPull` →
+  `GrantFreePulls(..., forcedTier)`, pad price unmoved, label "FREE"); the
+  guaranteed fusion: `PlayerDataService.TakeTutorialFreeFuse` (once per
+  account). **Guards:** while `TycoonController.IsTutorialActive()` shop
+  side cards / Starter / deals (`offerBlocked` "Tutorial"), the Daily card
+  and big tips (held, `ToastController.SetBigHold` / `FlushHeld`) wait;
+  the tutorial never sells. **Help:** a round "?" (`UIKit.AddHelpButton`)
+  in Fuse / Upgrades / Index / Rebirth, and an owner-only "How it works"
+  (H) prompt on the LOCK console and Gacha Pad, open
+  `TutorialConfig.Help[topic]` as a slideshow. Settings: ▶ REPLAY TUTORIAL
+  (`TutorialAdvance { Replay = true }`: every step as an OK-card, no free
+  pulls / fusion again). After it, the lit path follows the current goal;
+  the goal card's 👣 toggles it (`Settings.GoalPath` Auto / On / Off; Auto
+  = on for the first 2 sessions). Analytics `TutorialStep` (n),
+  `TutorialDone`. Studio `/tutorial reset`, `/tutorial step <n>`.
 - **REBIRTH button:** the bottom bar is UPGRADES · ITEMS · INDEX ·
   **REBIRTH** · ⚙. Purple, always there, a fill of cash against
   `GetRebirthCost` and "$2.1M / $15M"; glows and pulses once affordable;
@@ -170,7 +208,8 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   way to test the welcome-back card, since Studio profiles never save),
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
-  `/tips reset` (clears your seen one-time tips),
+  `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
+  `/tutorial step <n>`,
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
   `/shop grant <key>` (any ShopConfig key, the real grant path, no Robux),
@@ -194,7 +233,11 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
   the phone HUD's left group inside the left 40%, the real deal pop-up
   path, every panel label's `TextFits` at both scales, hovering things on
   their plot, auto-display order) and prints PASS / FAIL lines;
-  it refuses unless saves go to the mock store or `FT_StudioTest_1`.
+  it refuses unless saves go to the mock store or `FT_StudioTest_1`. Its
+  last part drives a reset tutorial through every step on the real
+  handlers (upgrade, tutorial pulls, fusion, `TutorialService.Advance`),
+  checks no shop / deal pop-up showed and that a mid-way save resumes, then
+  restores the tester's own tutorial state.
 - **Events** (`EventService`, every number in `EventConfig`): lab weather
   on a shared UTC clock. **The schedule is deterministic from the UTC slot
   time, never random at runtime:** `EventConfig.GetEventForSlot(slotStart)`
@@ -695,7 +738,8 @@ src/ReplicatedStorage/Shared/
                  DailyConfig — the 7-day daily reward and streak,
                  GiftConfig — the playtime gifts,
                  TrailerConfig — the /trailer shots and camera,
-                 DealConfig — the rotating deals, …)
+                 DealConfig — the rotating deals,
+                 TutorialConfig — the tutorial steps and "?" help, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
                  SurfaceGuis), PartKit (part/cylinder helpers, FT_Hover
@@ -725,6 +769,7 @@ src/ServerScriptService/
                            WorldService builds ground, street, Event Boards
                            and FREE LAB placeholders; EventService runs the
                            event clock; AdminService runs Admin Abuse;
+                           TutorialService the first-time tutorial;
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards)
 src/StarterPlayer/StarterPlayerScripts/
@@ -758,7 +803,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
-                  EventInfoCard (what the HUD event chip opens)
+                  EventInfoCard (what the HUD event chip opens),
+                  TutorialCards (tutorial cards + "?" slideshows)
 ```
 
 ### UI rules ("Fusion Lab" design — spec in `docs/UI_REDESIGN_PROMPT.md`)
@@ -887,6 +933,7 @@ calls left in `Services/`.
 | `MonetizationService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `RewardService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -928,7 +975,8 @@ in a service. To add one: add the name to `REMOTE_EVENT_NAMES` with a comment
 stating direction, then connect it in `:Init()`.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
-`MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`) (no lock remote: LOCK is the console
+`MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`),
+`TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`) (no lock remote: LOCK is the console
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),

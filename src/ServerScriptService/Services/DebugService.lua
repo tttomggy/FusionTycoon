@@ -11,6 +11,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
@@ -38,6 +40,8 @@ type EventServiceModule = typeof(require(script.Parent.EventService))
 type MonetizationServiceModule = typeof(require(script.Parent.MonetizationService))
 type ItemServiceModule = typeof(require(script.Parent.ItemService))
 type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
+type FusionServiceModule = typeof(require(script.Parent.FusionService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -57,6 +61,8 @@ local EventService: EventServiceModule
 local MonetizationService: MonetizationServiceModule
 local ItemService: ItemServiceModule
 local TutorialService: TutorialServiceModule
+local TycoonService: TycoonServiceModule
+local FusionService: FusionServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -158,6 +164,96 @@ local function waitForReport(player: Player, stage: string): any?
 		task.wait(0.2)
 	end
 	return nil
+end
+
+local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
+	local popups = 0
+	local watch = RemoteEvents.ShopAnalytics.OnServerEvent:Connect(function(sender: Player, payload: unknown)
+		local event = typeof(payload) == "table" and (payload :: any).Event
+		if sender == player and (event == "OfferShown" or event == "DealShown") then
+			popups += 1
+		end
+	end)
+	TutorialService.DebugReset(player)
+	PlayerDataService.SyncTycoon(player)
+	local function tutorial(): any
+		local data = PlayerDataService.GetData(player)
+		return data and data.Tutorial
+	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local home = if root and root:IsA("BasePart") then root.CFrame else nil
+	local order: { string } = {}
+	local stuck: string? = nil
+	for _ = 1, #TutorialConfig.Steps + 2 do
+		local t = tutorial()
+		if not t or t.Done then
+			break
+		end
+		local index = t.Step
+		local step = TutorialConfig.GetStep(index)
+		if not step then
+			break
+		end
+		table.insert(order, step.Id)
+		if step.Id == "upgrade" then
+			PlayerDataService.AddCash(player, 1e6)
+			TycoonService.HandleUpgradeRequest(player, "basic_generator")
+		elseif step.Id == "pull" then
+			for _ = 1, TutorialConfig.FreePulls do
+				TycoonService.TutorialPull(player)
+			end
+		elseif step.Id == "fuse" then
+			local commons = {}
+			local owned: { any } = PlayerDataService.GetInventory(player) or {}
+			for _, item in owned do
+				if item.Tier == TutorialConfig.FreePullTier and #commons < 2 and not PlayerDataService.IsItemCarried(player, item.Uid) then
+					table.insert(commons, item.Uid)
+				end
+			end
+			FusionService.HandleFusionRequest(player, { Uids = commons })
+		elseif step.Id == "multiplier" then
+			-- The "come back when you have $X" branch: OK completes it.
+			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
+			TutorialService.Advance(player, index)
+		elseif step.Kind == "Arrive" then
+			local plot = TycoonService.GetPlotForPlayer(player)
+			local slot = plot and plot:GetAttribute("SlotIndex")
+			if root and root:IsA("BasePart") and typeof(slot) == "number" then
+				root.CFrame = CFrame.new(PlotLayout.GetSlotCFrame(slot):PointToWorldSpace(PlotLayout.LOCK_CONSOLE) + Vector3.new(0, 4, 3))
+			end
+			TutorialService.Advance(player, index)
+		elseif step.Kind == "Action" then
+			-- claim: only reached on an unclaimed plot (claimed skips it).
+			stuck = step.Id .. " (needs a claimed lab)"
+			break
+		else
+			TutorialService.Advance(player, index)
+		end
+		PlayerDataService.SyncTycoon(player)
+		local after = tutorial()
+		if after and not after.Done and after.Step == index then
+			stuck = step.Id
+			break
+		end
+	end
+	if home and root and root:IsA("BasePart") then
+		root.CFrame = home
+	end
+	local t = tutorial()
+	result(t ~= nil and t.Done == true and stuck == nil, "tutorial: every step completes in order", ("%s; stuck at %s"):format(table.concat(order, " > "), tostring(stuck)))
+	task.wait(1)
+	watch:Disconnect()
+	result(popups == 0, "tutorial: no shop or deal pop-up while it runs", ("%d shown"):format(popups))
+
+	TutorialService.DebugSetStep(player, 6)
+	local resumeOk, resumeDetail = PlayerDataService.SelfTestTutorialRoundTrip(player)
+	local resumed = tutorial()
+	result(resumeOk and resumed ~= nil and resumed.Step == 6, "tutorial: a save left mid-way resumes at its step", resumeDetail)
+
+	PlayerDataService.SelfTestSwapTutorial(player, saved)
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function runSelfTest(player: Player)
@@ -354,6 +450,12 @@ local function runSelfTest(player: Player)
 	end
 	PlayerDataService.RemoveItemsByUid(player, added)
 	PlayerDataService.SyncTycoon(player)
+
+	-- 9. The tutorial, driven step by step on the real paths (the remote's
+	-- own handlers): every step completes in order, no shop / deal pop-up
+	-- while it runs, and a save left mid-way resumes at its step. The
+	-- tester's own tutorial state is restored after.
+	runTutorialSelfTest(player, result)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 
@@ -637,6 +739,8 @@ function DebugService:Start()
 	MonetizationService = require(script.Parent.MonetizationService)
 	ItemService = require(script.Parent.ItemService)
 	TutorialService = require(script.Parent.TutorialService)
+	TycoonService = require(script.Parent.TycoonService)
+	FusionService = require(script.Parent.FusionService)
 end
 
 return DebugService

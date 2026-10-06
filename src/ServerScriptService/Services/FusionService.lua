@@ -525,6 +525,11 @@ end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
+-- The RequestFusion remote's own handler (/selftest drives it).
+function FusionService.HandleFusionRequest(player: Player, payload: unknown)
+	onFusionRequest(player, payload)
+end
+
 function FusionService:Init()
 	table.insert(state.connections, RemoteEvents.RequestFusion.OnServerEvent:Connect(onFusionRequest))
 	table.insert(state.connections, RemoteEvents.RequestFuseAll.OnServerEvent:Connect(onFuseAllRequest))

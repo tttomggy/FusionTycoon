@@ -594,6 +594,32 @@ end
 -- Disk -> session -> disk must be lossless: toDisk(data), reconcile it back,
 -- toDisk again, compare (LastOnline is stamped per call, so skipped). In
 -- memory only: no profile is read or written.
+-- /selftest: a save that left mid-tutorial resumes at its saved step
+-- (disk copy -> reconcile keeps the whole Tutorial state).
+function PlayerDataService.SelfTestTutorialRoundTrip(player: Player): (boolean, string?)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false, "no data loaded"
+	end
+	local before = canonical(data.Tutorial)
+	local after = canonical(reconcile(deepCopy(toDisk(data))).Tutorial)
+	return before == after, if before == after then nil else ("%s became %s"):format(before, after)
+end
+
+-- /selftest saves and restores the tester's own tutorial state around the
+-- drive.
+function PlayerDataService.SelfTestSwapTutorial(player: Player, tutorial: TutorialState?): TutorialState?
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return nil
+	end
+	local old = deepCopy(data.Tutorial)
+	if tutorial then
+		data.Tutorial = deepCopy(tutorial)
+	end
+	return old
+end
+
 function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
 	local data = state.sessionCache[player.UserId]
 	if not data then

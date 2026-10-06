@@ -89,6 +89,8 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		MarkTipSeen = { {}, { { Id = "nope" } }, { { Id = 5 } }, { { Id = BIG_STRING } } },
 		-- Never the current slot: 0, a wrong slot, junk types.
 		MarkDealPopup = { {}, { "x" }, { { Slot = "1" } }, { { Slot = 1 } }, { { Slot = 1.5 } } },
+		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
+		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
 		AdminAction = { {}, { { Action = "Nope" } }, { { Action = "StartEvent", Args = { Id = "Nope" } } } },
 	}
 	for _, n in junkNumbers do
