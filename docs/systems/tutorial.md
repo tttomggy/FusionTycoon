@@ -18,11 +18,13 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   Tap it to see what to do"), "Reach $15M to Rebirth", "You're ready!".
   **Pieces:** the banner (`TutorialBanner`, top centre where the event chip
   is; slides in, a green ✓ + the Step sound on completion, the next one
-  0.4 s later; a replay adds a SKIP chip) · the **dotted path**
-  (`TutorialPath`: ≤ 60 lime `World.TutorialPath` Neon Ball parts, 0.5
-  studs, every 2 studs along PathfindingService waypoints (straight line
-  fallback), 0.5 up, a pulse running to the target, a fixed pool moved every
-  0.3 s; spacing widens past 120 studs; 3 chevrons (two thin Neon bars each)
+  0.4 s later; a replay adds a SKIP chip) · the **arrow path**
+  (`TutorialPath`: ≤ 40 small flat lime `World.TutorialPath` ">" chevrons,
+  two thin Neon bars each (1.2 × 0.25 studs; `PathArrowSize`), one every 3
+  studs along PathfindingService waypoints (straight line fallback), 0.2
+  above the floor, each pointing along the path toward the target and
+  brightening / fading in turn so they flow to it, a fixed pool of 80 parts
+  moved every 0.3 s; spacing widens past 120 studs; 3 bigger chevrons (two thin Neon bars each)
   on the floor in front of the target, pointing in; hidden within 6 studs) +
   the goal arrow's bouncing pill and floor ring (`GoalMarkerController.
   SetTutorialTarget`; heist > tutorial > event > goal) · **one hand 👆**

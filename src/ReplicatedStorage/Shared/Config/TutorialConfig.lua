@@ -80,13 +80,14 @@ TutorialConfig.GoalPathSessions = 2 -- the goal path is on by default this many 
 TutorialConfig.StepDelay = 0.4 -- after a step's ✓, the next banner slides in
 TutorialConfig.WelcomeSeconds = 2 -- "WELCOME TO YOUR LAB!" auto-fades, no button
 
--- The dotted path (client-only Ball parts, TutorialPath).
-TutorialConfig.PathDotSpacing = 2 -- studs between dots
-TutorialConfig.PathDotSize = 0.5
-TutorialConfig.PathDotLift = 0.5 -- floating above the floor
-TutorialConfig.PathMaxDots = 60
+-- The arrow path (client-only: a flat ">" of two thin Neon bars per arrow,
+-- TutorialPath).
+TutorialConfig.PathArrowSpacing = 3 -- studs between arrows (widens past PathMaxArrows)
+TutorialConfig.PathArrowSize = Vector3.new(1.2, 0.1, 0.25) -- one bar: length, height, thickness
+TutorialConfig.PathArrowLift = 0.2 -- lying this far above the floor
+TutorialConfig.PathMaxArrows = 40 -- 80 parts, a fixed pool
 TutorialConfig.PathFlowSeconds = 1.2 -- one pulse runs from you to the target
-TutorialConfig.PathArriveStuds = 6 -- the dots stop this close to the target
+TutorialConfig.PathArriveStuds = 6 -- the arrows stop this close to the target
 TutorialConfig.ChevronCount = 3
 
 TutorialConfig.Steps = {

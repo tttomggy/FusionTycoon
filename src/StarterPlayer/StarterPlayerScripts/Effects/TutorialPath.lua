@@ -2,17 +2,19 @@
 --[[
 	TutorialPath
 	------------
-	The way to the target, drawn like the egg games do it: a dotted line from
-	your feet to whatever the goal arrow marks
+	The way to the target, drawn like the egg games do it: a line of small
+	arrows from your feet to whatever the goal arrow marks
 	(GoalMarkerController.GetMarkedPosition), the tutorial's current step, or
 	after the tutorial the current goal (the goal card's 👣 toggle).
 
-	  * Dots, not rails: small lime Ball parts (about 0.5 studs, Neon, so the
-	    "no flat Neon circles" rule never applies) every 2 studs along
-	    PathfindingService waypoints, a straight line when no path is found,
-	    floating 0.5 studs up. Each one swells in turn so a pulse runs from
-	    you to the target. At most PathMaxDots of them (the spacing widens on
-	    a very long way); a fixed pool, moved, never rebuilt.
+	  * Arrows, not rails: a small flat chevron ">" (two thin lime Neon bars,
+	    1.2 studs long, so the "no flat Neon circles" rule never applies)
+	    every PathArrowSpacing studs along PathfindingService waypoints, a
+	    straight line when no path is found, lying 0.2 studs above the
+	    floor and pointing along the path toward the target. Each one
+	    brightens and fades in turn so a pulse flows from you to the target.
+	    At most PathMaxArrows of them (the spacing widens on a very long
+	    way); a fixed pool, moved, never rebuilt.
 	  * Lime (UITheme.World.TutorialPath): nothing else in the lab is lime, so
 	    it can't be taken for part of the level.
 	  * At the target: three big chevrons on the floor pointing in, in a row
@@ -35,8 +37,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TutorialPath = {}
 
 local MAX_WAYPOINTS = 80
-local PULSE_PHASE = 0.45 -- radians between neighbouring dots
-local PULSE_GROW = 0.9 -- a dot swells up to 1 + this
+local PULSE_PHASE = 0.45 -- radians between neighbouring arrows
 local CHEVRON_FIRST_GAP = 3 -- studs from the target's edge to the nearest chevron
 local CHEVRON_GAP = 3.4
 local CHEVRON_ARM = Vector3.new(3.2, 0.18, 0.9)
@@ -46,8 +47,8 @@ local CHEVRON_PULSE_SECONDS = 1.2
 local localPlayer = Players.LocalPlayer
 
 local folder: Folder? = nil
-local dots: { BasePart } = {} -- the pool, in path order
-local dotCount = 0 -- how many are placed (the rest sit hidden)
+local arrows: { { Left: BasePart, Right: BasePart } } = {} -- the pool, in path order
+local arrowCount = 0 -- how many are placed (the rest sit hidden)
 local chevrons: { { Left: BasePart, Right: BasePart } } = {}
 local enabled = false
 local getTarget: () -> Vector3? = function()
@@ -85,10 +86,22 @@ local function newPart(name: string, shape: Enum.PartType, size: Vector3): BaseP
 	return part
 end
 
-local function ensureDots(count: number)
-	while #dots < count do
-		table.insert(dots, newPart("PathDot", Enum.PartType.Ball, Vector3.one * TutorialConfig.PathDotSize))
+local function ensureArrows(count: number)
+	while #arrows < count do
+		table.insert(arrows, {
+			Left = newPart("PathArrowArm", Enum.PartType.Block, TutorialConfig.PathArrowSize),
+			Right = newPart("PathArrowArm", Enum.PartType.Block, TutorialConfig.PathArrowSize),
+		})
 	end
+end
+
+-- Lays a flat ">" with its tip at `tip`, pointing along `direction` (flat,
+-- unit): two bars of `length` back from the tip at +-45 degrees.
+local function layChevron(left: BasePart, right: BasePart, tip: Vector3, direction: Vector3, length: number)
+	local a = length * math.cos(math.rad(45))
+	local base = CFrame.lookAt(tip, tip + direction)
+	left.CFrame = base * CFrame.new(-a / 2, 0, a / 2) * CFrame.Angles(0, math.rad(45), 0)
+	right.CFrame = base * CFrame.new(a / 2, 0, a / 2) * CFrame.Angles(0, math.rad(-45), 0)
 end
 
 local function ensureChevrons()
@@ -106,9 +119,10 @@ local function ensureChevrons()
 end
 
 local function hideAll()
-	dotCount = 0
-	for _, dot in dots do
-		dot.Transparency = 1
+	arrowCount = 0
+	for _, arrow in arrows do
+		arrow.Left.Transparency = 1
+		arrow.Right.Transparency = 1
 	end
 	for _, chevron in chevrons do
 		chevron.Left.Transparency = 1
@@ -119,7 +133,7 @@ end
 -- The polyline resampled every `spacing` studs (the first point is `points[1]`).
 local function resample(points: { Vector3 }, spacing: number): { Vector3 }
 	local out: { Vector3 } = { points[1] }
-	local carried = 0 -- distance walked since the last dot
+	local carried = 0 -- distance walked since the last arrow
 	for index = 2, #points do
 		local a, b = points[index - 1], points[index]
 		local segment = (b - a).Magnitude
@@ -144,21 +158,36 @@ local function pathLength(points: { Vector3 }): number
 	return total
 end
 
-local function placeDots(points: { Vector3 })
-	local spacing = math.max(TutorialConfig.PathDotSpacing, pathLength(points) / TutorialConfig.PathMaxDots)
+local function placeArrows(points: { Vector3 })
+	local spacing = math.max(TutorialConfig.PathArrowSpacing, pathLength(points) / TutorialConfig.PathMaxArrows)
 	local placed = resample(points, spacing)
-	-- The first dot sits under your feet: start one step ahead.
+	-- Each arrow points along the path at its spot (flat, toward the
+	-- target); the last one keeps the direction of the step before it.
+	local directions: { Vector3 } = {}
+	for index = 1, #placed do
+		local nextPoint = placed[index + 1]
+		local delta = if nextPoint then nextPoint - placed[index] else placed[index] - (placed[index - 1] or placed[index])
+		local flat = Vector3.new(delta.X, 0, delta.Z)
+		directions[index] = if flat.Magnitude > 1e-3 then flat.Unit else directions[index - 1] or Vector3.zAxis * -1
+	end
+	-- The first spot is under your feet: start one step ahead.
 	table.remove(placed, 1)
-	local count = math.min(#placed, TutorialConfig.PathMaxDots)
-	ensureDots(count)
-	local lift = Vector3.new(0, TutorialConfig.PathDotLift, 0)
+	table.remove(directions, 1)
+	local count = math.min(#placed, TutorialConfig.PathMaxArrows)
+	ensureArrows(count)
+	local lift = Vector3.new(0, TutorialConfig.PathArrowLift, 0)
+	local length = TutorialConfig.PathArrowSize.X
+	local half = length * math.cos(math.rad(45)) / 2
 	for index = 1, count do
-		dots[index].Position = placed[index] + lift
+		-- Centre the ">" on the spot: its tip half its depth ahead.
+		local tip = placed[index] + lift + directions[index] * half
+		layChevron(arrows[index].Left, arrows[index].Right, tip, directions[index], length)
 	end
-	for index = count + 1, #dots do
-		dots[index].Transparency = 1
+	for index = count + 1, #arrows do
+		arrows[index].Left.Transparency = 1
+		arrows[index].Right.Transparency = 1
 	end
-	dotCount = count
+	arrowCount = count
 end
 
 -- Three chevrons in a row on the side you approach from, each pointing at
@@ -171,13 +200,10 @@ local function placeChevrons(target: Vector3, from: Vector3)
 	ensureChevrons()
 	local outward = flat.Unit -- target -> you
 	local inward = -outward -- what a chevron points along
-	local a = CHEVRON_ARM.X * math.cos(math.rad(45))
 	for index, chevron in chevrons do
 		local distance = CHEVRON_FIRST_GAP + (index - 1) * CHEVRON_GAP
 		local tip = Vector3.new(target.X, target.Y + CHEVRON_LIFT, target.Z) + outward * distance
-		local base = CFrame.lookAt(tip, tip + inward)
-		chevron.Left.CFrame = base * CFrame.new(-a / 2, 0, a / 2) * CFrame.Angles(0, math.rad(45), 0)
-		chevron.Right.CFrame = base * CFrame.new(a / 2, 0, a / 2) * CFrame.Angles(0, math.rad(-45), 0)
+		layChevron(chevron.Left, chevron.Right, tip, inward, CHEVRON_ARM.X)
 	end
 end
 
@@ -223,25 +249,24 @@ local function rebuild()
 		end
 		computing = false
 		if enabled then
-			placeDots(points)
+			placeArrows(points)
 			placeChevrons(goal, feet)
 		end
 	end)
 end
 
--- Every frame: the pulse runs down the dots, the chevrons light in turn.
+-- Every frame: the pulse runs down the arrows, the chevrons light in turn.
 local function animate()
-	if dotCount == 0 then
+	if arrowCount == 0 then
 		return
 	end
 	local now = os.clock()
-	local base = TutorialConfig.PathDotSize
 	local omega = (2 * math.pi) / TutorialConfig.PathFlowSeconds
-	for index = 1, dotCount do
+	for index = 1, arrowCount do
 		local wave = 0.5 + 0.5 * math.sin(now * omega - index * PULSE_PHASE)
-		local dot = dots[index]
-		dot.Size = Vector3.one * (base * (0.75 + PULSE_GROW * wave))
-		dot.Transparency = 0.1 + 0.5 * (1 - wave)
+		local transparency = 0.05 + 0.65 * (1 - wave)
+		arrows[index].Left.Transparency = transparency
+		arrows[index].Right.Transparency = transparency
 	end
 	local chevronOmega = (2 * math.pi) / CHEVRON_PULSE_SECONDS
 	local count = #chevrons
@@ -267,12 +292,12 @@ function TutorialPath.SetEnabled(on: boolean)
 end
 
 function TutorialPath.IsShowing(): boolean
-	return dotCount > 0
+	return arrowCount > 0
 end
 
--- How many dots are placed now (/selftest, the performance report).
-function TutorialPath.GetDotCount(): number
-	return dotCount
+-- How many arrows are placed now (/selftest, the performance report).
+function TutorialPath.GetArrowCount(): number
+	return arrowCount
 end
 
 function TutorialPath.GetChevronCount(): number
