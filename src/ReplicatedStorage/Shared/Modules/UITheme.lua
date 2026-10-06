@@ -89,6 +89,7 @@ UITheme.World = {
 	GloveRed = hex("#E8323C"), -- the Slap Glove
 	VipGold = hex("#FFD23F"), -- the VIP pass: sign border, wall trims, head tag
 	VoidShell = hex("#0B0A1A"), -- the Secret orb's dark glass shell
+	TutorialPath = hex("#B6FF2E"), -- the tutorial's dotted path + target chevrons: lime, because nothing else in the lab is
 }
 
 export type GradientPair = { Top: Color3, Bottom: Color3 }
