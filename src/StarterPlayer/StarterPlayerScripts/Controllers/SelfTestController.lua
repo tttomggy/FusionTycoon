@@ -379,6 +379,44 @@ local function testHover(label: string): { string }
 	return { ("PASS hovering things stay home (%s, %d checked)"):format(label, checked) }
 end
 
+-- Every visible, non-empty TextLabel / TextButton in the open modals must
+-- report TextFits (nothing cut off), at this scale.
+local textFitLines: { string } = {}
+
+local function shownOnScreen(gui: GuiObject, root: Instance): boolean
+	local current: Instance? = gui
+	while current and current ~= root do
+		if current:IsA("GuiObject") and not current.Visible then
+			return false
+		end
+		current = current.Parent
+	end
+	return gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0
+end
+
+local function checkTextFits(panelName: string, label: string)
+	local bad: { string } = {}
+	local checked = 0
+	for _, gui in UIKit.GetModalGuis() do
+		if gui.Enabled then
+			for _, text in gui:GetDescendants() do
+				if (text:IsA("TextLabel") or text:IsA("TextButton")) and text.Text ~= "" and shownOnScreen(text, gui) then
+					checked += 1
+					if not text.TextFits then
+						table.insert(bad, ("%s %q"):format(text:GetFullName(), text.Text:sub(1, 40)))
+					end
+				end
+			end
+		end
+	end
+	table.insert(
+		textFitLines,
+		if #bad > 0
+			then ("FAIL text fits (%s, %s): %s"):format(panelName, label, table.concat(bad, "; "))
+			else ("PASS text fits (%s, %s, %d labels)"):format(panelName, label, checked)
+	)
+end
+
 local function countGui(): number
 	local guis = UIKit.GetModalGuis()
 	local count = #guis
@@ -404,6 +442,7 @@ local function testPanels(): { string }
 					task.wait(0.3)
 					if cycle == 1 then
 						measureOpenModals(if phone then "phone" else "desktop")
+						checkTextFits(spec.Name, if phone then "phone" else "desktop")
 					end
 					spec.Close()
 					task.wait(0.4)
@@ -513,7 +552,11 @@ local function run(payload: any)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "Fuzz", Fired = fired })
 
 	cardLines = {}
+	textFitLines = {}
 	local panelLines = testPanels()
+	for _, line in textFitLines do
+		table.insert(panelLines, line)
+	end
 	for _, line in hoverLines do
 		table.insert(panelLines, line)
 	end

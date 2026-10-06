@@ -38,10 +38,13 @@ local MAX_SIZE = Vector2.new(640, 480)
 local DISPLAY_ORDER = 118 -- over the HUD and Fuse panel, under Toasts (120)
 local SCENE_MAX = Vector2.new(600, 250)
 local TITLE_HEIGHT = 36
-local LINE_HEIGHT = 40
+-- Room for 3 lines at 16 px: a translation runs longer than the English
+-- (other players saw the lines cut off); FitText scales it down from there.
+local LINE_HEIGHT = 58
 local NAV_HEIGHT = 52
 local TEXT_GAP = 6
 local BADGE_SIZE = 32
+local BADGE_GAP = 10
 local ARROW_SIZE = 52
 local DOT_SIZE = 12
 
@@ -189,7 +192,9 @@ local function build()
 	constraint.MaxSize = SCENE_MAX
 	constraint.Parent = sceneArea
 
-	-- Pink number badge + title, centred under the scene.
+	-- Pink number badge + title, centred under the scene. The title takes
+	-- the row's width (it scales down rather than run past the card); the
+	-- badge sits just left of the text itself.
 	local titleRow = Instance.new("Frame")
 	titleRow.Name = "TitleRow"
 	titleRow.BackgroundTransparency = 1
@@ -198,19 +203,12 @@ local function build()
 	titleRow.Size = UDim2.new(1, 0, 0, TITLE_HEIGHT)
 	titleRow.ZIndex = content.ZIndex + 1
 	titleRow.Parent = content
-	local rowLayout = Instance.new("UIListLayout")
-	rowLayout.FillDirection = Enum.FillDirection.Horizontal
-	rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-	rowLayout.Padding = UDim.new(0, 10)
-	rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	rowLayout.Parent = titleRow
 
 	local badge = Instance.new("Frame")
 	badge.Name = "Badge"
 	badge.Size = UDim2.fromOffset(BADGE_SIZE, BADGE_SIZE)
+	badge.AnchorPoint = Vector2.new(1, 0.5)
 	badge.BackgroundColor3 = Colors.White
-	badge.LayoutOrder = 1
 	badge.ZIndex = titleRow.ZIndex
 	badge.Parent = titleRow
 	UIKit.Corner(badge, 999)
@@ -231,18 +229,27 @@ local function build()
 		Name = "SlideTitle",
 		Font = Fonts.Display,
 		TextSize = 26,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, TITLE_HEIGHT),
-		LayoutOrder = 2,
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.fromScale(0.5, 0),
+		Size = UDim2.new(1, -2 * (BADGE_SIZE + BADGE_GAP), 1, 0),
+		TextXAlignment = Enum.TextXAlignment.Center,
 		Stroke = UITheme.Stroke.Text,
 		ZIndex = titleRow.ZIndex,
 		Parent = titleRow,
 	})
+	UIKit.FitText(titleLabel, 26, 14)
+	-- The badge follows the text's left edge (TextBounds are screen px).
+	local function placeBadge()
+		local scale = UIKit.EffectiveScale(titleLabel)
+		local half = titleLabel.TextBounds.X / scale / 2
+		badge.Position = UDim2.new(0.5, -(half + BADGE_GAP), 0.5, 0)
+	end
+	titleLabel:GetPropertyChangedSignal("TextBounds"):Connect(placeBadge)
+	placeBadge()
 	lineLabel = UIKit.Label({
 		Name = "SlideLine",
 		Font = Fonts.Body,
 		TextSize = 16,
-		TextWrapped = true,
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.new(0, 8, 1, -(NAV_HEIGHT + TEXT_GAP + UITheme.ShadowOffset)),
 		Size = UDim2.new(1, -16, 0, LINE_HEIGHT),
@@ -250,6 +257,7 @@ local function build()
 		ZIndex = content.ZIndex + 1,
 		Parent = content,
 	})
+	UIKit.FitText(lineLabel, 16, 11)
 
 	local nav = Instance.new("Frame")
 	nav.Name = "Nav"
