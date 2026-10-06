@@ -31,6 +31,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -156,6 +158,161 @@ end
 -- new one per open would leak). Not the whole PlayerGui: the HUD's deal
 -- countdown, timed pills, toasts and event chips churn on their own and
 -- swung the old whole-PlayerGui count by ±3 between cycles.
+--[[ Cards centred --------------------------------------------------------
+	Every modal and centred card: what you see (panel + shadow) centred in
+	the band between GetCardTop and GetCardBottom, inside it, or starting at
+	its top when taller (UIKit.CheckCardPlacement). The viewport can't be
+	forced, so the three target screens run the REAL plan functions
+	(PlanModalFor / PlanCardFor, the ones placeRoot / FitHeight call); the
+	live cards are measured from AbsolutePosition / AbsoluteSize at this
+	window's size. ]]
+local CARD_VIEWPORTS = {
+	{ Name = "1920x1080", Size = Vector2.new(1920, 1080), Phone = false },
+	{ Name = "1366x768", Size = Vector2.new(1366, 768), Phone = false },
+	{ Name = "844x390 phone", Size = Vector2.new(844, 390), Phone = true },
+}
+-- Holder heights of the fixed-size centred cards (result cards, the
+-- celebration, the event info card), a spread from short to taller than
+-- any band.
+local CARD_HEIGHTS = { 260, 340, 420, 520, 600, 700, 900 }
+local cardLines: { string } = {}
+
+local function cardFailures(label: string, failures: { string }): string
+	return ("FAIL cards centred (%s): %s"):format(label, table.concat(failures, "; "))
+end
+
+local function testCardMath(): { string }
+	local lines: { string } = {}
+	local margin = UIKit.MODAL_MARGIN
+	for _, viewport in CARD_VIEWPORTS do
+		local scale = if viewport.Phone then UITheme.PhoneScale else 1
+		local view = viewport.Size / scale
+		local failures: { string } = {}
+		local checked = 0
+		for _, spec in UIKit.GetModalSpecs() do
+			local plan = UIKit.PlanModalFor(spec.MaxSize, spec.FitContent, view, viewport.Phone)
+			-- The panel + shadow sits MODAL_MARGIN inside the root all round.
+			local top = plan.Top + margin * plan.Fit
+			local height = plan.Visual - 2 * margin * plan.Fit
+			local why = UIKit.CheckCardPlacement(top, height, view.Y, viewport.Phone)
+			checked += 1
+			if why then
+				table.insert(failures, ("%s %s"):format(spec.Name, why))
+			end
+		end
+		for _, height in CARD_HEIGHTS do
+			local visual = height + UITheme.ShadowOffset
+			local top, fit = UIKit.PlanCardFor(visual, view.Y, viewport.Phone)
+			local why = UIKit.CheckCardPlacement(top, visual * fit, view.Y, viewport.Phone)
+			checked += 1
+			if why then
+				table.insert(failures, ("card %d px %s"):format(height, why))
+			end
+		end
+		if #failures > 0 then
+			table.insert(lines, cardFailures(viewport.Name, failures))
+		else
+			table.insert(lines, ("PASS cards centred (%s, %d cards)"):format(viewport.Name, checked))
+		end
+	end
+	return lines
+end
+
+-- Logical px of `gui`'s visible rect: itself plus a "Shadow" sibling or
+-- child below it.
+local function visibleRect(gui: GuiObject, shadow: GuiObject?, screenScale: number): (number, number)
+	local top = gui.AbsolutePosition.Y
+	local bottom = gui.AbsolutePosition.Y + gui.AbsoluteSize.Y
+	if shadow and shadow.Visible then
+		bottom = math.max(bottom, shadow.AbsolutePosition.Y + shadow.AbsoluteSize.Y)
+	end
+	return top / screenScale, (bottom - top) / screenScale
+end
+
+local function screenScale(gui: Instance): number
+	local screen = gui:FindFirstAncestorWhichIsA("ScreenGui")
+	local mobile = screen and screen:FindFirstChild("MobileScale")
+	return if mobile and mobile:IsA("UIScale") then mobile.Scale else 1
+end
+
+-- Every open modal's panel (+ shadow), measured at this window's size.
+local function measureOpenModals(label: string)
+	local view = UIKit.GetLogicalViewport()
+	for _, gui in UIKit.GetModalGuis() do
+		local root = if gui.Enabled then gui:FindFirstChild("Root") else nil
+		local panel = root and root:FindFirstChild("Panel")
+		local body = panel and panel:FindFirstChild("Body")
+		if panel and body and body:IsA("GuiObject") then
+			local shadow = panel:FindFirstChild("Shadow") :: GuiObject?
+			local top, height = visibleRect(body, shadow, screenScale(body))
+			local why = UIKit.CheckCardPlacement(top, height, view.Y, UIKit.IsPhone())
+			table.insert(
+				cardLines,
+				if why
+					then cardFailures(("%s, %s live"):format(gui.Name, label), { why })
+					else ("PASS cards centred (%s, %s live, top %d)"):format(gui.Name, label, math.floor(top))
+			)
+		end
+	end
+end
+
+-- Every visible card UIKit.FitHeight placed (result cards, the event info
+-- card), measured at this window's size.
+local function measurePlacedCards(label: string): number
+	local view = UIKit.GetLogicalViewport()
+	local found = 0
+	for _, gui in localPlayer:WaitForChild("PlayerGui"):GetDescendants() do
+		if gui:IsA("GuiObject") and gui:GetAttribute("CardPlaced") == true and gui.Visible then
+			local screen = gui:FindFirstAncestorWhichIsA("ScreenGui")
+			if screen and screen.Enabled then
+				found += 1
+				local shadow = gui:FindFirstChild("Shadow") :: GuiObject?
+				local top, height = visibleRect(gui, shadow, screenScale(gui))
+				local why = UIKit.CheckCardPlacement(top, height, view.Y, UIKit.IsPhone())
+				table.insert(
+					cardLines,
+					if why
+						then cardFailures(("%s, %s live"):format(gui.Name, label), { why })
+						else ("PASS cards centred (%s, %s live, top %d)"):format(gui.Name, label, math.floor(top))
+				)
+			end
+		end
+	end
+	return found
+end
+
+local function testPlacedCards(): { string }
+	local result = require(script.Parent.ResultController) :: any
+	local eventInfo = require(UI.EventInfoCard) :: any
+	local common = ItemConfig.GetItemsByTier("Common")[1]
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local label = if phone then "phone" else "desktop"
+		local ok, err = pcall(function()
+			if common then
+				result.ShowItemCard("Self test", { Uid = "selftest", ItemId = common.Id, Tier = "Common" }, "Self test")
+				task.wait(0.4)
+				measurePlacedCards(label)
+				result.CloseCards()
+				task.wait(0.3)
+			end
+			local hud = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
+			if hud then
+				eventInfo.Show(hud, "GoldenRain", false)
+				task.wait(0.4)
+				measurePlacedCards(label)
+				eventInfo.Hide()
+			end
+		end)
+		if not ok then
+			table.insert(cardLines, "FAIL cards centred (live cards): " .. tostring(err))
+		end
+	end
+	UIKit.SetForcedPhone(nil)
+	return {}
+end
+
 local function countGui(): number
 	local guis = UIKit.GetModalGuis()
 	local count = #guis
@@ -179,6 +336,9 @@ local function testPanels(): { string }
 				for cycle = 1, 2 do
 					spec.Open()
 					task.wait(0.3)
+					if cycle == 1 then
+						measureOpenModals(if phone then "phone" else "desktop")
+					end
 					spec.Close()
 					task.wait(0.4)
 					counts[cycle] = countGui()
@@ -285,7 +445,15 @@ local function run(payload: any)
 	task.wait(1.5)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "Fuzz", Fired = fired })
 
+	cardLines = {}
 	local panelLines = testPanels()
+	testPlacedCards()
+	for _, line in cardLines do
+		table.insert(panelLines, line)
+	end
+	for _, line in testCardMath() do
+		table.insert(panelLines, line)
+	end
 	for _, line in testHudOrder() do
 		table.insert(panelLines, line)
 	end
