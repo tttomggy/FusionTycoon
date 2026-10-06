@@ -15,6 +15,7 @@ local RarityVisuals = require(ReplicatedStorage.Shared.Config.RarityVisuals)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
@@ -80,19 +81,31 @@ local MUTATION_SATELLITES: { [string]: SatelliteSpec } = {
 }
 
 -- Neon balls the client orbits round the orb (FT_Orbit). Built here so
--- every player sees them; positions are set every frame on clients.
-local function buildSatellites(group: Model, center: CFrame, diameter: number, mutation: string)
-	local spec = MUTATION_SATELLITES[mutation]
-	local color = UITheme.GetMutationColor(mutation)
-	if not spec or not color then
+-- every player sees them; positions are set every frame on clients. A
+-- stacked item (`mutations` has more than one) MIXES the colours: the
+-- top mutation's count and speed (+1 ball per extra mutation), the balls
+-- taking each mutation's colour in turn (Rainbow's its RainbowStops hues).
+local function buildSatellites(group: Model, center: CFrame, diameter: number, mutations: { string })
+	local topMutation = mutations[#mutations]
+	for _, name in mutations do
+		if MutationConfig.GetRank(name) > MutationConfig.GetRank(topMutation) then
+			topMutation = name
+		end
+	end
+	local spec = topMutation and MUTATION_SATELLITES[topMutation]
+	if not spec then
 		return
 	end
+	local count = spec.Count + (#mutations - 1)
 	local p = PlotLayout.Pedestal
 	local satellites = Instance.new("Model")
 	satellites.Name = "Satellites"
 	local stops = UITheme.Mutation.RainbowStops
-	for index = 1, spec.Count do
-		local hue = if mutation == "Rainbow" then stops[(index - 1) % #stops + 1] else color
+	for index = 1, count do
+		local mutation = mutations[(index - 1) % #mutations + 1]
+		local hue = if mutation == "Rainbow"
+			then stops[((index - 1) // #mutations) % #stops + 1]
+			else UITheme.GetMutationColor(mutation) or UITheme.Colors.Text
 		local ball = PartKit.Part({
 			Name = "Satellite" .. index,
 			Shape = Enum.PartType.Ball,
@@ -124,7 +137,7 @@ local function buildSatellites(group: Model, center: CFrame, diameter: number, m
 			trail.Parent = ball
 		end
 	end
-	satellites:SetAttribute("Count", spec.Count)
+	satellites:SetAttribute("Count", count)
 	satellites:SetAttribute("Radius", diameter / 2 + p.SatelliteRadiusExtra)
 	satellites:SetAttribute("Period", spec.Period)
 	satellites:SetAttribute("Tilt", p.SatelliteTiltDegrees)
@@ -171,7 +184,15 @@ end
 -- The orb group (glass orb, Neon core, light, mutation shell and
 -- satellites) centred on `center`. `hover` tags it FT_Hover (pedestals);
 -- the heist's carried orb is welded to a head instead.
-local function buildOrbAt(center: CFrame, tier: string, tierColor: Color3, parent: Instance, mutation: string?, hover: boolean): Model
+local function buildOrbAt(
+	center: CFrame,
+	tier: string,
+	tierColor: Color3,
+	parent: Instance,
+	mutation: string?,
+	hover: boolean,
+	events: { string }?
+): Model
 	local p = PlotLayout.Pedestal
 	local diameter = p.OrbDiameter[tier] or p.OrbDiameter.Common
 
@@ -210,9 +231,12 @@ local function buildOrbAt(center: CFrame, tier: string, tierColor: Color3, paren
 	light.Shadows = false
 	light.Parent = orb
 
-	if mutation then
-		buildShell(group, center, diameter, mutation)
-		buildSatellites(group, center, diameter, mutation)
+	-- The shell is the top mutation of the stack; the satellites mix them.
+	local mutations = MutationConfig.List(mutation, events)
+	local top = MutationConfig.GetTop(mutation, events)
+	if top then
+		buildShell(group, center, diameter, top)
+		buildSatellites(group, center, diameter, mutations)
 	end
 
 	group.PrimaryPart = orb
@@ -223,21 +247,28 @@ local function buildOrbAt(center: CFrame, tier: string, tierColor: Color3, paren
 	return group
 end
 
-local function buildOrb(pedestal: BasePart, tier: string, tierColor: Color3, parent: Instance, mutation: string?): BasePart
+local function buildOrb(
+	pedestal: BasePart,
+	tier: string,
+	tierColor: Color3,
+	parent: Instance,
+	mutation: string?,
+	events: { string }?
+): BasePart
 	local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
 	local bottom = pedestal.CFrame * CFrame.new(0, -baseSize.Y / 2, 0)
 	local center = bottom * CFrame.new(0, PlotLayout.Pedestal.OrbCenterY, 0)
-	local group = buildOrbAt(center, tier, tierColor, parent, mutation, true)
+	local group = buildOrbAt(center, tier, tierColor, parent, mutation, true, events)
 	return group.PrimaryPart :: BasePart
 end
 
 -- A cosmetic copy of a pedestal orb (mutation shell and satellites
 -- included) for the heist's carried item, built on each client. Not
 -- hovering: the caller welds the orb (PrimaryPart) to a character.
-function PedestalVisuals.BuildCarryOrb(tier: string, mutation: string?, center: CFrame, parent: Instance): Model
+function PedestalVisuals.BuildCarryOrb(tier: string, mutation: string?, center: CFrame, parent: Instance, events: { string }?): Model
 	local config = RarityVisuals.Tiers[tier]
 	local tierColor = FusionConfig.TierAccentColors[tier] or (config and config.GlowColor) or UITheme.Colors.Text
-	return buildOrbAt(center, tier, tierColor, parent, mutation, false)
+	return buildOrbAt(center, tier, tierColor, parent, mutation, false, events)
 end
 
 -- Removes every effect PedestalVisuals.Apply may have added, restoring the
@@ -293,7 +324,7 @@ end
 -- Applies tier's RarityVisuals entry to `pedestal`, plus a mutation shell
 -- when the item has one. Clears any previous styling first, so this is
 -- also how a pedestal gets reset/restyled.
-function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: string?)
+function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: string?, events: { string }?)
 	PedestalVisuals.Clear(pedestal)
 
 	local config = RarityVisuals.Tiers[tier]
@@ -322,7 +353,7 @@ function PedestalVisuals.Apply(pedestal: BasePart, tier: string, mutation: strin
 			lip.Transparency = 0
 		end
 	end
-	local orb = buildOrb(pedestal, tier, tierColor, elements, mutation)
+	local orb = buildOrb(pedestal, tier, tierColor, elements, mutation, events)
 
 	-- No Highlight: Roblox renders at most 31 per client, and 12 plots x 4
 	-- pedestals can reach 48, so outlines silently vanish. The cap lip glow

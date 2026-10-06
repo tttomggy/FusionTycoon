@@ -85,6 +85,7 @@ type ItemInfo = {
 	ItemId: string,
 	Tier: string,
 	Mutation: string?,
+	EventMutations: { string }?,
 	Name: string,
 }
 
@@ -153,7 +154,8 @@ local SUSPICIOUS_REASONS = {
 
 -- Player attributes the clients read to draw the carried orb and the
 -- THIEF pill on every screen (no remote needed for bystanders).
-local CARRY_ATTRIBUTES = { "HeistTier", "HeistMutation", "HeistItemName", "HeistEndsAt", "HeistVictimUserId" }
+local CARRY_ATTRIBUTES =
+	{ "HeistTier", "HeistMutation", "HeistEventMutations", "HeistItemName", "HeistEndsAt", "HeistVictimUserId" }
 
 -- Resolved in :Start(), never at module scope.
 local PlayerDataService: PlayerDataServiceModule
@@ -334,7 +336,7 @@ local function restorePedestal(victim: Player, carry: Carry)
 	local uid = PlayerDataService.GetPedestalDisplays(victim)[carry.PedestalIndex]
 	local item = uid and PlayerDataService.GetItemByUid(victim, uid)
 	if item then
-		PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+		PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 	else
 		PedestalVisuals.Clear(pedestal)
 	end
@@ -368,7 +370,8 @@ local function transferItem(thief: Player, victim: Player, carry: Carry): boolea
 		PlayerDataService.SetItemInUse(victim, carry.ItemUid, true)
 		return false
 	end
-	PlayerDataService.AddItem(thief, item.ItemId, item.Tier, item.Mutation)
+	-- The whole stack goes with it (base and event mutations).
+	PlayerDataService.AddItem(thief, item.ItemId, item.Tier, item.Mutation, item.EventMutations)
 	return true
 end
 
@@ -561,7 +564,8 @@ startCarry = function(
 		ItemId = item.ItemId,
 		Tier = item.Tier,
 		Mutation = item.Mutation,
-		Name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation),
+		EventMutations = item.EventMutations,
+		Name = MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation, item.EventMutations),
 	}
 	local carry: Carry = {
 		ThiefUserId = thief.UserId,
@@ -591,6 +595,8 @@ startCarry = function(
 
 	thief:SetAttribute("HeistTier", info.Tier)
 	thief:SetAttribute("HeistMutation", info.Mutation)
+	-- Attributes can't hold tables: the event set as "Charged,Void".
+	thief:SetAttribute("HeistEventMutations", table.concat(info.EventMutations or {}, ","))
 	thief:SetAttribute("HeistItemName", info.Name)
 	thief:SetAttribute("HeistEndsAt", carry.EndsAt)
 	thief:SetAttribute("HeistVictimUserId", victim.UserId)

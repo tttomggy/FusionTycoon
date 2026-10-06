@@ -23,6 +23,7 @@ local Config = ReplicatedStorage.Shared.Config
 local FusionConfig = require(Config.FusionConfig)
 local ItemConfig = require(Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local RarityVisuals = require(Config.RarityVisuals)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -97,7 +98,14 @@ local function reject(player: Player, reason: string, isSuspicious: boolean?)
 	RemoteEvents.FusionResult:FireClient(player, { Success = false, Reason = reason })
 end
 
-type InventoryItem = { Uid: string, ItemId: string, Tier: string, InUse: boolean, Mutation: string? }
+type InventoryItem = {
+	Uid: string,
+	ItemId: string,
+	Tier: string,
+	InUse: boolean,
+	Mutation: string?,
+	EventMutations: { string }?,
+}
 
 type FuseOutcome = {
 	Upgraded: boolean,
@@ -109,26 +117,32 @@ type FuseOutcome = {
 	-- A Safe Fusion token was used: on a fail every input stayed.
 	Safe: boolean,
 	-- Success with a mutation: "Kept" (carried over from the inputs) or
-	-- "Rolled" (a fresh fusion roll beat it). nil otherwise.
+	-- "Rolled" (a fresh fusion roll beat it or stacked onto it). nil otherwise.
 	MutationSource: string?,
+	-- An event mutation the roll stacked on (Void Moon: "Void"); nil otherwise.
+	Added: string?,
+	-- That addition landed on top of a kept mutation ("+ VOID (stacked!)").
+	Stacked: boolean?,
 }
 
 -- Fuses 2-6 already-validated, same-tier, not-in-use items. Fires no
 -- remotes and never yields, so callers stay atomic.
 --   success: every input goes; the result (next tier) gets the better of
---            (the LOWEST mutation among all inputs - so every input must
---            share a mutation for it to carry) and a fresh fusion roll at
---            the player's luck.
---   fail:    the input with the highest mutation rank (the first on a tie)
+--            (the LOWEST base mutation among all inputs - so every input
+--            must share it to carry) and a fresh fusion roll at the
+--            player's luck, plus the event mutations EVERY input shares
+--            (the intersection); a Void Moon hit stacks Void on top.
+--   fail:    the input with the highest stacked multiplier (the first on a tie)
 --            stays untouched, same Uid; all the others go. With `safe` (a
 --            Safe Fusion token, spent by the caller) nothing goes.
 -- Returns the outcome, or (nil, reason) if nothing changed.
-local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?): (FuseOutcome?, string?)
+local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?, spark: number?): (FuseOutcome?, string?)
 	local count = #items
 	local consumedTier = items[1].Tier
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
-	-- Void Moon adds a success bonus (EventService hook; capped at 100%).
-	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus())
+	-- Void Moon adds a success bonus (EventService hook; capped at 100%), an
+	-- armed Fusion Spark (QuestConfig) its own on top.
+	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus() + (spark or 0))
 	if not nextTier or chance <= 0 then
 		return nil, "MaxTier"
 	end
@@ -139,7 +153,10 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 	if not upgraded then
 		local keep = items[1]
 		for _, item in items do
-			if MutationConfig.GetRank(item.Mutation) > MutationConfig.GetRank(keep.Mutation) then
+			if
+				MutationConfig.GetStackedMultiplier(item.Mutation, item.EventMutations)
+				> MutationConfig.GetStackedMultiplier(keep.Mutation, keep.EventMutations)
+			then
 				keep = item
 			end
 		end
@@ -178,17 +195,23 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 	-- The lowest input mutation carries (FusionConfig.PredictMutation, the
 	-- same function the Fuse panel's prediction line shows).
 	local base = FusionConfig.PredictMutation(items)
+	local keptEvents = FusionConfig.PredictEventMutations(items)
 	local uids = {}
 	for _, item in items do
 		table.insert(uids, item.Uid)
 	end
 	local luck = PlayerDataService.GetLuck(player)
 	-- An event mutation (Void Moon: Void) replaces the normal fusion roll
-	-- when it hits; otherwise the normal roll at the event's odds.
+	-- when it hits and STACKS onto what was kept; otherwise the normal roll
+	-- at the event's odds.
 	local rolled: string?
+	local events = keptEvents
+	local added: string? = nil
 	local eventMutation, eventChance = EventService.GetFusionEventMutation()
 	if eventMutation and rng:NextNumber() < eventChance then
-		rolled = eventMutation
+		local stackedEvents, didAdd = MutationConfig.AddEvent(events, eventMutation)
+		events = stackedEvents
+		added = if didAdd then eventMutation else nil
 	else
 		local multipliers: { [string]: number } = {}
 		for _, name in MutationConfig.Order do
@@ -197,15 +220,17 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		rolled = MutationConfig.Roll(rng, luck, "Fusion", multipliers)
 	end
 	local mutation = MutationConfig.Better(base, rolled)
+	local hadKept = base ~= nil or keptEvents ~= nil
 
 	if not PlayerDataService.RemoveItemsByUid(player, uids) then
 		return nil, "ItemNotOwned"
 	end
-	local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation)
+	local newEntry, isNewIndex = PlayerDataService.AddItem(player, rewardItem.Id, rewardItem.Tier, mutation, events)
 	if not newEntry then
 		return nil, "DataNotLoaded"
 	end
 	PlayerDataService.IncrementTotalFusions(player)
+	PlayerDataService.AddStat(player, "Fused_" .. rewardItem.Tier, 1) -- the chain's "Fuse a Mythic"
 	AnalyticsKit.Funnel(player, "FirstFuse")
 	return {
 		Upgraded = true,
@@ -214,7 +239,12 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		IsNewIndex = isNewIndex,
 		Chance = chance,
 		KeptUid = nil,
-		MutationSource = if mutation == nil then nil elseif mutation == base then "Kept" else "Rolled",
+		MutationSource = if mutation == nil and events == nil
+			then nil
+			elseif mutation == base and added == nil then "Kept"
+			else "Rolled",
+		Added = added,
+		Stacked = added ~= nil and hadKept,
 		Safe = safe == true,
 	},
 		nil
@@ -230,10 +260,10 @@ end
 
 -- Server-wide brag for a Legendary+ result, or any Rainbow: the moment
 -- everyone else in the server sees and wants for themselves.
-local function announce(player: Player, item: InventoryItem)
-	-- An event-only mutation (a Void from the Void Moon) is a server moment
-	-- at any tier, with its own line.
-	if MutationConfig.IsEventOnly(item.Mutation) then
+local function announce(player: Player, item: InventoryItem, added: string?)
+	-- A freshly stacked event-only mutation (a Void from the Void Moon) is a
+	-- server moment at any tier, with its own line.
+	if added ~= nil then
 		EventService.AnnounceEventMutation(player, item, "VoidMoon")
 		return
 	end
@@ -247,7 +277,8 @@ local function announce(player: Player, item: InventoryItem)
 	RemoteEvents.RareFusionAnnouncement:FireAllClients({
 		Message = ("%s fused a %s %s!"):format(player.DisplayName, item.Tier:upper(), itemName),
 		Tier = item.Tier,
-		Mutation = item.Mutation,
+		Mutation = MutationConfig.GetTop(item.Mutation, item.EventMutations),
+		EventMutations = item.EventMutations,
 		-- Parts, so the client can colour the tier word.
 		PlayerName = player.DisplayName,
 		Verb = "fused",
@@ -351,7 +382,14 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 	if safe then
 		PlayerDataService.UseSafeFusionToken(player)
 	end
-	local outcome, failure = fuseOnce(player, items, safe)
+	-- An armed Fusion Spark (quest power-up) boosts this fusion and is spent
+	-- on it, success or fail; a fusion that changes nothing keeps it armed.
+	local sparkDef = QuestConfig.PowerUps.FusionSpark
+	local spark = if PlayerDataService.IsArmed(player, sparkDef.Key) then sparkDef.FusionBonus or 0 else 0
+	local outcome, failure = fuseOnce(player, items, safe, spark)
+	if outcome and spark > 0 then
+		PlayerDataService.SetArmed(player, sparkDef.Key, false)
+	end
 	if not outcome and safe then
 		PlayerDataService.AddSafeFusionTokens(player, 1)
 	end
@@ -366,11 +404,14 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		Upgraded = outcome.Upgraded,
 		Count = #items,
 		Chance = outcome.Chance,
+		Spark = spark > 0,
 		ConsumedUids = outcome.ConsumedUids,
 		ConsumedTier = tier,
 		NewItem = outcome.Entry,
 		KeptUid = outcome.KeptUid,
 		MutationSource = outcome.MutationSource,
+		Added = outcome.Added,
+		Stacked = outcome.Stacked,
 		LostCount = if outcome.Upgraded then nil else #outcome.ConsumedUids,
 		Safe = outcome.Safe,
 		NewIndex = outcome.IsNewIndex,
@@ -381,7 +422,7 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 	PlayerDataService.SyncTycoon(player)
 
 	if outcome.Upgraded then
-		announce(player, outcome.Entry)
+		announce(player, outcome.Entry, outcome.Added)
 	end
 end
 
@@ -396,7 +437,7 @@ local function findFuseAllPair(player: Player): (InventoryItem?, InventoryItem?)
 	for _, tier in FusionConfig.GetFuseAllTiers() do
 		local first: InventoryItem? = nil
 		for _, item in inventory do
-			if item.Tier == tier and not PlayerDataService.IsItemCarried(player, item.Uid) and item.Mutation == nil then
+			if item.Tier == tier and not PlayerDataService.IsItemCarried(player, item.Uid) and item.Mutation == nil and item.EventMutations == nil then
 				if first then
 					return first, item
 				end

@@ -50,6 +50,7 @@ local Workspace = game:GetService("Workspace")
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -233,12 +234,19 @@ export type MutationSource = "VoidMoon" | "Lightning" | "Meteor" | "Debug"
 -- The SERVER banner for an event-only mutation, at any tier: "Har got a
 -- VOID Nova Heart under the Void Moon!" (AnnouncementController, Verb
 -- "event").
-function EventService.AnnounceEventMutation(player: Player, item: { ItemId: string, Tier: string, Mutation: string? }, source: MutationSource)
+function EventService.AnnounceEventMutation(
+	player: Player,
+	item: { ItemId: string, Tier: string, Mutation: string?, EventMutations: { string }? },
+	source: MutationSource
+)
 	local def = ItemConfig.GetItemById(item.ItemId)
+	-- The banner's colour word is the top of the stack; the line names it all.
+	local label = MutationConfig.GetStackLabel(item.Mutation, item.EventMutations)
 	RemoteEvents.RareFusionAnnouncement:FireAllClients({
-		Message = ("%s got a %s %s!"):format(player.DisplayName, tostring(item.Mutation):upper(), def and def.Name or item.ItemId),
+		Message = ("%s got a %s %s!"):format(player.DisplayName, label, def and def.Name or item.ItemId),
 		Tier = item.Tier,
-		Mutation = item.Mutation,
+		Mutation = MutationConfig.GetTop(item.Mutation, item.EventMutations),
+		EventMutations = item.EventMutations,
 		PlayerName = player.DisplayName,
 		Verb = "event",
 		Source = source,
@@ -250,9 +258,9 @@ local function isFeedTier(tier: string): boolean
 	return (ItemConfig.Tiers[tier] or 0) >= (ItemConfig.Tiers[EFFECT_FEED_MIN_TIER] or math.huge)
 end
 
-local function itemName(item: { ItemId: string, Mutation: string? }): string
+local function itemName(item: { ItemId: string, Mutation: string?, EventMutations: { string }? }): string
 	local def = ItemConfig.GetItemById(item.ItemId)
-	return MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation)
+	return MutationConfig.GetDisplayName(def and def.Name or item.ItemId, item.Mutation, item.EventMutations)
 end
 
 local function getRoot(player: Player): BasePart?
@@ -340,12 +348,31 @@ local function payCoin(player: Player, seconds: number, position: Vector3, big: 
 		return
 	end
 	PlayerDataService.AddCash(player, amount)
+	PlayerDataService.AddStat(player, "RainCoins", 1) -- the "Collect 15 coins" quest
 	AnalyticsKit.Source(player, amount, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, if big then "BigCoin" else "Coin")
 	PlayerDataService.SyncTycoon(player)
 	local tally = (tallies[player.UserId] or 0) + amount
 	tallies[player.UserId] = tally
 	player:SetAttribute("GoldenRainTally", tally)
 	RemoteEvents.EventFx:FireClient(player, { Kind = "Coin", Position = position, Amount = amount, Big = big })
+end
+
+-- Every live coin's rules, so a Coin Magnet (quest power-up) can collect
+-- it through the same path as a touch.
+type CoinRules = { CanTake: (Player) -> boolean, OnTake: (Player, Vector3) -> () }
+local liveCoins: { [BasePart]: CoinRules } = {}
+
+-- Collects `coin` for `player` once (first wins); the caller checked reach.
+local function takeCoin(coin: BasePart, player: Player)
+	local rules = liveCoins[coin]
+	if not rules or coin:GetAttribute("Collected") then
+		return
+	end
+	coin:SetAttribute("Collected", true)
+	liveCoins[coin] = nil
+	local position = coin.Position
+	coin:Destroy()
+	rules.OnTake(player, position)
 end
 
 -- A Neon gold coin on its edge, spinning and bobbing (FT_Hover). `canTake`
@@ -388,10 +415,11 @@ local function buildCoin(
 			return
 		end
 		-- First valid touch wins (street coins are a race).
-		coin:SetAttribute("Collected", true)
-		local position = coin.Position
-		coin:Destroy()
-		onTake(toucher, position)
+		takeCoin(coin, toucher)
+	end)
+	liveCoins[coin] = { CanTake = canTake, OnTake = onTake }
+	coin.Destroying:Connect(function()
+		liveCoins[coin] = nil
 	end)
 	Debris:AddItem(coin, EventConfig.CoinLifetimeSeconds)
 end
@@ -439,12 +467,35 @@ local function spawnStreetCoin()
 	end)
 end
 
+-- Coin Magnet: every armed player pulls in each coin they may take within
+-- the radius. Returns the players whose magnet ran (disarmed at rain end).
+local function runMagnets(used: { [Player]: boolean })
+	local radius = QuestConfig.PowerUps.CoinMagnet.Radius or 0
+	for _, player in Players:GetPlayers() do
+		local root = getRoot(player)
+		if root and PlayerDataService.IsArmed(player, "CoinMagnet") and PlayerDataService.IsDataLoaded(player) then
+			used[player] = true
+			for coin, rules in liveCoins do
+				if coin.Parent and rules.CanTake(player) and (coin.Position - root.Position).Magnitude <= radius then
+					takeCoin(coin, player)
+				end
+			end
+		end
+	end
+end
+
 local function runGoldenRain(myGeneration: number, strength: number)
 	local labInterval = EventConfig.CoinIntervalSeconds / strength
 	local streetInterval = EventConfig.StreetCoinIntervalSeconds / strength
 	local nextLab, nextStreet = 0, os.clock() + streetInterval
+	local nextMagnet = 0
+	local magnetUsers: { [Player]: boolean } = {}
 	while generation == myGeneration do
 		local now = os.clock()
+		if now >= nextMagnet then
+			nextMagnet = now + QuestConfig.MagnetIntervalSeconds
+			runMagnets(magnetUsers)
+		end
 		if now >= nextLab then
 			nextLab = now + labInterval
 			for _, player in Players:GetPlayers() do
@@ -458,7 +509,14 @@ local function runGoldenRain(myGeneration: number, strength: number)
 			nextStreet = now + streetInterval
 			spawnStreetCoin()
 		end
-		task.wait(math.max(0.1, math.min(nextLab, nextStreet) - os.clock()))
+		task.wait(math.max(0.1, math.min(nextLab, nextStreet, nextMagnet) - os.clock()))
+	end
+	-- A magnet lasts one rain: spent on the rain it ran in.
+	for player in magnetUsers do
+		if player.Parent then
+			PlayerDataService.SetArmed(player, "CoinMagnet", false)
+			PlayerDataService.SyncTycoon(player)
+		end
 	end
 end
 
@@ -514,7 +572,8 @@ local function pickTarget(): Target?
 	return lab[rng:NextInteger(1, #lab)]
 end
 
--- The bolt on a marked target: it may turn a plain item Charged. Returns
+-- The bolt on a marked target: it may STACK Charged onto the item (any
+-- base mutation stays; an item already Charged is skipped). Returns
 -- whether it did.
 local function strike(target: Target): boolean
 	-- Still the same item on that pedestal, and not carried off meanwhile.
@@ -523,12 +582,21 @@ local function strike(target: Target): boolean
 		return false
 	end
 	local item = PlayerDataService.GetItemByUid(target.Owner, target.Uid)
-	if not item or item.Mutation ~= nil or rng:NextNumber() >= EventConfig.LightningChargeChance then
+	if
+		not item
+		or MutationConfig.HasEvent(item.EventMutations, "Charged")
+		or rng:NextNumber() >= EventConfig.LightningChargeChance
+	then
 		return false
 	end
+	-- Something was already on it: the card says "+ CHARGED (stacked!)".
+	local stacked = #MutationConfig.List(item.Mutation, item.EventMutations) > 0
 	-- Charged: inventory, Index, pedestal visuals and labels, then the syncs.
-	local isNew = PlayerDataService.SetItemMutation(target.Owner, target.Uid, "Charged")
-	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation)
+	local added, isNew = PlayerDataService.AddItemEventMutation(target.Owner, target.Uid, "Charged")
+	if not added then
+		return false
+	end
+	PedestalVisuals.Apply(target.Pedestal, item.Tier, item.Mutation, item.EventMutations)
 	TycoonService.RefreshPedestalLabels(target.Owner)
 	RemoteEvents.SyncInventory:FireClient(target.Owner, PlayerDataService.GetInventory(target.Owner))
 	PlayerDataService.SyncTycoon(target.Owner)
@@ -538,6 +606,8 @@ local function strike(target: Target): boolean
 		Item = item,
 		NewIndex = isNew,
 		Source = "Lightning",
+		Added = "Charged",
+		Stacked = stacked,
 	})
 	EventService.AnnounceEventMutation(target.Owner, item, "Lightning")
 	return true
@@ -597,31 +667,44 @@ local function rollCoreItem(): (string?, string, string?)
 		end
 	end
 	local def = ItemConfig.PickRandomOfTier(tier, rng)
-	local mutation = if rng:NextNumber() < EventConfig.MeteorCelestialChance then "Celestial" else nil
-	return def and def.Id, tier, mutation
+	return def and def.Id, tier
 end
 
 local function grantCore(player: Player)
-	local itemId, tier, mutation = rollCoreItem()
+	local itemId, tier = rollCoreItem()
 	if not itemId then
 		warn(("EventService: no ItemConfig entry for meteor tier %s"):format(tier))
 		return
 	end
-	local entry, isNew = PlayerDataService.AddItem(player, itemId, tier, mutation)
+	-- The normal pull roll for the base, then Celestial ON TOP (stacking).
+	local multipliers: MutationConfig.OddsMultipliers = {}
+	for _, name in MutationConfig.Order do
+		multipliers[name] = EventService.GetMutationOddsMultiplier(name, "Pull")
+	end
+	local base = MutationConfig.Roll(rng, PlayerDataService.GetLuck(player), "Pull", multipliers)
+	local celestial = rng:NextNumber() < EventConfig.MeteorCelestialChance
+	local entry, isNew = PlayerDataService.AddItem(player, itemId, tier, base, if celestial then { "Celestial" } else nil)
 	if not entry then
 		return
 	end
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
-	RemoteEvents.EventReward:FireClient(player, { Caption = "☄ METEOR CORE", Item = entry, NewIndex = isNew, Source = "Meteor" })
-	if mutation and MutationConfig.IsEventOnly(mutation) then
+	RemoteEvents.EventReward:FireClient(player, {
+		Caption = "☄ METEOR CORE",
+		Item = entry,
+		NewIndex = isNew,
+		Source = "Meteor",
+		Added = if celestial then "Celestial" else nil,
+		Stacked = celestial and entry.Mutation ~= nil,
+	})
+	if celestial then
 		EventService.AnnounceEventMutation(player, entry, "Meteor")
 	elseif isFeedTier(tier) then
 		local def = ItemConfig.GetItemById(itemId)
 		RemoteEvents.RareFusionAnnouncement:FireAllClients({
 			Message = ("%s grabbed a %s from a meteor!"):format(player.DisplayName, itemName(entry)),
 			Tier = tier,
-			Mutation = mutation,
+			Mutation = base,
 			PlayerName = player.DisplayName,
 			Verb = "grabbed",
 			ItemName = def and def.Name or itemId,
@@ -649,7 +732,13 @@ function EventService.GrantEventMutationItem(player: Player, mutation: string): 
 		then "VoidMoon"
 		elseif mutation == "Charged" then "Lightning"
 		else "Meteor"
-	RemoteEvents.EventReward:FireClient(player, { Caption = "EVENT MUTATION", Item = entry, NewIndex = isNew, Source = source })
+	RemoteEvents.EventReward:FireClient(player, {
+		Caption = "EVENT MUTATION",
+		Item = entry,
+		NewIndex = isNew,
+		Source = source,
+		Added = mutation,
+	})
 	EventService.AnnounceEventMutation(player, entry, source)
 	return true
 end

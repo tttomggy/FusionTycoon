@@ -37,6 +37,7 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
@@ -45,6 +46,7 @@ local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local ProfileStore = require(script.Parent.Parent.Packages.ProfileStore)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
@@ -57,9 +59,15 @@ export type InventoryItem = {
 	ItemId: string,
 	Tier: string,
 	InUse: boolean,
-	-- MutationConfig name ("Golden", "Charged", ...); nil = normal.
+	-- The BASE mutation (MutationConfig: Golden / Diamond / Rainbow); nil =
+	-- normal.
 	Mutation: string?,
+	-- Stacked event mutations (Charged / Void / Celestial), sorted by rank,
+	-- each at most once; nil = none (MutationConfig.SanitizeEvents).
+	EventMutations: { string }?,
 }
+
+export type QuestState = QuestConfig.QuestState
 
 export type TutorialState = {
 	Step: number, -- TutorialConfig.Steps index; 0 = not decided yet
@@ -129,6 +137,15 @@ export type PlayerData = {
 	Tutorial: TutorialState,
 	-- Earned weapons (CombatConfig ids -> true; CombatService grants them).
 	Weapons: { [string]: boolean },
+	-- Quest power-ups owned (QuestConfig.PowerUps key -> count). Never sold.
+	PowerUps: { [string]: number },
+	-- Armed one-shot power-ups waiting for their moment (FusionSpark: the
+	-- next fusion; CoinMagnet: the current or next Golden Rain).
+	Armed: { [string]: boolean },
+	-- Lifetime counters the quests measure (QuestConfig.StatKeys).
+	Stats: { [string]: number },
+	-- Daily quests and the lab chain (QuestService; QuestConfig).
+	Quests: QuestState,
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
 	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
@@ -228,6 +245,8 @@ type State = {
 	releasing: { [number]: boolean },
 	-- Session-only: GoalService's latest progress readout per UserId.
 	goalProgress: { [number]: GoalProgress? },
+	-- Session-only: QuestService's status readout per UserId (snapshot).
+	questStatus: { [number]: any },
 	-- Session-only: offline earnings computed on load, until claimed.
 	pendingOffline: { [number]: PendingOffline },
 	-- Session-only heist flags HeistService sets (it owns the heist state;
@@ -326,6 +345,10 @@ local DEFAULT_DATA: PlayerData = {
 	Sessions = 0,
 	DealPopupSlot = 0,
 	Weapons = {},
+	PowerUps = {},
+	Armed = {},
+	Stats = {},
+	Quests = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false },
 	Tutorial = {
 		Step = 0,
 		Done = false,
@@ -351,6 +374,7 @@ local state: State = {
 	profiles = {},
 	releasing = {},
 	goalProgress = {},
+	questStatus = {},
 	pendingOffline = {},
 	carriedUids = {},
 	carrying = {},
@@ -403,11 +427,95 @@ local function pedestalDisplaysFromDisk(raw: any): { [number]: string? }
 	end
 	for key, uid in raw do
 		local index = tonumber(key)
-		if index and typeof(uid) == "string" then
-			out[math.floor(index)] = uid
+		-- Only real pedestals (1..PEDESTAL_COUNT); anything else is dropped.
+		if index and index == index and typeof(uid) == "string" then
+			local whole = math.floor(index)
+			if whole >= 1 and whole <= PlotLayout.PEDESTAL_COUNT then
+				out[whole] = uid
+			end
 		end
 	end
 	return out
+end
+
+-- Marks the Index entry of EVERY mutation an item has (a stacked Rainbow +
+-- Charged fills both columns; a plain item fills Normal). Returns whether
+-- any entry was new.
+local function markIndex(data: PlayerData, item: InventoryItem): boolean
+	local isNew = false
+	local list = MutationConfig.List(item.Mutation, item.EventMutations)
+	if #list == 0 then
+		list = { "" }
+	end
+	for _, mutation in list do
+		local key = IndexConfig.GetKey(item.ItemId, if mutation == "" then nil else mutation)
+		if not data.Index[key] then
+			isNew = true
+			data.Index[key] = true
+		end
+	end
+	return isNew
+end
+
+local function finiteWhole(value: any, min: number, max: number): number?
+	if typeof(value) ~= "number" or value ~= value or value < min or value > max then
+		return nil
+	end
+	return math.floor(value)
+end
+
+-- Clean copies of the quest fields (QuestConfig): known power-up keys with
+-- counts in [0, MaxPowerUpStack], known armed keys, whitelisted stats, and
+-- a quest state whose entries name real daily quests.
+local function sanitizeQuests(raw: any): ({ [string]: number }, { [string]: boolean }, { [string]: number }, QuestState)
+	local powerUps: { [string]: number } = {}
+	if typeof(raw.PowerUps) == "table" then
+		for key, count in raw.PowerUps do
+			local n = finiteWhole(count, 0, QuestConfig.MaxPowerUpStack)
+			if QuestConfig.GetPowerUp(key) and n and n > 0 then
+				powerUps[key] = n
+			end
+		end
+	end
+	local armed: { [string]: boolean } = {}
+	if typeof(raw.Armed) == "table" then
+		for _, key in { "FusionSpark", "CoinMagnet" } do
+			if raw.Armed[key] == true then
+				armed[key] = true
+			end
+		end
+	end
+	local stats: { [string]: number } = {}
+	if typeof(raw.Stats) == "table" then
+		for key, value in raw.Stats do
+			local n = finiteWhole(value, 0, 1e15)
+			if QuestConfig.IsStatKey(key) and n then
+				stats[key] = n
+			end
+		end
+	end
+	local quests: QuestState = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false }
+	local rq = raw.Quests
+	if typeof(rq) == "table" then
+		quests.UtcDay = finiteWhole(rq.UtcDay, -1, 1e9) or -1
+		quests.Chain = finiteWhole(rq.Chain, 1, 1e6) or 1
+		quests.ChainBase = finiteWhole(rq.ChainBase, 0, 1e15) or 0
+		quests.ChainDone = rq.ChainDone == true
+		if typeof(rq.Daily) == "table" then
+			for _, entry in rq.Daily do
+				if typeof(entry) == "table" and QuestConfig.GetDaily(entry.Id) and #quests.Daily < QuestConfig.DailyCount then
+					table.insert(quests.Daily, {
+						Id = entry.Id,
+						Target = finiteWhole(entry.Target, 0, 1e300) or 0,
+						Base = finiteWhole(entry.Base, 0, 1e15) or 0,
+						Done = entry.Done == true,
+						Claimed = entry.Claimed == true,
+					})
+				end
+			end
+		end
+	end
+	return powerUps, armed, stats, quests
 end
 
 -- Fills any field missing from an older save with its default, so new
@@ -505,6 +613,7 @@ local function reconcile(raw: any): PlayerData
 			end
 		end
 	end
+	data.PowerUps, data.Armed, data.Stats, data.Quests = sanitizeQuests(raw)
 	-- A slot start: a finite whole number of seconds (NaN fails >= 0).
 	if typeof(raw.DealPopupSlot) == "number" and raw.DealPopupSlot >= 0 and raw.DealPopupSlot < math.huge then
 		data.DealPopupSlot = math.floor(raw.DealPopupSlot)
@@ -539,12 +648,11 @@ local function reconcile(raw: any): PlayerData
 	for _, item in data.Inventory do
 		item.InUse = displayed[item.Uid] == true
 		-- Old saves have no mutation; an unknown one (renamed/removed) is
-		-- dropped rather than left to break lookups.
-		if item.Mutation ~= nil and not MutationConfig.IsValid(item.Mutation) then
-			item.Mutation = nil
-		end
+		-- dropped rather than left to break lookups. Stacking: an event-only
+		-- base (pre-stacking saves) moves into EventMutations.
+		item.Mutation, item.EventMutations = MutationConfig.Normalize(item.Mutation, item.EventMutations)
 		-- Backfill: everything already owned counts as found.
-		data.Index[IndexConfig.GetKey(item.ItemId, item.Mutation)] = true
+		markIndex(data, item)
 	end
 	return data
 end
@@ -652,6 +760,31 @@ function PlayerDataService.SelfTestRoundTrip(player: Player): (boolean, string?)
 	return false, "a field was added"
 end
 
+-- /selftest: an old save's item with an event-only base ("Void") through
+-- reconcile; returns its (Mutation, EventMutations) afterwards.
+function PlayerDataService.SelfTestMigrateItem(itemId: string, tier: string, mutation: string): (string?, { string }?)
+	local raw: any = deepCopy(DEFAULT_DATA)
+	raw.Inventory = { { Uid = "selftest-old", ItemId = itemId, Tier = tier, InUse = false, Mutation = mutation } }
+	local data = reconcile(raw)
+	local item = data.Inventory[1]
+	return item.Mutation, item.EventMutations
+end
+
+-- /selftest: a copy of the quest state and power-ups, and the restore.
+function PlayerDataService.SelfTestSnapshotQuests(player: Player): any
+	local data = state.sessionCache[player.UserId]
+	return if data then deepCopy({ Quests = data.Quests, PowerUps = data.PowerUps, Armed = data.Armed }) else nil
+end
+
+function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
+	local data = state.sessionCache[player.UserId]
+	if data and typeof(saved) == "table" then
+		data.Quests = saved.Quests
+		data.PowerUps = saved.PowerUps
+		data.Armed = saved.Armed
+	end
+end
+
 -- Everything a bad remote must NOT change (cash is checked separately: the
 -- income tick only ever raises it). Gifts.PlaySeconds and Boosts tick.
 function PlayerDataService.SelfTestFingerprint(player: Player): string
@@ -678,6 +811,9 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		DealPopupSlot = data.DealPopupSlot,
 		Tutorial = data.Tutorial,
 		Weapons = data.Weapons,
+		PowerUps = data.PowerUps,
+		Armed = data.Armed,
+		Quests = data.Quests,
 	})
 end
 
@@ -976,24 +1112,30 @@ function PlayerDataService.AddItem(
 	player: Player,
 	itemId: string,
 	tier: string,
-	mutation: string?
+	mutation: string?,
+	eventMutations: { string }?
 ): (InventoryItem?, boolean)
 	local data = state.sessionCache[player.UserId]
 	if not data then
 		return nil, false
 	end
 
+	-- An event-only `mutation` lands in the set (callers may hand one name).
+	local base, events = MutationConfig.Normalize(mutation, eventMutations)
 	local entry: InventoryItem = {
 		Uid = HttpService:GenerateGUID(false),
 		ItemId = itemId,
 		Tier = tier,
 		InUse = false,
-		Mutation = if MutationConfig.IsValid(mutation) then mutation else nil,
+		Mutation = base,
+		EventMutations = events,
 	}
 	table.insert(data.Inventory, entry)
-	local key = IndexConfig.GetKey(itemId, entry.Mutation)
-	local isNew = not data.Index[key]
-	data.Index[key] = true
+	local isNew = markIndex(data, entry)
+	-- The "Get a Golden mutation" quest counts every new Golden-base item.
+	if base == "Golden" then
+		data.Stats.Goldens = (data.Stats.Goldens or 0) + 1
+	end
 	return entry, isNew
 end
 
@@ -1124,20 +1266,39 @@ function PlayerDataService.IncrementTotalFusions(player: Player)
 	end
 end
 
--- Changes an owned item's mutation in place (same Uid; Power Surge
--- lightning Charging a displayed item) and marks its Index entry. Returns
--- whether that Index entry is new. The caller re-syncs and restyles.
+-- Changes an owned item's base mutation in place (same Uid; /give, tests)
+-- and marks its Index entries. An event-only name is ADDED to the stack
+-- instead (AddItemEventMutation). Returns whether an Index entry is new.
+-- The caller re-syncs and restyles.
 function PlayerDataService.SetItemMutation(player: Player, uid: string, mutation: string?): boolean
+	if mutation ~= nil and MutationConfig.IsEventOnly(mutation) then
+		local _, isNew = PlayerDataService.AddItemEventMutation(player, uid, mutation)
+		return isNew
+	end
 	local data = state.sessionCache[player.UserId]
 	local item = PlayerDataService.GetItemByUid(player, uid)
 	if not data or not item or (mutation ~= nil and not MutationConfig.IsValid(mutation)) then
 		return false
 	end
 	item.Mutation = mutation
-	local key = IndexConfig.GetKey(item.ItemId, mutation)
-	local isNew = data.Index[key] ~= true
-	data.Index[key] = true
-	return isNew
+	return markIndex(data, item)
+end
+
+-- Stacks an event mutation onto an owned item in place (same Uid; a Power
+-- Surge strike adds Charged). The same one never stacks twice. Returns
+-- (added, isNewIndexEntry).
+function PlayerDataService.AddItemEventMutation(player: Player, uid: string, mutation: string): (boolean, boolean)
+	local data = state.sessionCache[player.UserId]
+	local item = PlayerDataService.GetItemByUid(player, uid)
+	if not data or not item then
+		return false, false
+	end
+	local events, added = MutationConfig.AddEvent(item.EventMutations, mutation)
+	if not added then
+		return false, false
+	end
+	item.EventMutations = events
+	return true, markIndex(data, item)
 end
 
 -- Marks a one-time tip seen (TipConfig ids only).
@@ -1203,6 +1364,89 @@ function PlayerDataService.SetGoalProgress(player: Player, progress: GoalProgres
 	state.goalProgress[player.UserId] = progress
 end
 
+--[[ Public API: quests, power-ups, stats (QuestService) ------------------ ]]
+
+-- QuestService's readout for the next snapshot (set in its sync hook).
+function PlayerDataService.SetQuestStatus(player: Player, status: any)
+	state.questStatus[player.UserId] = status
+end
+
+-- The live quest state (QuestService mutates it; nil until loaded).
+function PlayerDataService.GetQuestState(player: Player): QuestState?
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Quests else nil
+end
+
+function PlayerDataService.ResetQuests(player: Player)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		data.Quests = { UtcDay = -1, Daily = {}, Chain = 1, ChainBase = 0, ChainDone = false }
+	end
+end
+
+-- A lifetime counter the quests read (QuestConfig.StatKeys; unknown = 0).
+function PlayerDataService.GetStat(player: Player, key: string): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.Stats[key] or 0 else 0
+end
+
+-- Adds to a counter from a real server event (a pull, a coin, a knock...).
+function PlayerDataService.AddStat(player: Player, key: string, amount: number?)
+	local data = state.sessionCache[player.UserId]
+	local n = amount or 1
+	if not data or not QuestConfig.IsStatKey(key) or n ~= n or n <= 0 or n == math.huge then
+		return
+	end
+	data.Stats[key] = (data.Stats[key] or 0) + math.floor(n)
+end
+
+function PlayerDataService.GetPowerUpCount(player: Player, key: string): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.PowerUps[key] or 0 else 0
+end
+
+-- Adds power-ups (quest rewards, /powerup); capped at MaxPowerUpStack.
+function PlayerDataService.AddPowerUp(player: Player, key: string, count: number)
+	local data = state.sessionCache[player.UserId]
+	if not data or not QuestConfig.GetPowerUp(key) or count ~= count then
+		return
+	end
+	local n = math.clamp(math.floor((data.PowerUps[key] or 0) + count), 0, QuestConfig.MaxPowerUpStack)
+	local counts: { [string]: number? } = data.PowerUps
+	counts[key] = if n > 0 then n else nil
+end
+
+-- Spends one; false (nothing changed) at 0.
+function PlayerDataService.TakePowerUp(player: Player, key: string): boolean
+	local data = state.sessionCache[player.UserId]
+	local have = if data then data.PowerUps[key] or 0 else 0
+	if not data or have <= 0 then
+		return false
+	end
+	local counts: { [string]: number? } = data.PowerUps
+	counts[key] = if have > 1 then have - 1 else nil
+	return true
+end
+
+function PlayerDataService.IsArmed(player: Player, key: string): boolean
+	local data = state.sessionCache[player.UserId]
+	return data ~= nil and data.Armed[key] == true
+end
+
+function PlayerDataService.SetArmed(player: Player, key: string, armed: boolean)
+	local data = state.sessionCache[player.UserId]
+	if data then
+		local flags: { [string]: boolean? } = data.Armed
+		flags[key] = if armed then true else nil
+	end
+end
+
+-- The live TotalSteals counter (a quest base).
+function PlayerDataService.GetTotalSteals(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.TotalSteals else 0
+end
+
 --[[ Public API: income + sync -------------------------------------------- ]]
 
 -- Tiers of the items currently on this player's pedestals.
@@ -1210,14 +1454,13 @@ end
 function PlayerDataService.GetDisplayedItems(player: Player): { TycoonConfig.PedestalItem }
 	local items = {}
 	local carried = state.carriedUids[player.UserId]
-	local count = PlayerDataService.GetPedestalCount(player)
 	for index, uid in PlayerDataService.GetPedestalDisplays(player) do
 		-- A pedestal whose item is being carried off earns nothing; spots 5-6
-		-- count only with the +2 Pedestals pass.
-		if uid and index <= count and not (carried and carried[uid]) then
+		-- count only with the +2 Pedestals pass, 7-10 from Rebirth 2.
+		if uid and PlayerDataService.IsPedestalUnlocked(player, index) and not (carried and carried[uid]) then
 			local item = PlayerDataService.GetItemByUid(player, uid)
 			if item then
-				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation })
+				table.insert(items, { Tier = item.Tier, Mutation = item.Mutation, EventMutations = item.EventMutations })
 			end
 		end
 	end
@@ -1288,9 +1531,25 @@ function PlayerDataService.IsPolicyRestricted(player: Player): boolean
 	return session == nil or session.Restricted
 end
 
--- 4, or 6 with the +2 Pedestals pass.
+-- The pedestals this player can use, in the order auto-display fills them
+-- (PlotLayout.GetPedestalOrder): 1-4, 5-6 with the +2 Pedestals pass, the
+-- 2nd floor's 7-10 from RebirthConfig.SecondFloorRebirths.
+function PlayerDataService.GetPedestalOrder(player: Player): { number }
+	local data = state.sessionCache[player.UserId]
+	local passes = PlayerDataService.GetOwnedPasses(player)
+	return PlotLayout.GetPedestalOrder(
+		ShopConfig.GetPedestalCount(passes) > ShopConfig.BasePedestals,
+		data ~= nil and RebirthConfig.HasSecondFloor(data.Rebirths)
+	)
+end
+
+function PlayerDataService.IsPedestalUnlocked(player: Player, index: number): boolean
+	return table.find(PlayerDataService.GetPedestalOrder(player), index) ~= nil
+end
+
+-- How many pedestals this player can use (4 / 6 / 8 / 10).
 function PlayerDataService.GetPedestalCount(player: Player): number
-	return ShopConfig.GetPedestalCount(PlayerDataService.GetOwnedPasses(player))
+	return #PlayerDataService.GetPedestalOrder(player)
 end
 
 function PlayerDataService.HasReceipt(player: Player, purchaseId: string): boolean
@@ -1563,6 +1822,10 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
 		TipKeys = indexKeys(data and data.Tips or {}),
 		Weapons = indexKeys(data and data.Weapons or {}),
+		-- Quests (QuestService's status for this sync) and power-ups.
+		Quests = state.questStatus[player.UserId],
+		PowerUps = if data then table.clone(data.PowerUps) else {},
+		Armed = indexKeys(data and data.Armed or {}),
 		Tutorial = if data
 			then {
 				Step = data.Tutorial.Step,
@@ -1806,6 +2069,7 @@ local function onPlayerRemoving(player: Player)
 	state.sessionCache[userId] = nil
 	state.profiles[userId] = nil
 	state.goalProgress[userId] = nil
+	state.questStatus[userId] = nil
 	state.lastSyncRequest[userId] = nil
 	state.shop[userId] = nil
 	state.lastOfflinePaid[userId] = nil

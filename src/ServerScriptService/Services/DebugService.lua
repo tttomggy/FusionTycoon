@@ -16,6 +16,9 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
@@ -44,6 +47,7 @@ type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 type FusionServiceModule = typeof(require(script.Parent.FusionService))
 type CombatServiceModule = typeof(require(script.Parent.CombatService))
+type QuestServiceModule = typeof(require(script.Parent.QuestService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -66,6 +70,7 @@ local TutorialService: TutorialServiceModule
 local TycoonService: TycoonServiceModule
 local FusionService: FusionServiceModule
 local CombatService: CombatServiceModule
+local QuestService: QuestServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -97,6 +102,11 @@ local TUTORIAL_COMMAND = "/tutorial"
 -- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
 -- takes them all (rebirth ones come back on the next sync).
 local WEAPONS_COMMAND = "/weapons"
+-- "/quest complete <id>" latches a daily ("pull20", ...) or "chain" done;
+-- "/quest reset" hands today's dailies out again and restarts the chain.
+local QUEST_COMMAND = "/quest"
+-- "/powerup <key> <n>" sets a power-up's count (QuestConfig key, any case).
+local POWERUP_COMMAND = "/powerup"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
 -- length); "/event off" ends what's on. "/eventclock 15" shifts the event
 -- clock 15 min ahead so the schedule can be walked through.
@@ -312,6 +322,111 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	PlayerDataService.SyncTycoon(player)
 end
 
+-- Progression: stacking (helpers, a live stacked item, an old save's
+-- migration), the fusion intersection, the 2nd floor's assertions and
+-- build, a quest claim refused while incomplete, a power-up refused at 0.
+-- The tester's items, quests and power-ups are put back after.
+local function runProgressionSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- Stacking helpers.
+	local base, events = MutationConfig.Normalize("Void", nil)
+	result(base == nil and events ~= nil and events[1] == "Void", "stacking: an event-only base moves into the set")
+	local _, added = MutationConfig.AddEvent({ "Charged" }, "Charged")
+	result(not added, "stacking: the same event mutation never stacks twice")
+	result(MutationConfig.GetStackedMultiplier("Rainbow", { "Celestial" }) == 31, "stacking: Rainbow + Celestial = x31 (additive)")
+	local epic = ItemConfig.PickRandomOfTier("Epic")
+	if epic then
+		local oldBase, oldEvents = PlayerDataService.SelfTestMigrateItem(epic.Id, "Epic", "Celestial")
+		result(oldBase == nil and oldEvents ~= nil and oldEvents[1] == "Celestial", "stacking: an old Celestial save migrates into EventMutations")
+		local entry = PlayerDataService.AddItem(player, epic.Id, "Epic", "Rainbow", { "Charged" })
+		if entry then
+			local again = PlayerDataService.AddItemEventMutation(player, entry.Uid, "Charged")
+			local void = PlayerDataService.AddItemEventMutation(player, entry.Uid, "Void")
+			local index = PlayerDataService.GetIndex(player)
+			result(not again and void, "stacking: Charged refused twice, Void stacks on")
+			result(
+				index[IndexConfig.GetKey(epic.Id, "Rainbow")] == true
+					and index[IndexConfig.GetKey(epic.Id, "Charged")] == true
+					and index[IndexConfig.GetKey(epic.Id, "Void")] == true,
+				"stacking: a stacked item fills each of its Index entries"
+			)
+			result(
+				TycoonConfig.GetStackCashPerSecond(entry) == TycoonConfig.GetPedestalCashPerSecond("Epic") * (1 + 11 + 2 + 7),
+				"stacking: Rainbow + Charged + Void earns x21"
+			)
+			local roundOk, roundDetail = PlayerDataService.SelfTestRoundTrip(player)
+			result(roundOk, "stacking round trip (a stacked item through toDisk -> reconcile)", roundDetail)
+			PlayerDataService.RemoveItemsByUid(player, { entry.Uid })
+		end
+	end
+
+	-- Fusion intersection.
+	local inputs = {
+		{ Mutation = "Golden", EventMutations = { "Charged", "Void" } },
+		{ Mutation = "Diamond", EventMutations = { "Charged" } },
+	}
+	local kept = FusionConfig.PredictEventMutations(inputs)
+	result(
+		FusionConfig.PredictMutation(inputs) == "Golden" and kept ~= nil and #kept == 1 and kept[1] == "Charged",
+		"fusion intersection: keeps the lowest base and the shared event mutations"
+	)
+	local mix = FusionConfig.GetMutationMix(inputs)
+	result(
+		mix.Mixed and FusionConfig.IsDragging(mix, inputs[2]) and not FusionConfig.IsDragging(mix, { Mutation = "Diamond", EventMutations = { "Charged", "Void" } }),
+		"fusion intersection: the Fuse panel flags the orb missing Void"
+	)
+	result(FusionConfig.PredictEventMutations({ inputs[1], {} }) == nil, "fusion intersection: a plain input keeps no event mutation")
+
+	-- 2nd floor.
+	local floorOk, floorError = pcall(PlotLayout.CheckFloor2)
+	result(floorOk, "2nd floor: PlotLayout.CheckFloor2", if floorOk then nil else tostring(floorError))
+	local order = PlotLayout.GetPedestalOrder(true, true)
+	result(#PlotLayout.GetPedestalOrder(false, false) == 4 and #order == 10 and order[7] == 7, "2nd floor: fill order 1-4, 5-6, then 7-10")
+	local plot = TycoonService.GetPlotForPlayer(player)
+	local pedestals = plot and plot:FindFirstChild("Pedestals")
+	local floor7 = pedestals and pedestals:FindFirstChild("Pedestal7")
+	local origin = plot and plot.PrimaryPart
+	if floor7 and floor7:IsA("BasePart") and origin then
+		local localY = origin.CFrame:PointToObjectSpace(floor7.Position).Y
+		result(
+			plot:FindFirstChild("SecondFloor") ~= nil and math.abs(localY - (PlotLayout.Floor2.TopY + PlotLayout.Pedestal.ColumnSize.Y / 2)) < 0.1,
+			"2nd floor: built, pedestal 7 stands on the deck",
+			("local y %.2f"):format(localY)
+		)
+	end
+	local rebirths = PlayerDataService.GetRebirths(player)
+	result(
+		PlayerDataService.IsPedestalUnlocked(player, 7) == RebirthConfig.HasSecondFloor(rebirths),
+		("2nd floor: pedestal 7 unlocked exactly from Rebirth %d"):format(RebirthConfig.SecondFloorRebirths)
+	)
+
+	-- Quests and power-ups (state saved and put back).
+	local saved = PlayerDataService.SelfTestSnapshotQuests(player)
+	local quests = PlayerDataService.GetQuestState(player)
+	QuestService.GetDailyIds(player)
+	if quests and #quests.Daily > 0 then
+		local entry = quests.Daily[1]
+		entry.Done = false
+		entry.Claimed = false
+		entry.Target = 1e15 -- unreachable
+		result(QuestService.WhyNotClaim(player, entry.Id) == "NotComplete", "quests: a claim is refused while incomplete")
+		local ok = QuestService.Claim(player, entry.Id)
+		result(not ok and not entry.Claimed, "quests: the refused claim paid nothing")
+		result(QuestService.WhyNotClaim(player, "nope") == "Unknown", "quests: an unknown quest is refused")
+	else
+		result(false, "quests: today's dailies were handed out")
+	end
+	local have = PlayerDataService.GetPowerUpCount(player, "CashBurst")
+	PlayerDataService.AddPowerUp(player, "CashBurst", -have)
+	local boostBefore = PlayerDataService.GetBoostSeconds(player, "Income")
+	local used = QuestService.Use(player, "CashBurst")
+	result(
+		not used and QuestService.WhyNotUse(player, "CashBurst") == "NoneLeft" and PlayerDataService.GetBoostSeconds(player, "Income") == boostBefore,
+		"power-ups: refused at 0, nothing banked"
+	)
+	PlayerDataService.SelfTestRestoreQuests(player, saved)
+	PlayerDataService.SyncTycoon(player)
+end
+
 local function runSelfTest(player: Player)
 	local passed, failed = 0, 0
 	local function result(ok: boolean, name: string, detail: string?)
@@ -479,24 +594,26 @@ local function runSelfTest(player: Player)
 	PlayerDataService.SyncTycoon(player)
 	local function rate(uid: string?): number
 		local item = uid and PlayerDataService.GetItemByUid(player, uid)
-		return if item then TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) else -1
+		return if item then TycoonConfig.GetStackCashPerSecond(item) else -1
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
-	local count = PlayerDataService.GetPedestalCount(player)
+	local order = PlayerDataService.GetPedestalOrder(player)
+	local count = #order
 	local best = -1
 	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
 	for _, item in inventory do
 		if not PlayerDataService.IsItemCarried(player, item.Uid) then
-			best = math.max(best, TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation))
+			best = math.max(best, TycoonConfig.GetStackCashPerSecond(item))
 		end
 	end
 	local ordered = rate(displays[1]) == best
-	for index = 2, count do
-		if displays[index] and rate(displays[index]) > rate(displays[index - 1]) then
+	for position = 2, count do
+		local index, previous = order[position], order[position - 1]
+		if displays[index] and rate(displays[index]) > rate(displays[previous]) then
 			ordered = false
 		end
 	end
-	result(ordered, ("auto-display: pedestals 1-%d hold the best by $/s, in order"):format(count))
+	result(ordered, ("auto-display: the %d unlocked pedestals hold the best by $/s, in fill order"):format(count))
 	local def = ItemConfig.PickRandomOfTier("Secret")
 	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
 	if top then
@@ -517,6 +634,10 @@ local function runSelfTest(player: Player)
 	-- server's; a hit on a carrying thief sends the orb home with both
 	-- inventories unchanged (needs a second player: Test -> 2 players).
 	runCombatSelfTest(player, result)
+
+	-- 11. Progression: stacking, the fusion intersection, the 2nd floor,
+	-- quest / power-up refusals (the junk fuzz above covered their remotes).
+	runProgressionSelfTest(player, result)
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 
@@ -578,6 +699,40 @@ local function onPlayerChatted(player: Player, message: string)
 			HeistService.ClearRearm(player)
 		end
 		print(("DebugService: %s's shield set to %s s"):format(player.Name, tostring(seconds)))
+	elseif command == QUEST_COMMAND then
+		local verb, id = argument:match("^(%S+)%s*(%S*)$")
+		if verb == "complete" and id and id ~= "" then
+			if QuestService.DebugComplete(player, id) then
+				print(("DebugService: %s's quest %s is done"):format(player.Name, id))
+			else
+				warn(("DebugService: /quest complete: %s isn't one of today's quests (%s) or chain"):format(
+					id,
+					table.concat(QuestService.GetDailyIds(player), ", ")
+				))
+			end
+		elseif verb == "reset" then
+			QuestService.DebugReset(player)
+			print(("DebugService: %s's quests reset"):format(player.Name))
+		else
+			warn("DebugService: /quest complete <id> | /quest reset")
+		end
+		PlayerDataService.SyncTycoon(player)
+	elseif command == POWERUP_COMMAND then
+		local rawKey, rawCount = argument:match("^(%S+)%s*(%S*)$")
+		local key: string? = nil
+		for _, candidate in QuestConfig.PowerUpOrder do
+			if rawKey and candidate:lower() == rawKey:lower() then
+				key = candidate
+			end
+		end
+		local count = tonumber(rawCount)
+		if key and count and count == count then
+			PlayerDataService.AddPowerUp(player, key, count - PlayerDataService.GetPowerUpCount(player, key))
+			PlayerDataService.SyncTycoon(player)
+			print(("DebugService: %s has %d %s"):format(player.Name, PlayerDataService.GetPowerUpCount(player, key), key))
+		else
+			warn(("DebugService: /powerup <%s> <n>"):format(table.concat(QuestConfig.PowerUpOrder, "|")))
+		end
 	elseif command == WEAPONS_COMMAND then
 		if argument == "all" or argument == "reset" then
 			CombatService.DebugSetAll(player, argument == "all")
@@ -798,7 +953,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /quest complete <id>|reset, /powerup <key> <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()
@@ -811,6 +966,7 @@ function DebugService:Start()
 	TycoonService = require(script.Parent.TycoonService)
 	FusionService = require(script.Parent.FusionService)
 	CombatService = require(script.Parent.CombatService)
+	QuestService = require(script.Parent.QuestService)
 end
 
 return DebugService

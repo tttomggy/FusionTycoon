@@ -439,6 +439,7 @@ export type ButtonState = {
 	Text: string?,
 	SubText: string?,
 	TextColor3: Color3?,
+	TextSize: number?,
 }
 
 -- Restyles a UIKit.Button in place (state changes: affordable, locked, ...).
@@ -464,6 +465,9 @@ function UIKit.SetButton(button: TextButton, state: ButtonState)
 	local subLabel = column:FindFirstChild("SubLabel") :: TextLabel?
 	if label and state.Text then
 		label.Text = state.Text
+	end
+	if label and state.TextSize then
+		label.TextSize = state.TextSize
 	end
 	if subLabel and state.SubText ~= nil then
 		subLabel.Text = state.SubText
@@ -675,21 +679,73 @@ local function rainbowGradient(parent: Instance, spin: boolean): UIGradient
 	return gradient
 end
 
--- The mutation tag: an Ink pill with a 2 px outline and the word in the
--- mutation colour - "GOLDEN ×2", "DIAMOND ×5", "RAINBOW ×12". Rainbow is
--- white text under the rainbow gradient with a gradient outline. Returns
--- nil for a normal item.
-function UIKit.MutationPill(props: {
+export type MutationPillProps = {
 	Parent: Instance?,
 	Mutation: string?,
+	EventMutations: { string }?, -- stacked: one pill per mutation, side by side
 	Position: UDim2?,
 	AnchorPoint: Vector2?,
 	ZIndex: number?,
 	TextSize: number?,
 	Height: number?,
 	Label: string?, -- default "GOLDEN ×2"
-}): GuiObject?
-	local mutation = props.Mutation
+}
+
+-- The mutation tag: an Ink pill with a 2 px outline and the word in the
+-- mutation colour - "GOLDEN ×2", "DIAMOND ×5", "RAINBOW ×12". Rainbow is
+-- white text under the rainbow gradient with a gradient outline. Returns
+-- nil for a normal item. A STACKED item (EventMutations) gets one pill per
+-- mutation side by side, words only, then an Ink "×14" pill with the
+-- stacked multiplier (MutationConfig.GetStackedMultiplier): "RAINBOW ·
+-- CHARGED". The row is a transparent Frame; it is what's returned.
+function UIKit.MutationPill(props: MutationPillProps): GuiObject?
+	local list = MutationConfig.List(props.Mutation, props.EventMutations)
+	if #list > 1 then
+		local height = props.Height or 20
+		local row = Instance.new("Frame")
+		row.Name = "MutationStack"
+		row.BackgroundTransparency = 1
+		row.AutomaticSize = Enum.AutomaticSize.X
+		row.Size = UDim2.fromOffset(0, height)
+		row.Position = props.Position or UDim2.new()
+		row.AnchorPoint = props.AnchorPoint or Vector2.zero
+		row.ZIndex = props.ZIndex or 1
+		local layout = Instance.new("UIListLayout")
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.SortOrder = Enum.SortOrder.LayoutOrder
+		layout.VerticalAlignment = Enum.VerticalAlignment.Center
+		layout.Padding = UDim.new(0, 4)
+		layout.Parent = row
+		for index, name in list do
+			local pill = UIKit.MutationPill({
+				Parent = row,
+				Mutation = name,
+				ZIndex = props.ZIndex,
+				TextSize = props.TextSize,
+				Height = height,
+				Label = name:upper(),
+			})
+			if pill then
+				pill.LayoutOrder = index
+			end
+		end
+		local total = UIKit.Pill({
+			Name = "StackTotal",
+			Parent = row,
+			Text = ("×%d"):format(MutationConfig.GetStackedMultiplier(props.Mutation, props.EventMutations)),
+			Color = Colors.Ink,
+			TextColor3 = Colors.White,
+			Font = Fonts.Display,
+			TextSize = props.TextSize or 12,
+			Height = height,
+			StrokeThickness = 2,
+			ZIndex = props.ZIndex,
+		})
+		UIKit.PillRoot(total).LayoutOrder = #list + 1
+		row.Parent = props.Parent
+		return row
+	end
+	local mutation = list[1]
 	local color = UITheme.GetMutationColor(mutation)
 	if not mutation or not color then
 		return nil

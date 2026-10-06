@@ -81,6 +81,28 @@ PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # Mutations: (name, income mult, gacha chance, fusion-success chance)
 MUTATIONS = [("Rainbow", 12, 0.001, 0.0005), ("Diamond", 5, 0.008, 0.004), ("Golden", 2, 0.04, 0.02)]
 MUT_MULT = {"None": 1, "Golden": 2, "Charged": 3, "Diamond": 5, "Void": 8, "Rainbow": 12, "Celestial": 20}
+EVENT_ONLY = ("Charged", "Void", "Celestial")
+# Stacking (MutationConfig): an item is a base ("None" / Golden / Diamond /
+# Rainbow) plus a set of event mutations, written "Rainbow+Charged". The
+# multiplier is additive: 1 + sum(mult - 1) (Rainbow + Celestial = 31x).
+
+
+def stack_parts(mu):
+    return [p for p in mu.split("+") if p != "None"]
+
+
+def stack_key(parts):
+    base = [p for p in parts if p not in EVENT_ONLY]
+    events = sorted({p for p in parts if p in EVENT_ONLY}, key=lambda p: MUT_MULT[p])
+    return "+".join(base[:1] + events) or "None"
+
+
+def stack_add(mu, event):
+    return stack_key(stack_parts(mu) + [event])
+
+
+def stack_mult(mu):
+    return 1 + sum(MUT_MULT[p] - 1 for p in stack_parts(mu))
 # Index variants per item: Normal + all six mutations (event-only included),
 # so a full page needs the event mutations too (IndexConfig: 17 x 7 = 119).
 INDEX_VARIANTS = 7
@@ -88,6 +110,10 @@ INDEX_VARIANTS = 7
 # stops spending once the rebirth is within SAVE_SECONDS of income.
 REBIRTH_BASE = 1.5e7
 REBIRTH_GROWTH = 3.2
+# The 2nd floor (PlotLayout.Floor2): 4 more pedestals from this many rebirths
+# (RebirthConfig.SecondFloorRebirths).
+SECOND_FLOOR_REBIRTHS = 2
+SECOND_FLOOR_PEDESTALS = 4
 SAVE_SECONDS = 600
 REBIRTH_INCOME_PER = 0.5   # income x(1 + 0.5 * rebirths)
 REBIRTH_LUCK_PER = 0.05    # luck x(1 + 0.05 * rebirths)
@@ -109,6 +135,45 @@ AWAY_SECONDS = 8 * 3600
 # event from Random.new(slotStart); the sim draws the same distribution
 # from its own seeded RNG per slot.
 EVENTS = False
+
+# Quests (QuestConfig.lua), only with --quests: the average player. Each
+# session-day of QUEST_DAY_PLAY_SECONDS of play hands out 3 dailies (a
+# random 3 of the eligible pool) finished QUEST_DAILY_DONE_AT seconds in;
+# every power-up is used at once. Cash Burst = +300 s in the x2 income
+# bank, Lucky Charm = +600 s of x2 luck; Speed Boots, Fusion Spark and Coin
+# Magnet are not modelled (no income effect the sim can see; Spark's +10
+# points on one fusion is tiny). The lab chain pays on its real conditions.
+QUESTS = False
+QUEST_DAY_PLAY_SECONDS = 2 * 3600
+QUEST_DAILY_DONE_AT = (600, 1200, 1800)
+QUEST_DAILY_COUNT = 3
+# (id, power-up, count, min rebirths): QuestConfig.DailyPool
+QUEST_DAILY_POOL = [
+    ("pull20", "CashBurst", 1, 0),
+    ("fuse5", "FusionSpark", 1, 0),
+    ("golden1", "LuckyCharm", 1, 0),
+    ("coins15", "CoinMagnet", 1, 0),
+    ("upgrade25", "SpeedBoots", 1, 0),
+    ("income", "CashBurst", 1, 0),
+    ("steal1", "SpeedBoots", 2, 1),
+    ("knock3", "LuckyCharm", 2, 1),
+]
+# (kind, tier, target, [(power-up, count)]): QuestConfig.Chain
+QUEST_CHAIN = [
+    ("own", "Rare", 10, [("CashBurst", 2)]),
+    ("index_items", "Common", 1, [("LuckyCharm", 2)]),
+    ("fuse_into", "Mythic", 1, [("FusionSpark", 2)]),
+    ("own", "Legendary", 4, [("SpeedBoots", 2), ("CashBurst", 1)]),
+    ("rebirths", None, 2, [("CashBurst", 3)]),
+    ("index_entries", None, 30, [("CoinMagnet", 2)]),
+    ("index_items", "Rare", 1, [("LuckyCharm", 3)]),
+    ("own", "Secret", 1, [("FusionSpark", 3), ("CashBurst", 2)]),
+    ("rebirths", None, 3, [("CashBurst", 4)]),
+]
+CASH_BURST_SECONDS = 300
+LUCKY_CHARM_SECONDS = 600
+LUCK_POTION_MULT = 2.0  # ShopConfig.LuckPotionMultiplier
+BOOST_BANK_MAX = 3 * 3600  # ShopConfig.MaxBoostBankSeconds / MaxLuckBankSeconds
 EV_SLOT = 15 * 60
 EV_VOID_MOON_CHANCE = 0.15
 EV_DURATION = {"GoldenRain": 300, "PowerSurge": 300, "MeteorShower": 180, "RainbowStorm": 300,
@@ -172,7 +237,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         return (ev, slot) if clock - slot * EV_SLOT < EV_DURATION[ev] else None
 
     shop = PAYERS[payer]
-    pedestals = shop["pedestals"]
+    base_pedestals = shop["pedestals"]
     shop_mult = shop["mult"] * (BOOST_MULT if shop["boost"] else 1)
 
     cash = 0.0
@@ -189,13 +254,58 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     def add(tier, mut):
         inv[(tier, mut)] = inv.get((tier, mut), 0) + 1
         if DEPTH:
-            index.add((tier, rng.randrange(ITEMS_PER_TIER[tier]), mut))
+            # A stacked item fills the entry of EACH of its mutations.
+            item = rng.randrange(ITEMS_PER_TIER[tier])
+            for part in stack_parts(mut) or ["None"]:
+                index.add((tier, item, part))
 
     def mult():
         return 1 if mult_lvl == 0 else MULT_LEVELS[mult_lvl - 1][1]
 
+    # Quest power-up banks (seconds left) and progress.
+    qs = {"boost": 0.0, "luck": 0.0, "chain": 0, "fused_mythic": 0, "days": {}}
+    quest_rng = random.Random(seed * 7919 + 101)
+
     def luck():
-        return 1 + REBIRTH_LUCK_PER * rebirths
+        return (1 + REBIRTH_LUCK_PER * rebirths) * (LUCK_POTION_MULT if qs["luck"] > 0 else 1)
+
+    def pay(power, count):
+        if power == "CashBurst":
+            qs["boost"] = min(BOOST_BANK_MAX, qs["boost"] + CASH_BURST_SECONDS * count)
+        elif power == "LuckyCharm":
+            qs["luck"] = min(BOOST_BANK_MAX, qs["luck"] + LUCKY_CHARM_SECONDS * count)
+
+    def chain_done(kind, tier, target):
+        if kind == "own":
+            return sum(n for (tr, _), n in inv.items() if tr == tier) >= target
+        if kind == "index_items":
+            items = {e[1] for e in index if e[0] == tier}
+            return len(items) >= ITEMS_PER_TIER[tier]
+        if kind == "fuse_into":
+            return qs["fused_mythic"] >= target
+        if kind == "rebirths":
+            return rebirths >= target
+        if kind == "index_entries":
+            return len(index) >= target
+        return False
+
+    def quest_step():
+        day = int(t // QUEST_DAY_PLAY_SECONDS)
+        into = t - day * QUEST_DAY_PLAY_SECONDS
+        picks = qs["days"].get(day)
+        if picks is None:
+            eligible = [q for q in QUEST_DAILY_POOL if rebirths >= q[3]]
+            picks = {"list": quest_rng.sample(eligible, QUEST_DAILY_COUNT), "paid": 0}
+            qs["days"][day] = picks
+        while picks["paid"] < QUEST_DAILY_COUNT and into >= QUEST_DAILY_DONE_AT[picks["paid"]]:
+            _, power, count, _ = picks["list"][picks["paid"]]
+            pay(power, count)
+            picks["paid"] += 1
+        while qs["chain"] < len(QUEST_CHAIN) and chain_done(*QUEST_CHAIN[qs["chain"]][:3]):
+            for power, count in QUEST_CHAIN[qs["chain"]][3]:
+                pay(power, count)
+            qs["chain"] += 1
+            mark(f"chain{qs['chain']}")
 
     def index_bonus():
         b = INDEX_PER_ENTRY * len(index)
@@ -205,12 +315,14 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         return 1 + b
 
     def global_mult():
-        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult
+        burst = BOOST_MULT if qs["boost"] > 0 and not shop["boost"] else 1
+        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult * burst
 
     def ped_items():
+        pedestals = base_pedestals + (SECOND_FLOOR_PEDESTALS if rebirths >= SECOND_FLOOR_REBIRTHS else 0)
         items = []
         for (tr, mu), n in inv.items():
-            items += [(PEDESTAL_CPS[tr] * MUT_MULT[mu], tr, mu)] * min(n, pedestals)
+            items += [(PEDESTAL_CPS[tr] * stack_mult(mu), tr, mu)] * min(n, pedestals)
         items.sort(reverse=True)
         return items[:pedestals]
 
@@ -268,7 +380,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             if roll < 0:
                 tier = tr
                 break
-        add(tier, "Celestial" if rng.random() < METEOR_CELESTIAL else "None")
+        # The normal pull roll for the base, Celestial stacked on top.
+        base = roll_mut(False)
+        add(tier, stack_add(base, "Celestial") if rng.random() < METEOR_CELESTIAL else base)
 
     def lightning():
         # One strike on a random displayed item in a SERVER_PLAYERS server.
@@ -278,9 +392,12 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         if not shown:
             return
         _, tr, mu = rng.choice(shown)
-        if mu == "None" and rng.random() < LIGHTNING_CHARGE_CHANCE:
-            inv[(tr, "None")] -= 1
-            add(tr, "Charged")
+        # Stacks onto any item that isn't Charged yet (stacking).
+        if "Charged" not in stack_parts(mu) and rng.random() < LIGHTNING_CHARGE_CHANCE:
+            inv[(tr, mu)] -= 1
+            inv[(tr, stack_add(mu, "Charged"))] = inv.get((tr, stack_add(mu, "Charged")), 0) + 1
+            if DEPTH:
+                index.add((tr, rng.randrange(ITEMS_PER_TIER[tr]), "Charged"))
 
     step = 1.0
     while t < horizon:
@@ -297,8 +414,12 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
                 for _ in range(round(METEOR_COUNT / SERVER_PLAYERS)):
                     meteor_core()
         ev_last[0], ev_last[1] = (cur if cur else (None, -1))
+        if QUESTS:
+            quest_step()
         income = cps(ev)
         cash += income * step
+        qs["boost"] = max(0.0, qs["boost"] - step)
+        qs["luck"] = max(0.0, qs["luck"] - step)
         if ev == "GoldenRain":
             lab_seconds = ((BIG_COIN_CHANCE - 1) * COIN_INCOME_SECONDS + BIG_COIN_INCOME_SECONDS) / BIG_COIN_CHANCE
             cash += income * COIN_PICKUP * lab_seconds / COIN_INTERVAL * step
@@ -354,6 +475,8 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
                 bonus = VOID_MOON_FUSION_BONUS if ev == "VoidMoon" else 0
                 if rng.random() < min(1, FUSE_CHANCE[tr][FUSE_COUNT] + bonus):
                     add(TIERS[TIERS.index(tr) + 1], roll_mut(True, ev))
+                    if TIERS[TIERS.index(tr) + 1] == "Mythic":
+                        qs["fused_mythic"] += 1
                 else:
                     inv[(tr, "None")] += 1
         if pulls >= 1: mark("first_pull")
@@ -361,7 +484,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         for tr in TIERS[1:]:
             if tr in owned: mark(f"first_{tr}")
         for mu in MUT_MULT:
-            if mu != "None" and any(n > 0 and m == mu for (tr, m), n in inv.items()):
+            if mu != "None" and any(n > 0 and mu in stack_parts(m) for (tr, m), n in inv.items()):
                 mark(f"first_{mu}")
         if mult_lvl == len(MULT_LEVELS): mark("mult_max")
         if gen["sing"] >= 10: mark("sing_lv10")
@@ -430,6 +553,8 @@ if __name__ == "__main__":
         DEPTH = False
     if "--events" in sys.argv:
         EVENTS = True
+    if "--quests" in sys.argv:
+        QUESTS = True
     sessions = 0
     for a in sys.argv:
         if a.startswith("--fuse="):
@@ -457,6 +582,21 @@ if __name__ == "__main__":
     print(f"after {hours:g} h: rebirths median", sorted(r[2] for r in runs)[mid],
           " index entries median", sorted(r[3] for r in runs)[mid], "/", sum(ITEMS_PER_TIER.values()) * INDEX_VARIANTS,
           " cps median", f"{sorted(r[1] for r in runs)[mid]:.3g}")
+    if QUESTS:
+        # The same seeds without quests: what the average player's dailies
+        # and chain change (target: free Rebirth 1 stays ~1:04 +-10%).
+        QUESTS = False
+        base = [run(s, hours * 3600) for s in range(seeds)]
+        QUESTS = True
+        print("quests vs. none (same seeds), median:")
+        for k in ["rebirth1", "rebirth2", "rebirth3"]:
+            a = sorted(r[0].get(k, 1e12) for r in base)[mid]
+            b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
+            if a < 1e12 and b < 1e12:
+                print(f"  {k:10s} none {fmt(a)}  quests {fmt(b)}  {(a - b) / a:+.1%} sooner")
+        for k in [f"chain{i}" for i in range(1, len(QUEST_CHAIN) + 1)]:
+            vals = sorted(r[0].get(k, 1e12) for r in runs)
+            print(f"  {k:10s} median {fmt(vals[mid] if vals[mid] < 1e12 else None)}")
     if EVENTS:
         # The same seeds without events: how much the clock speeds Rebirth
         # 1-3 (target: at most 15% sooner).

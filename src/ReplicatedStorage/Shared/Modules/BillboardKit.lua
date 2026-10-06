@@ -440,6 +440,7 @@ end
 export type PedestalInfo = {
 	Tier: string,
 	Mutation: string?, -- shows as an Ink "GOLDEN ×2" chip on the label's top edge
+	EventMutations: { string }?, -- stacked: "RAINBOW · CHARGED ×14"
 	ItemName: string,
 	Rate: number, -- per second, owner's multiplier included
 	Stolen: boolean?, -- a thief is carrying it: "STOLEN!" in Danger, no income
@@ -546,16 +547,21 @@ end
 
 -- Shows or hides the filled label's mutation chip. Rainbow is white text
 -- and outline under the rainbow gradient (intended tinting).
-local function setMutationChip(gui: BillboardGui, mutation: string?)
+local function setMutationChip(gui: BillboardGui, base: string?, events: { string }?)
 	local chip = gui:FindFirstChild("MutationChip") :: Frame?
 	if not chip then
 		return
 	end
 	-- Pedestal labels refresh on every sync; only rebuild on a change.
-	if chip:GetAttribute("Mutation") == (mutation or "") then
+	local label = MutationConfig.GetStackLabel(base, events)
+	if chip:GetAttribute("Mutation") == label then
 		return
 	end
-	chip:SetAttribute("Mutation", mutation or "")
+	chip:SetAttribute("Mutation", label)
+	-- The chip's colour is the top of the stack; the text names them all.
+	local mutation = MutationConfig.GetTop(base, events)
+	local stacked = #MutationConfig.List(base, events) > 1
+	chip.Size = UDim2.fromScale(if stacked then 0.92 else 0.56, 0.26)
 	local text = chip:FindFirstChild("Text") :: TextLabel
 	local outline = chip:FindFirstChild("Outline") :: UIStroke
 	local color = UITheme.GetMutationColor(mutation)
@@ -571,7 +577,7 @@ local function setMutationChip(gui: BillboardGui, mutation: string?)
 		return
 	end
 	chip.Visible = true
-	text.Text = ("%s ×%d"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation))
+	text.Text = ("%s ×%d"):format(label, MutationConfig.GetStackedMultiplier(base, events))
 	if mutation == "Rainbow" then
 		text.TextColor3 = Colors.White
 		outline.Color = Colors.White
@@ -589,7 +595,10 @@ end
 
 -- A locked spot (the +2 Pedestals pass): the owner-only empty label reads
 -- "🔒 +2 PEDESTALS" instead of "+ EMPTY". Call after SetPedestalLabel(nil).
-function BillboardKit.SetPedestalLocked(pedestal: BasePart, locked: boolean)
+-- `reason`: "Pass" (spots 5-6, the +2 Pedestals pass), "Floor" (the 2nd
+-- floor, Rebirth 2) or nil (unlocked: "+ EMPTY").
+function BillboardKit.SetPedestalLocked(pedestal: BasePart, reason: string?)
+	local locked = reason ~= nil
 	local empty = pedestal:FindFirstChild("EmptyLabel")
 	local panel = empty and empty:FindFirstChild("Panel")
 	if not panel then
@@ -599,7 +608,7 @@ function BillboardKit.SetPedestalLocked(pedestal: BasePart, locked: boolean)
 	local badge = panel:FindFirstChild("Plus")
 	local glyph = badge and badge:FindFirstChild("Glyph")
 	if word and word:IsA("TextLabel") then
-		word.Text = if locked then "+2 PEDESTALS" else "EMPTY"
+		word.Text = if reason == "Floor" then "REBIRTH 2" elseif locked then "+2 PEDESTALS" else "EMPTY"
 		word.TextColor3 = if locked then Colors.GoldLabel else Colors.Muted
 	end
 	if glyph and glyph:IsA("TextLabel") then
@@ -628,7 +637,7 @@ function BillboardKit.SetPedestalLabel(pedestal: BasePart, info: PedestalInfo?)
 		local rateLabel = panel:FindFirstChild("Rate") :: TextLabel
 		tierLabel.Text = if info.Stolen then "STOLEN!" else info.Tier:upper()
 		tierLabel.TextColor3 = if info.Stolen then Colors.Danger else UITheme.GetTierLight(info.Tier)
-		setMutationChip(filledGui, info.Mutation)
+		setMutationChip(filledGui, info.Mutation, info.EventMutations)
 		nameLabel.Text = info.ItemName
 		rateLabel.Text = if info.Stolen then "+$0/s" else ("+%s/s"):format(NumberFormat.Money(info.Rate))
 		rateLabel.TextColor3 = if info.Stolen then Colors.Muted else Colors.Cash

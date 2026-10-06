@@ -104,10 +104,15 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
 		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
 		AdminAction = { {}, { { Action = "Nope" } }, { { Action = "StartEvent", Args = { Id = "Nope" } } } },
+		-- Never a real quest or power-up: junk ids / keys and types.
+		ClaimQuest = { {}, { "x" }, { { Id = 5 } }, { { Id = "nope" } }, { { Id = BIG_STRING } }, { { Id = { "chain" } } } },
+		UsePowerUp = { {}, { "x" }, { { Key = 5 } }, { { Key = "Nope" } }, { { Key = BIG_STRING } }, { { Key = { "CashBurst" } } } },
 	}
 	for _, n in junkNumbers do
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
+		table.insert(cases.ClaimQuest, { { Id = n } })
+		table.insert(cases.UsePowerUp, { { Key = n } })
 		table.insert(cases.MarkDealPopup, { { Slot = n } })
 		table.insert(cases.RequestHit, { { Weapon = "Bat", TargetUserId = n } })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })

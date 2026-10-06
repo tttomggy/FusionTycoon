@@ -3,8 +3,9 @@
 	ItemService
 	-----------
 	Pedestals show the player's best items automatically (Playtest 7):
-	highest $/s first (TycoonConfig.GetItemCashPerSecond), filling spots 1
-	-> 4 (-> 6 with the +2 Pedestals pass). Players never choose; there are
+	highest $/s first (TycoonConfig.GetStackCashPerSecond), filling spots 1
+	-> 4 (-> 6 with the +2 Pedestals pass), then the 2nd floor's 7 -> 10
+	from Rebirth 2 (PlayerDataService.GetPedestalOrder). Players never choose; there are
 	no place / remove requests any more.
 
 	ItemService.Arrange(player) is the ONE function that decides it. It runs
@@ -42,6 +43,9 @@ local TycoonService: TycoonServiceModule
 
 local ItemService = {}
 
+-- How many pedestals each player could use at their last arrange.
+local lastOrderCount: { [number]: number } = {}
+
 ItemService.Name = "ItemService"
 
 local function getPedestalPart(plot: Model, pedestalIndex: number): BasePart?
@@ -77,8 +81,8 @@ end
 -- The order pedestals fill in: $/s, then tier, then whatever is already up
 -- (no needless shuffling between equals), then Uid (stable).
 local function better(a: any, b: any, currentIndex: { [string]: number }): boolean
-	local rateA = TycoonConfig.GetItemCashPerSecond(a.Tier, a.Mutation)
-	local rateB = TycoonConfig.GetItemCashPerSecond(b.Tier, b.Mutation)
+	local rateA = TycoonConfig.GetStackCashPerSecond(a)
+	local rateB = TycoonConfig.GetStackCashPerSecond(b)
 	if rateA ~= rateB then
 		return rateA > rateB
 	end
@@ -93,7 +97,8 @@ local function better(a: any, b: any, currentIndex: { [string]: number }): boole
 	return a.Uid < b.Uid
 end
 
--- The one re-arrange: pedestals 1..count get the best free items in order;
+-- The one re-arrange: the unlocked pedestals, in fill order, get the best
+-- free items;
 -- a carried item's pedestal is left exactly as it is. Updates the data
 -- (displays + InUse), the visuals of every pedestal that changed, the
 -- labels, and the client's inventory tags. Never syncs (it runs inside one).
@@ -106,7 +111,11 @@ function ItemService.Arrange(player: Player)
 		return
 	end
 	local displays = PlayerDataService.GetPedestalDisplays(player)
-	local count = PlayerDataService.GetPedestalCount(player)
+	local order = PlayerDataService.GetPedestalOrder(player)
+	-- A new unlock (the pass, Rebirth 2's floor) restyles the locked spots
+	-- even when nothing moves.
+	local orderChanged = lastOrderCount[player.UserId] ~= #order
+	lastOrderCount[player.UserId] = #order
 
 	-- Pedestals held by a heist, and the items on them.
 	local fixed: { [number]: string } = {}
@@ -133,11 +142,12 @@ function ItemService.Arrange(player: Player)
 	end)
 
 	local wanted: { [number]: string } = {}
+	for index, uid in fixed do
+		wanted[index] = uid
+	end
 	local next = 1
-	for index = 1, PlotLayout.PEDESTAL_COUNT do
-		if fixed[index] then
-			wanted[index] = fixed[index]
-		elseif index <= count and candidates[next] then
+	for _, index in order do
+		if not fixed[index] and candidates[next] then
 			wanted[index] = candidates[next].Uid
 			next += 1
 		end
@@ -168,6 +178,9 @@ function ItemService.Arrange(player: Player)
 		end
 	end
 	if #changed == 0 and not inUseChanged then
+		if orderChanged then
+			TycoonService.RefreshPedestalLabels(player)
+		end
 		return
 	end
 	for _, index in changed do
@@ -182,7 +195,7 @@ function ItemService.Arrange(player: Player)
 			local item = uid and PlayerDataService.GetItemByUid(player, uid)
 			if pedestal then
 				if item then
-					PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+					PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 				else
 					PedestalVisuals.Clear(pedestal)
 				end
@@ -224,13 +237,16 @@ function ItemService.RebuildDisplayVisuals(player: Player)
 		local item = PlayerDataService.GetItemByUid(player, uid)
 		-- A carried item's pedestal is HeistService's until the heist ends.
 		if pedestal and item and not PlayerDataService.IsItemCarried(player, uid) then
-			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation)
+			PedestalVisuals.Apply(pedestal, item.Tier, item.Mutation, item.EventMutations)
 		end
 	end
 end
 
 function ItemService:Init()
-	-- Nothing to connect: the pedestals arrange themselves in every sync.
+	-- Nothing else to connect: the pedestals arrange themselves in every sync.
+	game:GetService("Players").PlayerRemoving:Connect(function(player)
+		lastOrderCount[player.UserId] = nil
+	end)
 end
 
 function ItemService:Start()

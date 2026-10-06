@@ -340,7 +340,7 @@ local function popPedestals(dt: number, cameraPosition: Vector3)
 		local group = elements and elements:FindFirstChild("OrbGroup")
 		local orb = group and group:FindFirstChild("Orb")
 		if item and orb and orb:IsA("BasePart") and (orb.Position - cameraPosition).Magnitude <= PEDESTAL_POP_RADIUS then
-			local value = TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * multiplier * PEDESTAL_POP_SECONDS
+			local value = TycoonConfig.GetStackCashPerSecond(item) * multiplier * PEDESTAL_POP_SECONDS
 			if value > 0 then
 				local top = orb.Position + Vector3.new(0, orb.Size.Y / 2 + PEDESTAL_POP_ABOVE_ORB, 0)
 				HudController.FloatPop(top, "+" .. NumberFormat.Money(value), UITheme.GetTierLight(item.Tier))

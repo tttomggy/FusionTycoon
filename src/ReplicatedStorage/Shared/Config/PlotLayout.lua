@@ -67,7 +67,7 @@ end
 -- does the keeping-out. Clients draw the rest (HeistController): the
 -- pulsing lock over the gate and the gate sign every player sees.
 PlotLayout.ShieldFence = {
-	Height = 12, -- taller than a character (was 10), up to the sign posts
+	Height = 18, -- covers a character on the 2nd floor (deck top 12; was 12)
 	Thickness = 0.2,
 	OutsetFromWall = 0.4, -- gap between the wall's outer face and the panel
 	TopEdgeHeight = 0.3, -- the glowing Neon strip along each panel's top
@@ -88,16 +88,85 @@ PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
--- Every lab builds all 6; spots 5-6 (a second row behind the first, between
--- its pairs) only work with the +2 Pedestals pass (ShopConfig: 4 base,
--- 6 with the pass). Without it they're a dim plinth with a locked label.
-PlotLayout.PEDESTAL_COUNT = 6
-PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17, -11.5, 11.5 } -- face +Z (the gate)
-PlotLayout.PEDESTAL_ZS = { -2, -2, -2, -2, -10, -10 }
+-- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind
+-- the first, between its pairs) only with the +2 Pedestals pass (ShopConfig:
+-- 4 base, 6 with the pass); without it they're a dim plinth with a locked
+-- label. 7-10 stand on the 2nd floor (PlotLayout.Floor2), unlocked at
+-- RebirthConfig.SecondFloorRebirths.
+PlotLayout.GROUND_PEDESTAL_COUNT = 6
+PlotLayout.PEDESTAL_COUNT = 10
+PlotLayout.PEDESTAL_XS = { -17, -6, 6, 17, -11.5, 11.5, -27, -21, -27, -21 } -- face +Z (the gate)
+PlotLayout.PEDESTAL_ZS = { -2, -2, -2, -2, -10, -10, -28, -28, -21, -21 }
 PlotLayout.LockedPedestalTransparency = 0.55 -- the dim plinth (column + cap)
 -- The VIP pass's gold band along the top of each wall's outer face.
 PlotLayout.VipTrimHeight = 0.35
 PlotLayout.VipTrimDepth = 0.12
+
+--[[ 2nd floor (Rebirth 2) -------------------------------------------------------
+	A mezzanine deck over the back-left of the lab (above the collector and
+	the end of the factory belt; the Fusion Machine and the portal stay open
+	to the sky). Pedestals 7-10 stand on it in a 2 x 2 grid. A jump pad on
+	the floor in front of it (client-side launch, JumpPadController) throws
+	you up through a gap in the front railing; you jump off to come down.
+	Neon top rails on SmoothPlastic posts round every edge but the gap.
+	The assertion block checks: inside the walls, the pedestals on the deck
+	and clear of the railings and the landing, the columns and the pad clear
+	of every floor footprint, and headroom over whatever stands under it.
+]]
+PlotLayout.Floor2 = {
+	FirstPedestal = 7, -- pedestals FirstPedestal..PEDESTAL_COUNT are up here
+	MinX = -31,
+	MaxX = -11,
+	MinZ = -31,
+	MaxZ = -16, -- the open front edge
+	TopY = 12, -- deck top, above the plot floor
+	Thickness = 1,
+	EdgeStripHeight = 0.2, -- Neon band along the open edges' faces (side-on)
+	ColumnSize = 1,
+	Columns = { v3(-11.5, 0, -16.5), v3(-30.5, 0, -16.5), v3(-11.5, 0, -30.5) },
+	RailHeight = 3, -- above the deck top
+	RailPostSize = 0.3,
+	RailPostSpacing = 4,
+	RailThickness = 0.2, -- the Neon top rail (a thin bar seen from the side)
+	RailInset = 0.25, -- from the deck edge to the rail's centre line
+	LandingMinX = -18, -- the gap in the front railing, over the jump pad
+	LandingMaxX = -13,
+	Headroom = 2, -- studs between the tallest thing under the deck and its bottom
+	LabelOffsetY = 8, -- the owner-only "🔒 2ND FLOOR" label, above the deck top
+	LabelMaxDistance = 90,
+	JumpPad = {
+		Position = v3(-15.5, 0, -13.5),
+		Radius = 1.75,
+		Height = 0.3,
+		-- Plot-local launch velocity (studs/s): up past the deck top and back
+		-- over the front edge (workspace gravity 196.2).
+		LaunchVelocity = v3(0, 78, -14),
+		CooldownSeconds = 0.8,
+		TriggerHeight = 3, -- root at most this far above the pad top
+		LabelOffsetY = 4,
+		LabelMaxDistance = 60,
+	},
+}
+
+function PlotLayout.IsFloor2Pedestal(index: number): boolean
+	return index >= PlotLayout.Floor2.FirstPedestal and index <= PlotLayout.PEDESTAL_COUNT
+end
+
+-- The order auto-display fills the pedestals in: ground 1 -> 4, 5 -> 6 with
+-- the +2 Pedestals pass, then the 2nd floor 7 -> 10 once it's unlocked.
+function PlotLayout.GetPedestalOrder(extraPedestals: boolean, secondFloor: boolean): { number }
+	local order = { 1, 2, 3, 4 }
+	if extraPedestals then
+		table.insert(order, 5)
+		table.insert(order, 6)
+	end
+	if secondFloor then
+		for index = PlotLayout.Floor2.FirstPedestal, PlotLayout.PEDESTAL_COUNT do
+			table.insert(order, index)
+		end
+	end
+	return order
+end
 
 PlotLayout.FUSION_MACHINE = v3(0, 0, -19)
 PlotLayout.ODDS_BOARD = v3(14, 0, -19) -- Events 2: 13 -> 14 for the 9-wide board (clear of the machine and the portal)
@@ -224,8 +293,10 @@ function PlotLayout.GetBeltLength(): number
 	return belt.StartZ - belt.EndZ
 end
 
+-- Plot-local base of a pedestal (y = the deck top for the 2nd floor).
 function PlotLayout.GetPedestalPosition(index: number): Vector3
-	return v3(PlotLayout.PEDESTAL_XS[index], 0, PlotLayout.PEDESTAL_ZS[index])
+	local y = if PlotLayout.IsFloor2Pedestal(index) then PlotLayout.Floor2.TopY else 0
+	return v3(PlotLayout.PEDESTAL_XS[index], y, PlotLayout.PEDESTAL_ZS[index])
 end
 
 --[[ Station pads (StationKit) ---------------------------------------------- ]]
@@ -480,10 +551,16 @@ local function collectFootprints(): ({ Footprint }, { Footprint }, Footprint)
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
 		boxFootprint("LockConsole", PlotLayout.LOCK_CONSOLE, PlotLayout.LockConsole.Footprint, PlotLayout.LockConsole.Footprint),
 	}
-	for index = 1, PlotLayout.PEDESTAL_COUNT do
+	for index = 1, PlotLayout.GROUND_PEDESTAL_COUNT do
 		local cap = PlotLayout.Pedestal.CapSize
 		table.insert(footprints, boxFootprint("Pedestal" .. index, PlotLayout.GetPedestalPosition(index), cap.X, cap.Z))
 	end
+	-- The 2nd floor's feet on the ground floor: its columns and the jump pad.
+	local f2 = PlotLayout.Floor2
+	for index, column in f2.Columns do
+		table.insert(footprints, boxFootprint("Floor2Column" .. index, column, f2.ColumnSize, f2.ColumnSize))
+	end
+	table.insert(footprints, circle("JumpPad", f2.JumpPad.Position, f2.JumpPad.Radius))
 	-- The factory line: generators (with the Spout reaching toward the belt),
 	-- the belt, the collector, and the Rebirth Portal's corner.
 	local factory: { Footprint } = {}
@@ -529,6 +606,77 @@ function PlotLayout.IsFloorPointFree(x: number, z: number, margin: number): bool
 			end
 		end
 	end
+	return true
+end
+
+-- The 2nd floor's own checks (also run by /selftest): inside the walls, its
+-- pedestals on the deck, clear of each other, the railings and the landing;
+-- headroom over everything under it; the shield fence and the inside box
+-- tall enough to cover it. Returns true or errors with the reason.
+function PlotLayout.CheckFloor2(): boolean
+	local f2 = PlotLayout.Floor2
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
+	local deck = rect("Floor2", f2.MinX, f2.MaxX, f2.MinZ, f2.MaxZ)
+	assert(
+		f2.MinX >= -inner and f2.MaxX <= inner and f2.MinZ >= -inner and f2.MaxZ <= inner,
+		"PlotLayout: the 2nd floor sits outside the walls"
+	)
+	assert(f2.FirstPedestal == PlotLayout.GROUND_PEDESTAL_COUNT + 1, "PlotLayout: 2nd-floor pedestals follow the ground ones")
+	local cap = PlotLayout.Pedestal.CapSize
+	local railClear = f2.RailInset + f2.RailPostSize
+	local landing = rect("Landing", f2.LandingMinX, f2.LandingMaxX, f2.MaxZ - 4, f2.MaxZ)
+	local caps: { Footprint } = {}
+	for index = f2.FirstPedestal, PlotLayout.PEDESTAL_COUNT do
+		local foot = boxFootprint("Pedestal" .. index, PlotLayout.GetPedestalPosition(index), cap.X, cap.Z)
+		local minX, maxX, minZ, maxZ = bounds(foot)
+		assert(
+			minX >= f2.MinX + railClear and maxX <= f2.MaxX - railClear
+				and minZ >= f2.MinZ + railClear and maxZ <= f2.MaxZ - railClear,
+			("PlotLayout: Pedestal%d is not on the 2nd floor, clear of its railings"):format(index)
+		)
+		assert(not overlaps(foot, landing), ("PlotLayout: Pedestal%d blocks the jump-pad landing"):format(index))
+		for _, other in caps do
+			assert(not overlaps(foot, other), ("PlotLayout: %s overlaps %s"):format(foot.Name, other.Name))
+		end
+		table.insert(caps, foot)
+	end
+	assert(
+		f2.LandingMinX > f2.MinX and f2.LandingMaxX < f2.MaxX,
+		"PlotLayout: the landing gap must be inside the front railing"
+	)
+	local pad = f2.JumpPad.Position
+	assert(
+		pad.X - f2.JumpPad.Radius >= f2.LandingMinX and pad.X + f2.JumpPad.Radius <= f2.LandingMaxX and pad.Z > f2.MaxZ,
+		"PlotLayout: the jump pad must sit in front of the landing gap"
+	)
+	-- Headroom: the Fusion Machine, the portal and the odds board stay out
+	-- from under it; whatever is under it is short enough.
+	local bottom = f2.TopY - f2.Thickness
+	-- What may stand under the deck, and how tall it gets (top y, labels
+	-- and the factory balls' arc included).
+	local ball = PlotLayout.FactoryBall
+	local under: { [string]: number } = {
+		Collector = PlotLayout.Collector.LabelOffsetY + 1,
+		FactoryBelt = PlotLayout.FactoryBelt.Height + ball.ArcRise + ball.Diameter.Mythic,
+	}
+	local footprints, factory = collectFootprints()
+	local mustBeClear = { FusionMachine = true, OddsBoard = true, RebirthPortal = true }
+	for _, list in { footprints, factory } do
+		for _, footprint in list do
+			if overlaps(footprint, deck) and not string.find(footprint.Name, "^Floor2Column") then
+				local top = under[footprint.Name]
+				assert(not mustBeClear[footprint.Name], ("PlotLayout: the 2nd floor covers the %s"):format(footprint.Name))
+				assert(top ~= nil, ("PlotLayout: %s stands under the 2nd floor with no height in CheckFloor2's list"):format(footprint.Name))
+				assert(
+					top + f2.Headroom <= bottom,
+					("PlotLayout: no headroom for %s under the 2nd floor"):format(footprint.Name)
+				)
+			end
+		end
+	end
+	-- Heists cover the deck: inside-box and fence above a character on it.
+	assert(PlotLayout.INSIDE_MAX_Y >= f2.TopY + 6, "PlotLayout: IsInsidePlot must reach above the 2nd floor")
+	assert(PlotLayout.ShieldFence.Height >= f2.TopY + 6, "PlotLayout: the shield fence must cover the 2nd floor")
 	return true
 end
 
@@ -590,7 +738,7 @@ local function checkLayout()
 
 	-- Pedestals must stay clear of the walkway.
 	local walkwayHalf = PlotLayout.WALKWAY_WIDTH / 2
-	for index = 1, PlotLayout.PEDESTAL_COUNT do
+	for index = 1, PlotLayout.GROUND_PEDESTAL_COUNT do
 		local x = PlotLayout.PEDESTAL_XS[index]
 		assert(
 			math.abs(x - PlotLayout.WALKWAY_X) - PlotLayout.Pedestal.CapSize.X / 2 >= walkwayHalf,
@@ -599,6 +747,7 @@ local function checkLayout()
 	end
 	assert(#PlotLayout.PEDESTAL_XS == PlotLayout.PEDESTAL_COUNT, "PlotLayout: PEDESTAL_XS must list every pedestal")
 	assert(#PlotLayout.PEDESTAL_ZS == PlotLayout.PEDESTAL_COUNT, "PlotLayout: PEDESTAL_ZS must list every pedestal")
+	PlotLayout.CheckFloor2()
 
 	-- The gate gap must fit inside the sign posts, and the slots must not
 	-- overlap each other.

@@ -76,12 +76,18 @@ local showSkippedLine: (item: any, extra: string?) -> () -- the skipped-card lin
 -- "Golden Star Core" for a mutated item, "Star Core" otherwise.
 local function itemName(item: any): string
 	local def = ItemConfig.GetItemById(item.ItemId)
-	return MutationConfig.GetDisplayName(if def then def.Name else tostring(item.ItemId), item.Mutation)
+	return MutationConfig.GetDisplayName(if def then def.Name else tostring(item.ItemId), item.Mutation, item.EventMutations)
 end
 
--- What `item` earns on a pedestal, income multiplier included.
+-- What `item` earns on a pedestal (its whole stack), income multiplier
+-- included.
 local function earnRate(item: any): number
-	return TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation) * TycoonController.GetIncomeMultiplier()
+	return TycoonConfig.GetStackCashPerSecond(item) * TycoonController.GetIncomeMultiplier()
+end
+
+-- The top mutation of an item's stack (orb ring, card stroke, colours).
+local function topOf(item: any): string?
+	return MutationConfig.GetTop(item.Mutation, item.EventMutations)
 end
 
 --[[ Big result card -------------------------------------------------------------- ]]
@@ -229,16 +235,17 @@ local function showBigCard(info: BigCardInfo)
 		Parent = body,
 	})
 
-	UIKit.MutationCardStroke(body, info.Item.Mutation)
-	local orb = UIKit.TierOrb(tier, 132, nil, info.Item.Mutation)
+	UIKit.MutationCardStroke(body, topOf(info.Item))
+	local orb = UIKit.TierOrb(tier, 132, nil, topOf(info.Item))
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 116)
 	orb.ZIndex = z
 	orb.Parent = body
-	local sourceLine = if info.Item.Mutation then info.SourceLine else nil
+	local sourceLine = if topOf(info.Item) then info.SourceLine else nil
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = info.Item.Mutation,
+		EventMutations = info.Item.EventMutations,
 		AnchorPoint = Vector2.new(if sourceLine then 1 else 0.5, 0),
 		Position = UDim2.new(0.5, if sourceLine then -4 else 0, 0, 228),
 		TextSize = 14,
@@ -251,7 +258,7 @@ local function showBigCard(info: BigCardInfo)
 			Text = sourceLine,
 			Font = Fonts.Display,
 			TextSize = 16,
-			TextColor3 = UITheme.GetMutationColor(info.Item.Mutation) or Colors.Text,
+			TextColor3 = UITheme.GetMutationColor(topOf(info.Item)) or Colors.Text,
 			Position = UDim2.new(0.5, 4, 0, 228),
 			Size = UDim2.new(0.5, -16, 0, 24),
 			ZIndex = z + 1,
@@ -367,7 +374,10 @@ local function indexCount(mutation: string): (number, number)
 	return found, #ItemConfig.Items
 end
 
-local function showEventMutationCard(item: any, newIndex: boolean)
+-- `added`: the event mutation this card is about (default: the item's top
+-- event mutation). `stacked`: it landed on an item that already had a
+-- mutation, so the word reads "+ CHARGED (stacked!)".
+local function showEventMutationCard(item: any, newIndex: boolean, added: string?, stacked: boolean?)
 	if bigHolder then
 		if sunburstConnection then
 			sunburstConnection:Disconnect()
@@ -376,7 +386,8 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 		(bigHolder :: Frame):Destroy()
 		bigHolder = nil
 	end
-	local mutation = item.Mutation :: string
+	local events: { string } = item.EventMutations or {}
+	local mutation = (if added and MutationConfig.IsEventOnly(added) then added else events[#events] or "Charged") :: string
 	local color = UITheme.GetMutationColor(mutation) or Colors.Text
 	local tier = item.Tier :: string
 
@@ -420,17 +431,26 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 		})
 	end
 	label("Caption", "EVENT-ONLY MUTATION", Fonts.BodyHeavy, 14, 18, 18, color)
-	label("Word", mutation:upper() .. "!", Fonts.Display, 44, 38, 52, color, 4)
+	if stacked then
+		label("Word", ("+ %s (stacked!)"):format(mutation:upper()), Fonts.Display, 36, 42, 46, color, 4)
+	else
+		label("Word", mutation:upper() .. "!", Fonts.Display, 44, 38, 52, color, 4)
+	end
 	local orb = UIKit.TierOrb(tier, 112, nil, mutation)
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 96)
 	orb.ZIndex = z
 	orb.Parent = body
 	label("ItemName", itemName(item), Fonts.Display, 24, 214, 30, Colors.Text, UITheme.Stroke.Text)
+	-- The whole stack, side by side ("RAINBOW · CHARGED ×14"), or the one.
+	local stackedPill = #MutationConfig.List(item.Mutation, events) > 1
 	UIKit.MutationPill({
 		Parent = body,
-		Mutation = mutation,
-		Label = ("%s ×%d income"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation)),
+		Mutation = if stackedPill then item.Mutation else mutation,
+		EventMutations = if stackedPill then events else nil,
+		Label = if stackedPill
+			then nil
+			else ("%s ×%d income"):format(mutation:upper(), MutationConfig.GetMultiplier(mutation)),
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, 250),
 		TextSize = 15,
@@ -506,9 +526,10 @@ local function showEventMutationCard(item: any, newIndex: boolean)
 	SoundKit.Play("EventReveal", holder)
 end
 
--- An event-only mutation always gets the reveal card instead.
+-- An event-only mutation always gets the reveal card instead (a pull's
+-- event roll, a meteor core's Celestial).
 local function isEventMutation(item: any): boolean
-	return typeof(item) == "table" and MutationConfig.IsEventOnly(item.Mutation)
+	return typeof(item) == "table" and typeof(item.EventMutations) == "table" and #item.EventMutations > 0
 end
 
 --[[ Pull x10 grid -------------------------------------------------------------------- ]]
@@ -537,7 +558,7 @@ local function pullRank(tier: string): number
 end
 
 local function itemValue(item: any): number
-	return TycoonConfig.GetItemCashPerSecond(item.Tier, item.Mutation)
+	return TycoonConfig.GetStackCashPerSecond(item)
 end
 
 local function buildMiniCard(parent: Instance, item: any, order: number, isBest: boolean, z: number): Frame
@@ -554,9 +575,9 @@ local function buildMiniCard(parent: Instance, item: any, order: number, isBest:
 		ZIndex = z,
 	})
 	if not isBest then
-		UIKit.MutationCardStroke(body, item.Mutation)
+		UIKit.MutationCardStroke(body, topOf(item))
 	end
-	local orb = UIKit.TierOrb(item.Tier, 44, nil, item.Mutation)
+	local orb = UIKit.TierOrb(item.Tier, 44, nil, topOf(item))
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 10)
 	orb.ZIndex = z + 1
@@ -564,6 +585,7 @@ local function buildMiniCard(parent: Instance, item: any, order: number, isBest:
 	UIKit.MutationPill({
 		Parent = body,
 		Mutation = item.Mutation,
+		EventMutations = item.EventMutations,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -4, 0, 4),
 		TextSize = 10,
@@ -692,7 +714,7 @@ local function showMultiCard(items: { any }, title: string?)
 		end
 		-- The best pull also gets the big card (and its reveal) if it
 		-- qualifies on its own.
-		if multiHolder == holder and ResultController.ShowsBigCardFor(best.Tier, best.Mutation) then
+		if multiHolder == holder and ResultController.ShowsBigCardFor(best.Tier, topOf(best)) then
 			showBigCard({
 				Caption = ("BEST OF %d"):format(#items),
 				Item = best,
@@ -876,7 +898,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 	})
 	bigHolder = holder
 	UIKit.SetOverlay("ResultCard", true)
-	UIKit.MutationCardStroke(body, item.Mutation)
+	UIKit.MutationCardStroke(body, topOf(item))
 	local z = body.ZIndex + 3
 	UIKit.Label({
 		Name = "Caption",
@@ -904,7 +926,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 		Stroke = 4,
 		Parent = body,
 	})
-	local orb = UIKit.TierOrb(item.Tier, 96, nil, item.Mutation)
+	local orb = UIKit.TierOrb(item.Tier, 96, nil, topOf(item))
 	orb.AnchorPoint = Vector2.new(0.5, 0)
 	orb.Position = UDim2.new(0.5, 0, 0, 100)
 	orb.ZIndex = z
@@ -1133,7 +1155,7 @@ local function showFuseAllCard(result: any)
 			LayoutOrder = 5,
 			ZIndex = z,
 		})
-		local orb = UIKit.TierOrb(best.Tier, 38, nil, best.Mutation)
+		local orb = UIKit.TierOrb(best.Tier, 38, nil, topOf(best))
 		orb.AnchorPoint = Vector2.new(0, 0.5)
 		orb.Position = UDim2.new(0, 12, 0.5, 0)
 		orb.ZIndex = row.ZIndex + 1
@@ -1267,7 +1289,7 @@ local function showFailCard(item: any, lostCount: number, safe: boolean?)
 	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
 	local z = body.ZIndex + 1
 
-	local orb = UIKit.TierOrb(tier, 56, 0.15, item.Mutation)
+	local orb = UIKit.TierOrb(tier, 56, 0.15, topOf(item))
 	orb.AnchorPoint = Vector2.new(0, 0.5)
 	orb.Position = UDim2.new(0, 16, 0.5, 0)
 	orb.ZIndex = z
@@ -1291,8 +1313,10 @@ local function showFailCard(item: any, lostCount: number, safe: boolean?)
 			else ("Kept your %s (%s), lost %d"):format(
 				"<b>"
 					.. UIKit.Colored(
-						(if item.Mutation then item.Mutation .. " " else "") .. tier,
-						UITheme.GetMutationColor(item.Mutation) or UITheme.GetTierLight(tier)
+						(if topOf(item)
+							then MutationConfig.GetDisplayName(tier, item.Mutation, item.EventMutations)
+							else tier),
+						UITheme.GetMutationColor(topOf(item)) or UITheme.GetTierLight(tier)
 					)
 					.. "</b>",
 				UIKit.EscapeRichText(itemName(item)),
@@ -1427,7 +1451,7 @@ showSkippedLine = function(item: any, extra: string?)
 	line.LayoutOrder = skipOrder
 	line.ZIndex = 2
 	UIKit.Corner(line, 999)
-	UIKit.Stroke(line, 2, UITheme.GetMutationColor(item.Mutation) or Colors.Ink)
+	UIKit.Stroke(line, 2, UITheme.GetMutationColor(topOf(item)) or Colors.Ink)
 	UIKit.Padding(line, 0, 14, 0, 8)
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
@@ -1440,7 +1464,7 @@ showSkippedLine = function(item: any, extra: string?)
 	orb.LayoutOrder = 1
 	orb.ZIndex = 3
 	orb.Parent = line
-	local nameColor = UITheme.GetMutationColor(item.Mutation) or Colors.Text
+	local nameColor = UITheme.GetMutationColor(topOf(item)) or Colors.Text
 	UIKit.Label({
 		Name = "Text",
 		Text = ("%s  %s  %s%s"):format(
@@ -1471,12 +1495,19 @@ end
 -- Epic+ tiers, and Diamond/Rainbow at any tier.
 -- The big card for an item granted outside a pull or fusion (a meteor core,
 -- an admin gift): `caption` over the tier name, the earn rate under it.
-function ResultController.ShowItemCard(caption: string, item: any, description: string?, newIndex: boolean?)
+function ResultController.ShowItemCard(
+	caption: string,
+	item: any,
+	description: string?,
+	newIndex: boolean?,
+	added: string?,
+	stacked: boolean?
+)
 	if typeof(item) ~= "table" or typeof(item.Tier) ~= "string" or typeof(item.Uid) ~= "string" then
 		return
 	end
 	if isEventMutation(item) then
-		showEventMutationCard(item, newIndex == true)
+		showEventMutationCard(item, newIndex == true, added, stacked)
 		return
 	end
 	showBigCard({
@@ -1511,15 +1542,16 @@ function ResultController.FusionBannerShows(result: any): boolean
 	end
 	local item = result.NewItem
 	return typeof(item.Tier) == "string"
-		and not MutationConfig.IsEventOnly(item.Mutation)
-		and not ResultController.ShowsBigCardFor(item.Tier, item.Mutation)
+		and result.Added == nil
+		and not ResultController.ShowsBigCardFor(item.Tier, topOf(item))
 end
 
 -- "GOLDEN kept" (carried over from the inputs) or "GOLDEN rolled!" (a
 -- fresh fusion roll), from the server's MutationSource. Public so the
 -- fusion banner (AnnouncementController) can say it too.
 function ResultController.GetMutationSourceLine(mutation: string?, source: unknown): string?
-	if not mutation then
+	-- `mutation` may be a stack label ("GOLDEN · CHARGED"); "" = plain.
+	if not mutation or mutation == "" then
 		return nil
 	end
 	if source == "Kept" then
@@ -1539,12 +1571,22 @@ local function onFusionResolved(result: any)
 		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1, result.Safe == true)
 		return
 	end
-	if isEventMutation(newItem) then
-		showEventMutationCard(newItem, result.IsNewIndex == true or result.NewIndex == true)
+	-- A Void Moon stacked Void on: the reveal card. Kept event mutations
+	-- alone take the normal path below.
+	if typeof(result.Added) == "string" then
+		showEventMutationCard(
+			newItem,
+			result.IsNewIndex == true or result.NewIndex == true,
+			result.Added,
+			result.Stacked == true
+		)
 		return
 	end
-	local sourceLine = ResultController.GetMutationSourceLine(newItem.Mutation, result.MutationSource)
-	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
+	local sourceLine = ResultController.GetMutationSourceLine(
+		MutationConfig.GetStackLabel(newItem.Mutation, newItem.EventMutations),
+		result.MutationSource
+	)
+	if ResultController.ShowsBigCardFor(newItem.Tier, topOf(newItem)) then
 		showBigCard({
 			Caption = "FUSION SUCCESS",
 			SourceLine = sourceLine,
@@ -1601,10 +1643,10 @@ local function onGachaPullResult(payload: any)
 	end
 	local newItem = payload.NewItem
 	if isEventMutation(newItem) then
-		showEventMutationCard(newItem, payload.NewIndex == true)
+		showEventMutationCard(newItem, payload.NewIndex == true, nil, newItem.Mutation ~= nil)
 		return
 	end
-	if ResultController.ShowsBigCardFor(newItem.Tier, newItem.Mutation) then
+	if ResultController.ShowsBigCardFor(newItem.Tier, topOf(newItem)) then
 		showBigCard({
 			-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").
 			Caption = if typeof(payload.Caption) == "string" then payload.Caption else "YOU PULLED",

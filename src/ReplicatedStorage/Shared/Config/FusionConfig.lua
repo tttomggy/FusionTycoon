@@ -257,8 +257,9 @@ function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
 end
 
 --[[ Mutations in a fusion -------------------------------------------------------
-	A success keeps the LOWEST mutation among the inputs (so every input must
-	share it), then may roll a better one. The Fuse panel says so before
+	A success keeps the LOWEST base mutation among the inputs (so every input
+	must share it) AND only the event mutations every input shares (the
+	intersection), then may roll a better base / add an event one. The Fuse panel says so before
 	FUSE, and FusionService uses the same function for the result.
 ]]
 -- Inputs are any items with a Mutation field (inventory entries).
@@ -276,51 +277,94 @@ function FusionConfig.PredictMutation(inputs: { any }): string?
 	return lowest
 end
 
+-- The event mutations a success carries: only those EVERY input has (the
+-- intersection; MutationConfig.Intersect).
+function FusionConfig.PredictEventMutations(inputs: { any }): { string }?
+	local sets: { { string }? } = {}
+	for _, input in inputs do
+		local set: { string } = input.EventMutations or {}
+		table.insert(sets, set)
+	end
+	return MutationConfig.Intersect(sets)
+end
+
 export type MutationMix = {
-	Kept: string?, -- what a success carries (PredictMutation)
-	Best: string?, -- the highest input mutation (what mixing loses)
-	Mixed: boolean, -- Kept ~= Best: some inputs drag the result down
-	BelowCount: number, -- inputs ranked under Best
-	BelowMutation: string?, -- their shared mutation (nil = plain) …
-	BelowShared: boolean, -- … when they all share one
+	Kept: string?, -- the base a success carries (PredictMutation)
+	KeptEvents: { string }?, -- the event mutations it carries (the intersection)
+	Best: string?, -- the highest input base (what mixing loses)
+	AllEvents: { string }?, -- every event mutation any input has
+	Mixed: boolean, -- something is lost: a lower base, or an event not everyone has
+	BelowCount: number, -- inputs dragging the result down (IsDragging)
+	BelowMutation: string?, -- their shared base (nil = plain) …
+	BelowShared: boolean, -- … when they all share one and only the base is mixed
 }
 
 -- What the inputs' mutations do to a success, for the Fuse panel's line.
 function FusionConfig.GetMutationMix(inputs: { any }): MutationMix
 	local best: string? = nil
+	local union: { string } = {}
 	for _, input in inputs do
 		best = MutationConfig.Better(best, input.Mutation)
-	end
-	local kept = FusionConfig.PredictMutation(inputs)
-	local bestRank = MutationConfig.GetRank(best)
-	local count, shared, belowShared = 0, nil :: string?, true
-	for _, input in inputs do
-		if MutationConfig.GetRank(input.Mutation) < bestRank then
-			if count == 0 then
-				shared = input.Mutation
-			elseif input.Mutation ~= shared then
-				belowShared = false
+		for _, name in input.EventMutations or {} do
+			if not table.find(union, name) then
+				table.insert(union, name)
 			end
-			count += 1
 		end
 	end
-	return {
+	local kept = FusionConfig.PredictMutation(inputs)
+	local keptEvents = FusionConfig.PredictEventMutations(inputs)
+	local allEvents = MutationConfig.SanitizeEvents(union)
+	local eventsLost = #(allEvents or {}) > #(keptEvents or {})
+	local mix: MutationMix = {
 		Kept = kept,
+		KeptEvents = keptEvents,
 		Best = best,
-		Mixed = MutationConfig.GetRank(kept) < bestRank,
-		BelowCount = count,
-		BelowMutation = shared,
-		BelowShared = belowShared,
+		AllEvents = allEvents,
+		Mixed = MutationConfig.GetRank(kept) < MutationConfig.GetRank(best) or eventsLost,
+		BelowCount = 0,
+		BelowMutation = nil,
+		BelowShared = not eventsLost,
 	}
+	local first = true
+	for _, input in inputs do
+		if FusionConfig.IsDragging(mix, input) then
+			if first then
+				mix.BelowMutation = input.Mutation
+				first = false
+			elseif input.Mutation ~= mix.BelowMutation then
+				mix.BelowShared = false
+			end
+			mix.BelowCount += 1
+		end
+	end
+	return mix
+end
+
+-- Whether `input` drags a success down: a lower base than the best, or
+-- missing an event mutation another input has (the red ring).
+function FusionConfig.IsDragging(mix: MutationMix, input: any): boolean
+	if not mix.Mixed then
+		return false
+	end
+	if MutationConfig.GetRank(input.Mutation) < MutationConfig.GetRank(mix.Best) then
+		return true
+	end
+	local all: { string } = mix.AllEvents or {}
+	for _, name in all do
+		if not MutationConfig.HasEvent(input.EventMutations, name) then
+			return true
+		end
+	end
+	return false
 end
 
 -- Diamond and up (Diamond, Void, Rainbow, Celestial) get the major reveal
 -- whatever the tier.
 FusionConfig.MajorRevealMutationRank = 3
 
-function FusionConfig.IsMajorReveal(tier: string, mutation: string?): boolean
+function FusionConfig.IsMajorReveal(tier: string, mutation: string?, events: { string }?): boolean
 	return FusionConfig.MajorRevealTiers[tier] == true
-		or MutationConfig.GetRank(mutation) >= FusionConfig.MajorRevealMutationRank
+		or MutationConfig.GetRank(MutationConfig.GetTop(mutation, events)) >= FusionConfig.MajorRevealMutationRank
 end
 
 return FusionConfig

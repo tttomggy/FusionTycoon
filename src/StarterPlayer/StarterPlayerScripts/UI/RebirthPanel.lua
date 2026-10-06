@@ -190,9 +190,9 @@ local function refresh()
 		UIKit.Colored(percent(luckBonus(nextNumber)), Colors.Rebirth)
 	)
 
-	local unlock = RebirthConfig.GetUnlockText(nextNumber)
+	local unlock = RebirthConfig.GetUnlockLine(nextNumber)
 	unlockHolder.Visible = unlock ~= nil
-	unlockText.Text = if unlock then ("UNLOCKS · %s"):format(unlock) else ""
+	unlockText.Text = unlock or ""
 
 	local cash = TycoonController.GetCash()
 	local cost = math.max(TycoonController.GetRebirthCost(), 1)
@@ -381,11 +381,15 @@ local function build()
 		Font = Fonts.BodyHeavy,
 		TextSize = 14,
 		TextColor3 = Colors.RebirthLabel,
-		Size = UDim2.fromScale(1, 1),
+		Size = UDim2.new(1, -12, 1, 0),
+		Position = UDim2.fromOffset(6, 0),
+		TextWrapped = true,
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = unlockBody.ZIndex + 1,
 		Parent = unlockBody,
 	})
+	-- "Rebirth 2: unlocks the 2nd floor (+4 pedestals) and the 🔫 Laser Gun."
+	UIKit.FitText(unlockText, 14, 10)
 
 	infoLines(list, "Keep", 3, "YOU KEEP", Colors.Cash, "Every item · your pedestals · Index · goals · rebirths")
 	resetLabel = infoLines(list, "Reset", 4, "YOU RESET", Colors.Danger, resetText(RebirthConfig.GetCost(0)))

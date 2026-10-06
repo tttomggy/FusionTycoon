@@ -20,6 +20,15 @@
 	fail keeps the best input). Event-only mutations (EventOnly) have no
 	normal chance: only their event grants them (EventService).
 
+	STACKING (Grow a Garden style): an item has ONE base mutation (none /
+	Golden / Diamond / Rainbow: Item.Mutation) plus any SET of event
+	mutations (Charged / Void / Celestial: Item.EventMutations, sorted by
+	rank, never the same one twice). The multiplier is additive:
+	1 + sum(mult - 1), so Rainbow + Celestial = 31x, not 240x
+	(GetStackedMultiplier; TycoonConfig.GetItemCashPerSecond). Events ADD
+	to the set (AddEvent); a fusion success keeps the lowest base and the
+	event mutations every input shares (Intersect).
+
 	Every chance is x luck (RebirthConfig.GetLuck) x an optional per-mutation
 	event multiplier (EventState.GetMutationMultipliers; this config never
 	requires an event module). Mirrored in tools/econ_sim.py (MUTATIONS);
@@ -84,18 +93,39 @@ function MutationConfig.GetChance(mutation: string, source: MutationSource, luck
 	return (if source == "Pull" then def.PullChance else def.FusionChance) * math.max(luck, 0) * event
 end
 
--- One roll against the cumulative chances, rarest first. nil = no mutation.
+-- The BASE roll: one roll against the cumulative chances of the base
+-- mutations, rarest first. nil = no mutation. Event-only mutations are
+-- never the base: RollEvents stacks them on top.
 function MutationConfig.Roll(rng: Random, luck: number, source: MutationSource, multipliers: OddsMultipliers?): string?
 	local roll = rng:NextNumber()
 	local cumulative = 0
 	for index = #MutationConfig.Order, 1, -1 do
 		local mutation = MutationConfig.Order[index]
+		if MutationConfig.IsEventOnly(mutation) then
+			continue
+		end
 		cumulative += MutationConfig.GetChance(mutation, source, luck, multipliers)
 		if roll < cumulative then
 			return mutation
 		end
 	end
 	return nil
+end
+
+-- The EVENT roll, on top of the base roll: each event-only mutation rolls
+-- on its own (its chance x luck x the event multiplier; 0 outside its
+-- event). Returns the set, or nil.
+function MutationConfig.RollEvents(rng: Random, luck: number, source: MutationSource, multipliers: OddsMultipliers?): { string }?
+	local list: { string } = {}
+	for _, mutation in MutationConfig.Order do
+		if MutationConfig.IsEventOnly(mutation) then
+			local chance = MutationConfig.GetChance(mutation, source, luck, multipliers)
+			if chance > 0 and rng:NextNumber() < chance then
+				table.insert(list, mutation)
+			end
+		end
+	end
+	return if #list > 0 then list else nil
 end
 
 -- The higher-ranked of two mutations (either may be nil); `a` on a tie.
@@ -108,10 +138,152 @@ function MutationConfig.Worse(a: string?, b: string?): string?
 	return if MutationConfig.GetRank(b) < MutationConfig.GetRank(a) then b else a
 end
 
--- "Golden Star Core"; just the item name for a normal item.
-function MutationConfig.GetDisplayName(itemName: string, mutation: string?): string
-	if mutation and MutationConfig.Mutations[mutation] then
-		return ("%s %s"):format(mutation, itemName)
+--[[ Stacking ----------------------------------------------------------- ]]
+
+-- An item's base mutation and event set (any table with these fields).
+export type Stack = { Mutation: string?, EventMutations: { string }? }
+
+local function byRank(a: string, b: string): boolean
+	return MutationConfig.GetRank(a) < MutationConfig.GetRank(b)
+end
+
+-- A clean event set: known event-only names, no repeats, sorted by rank;
+-- nil when empty (saves stay sparse). Anything else is dropped.
+function MutationConfig.SanitizeEvents(value: unknown): { string }?
+	if typeof(value) ~= "table" then
+		return nil
+	end
+	local seen: { [string]: boolean } = {}
+	local list: { string } = {}
+	for _, name in value :: { any } do
+		if typeof(name) == "string" and MutationConfig.IsEventOnly(name) and not seen[name] then
+			seen[name] = true
+			table.insert(list, name)
+		end
+	end
+	if #list == 0 then
+		return nil
+	end
+	table.sort(list, byRank)
+	return list
+end
+
+-- Splits a base + set into the stacking shape: an event-only base (an old
+-- save, or a source that hands one name) moves into the set. Returns
+-- (base, events).
+function MutationConfig.Normalize(base: string?, events: { string }?): (string?, { string }?)
+	local list: { string } = table.clone(events or {})
+	local cleanBase = if MutationConfig.IsValid(base) then base else nil
+	if cleanBase and MutationConfig.IsEventOnly(cleanBase) then
+		table.insert(list, cleanBase)
+		cleanBase = nil
+	end
+	return cleanBase, MutationConfig.SanitizeEvents(list)
+end
+
+-- `events` plus `mutation` (an event-only name); the same set if it is
+-- already there. Returns (newSet, added).
+function MutationConfig.AddEvent(events: { string }?, mutation: string): ({ string }?, boolean)
+	if not MutationConfig.IsEventOnly(mutation) then
+		return events, false
+	end
+	if events and table.find(events, mutation) then
+		return events, false
+	end
+	local list: { string } = table.clone(events or {})
+	table.insert(list, mutation)
+	return MutationConfig.SanitizeEvents(list), true
+end
+
+function MutationConfig.HasEvent(events: { string }?, mutation: string): boolean
+	return events ~= nil and table.find(events, mutation) ~= nil
+end
+
+-- The event mutations EVERY set shares (a fusion success keeps these).
+function MutationConfig.Intersect(sets: { { string }? }): { string }?
+	if #sets == 0 then
+		return nil
+	end
+	local list: { string } = {}
+	local first: { string } = sets[1] or {}
+	for _, name in first do
+		local everywhere = true
+		for i = 2, #sets do
+			if not MutationConfig.HasEvent(sets[i], name) then
+				everywhere = false
+				break
+			end
+		end
+		if everywhere then
+			table.insert(list, name)
+		end
+	end
+	return MutationConfig.SanitizeEvents(list)
+end
+
+-- Every mutation of a stack, base first then the events by rank.
+function MutationConfig.List(base: string?, events: { string }?): { string }
+	local list: { string } = {}
+	if MutationConfig.IsValid(base) then
+		table.insert(list, base :: string)
+	end
+	local extra: { string } = events or {}
+	for _, name in extra do
+		if MutationConfig.IsValid(name) and not table.find(list, name) then
+			table.insert(list, name)
+		end
+	end
+	return list
+end
+
+-- 1 + sum(mult - 1) over every mutation (additive stacking).
+function MutationConfig.GetStackedMultiplier(base: string?, events: { string }?): number
+	local total = 1
+	for _, name in MutationConfig.List(base, events) do
+		total += MutationConfig.GetMultiplier(name) - 1
+	end
+	return total
+end
+
+-- The highest-ranked mutation of a stack (the shell colour, the banner word).
+function MutationConfig.GetTop(base: string?, events: { string }?): string?
+	local top: string? = nil
+	for _, name in MutationConfig.List(base, events) do
+		top = MutationConfig.Better(top, name)
+	end
+	return top
+end
+
+-- Whether the two stacks are the same (base and set).
+function MutationConfig.SameStack(baseA: string?, eventsA: { string }?, baseB: string?, eventsB: { string }?): boolean
+	local a = MutationConfig.List(baseA, eventsA)
+	local b = MutationConfig.List(baseB, eventsB)
+	if #a ~= #b then
+		return false
+	end
+	for _, name in a do
+		if not table.find(b, name) then
+			return false
+		end
+	end
+	return true
+end
+
+-- "RAINBOW · CHARGED" (pills, labels); "" for a plain item.
+function MutationConfig.GetStackLabel(base: string?, events: { string }?): string
+	local words = {}
+	for _, name in MutationConfig.List(base, events) do
+		table.insert(words, string.upper(name))
+	end
+	return table.concat(words, " · ")
+end
+
+-- "Golden Star Core", "Rainbow Charged Star Core"; just the item name for a
+-- normal item.
+function MutationConfig.GetDisplayName(itemName: string, mutation: string?, events: { string }?): string
+	local words = MutationConfig.List(mutation, events)
+	if #words > 0 then
+		return ("%s %s"):format(table.concat(words, " "), itemName)
 	end
 	return itemName
 end

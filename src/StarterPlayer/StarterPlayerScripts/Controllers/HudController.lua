@@ -36,6 +36,8 @@ local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
 local ShopPanel = require(script.Parent.Parent.UI.ShopPanel)
 local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 local GiftsPanel = require(script.Parent.Parent.UI.GiftsPanel)
+local QuestsPanel = require(script.Parent.Parent.UI.QuestsPanel)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
@@ -560,6 +562,7 @@ local function buildBrowseEntries(): { any }
 			Name = def and def.Name or item.ItemId,
 			Tier = item.Tier,
 			Mutation = item.Mutation,
+			EventMutations = item.EventMutations,
 			InUse = InventoryController.IsInUse(item),
 		})
 	end
@@ -1257,6 +1260,155 @@ local function buildShopRow()
 	end)
 end
 
+--[[ QUESTS button, power-up row, goal tracker ----------------------------------
+	Under SHOP / GIFTS: the amber "📜 QUESTS" (QuestsPanel) with a green
+	ready badge (quests done, not claimed) and a bounce while any is, then
+	one round button per power-up you own (QuestConfig.PowerUpOrder; glyph,
+	a count badge; tap = UsePowerUp, server re-checked). An armed one shows
+	✓, Speed Boots its seconds left. Under the NEXT GOAL card, a small
+	tracker: the nearest unfinished quest ("📜 Pull 20 times · 12 / 20"),
+	a tap opens the panel.
+]]
+local QUESTS_BUTTON_SIZE = Vector2.new(124, 52)
+local POWER_BUTTON_SIZE = UITheme.MinTapSize + 4
+local QUEST_TRACKER_HEIGHT = 32
+local QUEST_TRACKER_GAP = 6
+local questRow: Frame
+local questsButton: TextButton
+local questsScale: UIScale
+local questsBounce: Tween? = nil
+local powerButtons: { [string]: { Holder: Frame, Button: TextButton } } = {}
+local questTracker: TextButton
+
+local function buildQuestRow()
+	questRow = Instance.new("Frame")
+	questRow.Name = "QuestRow"
+	questRow.BackgroundTransparency = 1
+	questRow.AutomaticSize = Enum.AutomaticSize.X
+	questRow.Size = UDim2.fromOffset(0, QUESTS_BUTTON_SIZE.Y + UITheme.ShadowOffset)
+	questRow.Parent = screenGui
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 8)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = questRow
+
+	local button, holder = UIKit.Button({
+		Name = "QuestsButton",
+		Parent = questRow,
+		Style = "Orange",
+		Text = "📜 QUESTS",
+		TextSize = 18,
+		Size = UDim2.fromOffset(QUESTS_BUTTON_SIZE.X, QUESTS_BUTTON_SIZE.Y),
+		LayoutOrder = 0,
+		OnClick = function()
+			QuestsPanel.Toggle()
+		end,
+	})
+	questsButton = button
+	questsScale = Instance.new("UIScale")
+	questsScale.Parent = holder
+
+	for order, key in QuestConfig.PowerUpOrder do
+		local def = QuestConfig.PowerUps[key]
+		local powerButton, powerHolder = UIKit.Button({
+			Name = "PowerUp_" .. key,
+			Parent = questRow,
+			Style = "Violet",
+			Text = def.Glyph,
+			TextSize = 22,
+			Size = UDim2.fromOffset(POWER_BUTTON_SIZE, POWER_BUTTON_SIZE),
+			ShadowOffset = UITheme.SmallShadowOffset,
+			LayoutOrder = order,
+			OnClick = function()
+				QuestsPanel.UsePowerUp(key)
+			end,
+		})
+		UIKit.Corner(powerButton, 999)
+		powerHolder.Visible = false
+		powerButtons[key] = { Holder = powerHolder, Button = powerButton }
+	end
+
+	local tracker = Instance.new("TextButton")
+	tracker.Name = "QuestTracker"
+	tracker.AutoButtonColor = false
+	tracker.BackgroundColor3 = Colors.Panel
+	tracker.BackgroundTransparency = 0.1
+	tracker.Text = ""
+	tracker.FontFace = Fonts.BodyHeavy
+	tracker.TextSize = 14
+	tracker.TextColor3 = Colors.Text
+	tracker.TextTruncate = Enum.TextTruncate.AtEnd
+	tracker.Size = UDim2.fromOffset(LAYOUT.Desktop.GoalWidth, QUEST_TRACKER_HEIGHT)
+	tracker.Visible = false
+	tracker.Parent = screenGui
+	UIKit.Corner(tracker, 10)
+	UIKit.Stroke(tracker, 2)
+	UIKit.Padding(tracker, 0, 10, 0, 10)
+	tracker.Activated:Connect(function()
+		QuestsPanel.Open()
+	end)
+	questTracker = tracker
+end
+
+-- Once a second: the badge, the power-up buttons, the tracker.
+local function refreshQuestRow()
+	local ready = if TycoonController.HasSynced() then QuestsPanel.GetReadyCount() else 0
+	local badge = UIKit.Badge(questsButton, ready)
+	badge.BackgroundColor3 = Colors.Cash
+	badge.TextColor3 = Colors.CoinText
+	if ready > 0 and not questsBounce then
+		local tween = TweenService:Create(
+			questsScale,
+			TweenInfo.new(0.45, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+			{ Scale = GIFTS_BOUNCE_SCALE }
+		)
+		tween:Play()
+		questsBounce = tween
+	elseif ready == 0 and questsBounce then
+		(questsBounce :: Tween):Cancel()
+		questsBounce = nil
+		questsScale.Scale = 1
+	end
+	local quests = TycoonController.GetQuests()
+	local speedLeft = if quests and typeof(quests.SpeedBootsUntil) == "number"
+		then math.max(0, math.ceil(quests.SpeedBootsUntil - workspace:GetServerTimeNow()))
+		else 0
+	for key, view in powerButtons do
+		local count = TycoonController.GetPowerUpCount(key)
+		local armed = TycoonController.IsArmed(key)
+		local timed = key == "SpeedBoots" and speedLeft > 0
+		view.Holder.Visible = count > 0 or armed or timed
+		local def = QuestConfig.PowerUps[key]
+		UIKit.SetButton(view.Button, {
+			Text = if timed then ("%s%d"):format(def.Glyph, speedLeft) elseif armed then def.Glyph .. "✓" else def.Glyph,
+			TextSize = if timed or armed then 15 else 22,
+		})
+		local countBadge = UIKit.Badge(view.Button, count)
+		countBadge.BackgroundColor3 = Colors.Panel2
+	end
+	local nearest = QuestsPanel.GetNearest()
+	questTracker.Visible = nearest ~= nil and TycoonController.HasSynced()
+	if nearest then
+		questTracker.Text = ("📜 %s · %s / %s"):format(
+			tostring(nearest.Text),
+			NumberFormat.Short(tonumber(nearest.Progress) or 0),
+			NumberFormat.Short(tonumber(nearest.Target) or 0)
+		)
+	end
+end
+
+-- The tracker sits under the goal card (or where it would be when the
+-- last goal is done).
+local function placeQuestTracker()
+	local layout = if layoutIsPhone then LAYOUT.Phone else LAYOUT.Desktop
+	questTracker.Size = UDim2.fromOffset(layout.GoalWidth, QUEST_TRACKER_HEIGHT)
+	local goalHeight = if goalHolder.Visible then goalHolder.AbsoluteSize.Y / UIKit.EffectiveScale(goalHolder) else 0
+	questTracker.Position = goalHolder.Position
+		+ UDim2.fromOffset(0, if goalHeight > 0 then math.ceil(goalHeight) + UITheme.ShadowOffset + QUEST_TRACKER_GAP else 0)
+end
+
 -- Once a second: the effect pills' timers and the SALE tag.
 local applyLayout: (isPhone: boolean) -> ()
 
@@ -1295,6 +1447,8 @@ local selfTestHold = false
 local function refreshShopRow()
 	-- Cash ticks between snapshots: keep the REBIRTH fill moving.
 	refreshRebirthButton()
+	refreshQuestRow()
+	placeQuestTracker()
 	if selfTestHold then
 		return
 	end
@@ -1358,7 +1512,10 @@ local function placeColumnFor(isPhone: boolean)
 	-- tracker follows them; on desktop it sits above the cash card).
 	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
-	local lockTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	-- The QUESTS row under SHOP / GIFTS.
+	local questTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	questRow.Position = questTop
+	local lockTop = questTop + UDim2.fromOffset(0, QUESTS_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	phoneStatus.Visible = isPhone
 	if isPhone then
 		-- Status stack under SHOP / GIFTS: the deal badge on its own line,
@@ -1385,6 +1542,7 @@ local function placeColumnFor(isPhone: boolean)
 	goalHolder.Position = if isPhone
 		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 		else layout.GoalPosition
+	placeQuestTracker()
 end
 
 -- Re-places the left column only (the phone status stack changed height:
@@ -1436,6 +1594,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	local parts: { [string]: GuiObject } = {
 		CashCard = cashHolder,
 		ShopRow = shopRow,
+		QuestRow = questRow,
 		PhoneStatus = phoneStatus,
 		DealBadge = dealHolder,
 		GiftsNext = UIKit.PillRoot(giftsNextPill),
@@ -1579,12 +1738,14 @@ function HudController.Init()
 	buildButtonRow()
 	buildLockChip()
 	buildShopRow()
+	buildQuestRow()
 	buildDealBadge()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
 	ShopPanel.Init()
 	GiftsPanel.Init()
+	QuestsPanel.Init()
 	SettingsPanel.Init()
 	FusePanel.Init()
 	HowToHeistPanel.Init()

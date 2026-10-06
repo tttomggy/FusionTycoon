@@ -1735,3 +1735,87 @@ Rebirth 2–3), `/weapons all` for the Slap Glove and Banana Peel.
 - [ ] `/selftest`: PASS "a Rebirth-0 player can't be hit", "the cooldown is
   enforced on the server", "knocking a thief returns the orb" (2 players),
   and the junk-remote fuzz (RequestHit) with no error or change.
+
+## 39. Stacking
+
+Studio: `/give` an Epic with `/give <itemId> rainbow`, then `/event
+PowerSurge 5` and stand by your pedestals.
+
+- [ ] A lightning strike on a Rainbow item makes it **Rainbow + Charged**:
+  the reveal card reads "+ CHARGED (stacked!)", its pill row is
+  "RAINBOW" "CHARGED" "×14" side by side; the pedestal chip reads
+  "RAINBOW · CHARGED ×14"; the orb's satellites mix the rainbow hues with
+  Charged blue; the label's $/s is 14× the tier's.
+- [ ] A struck item is never struck Charged twice (a second strike on it
+  does nothing).
+- [ ] `/eventmut celestial` on a Golden item's tier: the new Epic is plain
+  + Celestial; `/event MeteorShower`: a core can roll Golden and Celestial
+  together ("GOLDEN · CELESTIAL ×21").
+- [ ] Fuse panel: two Rainbow + Charged orbs → "✨ Keeps RAINBOW + CHARGED
+  ×14, might roll better"; add a Rainbow without Charged → the red box
+  ("the Legendary comes out RAINBOW, not RAINBOW + CHARGED") and that orb
+  ringed red; AUTO-FILL from a stacked first orb adds only the same stack.
+- [ ] A failed fusion keeps the input with the best stacked multiplier.
+- [ ] Index: the stacked item fills BOTH its Rainbow and Charged cells.
+- [ ] ITEMS: a stacked item is its own stack with the small pill row; the
+  sort puts it by its stacked $/s.
+- [ ] A thief carrying a stacked orb shows the mixed satellites; a
+  delivered orb keeps the whole stack.
+- [ ] `/selftest`: PASS the stacking lines (helpers, migration, ×21, round
+  trip) and the fusion intersection lines.
+
+## 40. 2nd floor
+
+Studio: `/rebirths 0`, then `/rebirths 2`.
+
+- [ ] Every lab has the mezzanine over the back-left (above the collector
+  and the end of the belt), the Fusion Machine and portal open to the sky,
+  nothing poking through the deck; neon railings round it with a gap at
+  the front; three columns; nothing clips.
+- [ ] Rebirth 0–1: the rails are dim, its 4 pedestals dim with "🔒 REBIRTH
+  2" on your empty labels, no prompts, and the owner-only "🔒 2ND FLOOR ·
+  Rebirth 2" chip over the deck (another player doesn't see it).
+- [ ] The ⬆ jump pad in front of the gap throws you up onto the deck in
+  one go (every time, from any side of the pad); jumping off brings you
+  down; a ragdolled player isn't thrown.
+- [ ] Rebirth 2: the rails light violet, the chip goes, and items beyond
+  the ground pedestals fill 7 → 10 (best ones on the ground floor first,
+  1 → 4, 5 → 6 with the pass). The income pill counts them.
+- [ ] The Rebirth panel at Rebirth 1 reads "Rebirth 2: unlocks the 2nd
+  floor (+4 pedestals) and the 🔫 Laser Gun."
+- [ ] Heist (2 players, both Rebirth 2): the thief jumps up, steals from a
+  floor-2 pedestal, drops off the edge and runs home; LOCK ejects someone
+  standing on the deck; the shield fence reaches above the deck.
+- [ ] `/selftest`: PASS the 2nd floor lines (CheckFloor2, fill order, built
+  at deck height, unlocked from Rebirth 2).
+
+## 41. Quests
+
+Studio: `/quest reset`, `/powerup cashburst 2`, `/powerup coinmagnet 1`.
+
+- [ ] The amber "📜 QUESTS" button sits under SHOP / GIFTS (desktop and
+  phone, inside the left 40%); a green badge + bounce when a quest is
+  ready; the power-up buttons beside it show only what you own, with a
+  count badge.
+- [ ] The panel: TODAY with 3 quests (text, reward, bar, "12 / 20", a grey
+  "…" until done, then a green CLAIM), "new quests in 7:12:05"; LAB QUEST
+  #1 "Own 10 Rares"; POWER-UPS with USE.
+- [ ] Pull a few times: "Pull 20 times" counts up live (server); `/quest
+  complete pull20` (or whatever today's ids are, the warning lists them)
+  → CLAIM pays "💸 Cash Burst ×1", the row dims with ✓, the badge drops.
+- [ ] Claiming LAB QUEST moves to #2; `/quest complete chain` three times
+  reaches "Fuse a Mythic" whose claim gives the Slap Glove card.
+- [ ] Cash Burst: USE → the ⚡ 2× pill gains 5 min; at a full 3 h bank it's
+  refused "Your boost time is full".
+- [ ] Lucky Charm: the 🍀 pill gains 10 min; the Gacha Pad odds change.
+- [ ] Speed Boots: you run at ×1.5 for 2 min (the button counts down);
+  refused while carrying; a carry slows you to 12 as usual.
+- [ ] Fusion Spark: USE → "ARMED"; the Fuse panel's % is +10 with ⚗️; it's
+  spent on the next fusion (success or fail).
+- [ ] Coin Magnet: armed, then `/event GoldenRain 2`: coins within 20 studs
+  pay you without touching them; it disarms when the rain ends.
+- [ ] The tracker under NEXT GOAL shows the quest closest to done; a tap
+  opens the panel.
+- [ ] Power-ups never appear in the shop.
+- [ ] `/selftest`: PASS "a claim is refused while incomplete", "refused at
+  0", and the fuzz (ClaimQuest / UsePowerUp) with no error or change.
