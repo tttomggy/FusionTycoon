@@ -126,6 +126,13 @@ When you change a system, update its doc (not this file) unless a rule here chan
   `UIKit.SetSelectedFill(gui, selected, unselected?)` for a plain frame (or
   a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
   `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
+- **Top centre is TopStack's.** Only `UI/TopStack` places anything at top
+  centre: the tutorial objective bar, then the event chip, then ONE
+  announcement line (banners and toasts queued 2.5 s each, capped at 4,
+  priority to the front), then the heist status bars. Ask
+  `TopStack.GetY(slot)`, re-place on `OnChanged`, and show banners with
+  `TopStack.Announce`; never a fixed y. The HUD's left column is a stack
+  too (`/selftest` checks its rects do not overlap).
 - **Card placement:** every `UIKit.Modal` and centred card lives in the
   band from `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also past the
   170 × 60 Roblox buttons after the 0.8 scale: 79 logical) down to the

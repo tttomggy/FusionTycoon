@@ -58,6 +58,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local HudGate = require(script.Parent.Parent.UI.HudGate)
+local TopStack = require(script.Parent.Parent.UI.TopStack)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local AnnouncementController = require(script.Parent.AnnouncementController)
 local ResultController = require(script.Parent.ResultController)
@@ -86,7 +87,6 @@ local RAINBOW_TINT_TOWARD_WHITE = 0.78
 local RAINBOW_CYCLE_SECONDS = 12
 
 local BANNER_SIZE = Vector2.new(460, 120)
-local BANNER_Y = 96 -- under the top bar and the goal tracker's row
 local BANNER_HOLD_SECONDS = 2.5
 
 local PARTICLE_HEIGHT = 30
@@ -119,7 +119,6 @@ local POP_SECONDS = 1.2
 local POP_RISE_STUDS = 4
 local POP_MAX_DISTANCE = 150
 
-local CHIP_Y = 12
 local CHIP_SIZE = { Desktop = Vector2.new(330, 44), Phone = Vector2.new(270, 44) }
 local CHIP_TEXT_SIZE = { Desktop = 18, Phone = 15 }
 local LINEUP_COUNT = 3
@@ -452,15 +451,15 @@ local function closeBanner()
 	end
 end
 
--- The icon + name + blurb on the event's gradient, straight away, for
--- BANNER_HOLD_SECONDS. A newer event's banner replaces it.
-local function showStartBanner(id: string, myGeneration: number)
+-- The icon + name + blurb on the event's gradient, built at the announcement
+-- slot's y (TopStack calls it when the banner's turn comes).
+local function buildStartBanner(id: string, y: number)
 	closeBanner()
 	local body, holder = UIKit.Panel({
 		Name = "EventBanner",
 		Parent = screenGui,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, BANNER_Y),
+		Position = UDim2.new(0.5, 0, 0, y),
 		Size = UDim2.fromOffset(BANNER_SIZE.X, BANNER_SIZE.Y),
 		Radius = 22,
 		StrokeThickness = UITheme.Stroke.Modal,
@@ -504,11 +503,33 @@ local function showStartBanner(id: string, myGeneration: number)
 	})
 	SoundKit.Play("EventStart", nil)
 	UIKit.PopIn(holder)
-	task.delay(BANNER_HOLD_SECONDS, function()
-		if bannerHolder == holder and generation == myGeneration then
+end
+
+-- An event start is a priority announcement: it goes to the front of the
+-- line, held BANNER_HOLD_SECONDS; a newer event's banner replaces it, and a
+-- banner for an event that already ended is skipped.
+local function showStartBanner(id: string, myGeneration: number)
+	TopStack.Announce({
+		Key = "EventStart",
+		Priority = 1,
+		Seconds = BANNER_HOLD_SECONDS,
+		Height = BANNER_SIZE.Y + UITheme.ShadowOffset,
+		Valid = function()
+			return generation == myGeneration
+		end,
+		Show = function(y: number)
+			buildStartBanner(id, y)
+		end,
+		Move = function(y: number)
+			if bannerHolder then
+				bannerHolder.Position = UDim2.new(0.5, 0, 0, y)
+			end
+		end,
+		Hide = function(_cut: boolean): number?
 			closeBanner()
-		end
-	end)
+			return nil
+		end,
+	})
 end
 
 --[[ Event changes -------------------------------------------------------------------- ]]
@@ -992,7 +1013,7 @@ local function buildHud()
 		Text = "",
 		TextSize = CHIP_TEXT_SIZE.Desktop,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, CHIP_Y),
+		Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Chip")),
 		Size = UDim2.fromOffset(CHIP_SIZE.Desktop.X, CHIP_SIZE.Desktop.Y),
 		Radius = 22,
 		OnClick = toggleCard,
@@ -1035,6 +1056,14 @@ local function buildHud()
 	chipGlow.Parent = chipHolder
 	UIKit.Corner(chipGlow, 999)
 	applyLayout(UIKit.IsPhone())
+	TopStack.SetHeight("Chip", function()
+		return if chipHolder.Visible and hudGui.Enabled then CHIP_SIZE.Desktop.Y else 0
+	end)
+	TopStack.OnChanged(function(slot)
+		if slot == "Chip" then
+			chipHolder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Chip"))
+		end
+	end)
 	UserInputService.InputBegan:Connect(onInputBegan)
 	UIKit.LayoutChanged:Connect(applyLayout)
 end

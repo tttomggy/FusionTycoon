@@ -95,3 +95,31 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   Rebirth 0, and that a single Common pull opens the "COMMON ORB!" card;
   plus the Timed refusals, the Multiplier skip, the Tutorial 1 migration and
   the mid-way resume.
+
+## TopStack (the top-centre of the screen)
+
+`UI/TopStack` is the only thing that places anything at top centre. Slots,
+top to bottom: **objective** (the tutorial bar; `TutorialBanner` registers
+its height), **chip** (the event chip; `EventController` registers it),
+**announce** (one line, queued), **status** (the heist bars hang below
+whatever the announcement uses). Owners ask `TopStack.GetY(slot)` and
+re-place on `TopStack.OnChanged`; without an objective bar the chip keeps
+its old place (y 12) and the line sits under it.
+
+The announcement line: `TopStack.Announce({ Key?, Priority?, Seconds?, Height,
+Show(y), Hide(cut), Move?, Valid? })`. 2.5 s each (`Seconds` overrides: the
+big server banners hold 4), the queue capped at 4 (the oldest lowest-priority
+item goes), a `Priority > 0` item (your own fusion success, an event start)
+goes to the front and cuts a lower one that is showing, an item with the
+same `Key` replaces its queued twin, `Valid` skips a stale item at its turn.
+`AnnouncementController` (banners, goals, fusion, rebirth, heist feed) and
+`EventController` (event start) feed it. The welcome splash waits with
+`TopStack.WhenIdle`.
+
+The HUD's left column is one stack too: NEXT GOAL, the quest tracker, then
+the cash card (desktop; it never sits above y 274 and follows the goal card
+and tracker down), SHOP / GIFTS (the timed pills are a row beside GIFTS on
+desktop, a stack on a phone), QUESTS, LOCK, the deal badge.
+`HudController.SelfTestLeftColumn` checks the rects do not overlap, at both
+layouts.
+

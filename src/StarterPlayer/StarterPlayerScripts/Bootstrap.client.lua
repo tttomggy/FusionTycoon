@@ -29,12 +29,14 @@ local TutorialController = require(Controllers.TutorialController)
 local CombatController = require(Controllers.CombatController)
 local JumpPadController = require(Controllers.JumpPadController)
 local HudGate = require(script.Parent.UI.HudGate)
+local TopStack = require(script.Parent.UI.TopStack)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
 InventoryController.Init()
 TycoonController.Init()
 ToastController.Init()
+TopStack.Init() -- the top-centre slots + the announcement queue
 AnnouncementController.Init()
 HudController.Init()
 ResultController.Init()

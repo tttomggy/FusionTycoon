@@ -76,6 +76,7 @@ local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local TopStack = require(script.Parent.Parent.UI.TopStack)
 local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
 local GoalMarkerController = require(script.Parent.GoalMarkerController)
@@ -102,7 +103,6 @@ local FOV_PUNCH_SECONDS = 0.3
 -- be verified to load from here), pitched up into a quick pickup blip.
 local PILL_MAX_DISTANCE = 200
 local BANNER_SIZE = Vector2.new(480, 92)
-local BANNER_TOP = 118 -- under the server banners (AnnouncementController)
 local ALARM_PINGS = 3
 local ALARM_GAP_SECONDS = 0.25
 local FENCE_FADE_SECONDS = 0.3
@@ -485,7 +485,7 @@ local function buildBanner(isThief: boolean, extraLine: string?): Banner
 		Name = "HeistBanner",
 		Parent = screenGui,
 		AnchorPoint = Vector2.new(0.5, 0),
-		Position = UDim2.new(0.5, 0, 0, BANNER_TOP),
+		Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Status")),
 		Size = UDim2.fromOffset(BANNER_SIZE.X, BANNER_SIZE.Y + (if extraLine then TOUCH_LINE_HEIGHT else 0)),
 		Gradient = { { 0, gradient.Top }, { 1, gradient.Bottom } },
 		Radius = 18,
@@ -590,7 +590,7 @@ local function playGrabMoment(itemName: string)
 	local holder = Instance.new("Frame")
 	holder.Name = "GrabBanner"
 	holder.AnchorPoint = Vector2.new(0.5, 0)
-	holder.Position = UDim2.new(0.5, 0, 0, BANNER_TOP)
+	holder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Status"))
 	holder.Size = UDim2.new(1, 0, 0, GRAB_BANNER_HEIGHT)
 	holder.BackgroundColor3 = Colors.White
 	holder.BorderSizePixel = 0
@@ -1249,6 +1249,12 @@ end
 
 function HeistController.Init()
 	screenGui = UIKit.Screen("Heist", 105)
+	-- The heist bars hang in TopStack's status slot, under the announcement.
+	TopStack.OnChanged(function(slot)
+		if slot == "Status" and banner then
+			banner.Holder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Status"))
+		end
+	end)
 	HudController.SetLockChipHandler(pointAtConsole)
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	RemoteEvents.HeistStarted.OnClientEvent:Connect(onHeistStarted)

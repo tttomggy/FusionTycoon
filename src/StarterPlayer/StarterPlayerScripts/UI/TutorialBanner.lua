@@ -39,6 +39,7 @@ local TweenService = game:GetService("TweenService")
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.UIKit)
+local TopStack = require(script.Parent.TopStack)
 
 local TutorialBanner = {}
 
@@ -89,9 +90,9 @@ local function barHeight(): number
 	return if isPhone() then BAR_HEIGHT.Phone else BAR_HEIGHT.Desktop
 end
 
--- Just under the Roblox top bar, plus the slide.
+-- The objective slot (just under the Roblox top bar), plus the slide.
 local function apply()
-	holder.Position = UDim2.new(0.5, 0, 0, UIKit.GetCardTop() - slideValue.Value)
+	holder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Objective") - slideValue.Value)
 end
 
 local function applyLayout()
@@ -245,10 +246,14 @@ end
 
 --[[ Welcome splash ----------------------------------------------------------------- ]]
 
+-- Waits for TopStack's announcement line to empty, so the splash never lands
+-- on a banner.
 function TutorialBanner.ShowSplash(title: string, sub: string)
 	splashToken += 1
 	local mine = splashToken
-	task.spawn(playSplash, title, sub, mine)
+	TopStack.WhenIdle(function()
+		playSplash(title, sub, mine)
+	end)
 end
 
 function playSplash(title: string, sub: string, mine: number)
@@ -298,6 +303,16 @@ end
 
 function TutorialBanner.Init()
 	screenGui = UIKit.Screen("TutorialBanner", DISPLAY_ORDER)
+	-- The bar owns the objective slot while it is up (the chip and the
+	-- announcement line sit under it).
+	TopStack.SetHeight("Objective", function()
+		return if holder.Visible then barHeight() + UITheme.ShadowOffset else 0
+	end)
+	TopStack.OnChanged(function(slot)
+		if slot == "Objective" then
+			apply()
+		end
+	end)
 
 	slideValue = Instance.new("NumberValue")
 	slideValue.Value = SLIDE_OFFSET

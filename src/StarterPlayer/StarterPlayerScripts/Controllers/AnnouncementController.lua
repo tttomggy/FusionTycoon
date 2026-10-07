@@ -10,8 +10,9 @@
 	    fusion success without a big card (your RevealRule; the banner says
 	    "GOLDEN kept / rolled!" and replaces the skipped-card line)
 
-	Queued so a burst plays one at a time. Fusion banners are "instant": the
-	newest replaces whatever is showing. Error messages (e.g. "Need $936 for
+	Queued by TopStack (one line at the top, 2.5 s each, capped at 4, the
+	oldest dropped). Fusion banners are priority items: they jump the queue
+	and the newest replaces any queued twin. Error messages (e.g. "Need $936 for
 	a pull") are toasts now, not banners.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -26,6 +27,7 @@ local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local TopStack = require(script.Parent.Parent.UI.TopStack)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
 local ResultController = require(script.Parent.ResultController)
@@ -42,15 +44,12 @@ local BANNER_HEIGHT = 64
 local SMALL_BANNER_TEXT_MAX = 21
 local SMALL_BANNER_TEXT_MIN = 14
 local MYTHIC_BANNER_HEIGHT = 84
-local VISIBLE_Y = 24
 local SLIDE_IN_SECONDS = 0.35
 local SLIDE_OUT_SECONDS = 0.3
-local HOLD_SECONDS = 3.5
-local MYTHIC_HOLD_SECONDS = 5
+local HOLD_SECONDS = TopStack.DEFAULT_SECONDS
+local MYTHIC_HOLD_SECONDS = 4
 local MYTHIC_SHAKE_MAGNITUDE_STUDS = 0.35
 local MYTHIC_SHAKE_DURATION_SECONDS = 0.5
--- How often a hold re-checks for a newer instant banner preempting it.
-local HOLD_POLL_SECONDS = 0.1
 
 -- The bigger server-wide banner: caption, left->right gradient, an emblem.
 type BigStyle = {
@@ -67,7 +66,8 @@ type Announcement = {
 	Text: string, -- RichText
 	AccentColor: Color3,
 	Big: BigStyle?, -- the bigger server-wide variant
-	Instant: boolean?,
+	Priority: number?, -- 1: jumps the queue (your own big success)
+	Key: string?, -- a queued item with the same key is replaced
 }
 
 local MYTHIC_STYLE: BigStyle = {
@@ -148,14 +148,7 @@ local REBIRTH_STYLE: BigStyle = {
 	Shake = false,
 }
 
-local queue: { Announcement } = {}
-local isProcessing = false
--- Bumped whenever an instant announcement preempts the current one; a hold
--- whose generation goes stale exits early without sliding out.
-local displayGeneration = 0
-
 local screenGui: ScreenGui
-local currentBanner: Frame? = nil
 
 --[[ Banner construction ------------------------------------------------------- ]]
 
@@ -264,80 +257,66 @@ end
 
 --[[ Queue ---------------------------------------------------------------------- ]]
 
-local function processQueue()
-	if isProcessing then
-		return
-	end
-	isProcessing = true
-
-	task.spawn(function()
-		while #queue > 0 do
-			local announcement = table.remove(queue, 1) :: Announcement
-			local myGeneration = displayGeneration
-			local big = announcement.Big
-			local height = if big then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
-
-			-- A preempted banner is swapped out in place, no slide-out.
-			if currentBanner then
-				(currentBanner :: Frame):Destroy()
-			end
-			local banner = buildBanner(announcement)
-			currentBanner = banner
-
-			SoundKit.Play("Toast", banner, { Volume = if big then 1.4 else 1 })
-
+-- Hands the banner to TopStack: it builds it at the announcement slot's y,
+-- holds it, and slides it out.
+local function enqueue(announcement: Announcement)
+	local big = announcement.Big
+	local height = if big then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
+	local banner: Frame? = nil
+	TopStack.Announce({
+		Key = announcement.Key,
+		Priority = announcement.Priority,
+		Seconds = if big then MYTHIC_HOLD_SECONDS else HOLD_SECONDS,
+		Height = height + UITheme.ShadowOffset,
+		Show = function(y: number)
+			local built = buildBanner(announcement)
+			banner = built
+			SoundKit.Play("Toast", built, { Volume = if big then 1.4 else 1 })
 			TweenService:Create(
-				banner,
+				built,
 				TweenInfo.new(SLIDE_IN_SECONDS, Enum.EasingStyle.Back, Enum.EasingDirection.Out),
-				{ Position = UDim2.new(0.5, 0, 0, VISIBLE_Y) }
+				{ Position = UDim2.new(0.5, 0, 0, y) }
 			):Play()
 			if big and big.Shake then
 				RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE_STUDS, MYTHIC_SHAKE_DURATION_SECONDS)
 			end
-
-			local holdSeconds = SLIDE_IN_SECONDS + (if big then MYTHIC_HOLD_SECONDS else HOLD_SECONDS)
-			local elapsed = 0
-			while elapsed < holdSeconds and displayGeneration == myGeneration do
-				local step = math.min(HOLD_POLL_SECONDS, holdSeconds - elapsed)
-				task.wait(step)
-				elapsed += step
+		end,
+		Move = function(y: number)
+			local shown = banner
+			if shown then
+				shown.Position = UDim2.new(0.5, 0, 0, y)
 			end
-
-			if displayGeneration == myGeneration then
-				local slideOut = TweenService:Create(
-					banner,
-					TweenInfo.new(SLIDE_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-					{ Position = hiddenPosition(height) }
-				)
-				slideOut:Play()
-				slideOut.Completed:Wait()
-				if currentBanner == banner then
-					banner:Destroy()
-					currentBanner = nil
-				end
+		end,
+		Hide = function(cut: boolean): number?
+			local shown = banner
+			banner = nil
+			if not shown then
+				return nil
 			end
-		end
-		isProcessing = false
-	end)
+			if cut then
+				-- Preempted: swapped out in place, no slide-out.
+				shown:Destroy()
+				return nil
+			end
+			local slideOut = TweenService:Create(
+				shown,
+				TweenInfo.new(SLIDE_OUT_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+				{ Position = hiddenPosition(height) }
+			)
+			slideOut:Play()
+			slideOut.Completed:Once(function()
+				shown:Destroy()
+			end)
+			return SLIDE_OUT_SECONDS
+		end,
+	})
 end
 
--- FIFO: plays out in full, never interrupting another.
-local function enqueue(announcement: Announcement)
-	table.insert(queue, announcement)
-	processQueue()
-end
-
--- Newest wins: drops queued instants, jumps the queue, cuts the current hold.
+-- Your own big success: front of the queue, newest replaces its twin.
 local function enqueueInstant(announcement: Announcement)
-	announcement.Instant = true
-	for i = #queue, 1, -1 do
-		if queue[i].Instant then
-			table.remove(queue, i)
-		end
-	end
-	table.insert(queue, 1, announcement)
-	displayGeneration += 1
-	processQueue()
+	announcement.Priority = 1
+	announcement.Key = announcement.Key or "Instant"
+	enqueue(announcement)
 end
 
 --[[ Event handlers --------------------------------------------------------------- ]]

@@ -1098,6 +1098,9 @@ local phoneStatus: Frame
 local phoneStatusLayout: UIListLayout
 local PHONE_STATUS_GAP = 4
 local giftsBounce: Tween? = nil
+-- The timed pills: a row beside GIFTS on desktop (it must not grow taller
+-- than the SHOP row), a stack in the phone status column.
+local effectsLayout: UIListLayout
 
 -- The 🔥 deal badge (ShopController.GetDeal): the live saving and the real
 -- countdown; it pulses once when a new slot starts; a tap opens the shop at
@@ -1225,6 +1228,7 @@ local function buildShopRow()
 	pillLayout.Padding = UDim.new(0, 4)
 	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	pillLayout.Parent = pills
+	effectsLayout = pillLayout
 	local function pill(name: string, order: number, pair: UITheme.GradientPair): TextLabel
 		local label = UIKit.Pill({
 			Name = name,
@@ -1507,11 +1511,27 @@ end
 
 local function placeColumnFor(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
-	cashHolder.Position = layout.CashPosition
+	effectsLayout.FillDirection = if isPhone then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal
+	-- The left column is one stack. Desktop: NEXT GOAL, the quest tracker,
+	-- then the cash card (never above where the card used to sit), so a
+	-- goal that wraps or a tracker that appears pushes everything down
+	-- instead of overlapping it. Phone: the goal follows the LOCK row.
+	local cashPosition = layout.CashPosition
+	if not isPhone then
+		local bottom = layout.GoalPosition.Y.Offset
+		if goalHolder.Visible then
+			bottom += math.ceil(goalHolder.AbsoluteSize.Y / UIKit.EffectiveScale(goalHolder)) + UITheme.ShadowOffset
+		end
+		if questTracker.Visible then
+			bottom += (if goalHolder.Visible then QUEST_TRACKER_GAP else 0) + QUEST_TRACKER_HEIGHT
+		end
+		cashPosition = UDim2.fromOffset(layout.CashPosition.X.Offset, math.max(layout.CashPosition.Y.Offset, bottom + LOCK_BUTTON_GAP))
+	end
+	cashHolder.Position = cashPosition
 	-- The left column, desktop and phone alike: cash card, then the SHOP /
 	-- GIFTS / timed-pill row, then the LOCK row (on a phone the goal
 	-- tracker follows them; on desktop it sits above the cash card).
-	local shopTop = layout.CashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+	local shopTop = cashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
 	-- The QUESTS row under SHOP / GIFTS.
 	local questTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
@@ -1541,7 +1561,7 @@ local function placeColumnFor(isPhone: boolean)
 	end
 	lockRow.Position = lockTop
 	goalHolder.Position = if isPhone
-		then UDim2.fromOffset(layout.CashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
+		then UDim2.fromOffset(cashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 		else layout.GoalPosition
 	placeQuestTracker()
 end
@@ -1608,7 +1628,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	local bad: { string } = {}
 	local checked = 0
 	for name, gui in parts do
-		if gui.Visible and gui:IsDescendantOf(screenGui) then
+		if layoutIsPhone and gui.Visible and gui:IsDescendantOf(screenGui) then
 			checked += 1
 			local right = gui.AbsolutePosition.X + gui.AbsoluteSize.X
 			if right > limit then
@@ -1617,13 +1637,66 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		end
 	end
 
+	-- Nothing in the column may overlap anything else: the rows, the goal
+	-- card, the quest tracker and the deal badge are laid out as one stack.
+	local stacked: { [string]: GuiObject } = {
+		CashCard = cashHolder,
+		ShopRow = shopRow,
+		QuestRow = questRow,
+		LockRow = lockRow,
+		Goal = goalHolder,
+		QuestTracker = questTracker,
+		DealBadge = if layoutIsPhone then phoneStatus else dealHolder,
+	}
+	local trackerWas, goalWas = questTracker.Visible, goalHolder.Visible
+	questTracker.Visible = true
+	goalHolder.Visible = true
+	task.wait(0.2)
+	local names: { string } = {}
+	for name in stacked do
+		table.insert(names, name)
+	end
+	table.sort(names)
+	local overlaps: { string } = {}
+	local measured = 0
+	for i, a in names do
+		local ga = stacked[a]
+		if not (ga.Visible and ga:IsDescendantOf(screenGui)) then
+			continue
+		end
+		measured += 1
+		for j = i + 1, #names do
+			local gb = stacked[names[j]]
+			if gb.Visible and gb:IsDescendantOf(screenGui) then
+				local pa, sa, pb, sb = ga.AbsolutePosition, ga.AbsoluteSize, gb.AbsolutePosition, gb.AbsoluteSize
+				local overlapX = math.min(pa.X + sa.X, pb.X + sb.X) - math.max(pa.X, pb.X)
+				local overlapY = math.min(pa.Y + sa.Y, pb.Y + sb.Y) - math.max(pa.Y, pb.Y)
+				if overlapX > 1 and overlapY > 1 then
+					table.insert(overlaps, ("%s/%s"):format(a, names[j]))
+				end
+			end
+		end
+	end
+
+	questTracker.Visible = trackerWas
+	goalHolder.Visible = goalWas
 	selfTestHold = false
 	refreshShopRow()
-	if #bad > 0 then
+	local lines: { string } = {}
+	if not layoutIsPhone then
+		-- The 40% rule is the phone's; desktop has the room.
+	elseif #bad > 0 then
 		table.sort(bad)
-		return { ("FAIL hud left column (%s): past %d px: %s"):format(scaleName, math.floor(limit), table.concat(bad, ", ")) }
+		table.insert(lines, ("FAIL hud left column (%s): past %d px: %s"):format(scaleName, math.floor(limit), table.concat(bad, ", ")))
+	else
+		table.insert(lines, ("PASS hud left column (%s, %d elements inside %d px)"):format(scaleName, checked, math.floor(limit)))
 	end
-	return { ("PASS hud left column (%s, %d elements inside %d px)"):format(scaleName, checked, math.floor(limit)) }
+	if #overlaps > 0 then
+		table.insert(lines, ("FAIL hud left column overlap (%s): %s"):format(scaleName, table.concat(overlaps, ", ")))
+	else
+		table.insert(lines, ("PASS hud left column overlap (%s, %d rects)"):format(scaleName, measured))
+	end
+	return lines
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
@@ -1809,6 +1882,15 @@ function HudController.Init()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		if layoutIsPhone then
+			placeColumn()
+		end
+	end)
+	-- Desktop: the cash card follows the goal card and the quest tracker.
+	for _, signalSource in { goalHolder, questTracker } do
+		signalSource:GetPropertyChangedSignal("Visible"):Connect(placeColumn)
+	end
+	goalHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		if not layoutIsPhone then
 			placeColumn()
 		end
 	end)

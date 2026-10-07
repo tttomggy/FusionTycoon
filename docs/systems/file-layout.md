@@ -95,6 +95,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   EventInfoCard (what the HUD event chip opens),
                   TutorialCards (the "?" slideshows + weapon unlock card),
                   TutorialBanner (the instruction banner + welcome splash),
+                  TopStack (the top-centre slots + the announcement queue),
                   TutorialHand (the pointing hand + the big contextual
                   button), HudGate (the progressive HUD),
                   QuestsPanel (the 📜 QUESTS panel)

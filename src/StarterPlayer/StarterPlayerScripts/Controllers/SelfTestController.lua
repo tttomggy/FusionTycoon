@@ -533,18 +533,88 @@ local function testChipJumps(): { string }
 	return lines
 end
 
+-- TopStack: the slots stack top to bottom without overlap, the queue is
+-- capped at 4 (the oldest lowest-priority item goes), a priority item jumps
+-- the line, and the welcome splash waits for the line to empty.
+local function testTopStack(): { string }
+	local TopStack = require(UI.TopStack) :: any
+	local lines: { string } = {}
+	local done = false
+	TopStack.WhenIdle(function()
+		done = true
+	end)
+	local started = os.clock()
+	while not done and os.clock() - started < 15 do
+		task.wait(0.1)
+	end
+	if not done then
+		return { "FAIL top stack: the announcement line never emptied" }
+	end
+
+	local objective = TopStack.GetY("Objective")
+	local chip = TopStack.GetY("Chip")
+	local announce = TopStack.GetY("Announce")
+	local status = TopStack.GetY("Status")
+	local ordered = objective <= chip and chip <= announce and announce <= status
+	table.insert(lines, if ordered
+		then ("PASS top stack slots in order (%d / %d / %d / %d)"):format(objective, chip, announce, status)
+		else ("FAIL top stack slots out of order (%d / %d / %d / %d)"):format(objective, chip, announce, status))
+
+	local shown: { string } = {}
+	local function item(name: string, priority: number?)
+		TopStack.Announce({
+			Priority = priority,
+			Seconds = 0.05,
+			Height = 0,
+			Show = function()
+				table.insert(shown, name)
+			end,
+			Hide = function()
+				return nil
+			end,
+		})
+	end
+	for _, name in { "A", "B", "C", "D", "E", "F" } do
+		item(name)
+	end
+	local queued = TopStack.GetQueueLength()
+	item("P", 1)
+	done = false
+	TopStack.WhenIdle(function()
+		done = true
+	end)
+	started = os.clock()
+	while not done and os.clock() - started < 5 do
+		task.wait(0.1)
+	end
+	local order = table.concat(shown, "")
+	table.insert(lines, if queued == TopStack.MAX_QUEUED and order == "APDEF"
+		then "PASS top stack queue (capped at 4, A already showing, priority P next, oldest dropped)"
+		else ("FAIL top stack queue: queued %d, shown order %s (want 4, APDEF)"):format(queued, order))
+	return lines
+end
+
 -- On the phone layout, every HUD element of the left group stays inside
--- the left 40% of the screen (deal badge, timed pills included).
+-- the left 40% of the screen (deal badge, timed pills included); at both
+-- layouts the column's rects (goal card, quest tracker, cash card, SHOP /
+-- QUESTS / LOCK rows, deal badge) never overlap.
 local function testHudLeftColumn(): { string }
 	local hud = require(script.Parent.HudController) :: any
-	UIKit.SetForcedPhone(true)
-	task.wait(0.2)
-	local ok, result = pcall(hud.SelfTestLeftColumn, "phone")
-	UIKit.SetForcedPhone(nil)
-	if not ok then
-		return { "FAIL hud left column: " .. tostring(result) }
+	local lines: { string } = {}
+	for _, phone in { true, false } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local ok, result = pcall(hud.SelfTestLeftColumn, if phone then "phone" else "desktop")
+		if not ok then
+			table.insert(lines, "FAIL hud left column: " .. tostring(result))
+		else
+			for _, line in result do
+				table.insert(lines, line)
+			end
+		end
 	end
-	return result
+	UIKit.SetForcedPhone(nil)
+	return lines
 end
 
 --[[ Tutorial probes ---------------------------------------------------------------------
@@ -768,6 +838,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testHudLeftColumn() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testTopStack() do
 		table.insert(panelLines, line)
 	end
 	local shopController = require(script.Parent.ShopController) :: any

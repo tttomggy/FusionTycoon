@@ -1853,7 +1853,7 @@ Studio: `/quest reset`, `/powerup cashburst 2`, `/powerup coinmagnet 1`.
 - [ ] `/selftest`: PASS "a claim is refused while incomplete", "refused at
   0", and the fuzz (ClaimQuest / UsePowerUp) with no error or change.
 
-## 42. Tutorial 3 (Part A)
+## 42. Tutorial 3 (Parts A + B)
 
 From Harris's Oct 7 playtest. New player, `/tutorial reset`.
 
@@ -1876,4 +1876,23 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   width minus 16 px margins, 28 px text, clear of the top-left buttons.
 - [ ] `/selftest`: "its explain card opens first", "the objective bar",
   "the hand's tip is inside its target" pass.
+
+**Part B: the top of the screen (TopStack).**
+
+- [ ] During the tutorial the objective bar is top; the event chip sits
+  under it; banners ("Goal complete!", FUSION SUCCESS!, event start, server
+  banners) appear under the chip, one at a time, never over the bar or each
+  other. Without the tutorial the chip keeps its place and banners go under
+  it.
+- [ ] Burst of announcements (fuse several times fast): 2.5 s each (server
+  Mythic / Secret ones longer), at most 4 waiting; your own fusion success
+  and an event start jump the line.
+- [ ] "WELCOME TO YOUR LAB!" waits until no banner is up.
+- [ ] The heist GET HOME! / THIEF IN YOUR LAB! bar hangs under the
+  announcement line and moves down / up as a banner comes and goes.
+- [ ] Left column at 1920x1080, 1366x768 and the phone: NEXT GOAL, quest
+  tracker, cash card, SHOP / GIFTS (+ timed pills in a row beside them),
+  QUESTS, LOCK and the deal badge never overlap, even with a long goal text.
+- [ ] `/selftest`: "top stack slots in order", "top stack queue", "hud left
+  column overlap" pass.
 
