@@ -104,7 +104,18 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		},
 		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
 		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
-		AdminAction = { {}, { { Action = "Nope" } }, { { Action = "StartEvent", Args = { Id = "Nope" } } } },
+		-- A non-admin tester: the SUSPICIOUS warn and nothing changes (the
+		-- fingerprint check); an admin tester: junk ids are rejected.
+		AdminAction = {
+			{},
+			{ { Action = "Nope" } },
+			{ { Action = "StartEvent", Args = { Id = "Nope" } } },
+			{ { Action = "RestartTutorial", Args = { UserId = otherUserId } } },
+			{ { Action = "ResetPlayer", Args = { UserId = otherUserId } } },
+			{ { Action = "ResetPlayer", Args = { UserId = 0 / 0 } } },
+			{ { Action = "ResetPlayer", Args = { UserId = "x" } } },
+			{ { Action = "ResetPlayer" } },
+		},
 		-- Never a real quest or power-up: junk ids / keys and types.
 		ClaimQuest = { {}, { "x" }, { { Id = 5 } }, { { Id = "nope" } }, { { Id = BIG_STRING } }, { { Id = { "chain" } } } },
 		UsePowerUp = { {}, { "x" }, { { Key = 5 } }, { { Key = "Nope" } }, { { Key = BIG_STRING } }, { { Key = { "CashBurst" } } } },

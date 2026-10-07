@@ -33,6 +33,10 @@ AdminConfig.BroadcastMaxChars = 80
 -- Seconds between two actions from one admin (keeps MessagingService well
 -- inside its publish budget: 150 + 60 x players per minute per server).
 AdminConfig.ActionCooldownSeconds = 2
+-- RestartTutorial / ResetPlayer: one per admin per this many seconds.
+AdminConfig.PlayerActionCooldownSeconds = 5
+-- The panel's RESET TO ZERO needs the button held this long.
+AdminConfig.ResetHoldSeconds = 2
 
 -- All-servers actions travel on this MessagingService topic: { Action,
 -- Args, SenderUserId }. Payloads stay far under the 1 KB message limit.
@@ -59,6 +63,14 @@ AdminConfig.Actions = {
 	Broadcast = true, -- { Text } (filtered on the sender's server)
 	SetNextAdminAbuse = true, -- { Unix } (0 clears)
 	EndEvent = true, -- {}
+	RestartTutorial = true, -- { UserId } a player in THIS server, never broadcast
+	ResetPlayer = true, -- { UserId } same
+} :: { [string]: boolean }
+
+-- The two per-player actions: this server only, 1 per PlayerActionCooldownSeconds.
+AdminConfig.PlayerActions = {
+	RestartTutorial = true,
+	ResetPlayer = true,
 } :: { [string]: boolean }
 
 -- `ownerUserId` is the place owner AdminService resolved (nil until known).

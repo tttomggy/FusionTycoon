@@ -1424,6 +1424,13 @@ local function removePlotForPlayer(player: Player)
 	end
 end
 
+-- Admin ResetPlayer: tears the plot down and builds a fresh unclaimed one,
+-- as for a player who just joined.
+function TycoonService.ResetPlot(player: Player)
+	removePlotForPlayer(player)
+	createPlotForPlayer(player)
+end
+
 -- /selftest: gives the tester a claimed lab through the real claim path (the
 -- character steps on the claim pad). Returns "Claimed" (already was),
 -- "Skip" (no free slot / no template) or "Ok" with a release function that

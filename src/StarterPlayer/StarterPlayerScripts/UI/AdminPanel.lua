@@ -15,9 +15,15 @@
 	  BROADCAST     <= 80 chars (filtered on the server)
 	  NEXT ADMIN ABUSE  stepped in your local time, sent as UTC unix seconds
 
+	  PLAYERS       everyone in THIS server (you first): pick one, then
+	                RESTART TUTORIAL or RESET TO ZERO (red confirm + 2 s hold).
+	                This server only, whatever TARGET says.
+
 	Results come back as AdminResult toasts (AdminController).
 ]]
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local AdminConfig = require(ReplicatedStorage.Shared.Config.AdminConfig)
@@ -53,6 +59,15 @@ local choice = {
 	Mutation = "",
 	AbuseUnix = 0,
 }
+
+local selectedUserId: number? = nil
+local playerRows: Frame
+local selectedLabel: TextLabel
+local confirmBox: Frame
+local confirmLabel: TextLabel
+local holdButton: TextButton
+local holdStarted: number? = nil
+local holdConnection: RBXScriptConnection? = nil
 
 local abuseLabel: TextLabel
 local broadcastBox: TextBox
@@ -162,6 +177,240 @@ local function stepAbuse(seconds: number)
 	refreshAbuse()
 end
 
+--[[ Players ------------------------------------------------------------------------ ]]
+
+local ROW_HEIGHT = 52
+local HOLD_TEXT = "HOLD TO RESET"
+
+local function statText(player: Player): string
+	local stats = player:FindFirstChild("leaderstats")
+	local cash = stats and stats:FindFirstChild("Cash")
+	local rebirths = stats and stats:FindFirstChild("Rebirths")
+	local cashText = if cash and cash:IsA("StringValue") then cash.Value else "-"
+	local rebirthText = if rebirths and rebirths:IsA("IntValue") then tostring(rebirths.Value) else "0"
+	return ("R%s · %s"):format(rebirthText, cashText)
+end
+
+local function selectedPlayer(): Player?
+	return if selectedUserId then Players:GetPlayerByUserId(selectedUserId) else nil
+end
+
+local function stopHold()
+	holdStarted = nil
+	if holdConnection then
+		holdConnection:Disconnect()
+		holdConnection = nil
+	end
+	UIKit.SetButton(holdButton, { Text = HOLD_TEXT })
+end
+
+local function closeConfirm()
+	stopHold()
+	confirmBox.Visible = false
+end
+
+local function refreshPlayers()
+	if not modal then
+		return
+	end
+	for _, child in playerRows:GetChildren() do
+		if child:IsA("GuiObject") then
+			child:Destroy()
+		end
+	end
+	local me = Players.LocalPlayer
+	local ordered: { Player } = { me }
+	local others = Players:GetPlayers()
+	table.sort(others, function(a, b)
+		return a.DisplayName:lower() < b.DisplayName:lower()
+	end)
+	for _, other in others do
+		if other ~= me then
+			table.insert(ordered, other)
+		end
+	end
+	if selectedUserId and not Players:GetPlayerByUserId(selectedUserId) then
+		selectedUserId = nil
+		closeConfirm()
+	end
+	for index, player in ordered do
+		local rowButton = Instance.new("TextButton")
+		rowButton.Name = "Player_" .. player.UserId
+		rowButton.Text = ""
+		rowButton.AutoButtonColor = false
+		rowButton.BackgroundColor3 = Colors.Panel2
+		rowButton.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
+		rowButton.LayoutOrder = index
+		rowButton.Parent = playerRows
+		UIKit.Corner(rowButton, UITheme.Radius.Row)
+		UIKit.Stroke(rowButton, 2)
+		local head = Instance.new("ImageLabel")
+		head.Name = "Head"
+		head.BackgroundColor3 = Colors.Panel3
+		head.Image = ("rbxthumb://type=AvatarHeadShot&id=%d&w=100&h=100"):format(player.UserId)
+		head.Position = UDim2.fromOffset(6, 6)
+		head.Size = UDim2.fromOffset(ROW_HEIGHT - 12, ROW_HEIGHT - 12)
+		head.Parent = rowButton
+		UIKit.Corner(head, 999)
+		UIKit.Label({
+			Name = "Name",
+			Text = if player == me then player.DisplayName .. " (you)" else player.DisplayName,
+			Font = Fonts.BodyHeavy,
+			TextSize = 16,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			Position = UDim2.fromOffset(ROW_HEIGHT + 4, 0),
+			Size = UDim2.new(0.5, -(ROW_HEIGHT + 4), 1, 0),
+			Parent = rowButton,
+		})
+		UIKit.Label({
+			Name = "Stats",
+			Text = statText(player),
+			Font = Fonts.Body,
+			TextSize = 14,
+			TextColor3 = Colors.Muted,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.new(1, -10, 0, 0),
+			Size = UDim2.new(0.5, -10, 1, 0),
+			Parent = rowButton,
+		})
+		UIKit.SetSelectedFill(rowButton, player.UserId == selectedUserId, Colors.Panel2)
+		rowButton.Activated:Connect(function()
+			UIKit.SelectFeedback(rowButton)
+			if selectedUserId ~= player.UserId then
+				closeConfirm()
+			end
+			selectedUserId = player.UserId
+			refreshPlayers()
+		end)
+	end
+	local target = selectedPlayer()
+	selectedLabel.Text = if target then ("Selected: %s"):format(target.DisplayName) else "Tap a player"
+end
+
+local function sendPlayerAction(action: string)
+	local target = selectedPlayer()
+	if target then
+		RemoteEvents.AdminAction:FireServer({ Action = action, Args = { UserId = target.UserId } })
+	end
+end
+
+local function startHold()
+	if holdStarted then
+		return
+	end
+	holdStarted = os.clock()
+	holdConnection = RunService.Heartbeat:Connect(function()
+		local began = holdStarted
+		if not began then
+			return
+		end
+		local left = AdminConfig.ResetHoldSeconds - (os.clock() - began)
+		if left > 0 then
+			UIKit.SetButton(holdButton, { Text = ("HOLD… %.1f s"):format(left) })
+			return
+		end
+		closeConfirm()
+		sendPlayerAction("ResetPlayer")
+	end)
+end
+
+local function buildPlayers()
+	heading("PLAYERS · this server only")
+	playerRows = Instance.new("Frame")
+	playerRows.Name = "PlayerRows"
+	playerRows.BackgroundTransparency = 1
+	playerRows.Size = UDim2.new(1, 0, 0, 0)
+	playerRows.AutomaticSize = Enum.AutomaticSize.Y
+	playerRows.LayoutOrder = nextOrder()
+	playerRows.Parent = list
+	local rowsLayout = Instance.new("UIListLayout")
+	rowsLayout.Padding = UDim.new(0, 6)
+	rowsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	rowsLayout.Parent = playerRows
+
+	selectedLabel = UIKit.Label({
+		Name = "Selected",
+		Text = "Tap a player",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = Colors.Muted,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 20),
+		LayoutOrder = nextOrder(),
+		Parent = list,
+	})
+	local actions = row()
+	button(actions, "↺ RESTART TUTORIAL", 220, "Blue", function()
+		if selectedPlayer() then
+			closeConfirm()
+			sendPlayerAction("RestartTutorial")
+		end
+	end)
+	button(actions, "⚠ RESET TO ZERO", 200, "Red", function()
+		local target = selectedPlayer()
+		if target then
+			confirmLabel.Text = ("Reset %s to zero? This can't be undone."):format(target.DisplayName)
+			confirmBox.Visible = true
+		end
+	end)
+
+	confirmBox = Instance.new("Frame")
+	confirmBox.Name = "ResetConfirm"
+	confirmBox.BackgroundTransparency = 1
+	confirmBox.Size = UDim2.new(1, 0, 0, 0)
+	confirmBox.AutomaticSize = Enum.AutomaticSize.Y
+	confirmBox.LayoutOrder = nextOrder()
+	confirmBox.Visible = false
+	confirmBox.Parent = list
+	local confirmLayout = Instance.new("UIListLayout")
+	confirmLayout.Padding = UDim.new(0, GAP)
+	confirmLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	confirmLayout.Parent = confirmBox
+	confirmLabel = UIKit.Label({
+		Name = "Warning",
+		Text = "",
+		Font = Fonts.BodyHeavy,
+		TextSize = 16,
+		TextColor3 = Colors.Danger,
+		TextWrapped = true,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Size = UDim2.new(1, 0, 0, 44),
+		LayoutOrder = 1,
+		Parent = confirmBox,
+	})
+	local confirmActions = Instance.new("Frame")
+	confirmActions.Name = "Row"
+	confirmActions.BackgroundTransparency = 1
+	confirmActions.Size = UDim2.new(1, 0, 0, TAP + UITheme.ShadowOffset)
+	confirmActions.LayoutOrder = 2
+	confirmActions.Parent = confirmBox
+	local confirmRow = Instance.new("UIListLayout")
+	confirmRow.FillDirection = Enum.FillDirection.Horizontal
+	confirmRow.Padding = UDim.new(0, GAP)
+	confirmRow.Parent = confirmActions
+	holdButton = button(confirmActions, HOLD_TEXT, 220, "Red", function() end)
+	holdButton.MouseButton1Down:Connect(startHold)
+	holdButton.MouseButton1Up:Connect(stopHold)
+	holdButton.MouseLeave:Connect(stopHold)
+	button(confirmActions, "CANCEL", 120, UNSELECTED_STYLE, closeConfirm)
+
+	Players.PlayerAdded:Connect(refreshPlayers)
+	Players.PlayerRemoving:Connect(function()
+		task.defer(refreshPlayers)
+	end)
+	-- Rebirths and cash tick: refresh the list while the panel is open.
+	task.spawn(function()
+		while true do
+			task.wait(2)
+			if modal and modal.IsOpen() then
+				refreshPlayers()
+			end
+		end
+	end)
+end
+
 --[[ Build -------------------------------------------------------------------------- ]]
 
 local function build(): UIKit.Modal
@@ -193,6 +442,8 @@ local function build(): UIKit.Modal
 	local padding = Instance.new("UIPadding")
 	padding.PaddingRight = UDim.new(0, 10)
 	padding.Parent = list
+
+	buildPlayers()
 
 	heading("TARGET")
 	picker({ { Label = "THIS SERVER", Value = "Server" }, { Label = "ALL SERVERS", Value = "All" } }, 160, choice.Scope, function(value)
@@ -356,6 +607,7 @@ function AdminPanel.Open(nextAdminAbuse: number?)
 		choice.AbuseUnix = math.floor(nextAdminAbuse)
 	end
 	refreshAbuse()
+	refreshPlayers()
 	m.Open()
 end
 

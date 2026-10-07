@@ -250,7 +250,7 @@ function TutorialService.IsActive(player: Player): boolean
 	return t ~= nil and not t.Done
 end
 
--- Studio /tutorial reset | step <n>.
+-- Studio /tutorial reset | step <n>, and the admin panel's RESTART TUTORIAL.
 function TutorialService.DebugReset(player: Player)
 	local t = tutorialOf(player)
 	if not t then

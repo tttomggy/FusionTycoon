@@ -43,3 +43,18 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   "All servers" publishes `{ Action, Args, SenderUserId }` on
   MessagingService topic **`FT_Admin`**; every receiver re-checks the sender
   and re-validates. Every action is logged with `warn`.
+  **Players section** (top of the panel): everyone in THIS server, you
+  first ("(you)"), headshot + name + Rebirths + cash; tap to select.
+  `RestartTutorial { UserId }` = `TutorialService.DebugReset` + sync (only
+  `PlayerData.Tutorial` changes). `ResetPlayer { UserId }` = fail the
+  target's heist carries (as `/wipe`), `PlayerDataService.ResetToNew`
+  (session data becomes the `DEFAULT_DATA` template; **keeps `Receipts`,
+  `Funnel`, `Sessions`**; Cosmetics and everything else go; gamepasses live
+  on Roblox), `TycoonService.ResetPlot` (unclaimed plot, as for a new
+  player), sync, save. The panel asks first: red "Reset <name> to zero?
+  This can't be undone." and a 2 s hold button (`AdminConfig.ResetHoldSeconds`).
+  Both: target must be in this server, 1 per 5 s per admin
+  (`PlayerActionCooldownSeconds`), `warn` log of who did what to whom, never
+  sent on `FT_Admin` (a received one is ignored), Scope is ignored.
+  `/selftest` fuzzes both as a non-admin (SUSPICIOUS warn, fingerprint
+  unchanged).

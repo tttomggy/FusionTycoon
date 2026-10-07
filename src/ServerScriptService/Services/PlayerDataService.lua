@@ -1948,6 +1948,31 @@ function PlayerDataService.GetPendingOffline(player: Player): PendingOffline?
 	return state.pendingOffline[player.UserId]
 end
 
+-- Admin panel RESET TO ZERO: the session data becomes a brand-new player's
+-- (the DEFAULT_DATA template). Kept: Receipts (Roblox never re-grants an old
+-- purchase) and Funnel (analytics doesn't count them as new again), plus
+-- Sessions. The caller fails heist carries first, rebuilds the plot, syncs
+-- and saves.
+function PlayerDataService.ResetToNew(player: Player): boolean
+	local userId = player.UserId
+	local old = state.sessionCache[userId]
+	if not old then
+		return false
+	end
+	local fresh = reconcile(deepCopy(toDisk(DEFAULT_DATA)))
+	fresh.Receipts = old.Receipts
+	fresh.Funnel = old.Funnel
+	fresh.Sessions = old.Sessions
+	state.sessionCache[userId] = fresh
+	state.pendingOffline[userId] = nil
+	state.lastOfflinePaid[userId] = nil
+	state.goalProgress[userId] = nil
+	state.questStatus[userId] = nil
+	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
+	return true
+end
+
 -- Replaces the pending offline earnings (0 clears them). /offline uses it.
 function PlayerDataService.SetPendingOffline(player: Player, amount: number, awaySeconds: number)
 	if amount > 0 then

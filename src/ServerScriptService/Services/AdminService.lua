@@ -21,6 +21,13 @@
 	                   filter fails
 	        SetNextAdminAbuse { Unix }  DataStore GlobalEvents/NextAdminAbuse
 	                   (UTC), then every server (0 clears)
+	        RestartTutorial { UserId }  that player's Tutorial state starts
+	                   over (TutorialService.DebugReset + sync); nothing else
+	        ResetPlayer { UserId }  that player's save back to a brand-new
+	                   player (carries failed, PlayerDataService.ResetToNew,
+	                   plot rebuilt unclaimed, sync, save). Keeps Receipts and
+	                   Funnel. These two: a player in THIS server only, 1 per
+	                   5 s per admin, never sent on FT_Admin, warn-logged.
 	  A non-admin firing AdminAction gets a suspicious warn and nothing else.
 	  /trailer [shot|stop] (chat, live servers too)  TrailerStart { Shot?,
 	        Stop? } to that admin only (shot whitelisted against
@@ -55,9 +62,13 @@ local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local TrailerConfig = require(ReplicatedStorage.Shared.Config.TrailerConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type EventServiceModule = typeof(require(script.Parent.EventService))
+type HeistServiceModule = typeof(require(script.Parent.HeistService))
+type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
+type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 
 type Args = { [string]: any }
 
@@ -65,6 +76,7 @@ type State = {
 	ownerUserId: number?,
 	subscribed: boolean,
 	lastActionAt: { [number]: number },
+	lastPlayerActionAt: { [number]: number },
 	connections: { RBXScriptConnection },
 	running: boolean,
 }
@@ -73,6 +85,7 @@ local state: State = {
 	ownerUserId = nil,
 	subscribed = false,
 	lastActionAt = {},
+	lastPlayerActionAt = {},
 	connections = {},
 	running = false,
 }
@@ -82,6 +95,9 @@ local GIFT_CAPTION = "🎁 ADMIN GIFT"
 -- Resolved in :Start(), never at module scope.
 local PlayerDataService: PlayerDataServiceModule
 local EventService: EventServiceModule
+local HeistService: HeistServiceModule
+local TutorialService: TutorialServiceModule
+local TycoonService: TycoonServiceModule
 
 local AdminService = {}
 
@@ -162,6 +178,12 @@ local function validate(action: unknown, raw: unknown): (string?, Args?, string?
 			return nil, nil, "time out of range"
 		end
 		return action, { Unix = unix }, nil
+	elseif action == "RestartTutorial" or action == "ResetPlayer" then
+		local userId = RemoteGuard.Int(args.UserId, 1, 2 ^ 52)
+		if not userId then
+			return nil, nil, "bad player"
+		end
+		return action, { UserId = userId }, nil
 	end
 	-- Luck, EndEvent: no args.
 	return action, {}, nil
@@ -264,6 +286,32 @@ end
 
 --[[ Handlers ------------------------------------------------------------- ]]
 
+-- RestartTutorial / ResetPlayer: the target must be loaded in THIS server.
+local function applyPlayerAction(admin: Player, action: string, userId: number)
+	local target = Players:GetPlayerByUserId(userId)
+	if not target or not PlayerDataService.IsDataLoaded(target) then
+		reply(admin, false, "That player isn't in this server")
+		return
+	end
+	warn(("AdminService: %s (%d) %s -> %s (%d)"):format(admin.Name, admin.UserId, action, target.Name, target.UserId))
+	if action == "RestartTutorial" then
+		TutorialService.DebugReset(target)
+		PlayerDataService.SyncTycoon(target)
+		reply(admin, true, ("Tutorial restarted for %s"):format(target.DisplayName))
+		return
+	end
+	-- Any steal this player is part of resolves (returns) before the wipe.
+	HeistService.FailCarriesFor(target, "Left")
+	if not PlayerDataService.ResetToNew(target) then
+		reply(admin, false, "Reset failed")
+		return
+	end
+	TycoonService.ResetPlot(target)
+	PlayerDataService.SyncTycoon(target)
+	PlayerDataService.SaveNow(target)
+	reply(admin, true, ("%s reset to zero"):format(target.DisplayName))
+end
+
 local function onAdminAction(player: Player, payload: unknown)
 	if not isAdmin(player.UserId) then
 		warn(("AdminService: SUSPICIOUS AdminAction from non-admin %s (%d)"):format(player.Name, player.UserId))
@@ -280,6 +328,17 @@ local function onAdminAction(player: Player, payload: unknown)
 	local action, args, reason = validate(data.Action, data.Args)
 	if not action or not args then
 		reply(player, false, "Rejected: " .. tostring(reason))
+		return
+	end
+	if AdminConfig.PlayerActions[action] then
+		-- Per-player actions: this server only, never broadcast.
+		local lastPlayer = state.lastPlayerActionAt[player.UserId]
+		if lastPlayer and now - lastPlayer < AdminConfig.PlayerActionCooldownSeconds then
+			reply(player, false, "Slow down: one player action every 5 s")
+			return
+		end
+		state.lastPlayerActionAt[player.UserId] = now
+		applyPlayerAction(player, action, args.UserId)
 		return
 	end
 	-- Next Admin Abuse lives in the DataStore and is global by nature.
@@ -328,6 +387,10 @@ local function onMessage(message: any)
 	local sender = data.SenderUserId
 	if typeof(sender) ~= "number" or not isAdmin(sender) then
 		warn(("AdminService: SUSPICIOUS FT_Admin message from non-admin %s"):format(tostring(sender)))
+		return
+	end
+	if typeof(data.Action) == "string" and AdminConfig.PlayerActions[data.Action] then
+		warn(("AdminService: FT_Admin %s from %d ignored: this server only"):format(data.Action, sender))
 		return
 	end
 	local action, args, reason = validate(data.Action, data.Args)
@@ -414,6 +477,7 @@ function AdminService:Init()
 		state.connections,
 		Players.PlayerRemoving:Connect(function(player: Player)
 			state.lastActionAt[player.UserId] = nil
+			state.lastPlayerActionAt[player.UserId] = nil
 		end)
 	)
 end
@@ -421,6 +485,9 @@ end
 function AdminService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	EventService = require(script.Parent.EventService)
+	HeistService = require(script.Parent.HeistService)
+	TutorialService = require(script.Parent.TutorialService)
+	TycoonService = require(script.Parent.TycoonService)
 	state.running = true
 	task.spawn(resolveOwner)
 	task.spawn(function()
