@@ -578,6 +578,42 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	if not presented() or not step then
 		return { { Ok = false, Name = ("tutorial %s: its banner shows"):format(stepId), Detail = "never presented" } }
 	end
+	local TutorialExplain = require(UI.TutorialExplain) :: any
+	local TutorialHand = require(UI.TutorialHand) :: any
+	-- The explain card: a step that introduces something opens it first
+	-- (title, >= 22 px text, an OK); OK hands over to the banner (or ends
+	-- the step). The claim has none.
+	local cardOpen = TutorialCards.IsOpen() or TutorialExplain.IsOpen()
+	if step.Card then
+		local waited = os.clock()
+		while not TutorialExplain.IsOpen() and os.clock() - waited < 4 do
+			task.wait(0.1)
+		end
+		local body = TutorialExplain.GetBody()
+		table.insert(lines, {
+			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body,
+			Name = ("tutorial %s: its explain card opens first (text >= 22 px)"):format(stepId),
+			Detail = if body then ("%d px"):format(body.TextSize) else "no card",
+		})
+		task.wait(0.4)
+		TutorialExplain.PressOk()
+		task.wait(0.2)
+		local banner = TutorialBanner.IsShown()
+		table.insert(lines, {
+			Ok = step.CardEnds == true or banner,
+			Name = ("tutorial %s: the banner takes over after OK"):format(stepId),
+		})
+		if step.CardEnds then
+			return lines
+		end
+	else
+		table.insert(lines, { Ok = not cardOpen, Name = ("tutorial %s: no card"):format(stepId) })
+	end
+	if stepId == "claim" then
+		local UIKit = require(UI.UIKit) :: any
+		local anyCard = cardOpen or UIKit.IsOverlayOpen() or TutorialBanner.IsSplashShown()
+		table.insert(lines, { Ok = not anyCard, Name = "tutorial: no card shows before the claim" })
+	end
 	task.wait(0.5) -- the slide-in
 	local text = TutorialBanner.GetBaseText()
 	local words = #text:split(" ")
@@ -586,14 +622,38 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		Name = ("tutorial %s: the banner reads its instruction in 6 words or fewer"):format(stepId),
 		Detail = ("%q (%d words)"):format(text, words),
 	})
-	-- No card of any kind: no tutorial card, and before the claim nothing
-	-- else either (no modal, no result card, no welcome splash yet).
-	local cardOpen = TutorialCards.IsOpen()
-	table.insert(lines, { Ok = not cardOpen, Name = ("tutorial %s: no tutorial card"):format(stepId) })
-	if stepId == "claim" then
-		local UIKit = require(UI.UIKit) :: any
-		local anyCard = cardOpen or UIKit.IsOverlayOpen() or TutorialBanner.IsSplashShown()
-		table.insert(lines, { Ok = not anyCard, Name = "tutorial: no card shows before the claim" })
+	-- The objective bar: 36 px text (28 on a phone), a lime border, 520-640 wide.
+	local objectiveBar = TutorialBanner.GetFrame()
+	local label = TutorialBanner.GetTextLabel()
+	local UIKitForBar = require(UI.UIKit) :: any
+	local phone = UIKitForBar.IsPhone()
+	local widthOk = if phone then true else (objectiveBar.AbsoluteSize.X / UIKitForBar.EffectiveScale(objectiveBar) >= 520 and objectiveBar.AbsoluteSize.X / UIKitForBar.EffectiveScale(objectiveBar) <= 640)
+	table.insert(lines, {
+		Ok = widthOk and label.TextSize == (if phone then 28 else 36) and TutorialBanner.GetStepText() == ("%d / %d"):format(stepIndex, #TutorialConfig.Steps),
+		Name = ("tutorial %s: the objective bar (width, text size, step counter)"):format(stepId),
+		Detail = ("%.0f px wide, text %d, %s"):format(objectiveBar.AbsoluteSize.X, label.TextSize, TutorialBanner.GetStepText()),
+	})
+	-- The hand: its fingertip lies inside the button it points at (the
+	-- Fuse panel's buttons and the contextual button are closed / out of
+	-- reach in this drive).
+	if step.Hand then
+		local until_ = os.clock() + 3
+		local tip = TutorialHand.GetTip()
+		while tip == nil and os.clock() < until_ do
+			task.wait(0.1)
+			tip = TutorialHand.GetTip()
+		end
+		local target = TutorialHand.GetTarget()
+		local inside = false
+		if tip and target then
+			local p, sz = target.AbsolutePosition, target.AbsoluteSize
+			inside = tip.X >= p.X and tip.X <= p.X + sz.X and tip.Y >= p.Y and tip.Y <= p.Y + sz.Y
+		end
+		table.insert(lines, {
+			Ok = inside,
+			Name = ("tutorial %s: the hand's tip is inside its target"):format(stepId),
+			Detail = if tip and target then ("tip %.0f,%.0f target %.0f,%.0f %.0fx%.0f"):format(tip.X, tip.Y, target.AbsolutePosition.X, target.AbsolutePosition.Y, target.AbsoluteSize.X, target.AbsoluteSize.Y) else "no hand",
+		})
 	end
 	-- The HUD set: each key shown exactly from the step that introduces it
 	-- (the staggered ones get their time).

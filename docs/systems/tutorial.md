@@ -7,30 +7,25 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `UI/TutorialBanner` + `UI/TutorialHand` + `UI/HudGate` +
   `Effects/TutorialPath` client). Built like the egg games' tutorials (Harris:
   "super confusing, it needs a redo" about Tutorial 1's OK cards, yellow
-  rings and rails): **one instruction at a time, no OK cards**. 10 steps:
-  Claim · Upgrade · Pull · Pull one more · Pedestals (3 s) · Fuse (first
-  one always succeeds) · Multiplier Pad · Lab weather · Rebirth · You're
-  ready (3 s). Banners (≤ 6 words, `· 24m` live distance added while there
+  rings and rails): **one instruction at a time**; Tutorial 3 brought back one big **explain card** before each step that introduces something. 11 steps:
+  Claim · Upgrade · Pull · Pull one more · Pedestals (OK ends it) · Fuse
+  (first one always succeeds) · Index (OK ends it) · Multiplier Pad · Lab
+  weather · Rebirth · You're ready (3 s). Banners (≤ 6 words, `· 24m` live distance added while there
   is a world target): "Claim your lab", "Upgrade your generator", "Pull an
   orb" (sub "Your first 2 are free!"), "Pull one more!", "Your orbs make
   money!", "Fuse 2 orbs", "Make more money" (sub "Come back with $X" while
   it's out of reach, skipped after 3 s), "Lab weather!" (sub "Every 15 min.
   Tap it to see what to do"), "Reach $15M to Rebirth", "You're ready!".
-  **Pieces:** the banner (`TutorialBanner`, top centre where the event chip
-  is; slides in, a green ✓ + the Step sound on completion, the next one
-  0.4 s later; a replay adds a SKIP chip) · the **arrow path**
-  (`TutorialPath`: ≤ 40 small flat lime `World.TutorialPath` ">" chevrons,
+  **Pieces:** the **objective bar** (`TutorialBanner`: a solid dark panel with a lime border, top centre just under the Roblox top bar, 600 px wide (`ObjectiveWidth`; phone: full width minus 16 px margins), a 48 px step icon (`Step.Icon`), the instruction in 36 px white display text (28 on a phone), a lime "24m" pill on the right, "3 / 11" (+ the sub line) under it, a pulse on each change; a green ✓ + the Step sound on completion, the next one 0.4 s later; a replay adds a SKIP chip) · the **explain card** (`UI/TutorialExplain`, `Step.Card`: shown before each step that introduces something, never the claim: a ViewportFrame clone of the real generator / Gacha Pad / pedestal / pad (`Card.Model` = a GoalMarkerController target), tier orbs for Fuse, else the icon; title; 1-2 sentences at ≥ 22 px; a big green OK, ✕ / tap outside count as OK; then the banner, path and hand take over. `CardEnds` steps (Pedestals, Index) end on OK; `CardDelay` waits after INDEX pops in) · the **arrow path**
+  (`TutorialPath`: ≤ 40 small flat lime `World.TutorialPath` ">" arrows, one size only (no big chevrons at the target),
   two thin Neon bars each (1.2 × 0.25 studs; `PathArrowSize`), one every 3
   studs along PathfindingService waypoints (straight line fallback), 0.2
   above the floor, each pointing along the path toward the target and
   brightening / fading in turn so they flow to it, a fixed pool of 80 parts
-  moved every 0.3 s; spacing widens past 120 studs; 3 bigger chevrons (two thin Neon bars each)
-  on the floor in front of the target, pointing in; hidden within 6 studs) +
+  moved every 0.3 s; spacing widens past 120 studs; hidden within 6 studs) +
   the goal arrow's bouncing pill and floor ring (`GoalMarkerController.
   SetTutorialTarget`; heist > tutorial > event > goal) · **one hand 👆**
-  (`TutorialHand`, a glyph with a shadow, below-right of its target and
-  bobbing toward it, 👇 above on the lower half of the screen, above every
-  modal; never a rectangle) on the exact thing to press: the big button;
+  (`TutorialHand`, a glyph with a shadow whose fingertip lands inside its target (`GetTip`, checked by `/selftest`), bobbing toward it, 👇 above on the lower half of the screen, above every modal; never a rectangle; the top-bar inset (`GuiService:GetGuiInset`) is added back to the target's `AbsolutePosition`, it tracks the target every frame and hides when the target is off screen or scrolled out) on the exact thing to press: the big button;
   AUTO-FILL then FUSE in the Fuse panel (2 taps, the odds aren't part of
   it); the event chip; REBIRTH · the **contextual button** (a big green
   "UPGRADE" / "PULL" / "FUSE" / "BUY" above the bottom bar, shown at a
@@ -43,7 +38,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   **Progressive HUD** (`UI/HudGate`, `TutorialConfig.HudReveal` +
   `IsHudShown`): a new player sees the cash card and the banner only;
   UPGRADES pops in at the upgrade step, ITEMS at "Pull one more", INDEX
-  after the first fusion (note "New orbs fill your Index!"), the event
+  at the Index step (after the first fusion) (note "New orbs fill your Index!"), the event
   chip at the weather step, REBIRTH at the rebirth step, and at the end
   ⚙, SHOP / GIFTS / QUESTS / the deal badge / power-ups, then NEXT GOAL +
   the quest tracker, one by one (`HudRevealDelay`). Each pops (0 → 1.15 →

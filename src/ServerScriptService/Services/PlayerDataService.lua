@@ -314,8 +314,13 @@ local function sanitizeTutorial(raw: unknown): TutorialState
 	local step = whole(t.Step, 1000)
 	local done = t.Done == true
 	-- A save from Tutorial 1 (its 14 steps): resume at the matching step.
-	if whole(t.Ver, 1000) < TutorialConfig.DataVersion and step > 0 and not done then
-		step = TutorialConfig.MigrateStep(step)
+	local ver = whole(t.Ver, 1000)
+	if step > 0 and not done then
+		if ver < 2 then
+			step = TutorialConfig.MigrateStep(step)
+		elseif ver == 2 then
+			step = TutorialConfig.MigrateV2Step(step)
+		end
 	end
 	return {
 		Ver = TutorialConfig.DataVersion,

@@ -51,6 +51,19 @@ export type Card = {
 	Body: string,
 }
 
+-- An explain card shown before a step's banner (Tutorial 3): big image,
+-- title, one or two short sentences, a big green OK. `Model` names the
+-- world object (GoalMarkerController target) drawn in a ViewportFrame;
+-- `Orbs` draws UIKit.TierOrbs instead ("Common", "+", "Common", "->",
+-- "Rare"); else the Icon is the image.
+export type ExplainCard = {
+	Icon: string,
+	Title: string,
+	Body: string,
+	Model: string?,
+	Orbs: { string }?,
+}
+
 export type Step = {
 	Id: string,
 	Kind: Kind,
@@ -63,10 +76,15 @@ export type Step = {
 	Seconds: number?,
 	Skip: string?,
 	SkipSeconds: number?,
+	Icon: string?, -- the objective bar's 48 px step icon
+	Card: ExplainCard?, -- opens first (never at the claim), then the banner
+	CardEnds: boolean?, -- OK on the card completes the step
+	CardDelay: number?, -- seconds after the step starts before the card opens
 }
 
--- The saved layout version (Tutorial 2 = 2; no Ver = Tutorial 1's 14 steps).
-TutorialConfig.DataVersion = 2
+-- The saved layout version (Tutorial 3 = 3, 11 steps; 2 = Tutorial 2's 10;
+-- no Ver = Tutorial 1's 14 steps).
+TutorialConfig.DataVersion = 3
 
 -- Old saves with real progress skip it (with a one-time "replay in ⚙" toast).
 TutorialConfig.ProgressRebirths = 1
@@ -77,6 +95,10 @@ TutorialConfig.PathRebuildSeconds = 0.3
 TutorialConfig.GoalPathSessions = 2 -- the goal path is on by default this many sessions
 
 -- The banner and the welcome splash.
+-- The objective bar (TutorialBanner): desktop width 520-640, phone full
+-- width minus this margin (real px) on each side.
+TutorialConfig.ObjectiveWidth = 600
+TutorialConfig.ObjectiveMarginPhone = 32 -- both sides together (16 each)
 TutorialConfig.StepDelay = 0.4 -- after a step's ✓, the next banner slides in
 TutorialConfig.WelcomeSeconds = 2 -- "WELCOME TO YOUR LAB!" auto-fades, no button
 
@@ -88,12 +110,12 @@ TutorialConfig.PathArrowLift = 0.2 -- lying this far above the floor
 TutorialConfig.PathMaxArrows = 40 -- 80 parts, a fixed pool
 TutorialConfig.PathFlowSeconds = 1.2 -- one pulse runs from you to the target
 TutorialConfig.PathArriveStuds = 6 -- the arrows stop this close to the target
-TutorialConfig.ChevronCount = 3
 
 TutorialConfig.Steps = {
 	{
 		Id = "claim",
 		Kind = "Action",
+		Icon = "🏠",
 		Banner = "Claim your lab",
 		Target = "ClaimStation",
 		Skip = "Claimed",
@@ -101,6 +123,13 @@ TutorialConfig.Steps = {
 	{
 		Id = "upgrade",
 		Kind = "Action",
+		Icon = "⚡",
+		Card = {
+			Icon = "⚡",
+			Title = "Generators",
+			Body = "Generators make your money. Upgrading them makes more.",
+			Model = "Generator_basic_generator",
+		},
 		Banner = "Upgrade your generator",
 		Target = "Generator_basic_generator",
 		PromptName = "GeneratorPrompt",
@@ -110,6 +139,13 @@ TutorialConfig.Steps = {
 	{
 		Id = "pull",
 		Kind = "Action",
+		Icon = "🎰",
+		Card = {
+			Icon = "🎰",
+			Title = "The Gacha Pad",
+			Body = "The Gacha Pad gives you orbs. Rarer orbs earn way more!",
+			Model = "GachaStation",
+		},
 		Banner = "Pull an orb",
 		Sub = "Your first 2 are free!",
 		Target = "GachaStation",
@@ -119,6 +155,7 @@ TutorialConfig.Steps = {
 	{
 		Id = "pull2",
 		Kind = "Action",
+		Icon = "🎰",
 		Banner = "Pull one more!",
 		Target = "GachaStation",
 		PromptName = "PullPrompt",
@@ -126,22 +163,59 @@ TutorialConfig.Steps = {
 	},
 	{
 		Id = "pedestals",
-		Kind = "Timed",
+		Kind = "Open",
+		Icon = "🏛",
+		Card = {
+			Icon = "🏛",
+			Title = "Pedestals",
+			Body = "Pedestals show your best orbs. Every orb on display earns cash every second.",
+			Model = "Pedestal1",
+		},
+		CardEnds = true,
 		Banner = "Your orbs make money!",
 		Target = "Pedestal1",
-		Seconds = 3,
+		Seconds = 30,
 	},
 	{
 		Id = "fuse",
 		Kind = "Action",
+		Icon = "🔮",
+		Card = {
+			Icon = "🔮",
+			Title = "Fusing",
+			Body = "Fusing turns 2 orbs of the same tier into 1 better orb. Common + Common → Rare!",
+			Orbs = { "Common", "+", "Common", "→", "Rare" },
+		},
 		Banner = "Fuse 2 orbs",
 		Target = "FusionMachine",
 		PromptName = "FusePrompt",
 		Prompt = "FUSE",
 	},
 	{
+		Id = "index",
+		Kind = "Open",
+		Icon = "📖",
+		Card = {
+			Icon = "📖",
+			Title = "The Index",
+			Body = "The Index collects every orb you find. Each new one boosts your income forever.",
+		},
+		CardEnds = true,
+		CardDelay = 1, -- after INDEX pops in
+		Banner = "Open your Index",
+		Hand = "Index",
+		Seconds = 30,
+	},
+	{
 		Id = "multiplier",
 		Kind = "Action",
+		Icon = "✖️",
+		Card = {
+			Icon = "✖️",
+			Title = "Multiplier Pad",
+			Body = "The Multiplier Pad multiplies ALL your money.",
+			Model = "MultiplierStation",
+		},
 		Banner = "Make more money",
 		Target = "MultiplierStation",
 		PromptName = "UpgradePrompt",
@@ -152,6 +226,12 @@ TutorialConfig.Steps = {
 	{
 		Id = "events",
 		Kind = "Open",
+		Icon = "🌦",
+		Card = {
+			Icon = "🌦",
+			Title = "Lab weather",
+			Body = "Lab weather changes every 15 min. Each one gives a bonus. Tap the top chip to see it.",
+		},
 		Banner = "Lab weather!",
 		Sub = "Every 15 min. Tap it to see what to do",
 		Hand = "EventChip",
@@ -160,6 +240,12 @@ TutorialConfig.Steps = {
 	{
 		Id = "rebirth",
 		Kind = "Open",
+		Icon = "♻️",
+		Card = {
+			Icon = "♻️",
+			Title = "Rebirth",
+			Body = ("Rebirth at %s: you keep your orbs and earn faster forever."):format(NumberFormat.Money(RebirthConfig.GetCost(0))),
+		},
 		Banner = ("Reach %s to Rebirth"):format(NumberFormat.Money(RebirthConfig.GetCost(0))),
 		Hand = "Rebirth",
 		Seconds = 6,
@@ -167,6 +253,7 @@ TutorialConfig.Steps = {
 	{
 		Id = "finish",
 		Kind = "Timed",
+		Icon = "🎉",
 		Banner = "You're ready!",
 		Seconds = 3,
 	},
@@ -204,6 +291,15 @@ local OLD_STEP_IDS = {
 	"finish",
 }
 
+-- Tutorial 2's step (10 steps) -> this list's: "index" was added before
+-- "multiplier".
+local V2_STEP_IDS = { "claim", "upgrade", "pull", "pull2", "pedestals", "fuse", "multiplier", "events", "rebirth", "finish" }
+
+function TutorialConfig.MigrateV2Step(oldStep: number): number
+	local id = V2_STEP_IDS[oldStep]
+	return if id then TutorialConfig.IndexOf(id) :: number else 1
+end
+
 function TutorialConfig.MigrateStep(oldStep: number): number
 	local id = OLD_STEP_IDS[oldStep]
 	return if id then TutorialConfig.IndexOf(id) :: number else 1
@@ -221,7 +317,7 @@ TutorialConfig.HudKeys = { "Upgrades", "Items", "Index", "Rebirth", "Event", "Se
 TutorialConfig.HudReveal = {
 	Upgrades = "upgrade", -- the upgrade step
 	Items = "pull2", -- after the first pull
-	Index = "multiplier", -- after the first fusion
+	Index = "index", -- after the first fusion
 	Rebirth = "rebirth",
 	Event = "events",
 	Settings = "finish",

@@ -22,6 +22,7 @@
 	  IsContextualShown() / GetTarget()
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -37,6 +38,10 @@ local BUTTON_DISPLAY_ORDER = 62 -- over the HUD, under every panel
 local HAND_SIZE = 64
 local BOB_PIXELS = 12
 local BOB_SECONDS = 0.45
+-- The fingertip inside the glyph box (fractions of HAND_SIZE).
+local TIP_X = 0.5
+local TIP_UP = 0.12 -- 👆: near the top
+local TIP_DOWN = 0.88 -- 👇: near the bottom
 local BUTTON_SIZE = { Desktop = Vector2.new(280, 84), Phone = Vector2.new(240, 72) }
 local BUTTON_GAP = 14 -- above the bottom bar's reserve
 
@@ -45,6 +50,7 @@ local handRoot: Frame
 local handLabel: TextLabel
 local handShadow: TextLabel
 local target: GuiObject? = nil
+local tipAbs: Vector2? = nil
 
 local buttonGui: ScreenGui
 local buttonHolder: Frame
@@ -70,29 +76,69 @@ local function isOnScreen(gui: GuiObject): boolean
 	return true
 end
 
+-- The target's centre must be on the screen and inside every scrolling
+-- frame it sits in (a button scrolled out of its list is not pointed at).
+local function centreVisible(gui: GuiObject, centre: Vector2): boolean
+	local view = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1920, 1080)
+	local inset = GuiService:GetGuiInset().Y
+	if centre.X < 0 or centre.X > view.X or centre.Y < -inset or centre.Y > view.Y - inset then
+		return false
+	end
+	local current = gui.Parent
+	while current and not current:IsA("LayerCollector") do
+		if current:IsA("ScrollingFrame") then
+			local p, sz = current.AbsolutePosition, current.AbsoluteSize
+			if centre.X < p.X or centre.X > p.X + sz.X or centre.Y < p.Y or centre.Y > p.Y + sz.Y then
+				return false
+			end
+		end
+		current = current.Parent
+	end
+	return true
+end
+
 local function placeHand()
 	local gui = target
 	if not gui or not isOnScreen(gui) then
 		handRoot.Visible = false
+		tipAbs = nil
 		return
 	end
+	-- AbsolutePosition is measured BELOW the Roblox top bar even in an
+	-- IgnoreGuiInset gui (the hand's), so the inset is added back when
+	-- converting to the hand gui's logical px.
 	local scale = UIKit.EffectiveScale(handRoot)
-	local position = gui.AbsolutePosition / scale
-	local size = gui.AbsoluteSize / scale
+	local inset = GuiService:GetGuiInset().Y
+	local absPos, absSize = gui.AbsolutePosition, gui.AbsoluteSize
+	if not centreVisible(gui, absPos + absSize / 2) then
+		handRoot.Visible = false
+		tipAbs = nil
+		return
+	end
 	local viewport = UIKit.GetLogicalViewport()
-	local below = (position.Y + size.Y / 2) < viewport.Y * 0.6
+	local centreY = (absPos.Y + inset + absSize.Y / 2) / scale
+	local below = centreY < viewport.Y * 0.6
 	local bob = math.sin(os.clock() * (math.pi * 2) / (BOB_SECONDS * 2)) * 0.5 + 0.5 -- 0..1
-	local toward = bob * BOB_PIXELS
+	local heightLogical = absSize.Y / scale
+	local toward = bob * math.min(BOB_PIXELS, heightLogical * 0.3)
 	handLabel.Text = if below then "👆" else "👇"
 	handShadow.Text = handLabel.Text
-	-- Below-right of the target (or above-right on the lower half), nudged
-	-- toward it as it bobs.
-	local x = position.X + size.X * 0.7
-	local y = if below then position.Y + size.Y * 0.75 - toward else position.Y - HAND_SIZE * 0.75 + size.Y * 0.25 + toward
-	x = math.clamp(x, 0, viewport.X - HAND_SIZE)
-	y = math.clamp(y, 0, viewport.Y - HAND_SIZE)
+	-- The fingertip lands inside the target: low in it for a 👆 (the hand
+	-- hangs below), high in it for a 👇 (the hand hangs above), nudged
+	-- toward its middle as it bobs.
+	local tipX = (absPos.X + absSize.X * 0.5) / scale
+	local tipY = (absPos.Y + inset) / scale + heightLogical * (if below then 0.65 else 0.35) + (if below then -toward else toward)
+	local x = tipX - HAND_SIZE * TIP_X
+	local y = tipY - HAND_SIZE * (if below then TIP_UP else TIP_DOWN)
 	handRoot.Position = UDim2.fromOffset(x, y)
 	handRoot.Visible = true
+	tipAbs = Vector2.new(tipX * scale, tipY * scale - inset)
+end
+
+-- Where the fingertip is, in the same px space as a GuiObject's
+-- AbsolutePosition (/selftest: it must lie inside the target's rect).
+function TutorialHand.GetTip(): Vector2?
+	return if handRoot.Visible then tipAbs else nil
 end
 
 function TutorialHand.SetTarget(gui: GuiObject?)

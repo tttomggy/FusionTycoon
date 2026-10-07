@@ -4,13 +4,15 @@
 	------------------
 	Drives the first-time tutorial on the client (Tutorial 2; the steps are
 	TutorialConfig.Steps, the server owns the step, TutorialService, and
-	sends it in the snapshot). One instruction at a time, no OK cards:
+	sends it in the snapshot). One instruction at a time; a step that
+	introduces something opens one big explain card first (UI/TutorialExplain):
 
-	  1. THE BANNER (UI/TutorialBanner), top centre: the step's instruction
-	     and, while it has a world target, the live distance ("· 24m").
-	  2. THE PATH (Effects/TutorialPath): lime dots from your feet to the
-	     target, chevrons on the floor at it, the goal arrow's bouncing pill
-	     (GoalMarkerController's tutorial layer).
+	  1. THE OBJECTIVE BAR (UI/TutorialBanner), top centre under the Roblox
+	     top bar: icon, the step's instruction, "3 / 11", and while it has a
+	     world target the live distance (a lime "24m" pill).
+	  2. THE PATH (Effects/TutorialPath): small lime arrows from your feet to
+	     the target, the goal arrow's bouncing pill (GoalMarkerController's
+	     tutorial layer).
 	  3. THE BIG BUTTON (UI/TutorialHand): standing at a world target with a
 	     prompt, a green "PULL" / "UPGRADE" / "FUSE" / "BUY" button appears
 	     above the bottom bar; it triggers that ProximityPrompt
@@ -49,6 +51,7 @@ local UI = script.Parent.Parent.UI
 local UIKit = require(UI.UIKit)
 local TutorialCards = require(UI.TutorialCards)
 local TutorialBanner = require(UI.TutorialBanner)
+local TutorialExplain = require(UI.TutorialExplain)
 local TutorialHand = require(UI.TutorialHand)
 local FusePanel = require(UI.FusePanel)
 local RebirthPanel = require(UI.RebirthPanel)
@@ -86,6 +89,7 @@ local wasActive = false
 local pedestalPops: { BillboardGui } = {}
 local lastSub: string? = nil
 local pressing = false
+local cardUp = false -- an explain card is open: banner, path and hand wait
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
 
@@ -218,6 +222,8 @@ end
 --[[ Presenting a step -------------------------------------------------------------------- ]]
 
 local function stopGuidance()
+	cardUp = false
+	TutorialExplain.Close()
 	TutorialHand.SetContextual(nil, nil)
 	TutorialHand.SetTarget(nil)
 	TutorialPath.SetEnabled(false)
@@ -229,18 +235,19 @@ local function labName(): string
 	return ("%s'S LAB"):format(localPlayer.DisplayName:upper())
 end
 
--- Slides step `index`'s banner in and turns its guidance on.
-local function present(index: number)
+-- The banner, path, goal arrow and pedestal pops for step `index` (after
+-- its explain card, if it has one).
+local function beginGuidance(index: number)
 	local step = TutorialConfig.GetStep(index)
-	if not step then
+	if not step or presented ~= index then
 		return
 	end
 	local t = TycoonController.GetTutorial()
-	presented = index
+	cardUp = false
 	stepStart = os.clock()
 	advanceSentFor = nil
 	lastSub = step.Sub
-	TutorialBanner.Show(step.Banner, step.Sub)
+	TutorialBanner.Show(step.Banner, step.Sub, step.Icon, index, #TutorialConfig.Steps)
 	TutorialBanner.SetSkip(if t.Replay then function()
 		sendAdvance(index)
 	end else nil)
@@ -251,9 +258,45 @@ local function present(index: number)
 		GoalMarkerController.SetTutorialTarget(nil, nil, true)
 		TutorialPath.SetEnabled(false)
 	end
+end
+
+-- Starts step `index`: its explain card first (never the claim's), then the
+-- banner, path and hand.
+local function present(index: number)
+	local step = TutorialConfig.GetStep(index)
+	if not step then
+		return
+	end
+	presented = index
+	stepStart = os.clock()
+	advanceSentFor = nil
+	lastSub = step.Sub
 	if step.Id == "pedestals" then
 		showPedestalPops()
 	end
+	local card = step.Card
+	if not card then
+		beginGuidance(index)
+		return
+	end
+	cardUp = true
+	task.delay(step.CardDelay or 0, function()
+		if presented ~= index or not cardUp then
+			return
+		end
+		local model = if card.Model then GoalMarkerController.ResolvePlotTarget(card.Model) else nil
+		TutorialExplain.Show(card, model, function()
+			if presented ~= index then
+				return
+			end
+			if step.CardEnds then
+				cardUp = false
+				sendAdvance(index)
+			else
+				beginGuidance(index)
+			end
+		end)
+	end)
 end
 
 -- The step changed (or the tutorial started / ended): ✓ the old banner, then
@@ -291,6 +334,7 @@ end
 
 local function finishTutorial()
 	TutorialCards.Close()
+	TutorialExplain.Close()
 	TutorialBanner.SetSkip(nil)
 	ToastController.FlushHeld()
 end
@@ -355,7 +399,7 @@ end
 
 local function stepFrame()
 	local tutorialStep = presentedStep()
-	if not tutorialStep or not TycoonController.IsTutorialActive() then
+	if not tutorialStep or not TycoonController.IsTutorialActive() or cardUp then
 		return
 	end
 	local index = presented :: number
@@ -472,6 +516,7 @@ end
 
 function TutorialController.Init()
 	TutorialCards.Init()
+	TutorialExplain.Init()
 	TutorialBanner.Init()
 	TutorialHand.Init()
 	TutorialPath.Init()

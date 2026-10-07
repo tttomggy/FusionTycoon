@@ -1852,3 +1852,28 @@ Studio: `/quest reset`, `/powerup cashburst 2`, `/powerup coinmagnet 1`.
 - [ ] Power-ups never appear in the shop.
 - [ ] `/selftest`: PASS "a claim is refused while incomplete", "refused at
   0", and the fuzz (ClaimQuest / UsePowerUp) with no error or change.
+
+## 42. Tutorial 3 (Part A)
+
+From Harris's Oct 7 playtest. New player, `/tutorial reset`.
+
+- [ ] **Hand position:** in the Fuse panel the 👆 sits on AUTO-FILL (not
+  the "2 orbs 55%" chip), then on FUSE; at REBIRTH it is on the button, not
+  by the "Goal complete!" toast. Its fingertip is inside the button at every
+  step, on a phone too; it follows the Fuse panel as it pops in, hides while
+  its target is scrolled / off screen.
+- [ ] **One arrow size:** small lime ">" arrows all the way to the target,
+  no big chevrons at the end. The bouncing goal arrow stays.
+- [ ] **Explain cards:** none before the claim. Then one big card before
+  each of Upgrade (generator model), Pull (Gacha Pad), Pedestals (pedestal;
+  OK ends the step), Fuse (Common + Common → Rare orbs), Index (after INDEX
+  pops in; OK ends it), Multiplier (pad), Weather, Rebirth. Each: large
+  image, title, 1-2 sentences ≥ 22 px, a big green OK. Never two at once:
+  card, OK, banner / path / hand, action, next card.
+- [ ] **Objective bar:** solid dark panel, lime border, top centre just under
+  the Roblox top bar, 520-640 px wide, 48 px icon, 36 px instruction, lime
+  "24m" pill, "3 / 11" under it, a small pulse on each change. Phone: full
+  width minus 16 px margins, 28 px text, clear of the top-left buttons.
+- [ ] `/selftest`: "its explain card opens first", "the objective bar",
+  "the hand's tip is inside its target" pass.
+

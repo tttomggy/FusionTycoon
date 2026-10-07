@@ -17,8 +17,8 @@
 	    way); a fixed pool, moved, never rebuilt.
 	  * Lime (UITheme.World.TutorialPath): nothing else in the lab is lime, so
 	    it can't be taken for part of the level.
-	  * At the target: three big chevrons on the floor pointing in, in a row
-	    on the side you come from (two thin Neon bars each), lighting in turn.
+	  * One arrow size only: the same small arrows run right up to the target
+	    (no big chevrons at the end; the goal arrow's bouncing pill stays).
 	  * Hidden once you're within PathArriveStuds of the target.
 
 	All of it is client-only (parts under Workspace.Terrain). Rebuilt every
@@ -38,18 +38,12 @@ local TutorialPath = {}
 
 local MAX_WAYPOINTS = 80
 local PULSE_PHASE = 0.45 -- radians between neighbouring arrows
-local CHEVRON_FIRST_GAP = 3 -- studs from the target's edge to the nearest chevron
-local CHEVRON_GAP = 3.4
-local CHEVRON_ARM = Vector3.new(3.2, 0.18, 0.9)
-local CHEVRON_LIFT = 0.12
-local CHEVRON_PULSE_SECONDS = 1.2
 
 local localPlayer = Players.LocalPlayer
 
 local folder: Folder? = nil
 local arrows: { { Left: BasePart, Right: BasePart } } = {} -- the pool, in path order
 local arrowCount = 0 -- how many are placed (the rest sit hidden)
-local chevrons: { { Left: BasePart, Right: BasePart } } = {}
 local enabled = false
 local getTarget: () -> Vector3? = function()
 	return nil
@@ -104,29 +98,11 @@ local function layChevron(left: BasePart, right: BasePart, tip: Vector3, directi
 	right.CFrame = base * CFrame.new(a / 2, 0, a / 2) * CFrame.Angles(0, math.rad(-45), 0)
 end
 
-local function ensureChevrons()
-	local f = getFolder()
-	while #chevrons < TutorialConfig.ChevronCount do
-		table.insert(chevrons, {
-			Left = newPart("ChevronArm", Enum.PartType.Block, CHEVRON_ARM),
-			Right = newPart("ChevronArm", Enum.PartType.Block, CHEVRON_ARM),
-		})
-	end
-	for _, chevron in chevrons do
-		chevron.Left.Parent = f
-		chevron.Right.Parent = f
-	end
-end
-
 local function hideAll()
 	arrowCount = 0
 	for _, arrow in arrows do
 		arrow.Left.Transparency = 1
 		arrow.Right.Transparency = 1
-	end
-	for _, chevron in chevrons do
-		chevron.Left.Transparency = 1
-		chevron.Right.Transparency = 1
 	end
 end
 
@@ -190,23 +166,6 @@ local function placeArrows(points: { Vector3 })
 	arrowCount = count
 end
 
--- Three chevrons in a row on the side you approach from, each pointing at
--- the target.
-local function placeChevrons(target: Vector3, from: Vector3)
-	local flat = Vector3.new(from.X - target.X, 0, from.Z - target.Z)
-	if flat.Magnitude < 1e-3 then
-		return
-	end
-	ensureChevrons()
-	local outward = flat.Unit -- target -> you
-	local inward = -outward -- what a chevron points along
-	for index, chevron in chevrons do
-		local distance = CHEVRON_FIRST_GAP + (index - 1) * CHEVRON_GAP
-		local tip = Vector3.new(target.X, target.Y + CHEVRON_LIFT, target.Z) + outward * distance
-		layChevron(chevron.Left, chevron.Right, tip, inward, CHEVRON_ARM.X)
-	end
-end
-
 local function straightLine(from: Vector3, to: Vector3): { Vector3 }
 	return { from, to }
 end
@@ -250,12 +209,11 @@ local function rebuild()
 		computing = false
 		if enabled then
 			placeArrows(points)
-			placeChevrons(goal, feet)
 		end
 	end)
 end
 
--- Every frame: the pulse runs down the arrows, the chevrons light in turn.
+-- Every frame: the pulse runs down the arrows.
 local function animate()
 	if arrowCount == 0 then
 		return
@@ -267,15 +225,6 @@ local function animate()
 		local transparency = 0.05 + 0.65 * (1 - wave)
 		arrows[index].Left.Transparency = transparency
 		arrows[index].Right.Transparency = transparency
-	end
-	local chevronOmega = (2 * math.pi) / CHEVRON_PULSE_SECONDS
-	local count = #chevrons
-	for index, chevron in chevrons do
-		-- The farthest chevron lights first; the one at the target last.
-		local wave = 0.5 + 0.5 * math.sin(now * chevronOmega - (count - index) * 1.1)
-		local transparency = 0.05 + 0.6 * (1 - wave)
-		chevron.Left.Transparency = transparency
-		chevron.Right.Transparency = transparency
 	end
 end
 
@@ -298,10 +247,6 @@ end
 -- How many arrows are placed now (/selftest, the performance report).
 function TutorialPath.GetArrowCount(): number
 	return arrowCount
-end
-
-function TutorialPath.GetChevronCount(): number
-	return #chevrons
 end
 
 function TutorialPath.Init()
