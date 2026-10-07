@@ -26,6 +26,7 @@
 	since any call to those is a real action.
 ]]
 local CollectionService = game:GetService("CollectionService")
+local GuiService = game:GetService("GuiService")
 local LogService = game:GetService("LogService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -240,11 +241,14 @@ end
 
 -- Logical px of `gui`'s visible rect: itself plus a "Shadow" sibling or
 -- child below it.
+-- AbsolutePosition is reported below the Roblox top-bar inset even in
+-- IgnoreGuiInset guis, so the inset is added back before converting.
 local function visibleRect(gui: GuiObject, shadow: GuiObject?, screenScale: number): (number, number)
-	local top = gui.AbsolutePosition.Y
-	local bottom = gui.AbsolutePosition.Y + gui.AbsoluteSize.Y
+	local inset = GuiService:GetGuiInset().Y
+	local top = gui.AbsolutePosition.Y + inset
+	local bottom = top + gui.AbsoluteSize.Y
 	if shadow and shadow.Visible then
-		bottom = math.max(bottom, shadow.AbsolutePosition.Y + shadow.AbsoluteSize.Y)
+		bottom = math.max(bottom, shadow.AbsolutePosition.Y + inset + shadow.AbsoluteSize.Y)
 	end
 	return top / screenScale, (bottom - top) / screenScale
 end

@@ -1424,6 +1424,53 @@ local function removePlotForPlayer(player: Player)
 	end
 end
 
+-- /selftest: gives the tester a claimed lab through the real claim path (the
+-- character steps on the claim pad). Returns "Claimed" (already was),
+-- "Skip" (no free slot / no template) or "Ok" with a release function that
+-- puts the tester back to where they were (no plot, or a fresh unclaimed one).
+function TycoonService.SelfTestClaim(player: Player): (string, (() -> ())?)
+	local plot = plotByUserId[player.UserId]
+	if plot and plot:GetAttribute("Claimed") == true then
+		return "Claimed", nil
+	end
+	local hadPlot = plot ~= nil
+	if not plot then
+		createPlotForPlayer(player)
+		plot = plotByUserId[player.UserId]
+		if not plot then
+			return "Skip", nil
+		end
+	end
+	local pad = findPart(plot, "ClaimButton")
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not pad or not root or not root:IsA("BasePart") then
+		if not hadPlot then
+			removePlotForPlayer(player)
+		end
+		return "Skip", nil
+	end
+	local home = root.CFrame
+	root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
+	local deadline = os.clock() + 5
+	while plot:GetAttribute("Claimed") ~= true and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	root.CFrame = home
+	if plot:GetAttribute("Claimed") ~= true then
+		if not hadPlot then
+			removePlotForPlayer(player)
+		end
+		return "Skip", nil
+	end
+	return "Ok", function()
+		removePlotForPlayer(player)
+		if hadPlot then
+			createPlotForPlayer(player)
+		end
+	end
+end
+
 function TycoonService:Init()
 	RemoteEvents.RequestUpgrade.OnServerEvent:Connect(onRequestUpgrade)
 	RemoteEvents.RequestUpgradeMax.OnServerEvent:Connect(onRequestUpgradeMax)

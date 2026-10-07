@@ -248,6 +248,12 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 end
 
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- No lab yet: claim one through the real claim path, release it after.
+	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
+	if claimState == "Skip" then
+		print("[SelfTest] SKIP tutorial drive: no free lab slot to claim")
+		return
+	end
 	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
 	local popups = 0
 	local watch = RemoteEvents.ShopAnalytics.OnServerEvent:Connect(function(sender: Player, payload: unknown)
@@ -353,6 +359,9 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 
 	PlayerDataService.SelfTestSwapTutorial(player, saved)
 	PlayerDataService.SyncTycoon(player)
+	if releaseClaim then
+		releaseClaim()
+	end
 end
 
 -- Progression: stacking (helpers, a live stacked item, an old save's

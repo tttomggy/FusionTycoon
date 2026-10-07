@@ -88,6 +88,8 @@ local localPlayer = Players.LocalPlayer
 
 local joinedAt = os.clock()
 local lastOfferAt = -math.huge
+-- /selftest only: lets the deal real path run past the tutorial guard.
+local tutorialGuardOverride = false
 local lastLossAt = -math.huge
 local starterShown = false
 
@@ -203,7 +205,7 @@ local function offerBlocked(fromOverlay: string?): string?
 		return "NotSynced"
 	end
 	-- The tutorial never sells anything; nothing pops up over it.
-	if TycoonController.IsTutorialActive() then
+	if TycoonController.IsTutorialActive() and not tutorialGuardOverride then
 		return "Tutorial"
 	end
 	if now - lastOfferAt < ShopConfig.OfferCooldownSeconds then
@@ -429,6 +431,8 @@ function ShopController.SelfTestDealPath(): { string }
 	lastOfferAt = -math.huge
 	lastLossAt = -math.huge
 	dealPopSlot = nil
+	local savedTutorial = tutorialGuardOverride
+	tutorialGuardOverride = true
 	ShopCards.CloseSide()
 	local blocked = dealBlocked(deal, true)
 	if not blocked then
@@ -437,6 +441,7 @@ function ShopController.SelfTestDealPath(): { string }
 	local shown = ShopCards.GetSideName() == "DealOffer"
 	ShopCards.CloseSide()
 	joinedAt, lastOfferAt, lastLossAt, dealPopSlot = savedJoined, savedOffer, savedLoss, savedSlot
+	tutorialGuardOverride = savedTutorial
 	if blocked then
 		return { ("FAIL deal real path: still blocked by %s with the guards cleared"):format(blocked) }
 	end
