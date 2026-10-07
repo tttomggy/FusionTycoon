@@ -118,6 +118,16 @@ Several things draw in the same top-centre spot and overlap:
 - **Daily card:** the reward tiles get equal padding, and their text is
   vertically centred.
 - **Rebirth panel:** the "Need $X more" line is ≥ 20 px bold.
+- **Unfinished from `SELFTEST_FIX_PROMPT.md` item 2** (the session ran out
+  before it): these labels still fail `/selftest`'s "text fits". Shorten
+  the copy, or wrap / `TextScaled` with a minimum size:
+  - Shop tiles Overclock / SafeFusion1 / SafeFusion5 (`ShopConfig` `Effect`
+    strings);
+  - the Gifts footer (it already has `TextWrapped` + `AutomaticSize` Y, so
+    find out why `TextFits` is still false; probably a parent clip or a
+    fixed height);
+  - the Rebirth panel's `Reset` line (`resetText`) and, on the phone, its
+    `Unlock` line.
 
 ## Check
 
