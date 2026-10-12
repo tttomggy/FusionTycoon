@@ -23,8 +23,9 @@
 	  5. Done: "Action" steps only when the server confirms the real action
 	     (the snapshot's Step moves on); "Timed" / "Open" steps ask the
 	     server (TutorialAdvance, re-checked) after their Seconds or once the
-	     chip / panel was opened. Then the banner shows a ✓ and the Step
-	     sound, and the next instruction slides in 0.4 s later.
+	     chip / panel was opened. Then the banner shows "✓ Nice!" and the
+	     Step sound; the next step starts after a pause (Tutorial 4: ONE
+	     step at a time, in order, see "Presenting a step" below).
 
 	The only card is the welcome splash after the claim ("WELCOME TO YOUR
 	LAB!", fades by itself). The HUD builds up as it goes (UI/HudGate): this
@@ -53,6 +54,7 @@ local TutorialCards = require(UI.TutorialCards)
 local TutorialBanner = require(UI.TutorialBanner)
 local TutorialExplain = require(UI.TutorialExplain)
 local TutorialHand = require(UI.TutorialHand)
+local HudGate = require(UI.HudGate)
 local FusePanel = require(UI.FusePanel)
 local RebirthPanel = require(UI.RebirthPanel)
 local GiftsPanel = require(UI.GiftsPanel)
@@ -76,12 +78,23 @@ local FIRST_STEP_DELAY = 1 -- after joining: let the world settle, then the firs
 local ARRIVE_STUDS = 8 -- inside this the distance is dropped (you're there)
 local PEDESTAL_POP_OFFSET = 6 -- studs above a pedestal for "+$X/s"
 local RESEND_SECONDS = 2
+local WAIT_STEP = 0.1 -- how often a wait looks again
+local QUIET_TIMEOUT = 120 -- a panel the player leaves open cannot stall the tutorial for ever
+local SPLASH_TIMEOUT = 4
+local NICE_TEXT = "Nice!"
+local EXPLAIN_OVERLAY = "TutorialExplain" -- the card's own UIKit overlay name
 
 local localPlayer = Players.LocalPlayer
 
-local presented: number? = nil -- the step whose banner is up (nil between steps)
-local lastSeen: number? = nil -- the snapshot step last handled
-local seq = 0 -- bumped on every change, so a stale transition stops
+local presented: number? = nil -- the step on screen (its card, banner or ✓)
+local serverStep = 0 -- the snapshot's step (it can be ahead of `presented`)
+local active = false -- the snapshot says the tutorial is running
+local runnerSeq = 0 -- bumped to stop a runner
+local runnerRunning = false
+local lastPlayed: number? = nil -- the last step played to its end
+local begun = 0 -- the highest step begun (HudGate reveals up to it)
+local guideUp = false -- the banner, path and hand are live for `presented`
+local bannerShownAt = 0
 local stepStart = 0 -- os.clock() the presented step's banner came in
 local advanceSentFor: number? = nil
 local replayHintShown = false
@@ -89,7 +102,6 @@ local wasActive = false
 local pedestalPops: { BillboardGui } = {}
 local lastSub: string? = nil
 local pressing = false
-local cardUp = false -- an explain card is open: banner, path and hand wait
 local openSeen = false -- an Open step's card / panel has been up (it ends when it is closed)
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
@@ -100,7 +112,9 @@ local function presentedStep(): TutorialConfig.Step?
 end
 
 local function sendAdvance(stepIndex: number)
-	if advanceSentFor == stepIndex then
+	-- Only the server's current step can be advanced (the presenter may be
+	-- showing an older one).
+	if advanceSentFor == stepIndex or not active or stepIndex ~= serverStep then
 		return
 	end
 	advanceSentFor = stepIndex
@@ -222,9 +236,45 @@ end
 
 --[[ Presenting a step -------------------------------------------------------------------- ]]
 
+-- Tutorial 4's rule: ONE STEP AT A TIME, in order, whatever the server's
+-- step already is (it moves the moment the real action happens, so it can be
+-- several steps ahead of what the player has been shown). A step is:
+--   explain card (OK after the read time) -> banner / path / hand ->
+--   done -> "✓ Nice!" -> the bar slides out -> a pause with nothing new ->
+--   the next step. A step the player already did ahead of time still gets
+--   its card, then completes at once with "Already done ✓".
+
+local function isStepDone(index: number): boolean
+	return not active or serverStep > index
+end
+
+-- Nothing the player opened is still up (a panel, a card, the event info, a
+-- result card): the next step never starts over it.
+local function screenQuiet(): boolean
+	return not UIKit.IsOverlayOpen(EXPLAIN_OVERLAY)
+		and not ResultController.IsBigCardOpen()
+		and not EventInfoCard.IsOpen()
+		and not TutorialCards.IsOpen()
+end
+
+local function waitFor(mine: number, predicate: () -> boolean, timeout: number?): boolean
+	local started = os.clock()
+	while runnerSeq == mine do
+		if predicate() then
+			return true
+		end
+		if timeout and os.clock() - started >= timeout then
+			return false
+		end
+		task.wait(WAIT_STEP)
+	end
+	return false
+end
+
+-- The hand, the path, the goal arrow and the pedestal pops (not the card or
+-- the banner).
 local function stopGuidance()
-	cardUp = false
-	TutorialExplain.Close()
+	guideUp = false
 	TutorialHand.SetContextual(nil, nil)
 	TutorialHand.SetTarget(nil)
 	TutorialPath.SetEnabled(false)
@@ -236,17 +286,16 @@ local function labName(): string
 	return ("%s'S LAB"):format(localPlayer.DisplayName:upper())
 end
 
--- The banner, path, goal arrow and pedestal pops for step `index` (after
--- its explain card, if it has one).
+-- The banner, path and goal arrow for step `index` (after its explain card).
 local function beginGuidance(index: number)
 	local step = TutorialConfig.GetStep(index)
 	if not step or presented ~= index then
 		return
 	end
 	local t = TycoonController.GetTutorial()
-	cardUp = false
 	openSeen = false
 	stepStart = os.clock()
+	bannerShownAt = stepStart
 	advanceSentFor = nil
 	lastSub = step.Sub
 	-- The event card gets its "OK, got it" while this step runs.
@@ -262,87 +311,175 @@ local function beginGuidance(index: number)
 		GoalMarkerController.SetTutorialTarget(nil, nil, true)
 		TutorialPath.SetEnabled(false)
 	end
+	guideUp = true
 end
 
--- Starts step `index`: its explain card first (never the claim's), then the
--- banner, path and hand.
-local function present(index: number)
-	local step = TutorialConfig.GetStep(index)
-	if not step then
-		return
-	end
-	presented = index
-	stepStart = os.clock()
-	advanceSentFor = nil
-	lastSub = step.Sub
-	if step.Id == "pedestals" then
-		showPedestalPops()
-	end
+-- The explain card: true once the player pressed OK (or closed it).
+local function showCard(step: TutorialConfig.Step, mine: number): boolean
 	local card = step.Card
 	if not card then
-		beginGuidance(index)
-		return
+		return true
 	end
-	cardUp = true
-	task.delay(step.CardDelay or 0, function()
-		if presented ~= index or not cardUp then
-			return
-		end
-		local model = if card.Model then GoalMarkerController.ResolvePlotTarget(card.Model) else nil
-		TutorialExplain.Show(card, model, function()
-			if presented ~= index then
-				return
-			end
-			if step.CardEnds then
-				cardUp = false
-				sendAdvance(index)
-			else
-				beginGuidance(index)
-			end
-		end)
+	local model = if card.Model then GoalMarkerController.ResolvePlotTarget(card.Model) else nil
+	local closed = false
+	TutorialExplain.Show(card, model, function()
+		closed = true
 	end)
+	waitFor(mine, function()
+		return closed or not active
+	end)
+	return closed
 end
 
--- The step changed (or the tutorial started / ended): ✓ the old banner, then
--- the new one.
-local function changeStep(newStep: number?, finished: boolean)
-	seq += 1
-	local mine = seq
-	local previousIndex = presented
-	local previous = presentedStep()
-	presented = nil
+-- Plays step `index` from its card to the pause after it. False: the runner
+-- was stopped (a restart, the tutorial ended).
+local function playStep(index: number, mine: number): boolean
+	local step = TutorialConfig.GetStep(index)
+	if not step then
+		return false
+	end
+	presented = index
+	begun = math.max(begun, index)
+	stepStart = os.clock()
+	advanceSentFor = nil
+	openSeen = false
+	lastSub = step.Sub
+	local already = isStepDone(index)
+	if step.Id == "pedestals" and not already then
+		showPedestalPops()
+	end
+
+	-- 1. The explain card, on a quiet screen (after CardDelay: INDEX has
+	-- popped in by then).
+	if step.Card then
+		waitFor(mine, screenQuiet, QUIET_TIMEOUT)
+		if (step.CardDelay or 0) > 0 and runnerSeq == mine then
+			task.wait(step.CardDelay)
+		end
+		if runnerSeq ~= mine then
+			return false
+		end
+		showCard(step, mine)
+		if runnerSeq ~= mine then
+			return false
+		end
+		-- The action may have happened while the card was up.
+		already = isStepDone(index)
+	end
+
+	-- 2. The instruction, until the step is done.
+	local hasBanner = false
+	if already then
+		-- Done ahead of time: the bar says so and moves on.
+		TutorialBanner.Show(step.Banner, nil, step.Icon, index, #TutorialConfig.Steps)
+		bannerShownAt = os.clock()
+		hasBanner = true
+	elseif step.CardEnds and not step.HoldSeconds then
+		-- OK on the card ends the step (Index).
+		waitFor(mine, function()
+			sendAdvance(index)
+			return isStepDone(index)
+		end)
+	else
+		beginGuidance(index)
+		hasBanner = true
+		waitFor(mine, function()
+			return isStepDone(index)
+		end)
+	end
+	if runnerSeq ~= mine then
+		return false
+	end
+
+	-- 3. Done: the hand and path go now; the instruction stays up its minimum
+	-- time, then "✓ Nice!".
 	stopGuidance()
-	-- A card the player opened stays open: only the "OK, got it" button goes.
-	if previous and previous.Id == "events" then
+	if hasBanner then
+		if not already then
+			local remaining = TutorialConfig.BannerMinSeconds - (os.clock() - bannerShownAt)
+			if remaining > 0 then
+				task.wait(remaining)
+			end
+			if runnerSeq ~= mine then
+				return false
+			end
+		end
+		if step.Id == "claim" then
+			TutorialBanner.ShowSplash("WELCOME TO YOUR LAB!", labName())
+		end
+		SoundKit.Play("RevealMinor", nil)
+		TutorialBanner.Complete(TutorialConfig.NiceSeconds, if already then TutorialConfig.AlreadyDoneText else NICE_TEXT)
+	else
+		SoundKit.Play("RevealMinor", nil)
+	end
+	if step.Id == "events" then
+		-- A card the player opened stays open: only the "OK, got it" button goes.
 		EventInfoCard.SetTutorialOk(false)
 	end
-	task.spawn(function()
-		if previousIndex ~= nil then
-			if previous and previous.Id == "claim" then
-				TutorialBanner.ShowSplash("WELCOME TO YOUR LAB!", labName())
-			end
-			SoundKit.Play("RevealMinor", nil)
-			TutorialBanner.Complete()
-		elseif not finished then
-			task.wait(FIRST_STEP_DELAY)
-		end
-		if mine ~= seq then
-			return
-		end
-		if finished or not newStep then
-			TutorialBanner.Hide()
-			return
-		end
-		present(newStep)
-	end)
+	TutorialBanner.SetSkip(nil)
+
+	-- 4. The pause: whatever the step opened is closed, the bar is out, the
+	-- welcome splash is over, and a beat of nothing new.
+	waitFor(mine, screenQuiet, QUIET_TIMEOUT)
+	task.wait(TutorialConfig.SettleSeconds)
+	waitFor(mine, function()
+		return not TutorialBanner.IsSplashShown()
+	end, SPLASH_TIMEOUT)
+	return runnerSeq == mine
 end
 
-local function finishTutorial()
+local function endTutorial()
+	presented = nil
+	lastPlayed = nil
+	begun = 0
+	TutorialBanner.SetSkip(nil)
+	TutorialBanner.Hide()
+	stopGuidance()
 	TutorialCards.Close()
 	TutorialExplain.Close()
 	EventInfoCard.SetTutorialOk(false)
-	TutorialBanner.SetSkip(nil)
 	ToastController.FlushHeld()
+end
+
+local function runTutorial(mine: number)
+	-- The world settles first.
+	task.wait(FIRST_STEP_DELAY)
+	while runnerSeq == mine and active do
+		local index = if lastPlayed then lastPlayed + 1 else serverStep
+		if index > #TutorialConfig.Steps then
+			break
+		end
+		if not playStep(index, mine) then
+			break
+		end
+		lastPlayed = index
+	end
+	if runnerSeq == mine then
+		runnerRunning = false
+		wasActive = false
+		endTutorial()
+		-- After the tutorial the path follows the current goal (👣).
+		local t = TycoonController.GetTutorial()
+		TutorialPath.SetEnabled(t.Done and TycoonController.IsGoalPathOn())
+	end
+end
+
+-- Stops the runner where it stands (a restart from step 1, a debug jump).
+local function abortRunner()
+	runnerSeq += 1
+	runnerRunning = false
+	guideUp = false
+	TutorialExplain.Close()
+	stopGuidance()
+	TutorialBanner.Hide()
+	EventInfoCard.SetTutorialOk(false)
+end
+
+local function startRunner()
+	runnerSeq += 1
+	local mine = runnerSeq
+	runnerRunning = true
+	task.spawn(runTutorial, mine)
 end
 
 local function onTycoonChanged()
@@ -355,26 +492,38 @@ local function onTycoonChanged()
 		TycoonController.MarkTipSeen("tutorialReplay")
 		ToastController.Show("New: replay the tutorial in ⚙ Settings", "Neutral", { Big = true })
 	end
-	local active = TycoonController.IsTutorialActive() and t.Step >= 1
-	if not active then
-		if wasActive then
-			wasActive = false
-			lastSeen = nil
-			changeStep(nil, true)
-			finishTutorial()
-		end
-		-- After the tutorial the path follows the current goal (👣).
-		if lastSeen == nil then
+	local nowActive = TycoonController.IsTutorialActive() and t.Step >= 1
+	if not nowActive then
+		active = false
+		if not runnerRunning then
+			-- After the tutorial the path follows the current goal (👣).
+			if wasActive then
+				wasActive = false
+				endTutorial()
+			end
 			TutorialPath.SetEnabled(t.Done and TycoonController.IsGoalPathOn())
 		end
+		-- A running step finishes its ✓ and pause; the runner then ends it.
 		return
 	end
+	local previous = serverStep
+	serverStep = t.Step
+	active = true
 	wasActive = true
-	if lastSeen == t.Step then
-		return
+	-- The server went back (a replay, /tutorial step): start over from there.
+	if runnerRunning and (t.Step < previous or (lastPlayed ~= nil and t.Step <= lastPlayed)) then
+		abortRunner()
+		lastPlayed = nil
+		begun = 0
+		presented = nil
 	end
-	lastSeen = t.Step
-	changeStep(t.Step, false)
+	if not runnerRunning then
+		if lastPlayed ~= nil and t.Step <= lastPlayed then
+			lastPlayed = nil
+			begun = 0
+		end
+		startRunner()
+	end
 end
 
 --[[ Every frame ----------------------------------------------------------------------------- ]]
@@ -405,7 +554,7 @@ end
 
 local function stepFrame()
 	local tutorialStep = presentedStep()
-	if not tutorialStep or not TycoonController.IsTutorialActive() or cardUp then
+	if not tutorialStep or not guideUp or not active then
 		return
 	end
 	local index = presented :: number
@@ -446,9 +595,15 @@ local function stepFrame()
 	end
 	TutorialHand.SetTarget(handTarget(tutorialStep, showButton))
 
-	-- Completion that isn't a server-confirmed action.
-	if tutorialStep.Kind == "Timed" then
-		if elapsed >= (tutorialStep.Seconds or 0) then
+	-- Completion that isn't a server-confirmed action. Nothing ends while a
+	-- card or panel is up.
+	if tutorialStep.HoldSeconds then
+		-- Pedestals: after its card the orbs earn on screen at least this long.
+		if elapsed >= tutorialStep.HoldSeconds and screenQuiet() then
+			sendAdvance(index)
+		end
+	elseif tutorialStep.Kind == "Timed" then
+		if elapsed >= (tutorialStep.Seconds or 0) and screenQuiet() then
 			sendAdvance(index)
 		end
 	elseif tutorialStep.Kind == "Open" then
@@ -537,6 +692,10 @@ function TutorialController.Init()
 	TutorialPath.Init()
 	TutorialPath.SetTargetSource(GoalMarkerController.GetMarkedPosition)
 	ToastController.SetBigHold(TycoonController.IsTutorialActive)
+	-- The HUD reveals up to the step the player has been shown.
+	HudGate.SetStepSource(function(): number?
+		return if active and begun > 0 then begun else nil
+	end)
 	-- The LOCK console's and Gacha Pad's "How it works" (H) prompts.
 	ProximityPromptService.PromptTriggered:Connect(function(prompt: ProximityPrompt, triggeringPlayer: Player)
 		local topic = prompt:GetAttribute("HelpTopic")

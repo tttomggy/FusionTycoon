@@ -12,12 +12,16 @@
 	  * a title;
 	  * one or two short sentences at >= 22 px saying what it is for;
 	  * a big green OK (the only way out, ✕ and a tap outside count as OK).
+	    The OK turns on after TutorialConfig.CardReadSeconds (1.5 s): until
+	    then it is grey with a fill bar running across it, and ✕ / a tap
+	    outside are ignored too, so the card cannot flash past unread.
 
 	  Show(card, model?, onOk)   opens it; OK calls onOk once
 	  Close()                    closes without calling onOk
 	  IsOpen() / GetBody() / PressOk()   /selftest
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
@@ -41,6 +45,9 @@ local bodyLabel: TextLabel
 local okButton: TextButton
 local onOk: (() -> ())? = nil
 local closingByOk = false
+local okReady = false -- the read time is over: OK, ✕ and a tap outside work
+local readToken = 0
+local readFill: Frame
 
 local function finish()
 	local callback = onOk
@@ -157,6 +164,10 @@ local function build()
 		MaxSize = MAX_SIZE,
 		FitContent = true,
 		HeaderTop = UITheme.Gradients.Teal.Bottom,
+		-- Nothing but a programmatic close works before the read time is over.
+		CanClose = function()
+			return okReady
+		end,
 		-- ✕ or a tap outside counts as OK: the tutorial keeps going.
 		OnClose = function()
 			if not closingByOk then
@@ -198,12 +209,44 @@ local function build()
 		Size = UDim2.fromOffset(OK_SIZE.X, OK_SIZE.Y),
 		ZIndex = content.ZIndex + 1,
 		OnClick = function()
+			if not okReady then
+				return
+			end
 			closingByOk = true
 			m.Close()
 			closingByOk = false
 			finish()
 		end,
 	})
+	-- The read-time bar: the green fill running across the grey OK.
+	readFill = Instance.new("Frame")
+	readFill.Name = "ReadFill"
+	readFill.BackgroundColor3 = Colors.White
+	readFill.BorderSizePixel = 0
+	readFill.Size = UDim2.fromScale(0, 1)
+	readFill.ZIndex = okButton.ZIndex
+	readFill.Parent = okButton
+	UIKit.Corner(readFill, UITheme.Radius.Button)
+	UIKit.PairGradient(readFill, UITheme.Gradients.Green)
+end
+
+-- Greys the OK and runs the fill; turns it on after the read time.
+local function startReadTime()
+	readToken += 1
+	local mine = readToken
+	okReady = false
+	UIKit.SetButton(okButton, { Style = "Disabled", TextColor3 = Colors.Muted })
+	readFill.Size = UDim2.fromScale(0, 1)
+	readFill.Visible = true
+	TweenService:Create(readFill, TweenInfo.new(TutorialConfig.CardReadSeconds, Enum.EasingStyle.Linear), { Size = UDim2.fromScale(1, 1) }):Play()
+	task.delay(TutorialConfig.CardReadSeconds, function()
+		if mine ~= readToken then
+			return
+		end
+		okReady = true
+		readFill.Visible = false
+		UIKit.SetButton(okButton, { Style = "Green", TextColor3 = Colors.Text })
+	end)
 end
 
 -- Opens the card. `model` is the world object to draw (nil: the icon).
@@ -216,12 +259,14 @@ function TutorialExplain.Show(card: TutorialConfig.ExplainCard, model: Instance?
 	m.Title.Text = card.Title:upper()
 	bodyLabel.Text = card.Body
 	buildImage(card, model)
+	startReadTime()
 	if not m.IsOpen() then
 		m.Open()
 	end
 end
 
 function TutorialExplain.Close()
+	readToken += 1
 	local m = modal
 	if m and m.IsOpen() then
 		closingByOk = true
@@ -245,9 +290,17 @@ function TutorialExplain.GetOkButton(): TextButton?
 	return if modal then okButton else nil
 end
 
+-- /selftest: whether the read time is over (OK, ✕ and a tap outside work).
+function TutorialExplain.IsOkReady(): boolean
+	return okReady
+end
+
+-- /selftest: skips the read time and presses OK.
 function TutorialExplain.PressOk()
 	local m = modal
 	if m and m.IsOpen() then
+		readToken += 1
+		okReady = true
 		closingByOk = true
 		m.Close()
 		closingByOk = false

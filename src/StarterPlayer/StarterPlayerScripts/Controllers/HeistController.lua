@@ -883,11 +883,13 @@ local function buildGateView(line: BasePart): GateView
 		StudsOffset = Vector3.new(0, f.GateSignY - f.GateLineY, 0),
 		MaxDistance = f.GateSignMaxDistance,
 	})
+	chip.Gui.DistanceLowerLimit = f.GateSignMinDistance
 	local icon = Instance.new("BillboardGui")
 	icon.Name = "ShieldLockIcon"
 	icon.Size = UDim2.fromScale(LOCK_ICON_STUDS, LOCK_ICON_STUDS)
 	icon.StudsOffset = Vector3.new(0, f.LockIconY - f.GateLineY, 0)
 	icon.MaxDistance = f.GateSignMaxDistance
+	icon.DistanceLowerLimit = f.GateSignMinDistance
 	icon.LightInfluence = 0
 	icon.AlwaysOnTop = false
 	icon.Enabled = false

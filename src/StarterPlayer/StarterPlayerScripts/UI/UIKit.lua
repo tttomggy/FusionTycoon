@@ -12,6 +12,7 @@
 	holder (returned as the second value) - position and parent the holder,
 	style the body.
 ]]
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -1002,6 +1003,9 @@ local function getPopScale(gui: GuiObject): UIScale
 	return scale :: UIScale
 end
 
+-- The fade a PopOut is running on a CanvasGroup (PopIn cancels it).
+local popFades: { [GuiObject]: Tween } = setmetatable({}, { __mode = "k" }) :: any
+
 -- A card's resting scale: 1, or less once UIKit.FitHeight shrank it.
 local function restScale(gui: GuiObject): number
 	local fit = gui:GetAttribute("FitScale")
@@ -1016,6 +1020,14 @@ function UIKit.PopIn(gui: GuiObject)
 	scale.Scale = 0.85 * rest
 	gui.Visible = true
 	if gui:IsA("CanvasGroup") then
+		-- A PopOut still fading this group to 1 would keep overwriting the
+		-- 0 below: the card vanished and its backdrop stayed (a dim screen
+		-- with nothing on it).
+		local fade = popFades[gui]
+		if fade then
+			fade:Cancel()
+			popFades[gui] = nil
+		end
 		gui.GroupTransparency = 0
 	end
 	TweenService:Create(scale, POP_IN_INFO, { Scale = rest }):Play()
@@ -1027,7 +1039,9 @@ function UIKit.PopOut(gui: GuiObject): Tween
 	local scale = getPopScale(gui)
 	local tween = TweenService:Create(scale, POP_OUT_INFO, { Scale = 0.9 * restScale(gui) })
 	if gui:IsA("CanvasGroup") then
-		TweenService:Create(gui, POP_OUT_INFO, { GroupTransparency = 1 }):Play()
+		local fade = TweenService:Create(gui, POP_OUT_INFO, { GroupTransparency = 1 })
+		popFades[gui] = fade
+		fade:Play()
 	end
 	tween:Play()
 	tween.Completed:Once(function(playbackState)
@@ -1395,6 +1409,10 @@ export type ModalProps = {
 	MaxSize: Vector2,
 	HeaderTop: Color3, -- gradient top colour (fades to Panel at 22%)
 	OnClose: (() -> ())?,
+	-- The player's own closes (the X, a tap on the backdrop) are ignored
+	-- while this returns false (the tutorial card's read time). Close()
+	-- itself always works.
+	CanClose: (() -> boolean)?,
 	-- Fixed layout (no scrolling): keep the design height and shrink the
 	-- whole card to fit instead of squashing it.
 	FitContent: boolean?,
@@ -1464,6 +1482,53 @@ end
 
 function UIKit.GetModalGuis(): { ScreenGui }
 	return table.clone(modalGuis)
+end
+
+-- The dim-backdrop rule: a backdrop only exists as part of a visible card.
+-- The root counts as a card on screen when it is shown, not faded out, and
+-- its centre is inside the viewport.
+local CARD_WATCHDOG_SECONDS = 0.5
+local BACKDROP_DIM_LIMIT = 0.8 -- BackgroundTransparency below this reads as dimmed
+local CARD_FADE_LIMIT = 0.95 -- GroupTransparency below this is visible
+
+local function cardOnScreen(gui: ScreenGui, root: CanvasGroup): boolean
+	if not gui.Enabled or not root.Visible or root.GroupTransparency >= CARD_FADE_LIMIT then
+		return false
+	end
+	if root.AbsoluteSize.X < 4 or root.AbsoluteSize.Y < 4 then
+		return false
+	end
+	-- AbsolutePosition is reported below the Roblox top-bar inset even in an
+	-- IgnoreGuiInset gui, so the inset is added back.
+	local centre = root.AbsolutePosition + root.AbsoluteSize / 2 + Vector2.new(0, GuiService:GetGuiInset().Y)
+	local view = viewportSize()
+	return centre.X > 0 and centre.X < view.X and centre.Y > 0 and centre.Y < view.Y
+end
+
+-- /selftest: the name of every modal whose backdrop dims the screen while no
+-- card is on screen (empty = fine). A modal that closed this instant may
+-- still be fading: ask again after 0.2 s.
+local dimProbes: { [ScreenGui]: () -> boolean } = {}
+
+function UIKit.GetDimProblems(): { string }
+	local bad: { string } = {}
+	for gui, dimmedWithoutCard in dimProbes do
+		if gui.Enabled and dimmedWithoutCard() then
+			table.insert(bad, gui.Name)
+		end
+	end
+	return bad
+end
+
+-- True while any modal dims the screen (backdrop up and the gui enabled).
+function UIKit.IsDimmed(): boolean
+	for gui in dimProbes do
+		local backdrop = gui:FindFirstChild("Backdrop")
+		if gui.Enabled and backdrop and backdrop:IsA("GuiObject") and backdrop.BackgroundTransparency < BACKDROP_DIM_LIMIT then
+			return true
+		end
+	end
+	return false
 end
 
 function UIKit.Modal(props: ModalProps): Modal
@@ -1556,12 +1621,18 @@ function UIKit.Modal(props: ModalProps): Modal
 
 	local isOpen = false
 	local modal: Modal
+	local openToken = 0
+
+	dimProbes[gui] = function(): boolean
+		return backdrop.BackgroundTransparency < BACKDROP_DIM_LIMIT and not cardOnScreen(gui, root)
+	end
 
 	local function close()
 		if not isOpen then
 			return
 		end
 		isOpen = false
+		openToken += 1
 		UIKit.SetOverlay(props.Name, false)
 		local tween = UIKit.PopOut(root)
 		TweenService:Create(backdrop, POP_OUT_INFO, { BackgroundTransparency = 1 }):Play()
@@ -1583,16 +1654,37 @@ function UIKit.Modal(props: ModalProps): Modal
 		backdrop.BackgroundTransparency = 1
 		TweenService:Create(backdrop, POP_IN_INFO, { BackgroundTransparency = 0.45 }):Play()
 		UIKit.PopIn(root)
+		-- Watchdog: no card on screen 0.5 s after opening means the backdrop
+		-- would dim the game with nothing to read or press. Drop it (the
+		-- owner's OnClose runs, so a tutorial step cannot stick on it).
+		openToken += 1
+		local mine = openToken
+		task.delay(CARD_WATCHDOG_SECONDS, function()
+			if mine ~= openToken or not isOpen or cardOnScreen(gui, root) then
+				return
+			end
+			warn(("[UIKit] modal %s opened without a card on screen; closing its backdrop"):format(props.Name))
+			close()
+			gui.Enabled = false
+		end)
+	end
+
+	local function playerClose()
+		local canClose = props.CanClose
+		if canClose and not canClose() then
+			return
+		end
+		close()
 	end
 
 	UIKit.CloseButton({
 		Parent = header,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		OnClick = close,
+		OnClick = playerClose,
 		ZIndex = header.ZIndex,
 	})
-	backdrop.Activated:Connect(close)
+	backdrop.Activated:Connect(playerClose)
 
 	modal = {
 		Gui = gui,

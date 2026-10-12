@@ -35,7 +35,11 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   at both scales with no leftover instances in the panels' own modal guis,
   the phone HUD's left group inside the left 40%, the real deal pop-up
   path, every panel label's `TextFits` at both scales, hovering things on
-  their plot, auto-display order) and prints PASS / FAIL lines;
+  their plot, auto-display order, the TopStack plan at both layouts (slots
+  rise strictly, objective bar clear of the top bar), the gate sign / lock
+  billboards' size cap, and per tutorial step: no dim backdrop without a
+  card on screen, the card's read-time OK, the objective bar fully on
+  screen) and prints PASS / FAIL lines;
   it refuses unless saves go to the mock store or `FT_StudioTest_1`. Its
   last part drives a reset tutorial through every step on the real
   handlers (upgrade, tutorial pulls, fusion, `TutorialService.Advance`),

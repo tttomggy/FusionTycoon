@@ -51,7 +51,7 @@ local TEXT_SIZE = { Desktop = 36, Phone = 28 }
 local BAR_HEIGHT = { Desktop = 84, Phone = 72 }
 local ICON_SIZE = 48
 local PADDING = 14
-local SLIDE_OFFSET = 110 -- px above its place when hidden
+local HIDE_GAP = 12 -- px of clear screen above the bar when it is slid out
 local SLIDE_SECONDS = 0.3
 local OUT_SECONDS = 0.2
 local PULSE_SCALE = 1.06
@@ -90,9 +90,19 @@ local function barHeight(): number
 	return if isPhone() then BAR_HEIGHT.Phone else BAR_HEIGHT.Desktop
 end
 
--- The objective slot (just under the Roblox top bar), plus the slide.
+-- How far above its place the bar sits when slid out: the whole bar, its
+-- shadow and a gap above the top edge of the screen. (A fixed 110 px left
+-- the bottom of the bar, "4 / 11", showing at the top of the screen
+-- whenever the bar was out of play, e.g. behind an explain card.)
+local function hiddenOffset(): number
+	return UIKit.GetCardTop() + barHeight() + UITheme.ShadowOffset + HIDE_GAP
+end
+
+-- The objective slot (just under the Roblox top bar), plus the slide:
+-- slideValue is the fraction slid out (0 in its place, 1 fully out), so a
+-- layout change while it is out cannot leave it half in view.
 local function apply()
-	holder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Objective") - slideValue.Value)
+	holder.Position = UDim2.new(0.5, 0, 0, TopStack.GetY("Objective") - slideValue.Value * hiddenOffset())
 end
 
 local function applyLayout()
@@ -123,8 +133,27 @@ local function render()
 	distancePill.Text = distanceText
 end
 
+-- Every slide lands exactly on its target: a tween another one cancelled (or
+-- one that never ran) used to leave the bar stuck partway up, its text above
+-- the screen. A guard sets the value itself once the slide should be over.
+local slideTween: Tween? = nil
+local slideGen = 0
+
 local function slideTo(target: number, seconds: number, direction: Enum.EasingDirection)
-	TweenService:Create(slideValue, TweenInfo.new(seconds, Enum.EasingStyle.Quad, direction), { Value = target }):Play()
+	slideGen += 1
+	local mine = slideGen
+	local previous = slideTween
+	if previous then
+		previous:Cancel()
+	end
+	local tween = TweenService:Create(slideValue, TweenInfo.new(seconds, Enum.EasingStyle.Quad, direction), { Value = target })
+	slideTween = tween
+	tween:Play()
+	task.delay(seconds + 0.1, function()
+		if slideGen == mine then
+			slideValue.Value = target
+		end
+	end)
 end
 
 local function popPulse(from: number)
@@ -146,7 +175,7 @@ function TutorialBanner.Show(text: string, sub: string?, icon: string?, step: nu
 	render()
 	holder.Visible = true
 	if not shown then
-		slideValue.Value = SLIDE_OFFSET
+		slideValue.Value = 1
 		shown = true
 		slideTo(0, SLIDE_SECONDS, Enum.EasingDirection.Out)
 	end
@@ -175,9 +204,11 @@ function TutorialBanner.SetDistance(studs: number?)
 	end
 end
 
--- ✓ in green, a pop, a short hold (TutorialConfig.StepDelay), then out.
--- Yields for the hold, so the next step's banner slides in right after it.
-function TutorialBanner.Complete()
+-- ✓ in green, a pop, a hold (`holdSeconds`, default TutorialConfig.StepDelay),
+-- then out. `label` replaces the instruction ("Nice!", "Already done ✓");
+-- nil keeps it behind the ✓. Yields for the hold, so the next step's
+-- banner can slide in right after it.
+function TutorialBanner.Complete(holdSeconds: number?, label: string?)
 	if not shown then
 		return
 	end
@@ -186,16 +217,16 @@ function TutorialBanner.Complete()
 	local mine = token
 	iconLabel.Text = "✓"
 	iconLabel.Visible = true
-	baseText = "✓ " .. baseText
+	baseText = if label then label else "✓ " .. baseText
 	distanceText = ""
 	render()
 	textLabel.TextColor3 = Colors.Cash
 	popPulse(1.12)
-	task.wait(TutorialConfig.StepDelay)
+	task.wait(holdSeconds or TutorialConfig.StepDelay)
 	if token ~= mine then
 		return
 	end
-	slideTo(SLIDE_OFFSET, OUT_SECONDS, Enum.EasingDirection.In)
+	slideTo(1, OUT_SECONDS, Enum.EasingDirection.In)
 	shown = false
 end
 
@@ -203,7 +234,7 @@ function TutorialBanner.Hide()
 	token += 1
 	completing = false
 	if shown then
-		slideTo(SLIDE_OFFSET, OUT_SECONDS, Enum.EasingDirection.In)
+		slideTo(1, OUT_SECONDS, Enum.EasingDirection.In)
 		shown = false
 	end
 	task.delay(OUT_SECONDS, function()
@@ -315,7 +346,7 @@ function TutorialBanner.Init()
 	end)
 
 	slideValue = Instance.new("NumberValue")
-	slideValue.Value = SLIDE_OFFSET
+	slideValue.Value = 1
 	slideValue.Changed:Connect(apply)
 
 	holder = Instance.new("Frame")

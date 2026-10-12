@@ -127,3 +127,69 @@ desktop, a stack on a phone), QUESTS, LOCK, the deal badge.
 `HudController.SelfTestLeftColumn` checks the rects do not overlap, at both
 layouts.
 
+
+## Tutorial 4: pacing, the dim screen, the objective bar
+
+**One step at a time, in order** (`TutorialController` runner). The
+server's step moves the moment the real action happens, so it can be several
+steps ahead of what the player has been shown; the client plays
+`lastPlayed + 1` regardless (a resume starts at the server's step):
+
+1. the explain card, on a quiet screen (no panel, result card, event info or
+   help card open; `CardDelay` first, so INDEX has popped in);
+2. the banner / path / hand until the step is done (server step > index, or
+   the tutorial ended);
+3. the hand and path go at once; the instruction stays up at least
+   `BannerMinSeconds` (3 s), then **"✓ Nice!"** for `NiceSeconds` (1.2 s) and
+   the bar slides out;
+4. the pause: whatever the step opened must be closed, the welcome splash
+   is over, then `SettleSeconds` (0.8 s) with nothing new on screen. Only
+   then the next step's card.
+
+A step the player already did early (the Multiplier bought during the Index
+step) still gets its card; then the bar shows its instruction and completes
+at once with **"Already done ✓"** (`AlreadyDoneText`). Never several steps
+in one go. Steps only `sendAdvance` when they are the server's current step.
+`TutorialConfig.Steps[].HoldSeconds` (Pedestals, 4 s): after OK the banner,
+path and "+$X/s" stay up at least that long, and Timed/Hold steps wait for
+any open card. "Ready" is 4 s. The server stamps `enteredAt` when a step
+begins, so a Timed step is timed from there (the client's own timer starts
+later and never beats it).
+
+The explain card's OK is grey with a fill bar for `CardReadSeconds` (1.5 s);
+✕ and a tap outside are ignored for that time too (`UIKit.Modal`'s
+`CanClose`); `PressOk` (selftest) skips it. `HudGate.SetStepSource`: the HUD
+reveals up to the step the player has been **shown** (`begun`), not the
+server's.
+
+**The dim screen with nothing on it** had two causes. (1) `UIKit.PopIn` set
+`GroupTransparency = 0` but did not cancel the fade a `PopOut` was still
+running on the same CanvasGroup, so a card re-opened within 0.12 s of closing
+faded to invisible while its backdrop stayed. `PopIn` now cancels it. (2) A
+watchdog in every `UIKit.Modal`: 0.5 s after opening, if the root is not
+shown / faded out / off screen, it warns, closes the backdrop at once and
+runs `OnClose` (so the tutorial moves on). The rule: **a backdrop only
+exists as part of a visible card**; `UIKit.GetDimProblems()` lists modals
+that break it (`/selftest` asks per tutorial step).
+
+**The objective bar "pushed off the top"**: it was the bar *slid out* (its
+resting state between steps, behind an explain card) with a fixed 110 px
+offset, which left its bottom 45 px (the "4 / 11" line) on screen. The slide
+is now a 0-1 fraction of `GetCardTop + bar + shadow + 12 px`, so out is out
+at any layout, and every slide snaps to its target after its time (a
+cancelled tween can no longer leave the bar part way). `TopStack.PlanFor`
+is the pure slot math; with the bar empty the chip keeps y 12 beside the top
+bar, so `/selftest` orders the **occupied** slots (plan at both layouts with
+all four, live slots on the real stack) instead of the raw Ys.
+
+**The giant LOCKED bar and lock disc** were the heist's world billboards
+(the gate sign and the lock icon, sized in studs) seen from the gate: 160 px
+and 230 px on a 1080p screen. They now carry `DistanceLowerLimit =
+PlotLayout.ShieldFence.GateSignMinDistance` (40 studs): closer than that
+they stop growing (sign ~230 x 46 px). The HUD LOCK chip is a 44 px chip
+and was never a lock button.
+
+Smaller: `EventInfoCard` re-centres once its PopIn is over (the PopIn
+tween made AbsoluteSize lag PopScale by a frame: a 3-7 px error baked into
+its position); the shop tiles' Main line has two lines (`TILE_HEIGHT` 288,
+`FitText`), the Rebirth panel's YOU KEEP / YOU RESET lines auto-size.

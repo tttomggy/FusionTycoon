@@ -67,7 +67,7 @@ local HEADER_HEIGHT = 44
 local FEATURED_HEIGHT = 170
 local FEATURED_NARROW_HEIGHT = 262
 local PASS_HEIGHT = 140
-local TILE_HEIGHT = 272 -- the icon is ~45% of it (120 px)
+local TILE_HEIGHT = 288 -- the icon is ~42% of it (120 px); Main gets two lines
 local GRID_GAP = 12
 local NARROW_WIDTH = 560 -- logical px of page width under which tiles go 2-up
 local REFRESH_SECONDS = 1
@@ -871,17 +871,20 @@ local function buildTile(parent: Frame, section: ShopConfig.Section, key: string
 		TextSize = if isCash then 20 else 13,
 		TextWrapped = true,
 		Position = UDim2.fromOffset(8, 158),
-		Size = UDim2.new(1, -16, 0, 22),
+		Size = UDim2.new(1, -16, 0, 32),
 		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Top,
 		Stroke = 1.5,
 	})
+	-- Two lines at most; a longer line shrinks instead of spilling out.
+	UIKit.FitText(main, if isCash then 20 else 13, 10)
 	local sub = textLabel(body, "Sub", {
 		Text = subText,
 		RichText = true,
 		Font = Fonts.Body,
 		TextSize = 12,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 182),
+		Position = UDim2.fromOffset(8, 194),
 		Size = UDim2.new(1, -16, 0, 26),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Top,

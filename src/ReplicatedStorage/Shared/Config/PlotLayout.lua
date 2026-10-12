@@ -77,6 +77,10 @@ PlotLayout.ShieldFence = {
 	GateSignY = 18.8, -- the LOCKED / OPEN sign, above the sign board (top 16.5)
 	GateSignStuds = Vector2.new(12, 2.4),
 	GateSignMaxDistance = 150,
+	-- Closer than this the sign and the lock stop growing (BillboardGui
+	-- DistanceLowerLimit): at the gate they filled a 1080p screen (a 160 px
+	-- pink bar and a 230 px disc). At 40 studs the sign is ~230 x 46 px.
+	GateSignMinDistance = 40,
 }
 
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]

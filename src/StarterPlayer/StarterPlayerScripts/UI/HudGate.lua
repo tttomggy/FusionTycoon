@@ -65,13 +65,29 @@ function HudGate.Register(key: string, entry: Entry)
 	entries[key] = entry
 end
 
+-- The tutorial step the player has been SHOWN (TutorialController plays the
+-- steps one at a time and may trail the server's step): nil = no limit yet.
+local stepSource: (() -> number?)? = nil
+
+function HudGate.SetStepSource(source: () -> number?)
+	stepSource = source
+end
+
 -- What the tutorial wants for `key` right now (before any reveal delay).
 local function wanted(key: string): boolean
 	if not TycoonController.HasSynced() then
 		return false
 	end
 	local t = TycoonController.GetTutorial()
-	return TutorialConfig.IsHudShown(key, t.Step, t.Done, t.Replay)
+	local step = t.Step
+	local source = stepSource
+	if source and not t.Done and not t.Replay then
+		local shown = source()
+		if shown then
+			step = math.min(step, shown)
+		end
+	end
+	return TutorialConfig.IsHudShown(key, step, t.Done, t.Replay)
 end
 
 -- Is the element itself on screen (any root Visible)? /selftest.

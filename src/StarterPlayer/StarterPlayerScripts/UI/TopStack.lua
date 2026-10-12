@@ -78,27 +78,37 @@ function TopStack.SetHeight(slot: "Objective" | "Chip", provider: () -> number)
 	heights[slot] = provider
 end
 
-local function computeY(slot: Slot): number
-	local objective = height("Objective")
-	local chip = height("Chip")
+export type Plan = { Objective: number, Chip: number, Announce: number, Status: number }
+
+-- The slots' logical y from the heights they use, top to bottom. The
+-- objective bar starts at `cardTop` (UIKit.GetCardTop: under the Roblox top
+-- bar); with it the chip and everything below sit under it, without it the
+-- chip keeps CHIP_Y beside the top bar. Pure (/selftest runs it at both
+-- layouts).
+function TopStack.PlanFor(cardTop: number, objective: number, chip: number, announce: number): Plan
 	local gap = TopStack.GAP
-	local objectiveY = UIKit.GetCardTop()
-	if slot == "Objective" then
-		return objectiveY
-	end
-	local chipY = if objective > 0 then objectiveY + objective + gap else TopStack.CHIP_Y
-	if slot == "Chip" then
-		return chipY
-	end
+	local chipY = if objective > 0 then cardTop + objective + gap else TopStack.CHIP_Y
 	local announceY = if chip > 0 then chipY + chip + gap elseif objective > 0 then chipY else TopStack.CHIP_Y
-	if slot == "Announce" then
-		return announceY
-	end
-	return if announceHeight > 0 then announceY + announceHeight + gap else announceY
+	return {
+		Objective = cardTop,
+		Chip = chipY,
+		Announce = announceY,
+		Status = if announce > 0 then announceY + announce + gap else announceY,
+	}
+end
+
+local function computeY(slot: Slot): number
+	local plan = TopStack.PlanFor(UIKit.GetCardTop(), height("Objective"), height("Chip"), announceHeight)
+	return if slot == "Objective" then plan.Objective elseif slot == "Chip" then plan.Chip elseif slot == "Announce" then plan.Announce else plan.Status
 end
 
 function TopStack.GetY(slot: Slot): number
 	return computeY(slot)
+end
+
+-- The logical height a slot uses right now (0: empty). /selftest.
+function TopStack.GetHeight(slot: Slot): number
+	return if slot == "Announce" then announceHeight else height(slot)
 end
 
 -- Logical px from the top of the screen to the bottom of everything the

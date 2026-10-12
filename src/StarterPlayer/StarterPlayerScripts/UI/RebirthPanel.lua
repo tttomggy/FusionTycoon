@@ -139,6 +139,8 @@ end
 
 local function infoLines(parent: Instance, name: string, order: number, heading: string, headingColor: Color3, text: string): TextLabel
 	local frame = section(parent, name, order, 40)
+	-- Grows with its text (a long line wraps to a second or third row).
+	frame.AutomaticSize = Enum.AutomaticSize.Y
 	UIKit.Label({
 		Name = "Heading",
 		Text = heading,
@@ -155,15 +157,16 @@ local function infoLines(parent: Instance, name: string, order: number, heading:
 		TextSize = 14,
 		TextColor3 = Colors.Text,
 		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
 		Position = UDim2.fromOffset(0, 17),
 		Size = UDim2.new(1, 0, 0, 22),
 		Parent = frame,
 	})
 end
 
--- "Cash (pays the $15M) · Generators → Basic LV 1 · ..."
+-- "Cash (pays $15M) · Generators → LV 1 · ..." (short: it wraps on a phone)
 local function resetText(cost: number): string
-	return ("Cash (pays the %s) · Generators → Basic LV %d · Multiplier → %s · Gacha price → %s"):format(
+	return ("Cash (pays %s) · Generators → LV %d · Multiplier → %s · Pull price → %s"):format(
 		NumberFormat.Money(cost),
 		TycoonConfig.StartingBasicGeneratorLevel,
 		NumberFormat.Multiplier(TycoonConfig.GetCashMultiplierValue(0)),

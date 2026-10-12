@@ -157,7 +157,8 @@ When you change a system, update its doc (not this file) unless a rule here chan
   the same through `UIKit.FitHeight`. Every modal's DisplayOrder is above
   the HUD's (`/selftest` checks it).
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
-- World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance.
+- **A dim backdrop only exists with a visible card** (`UIKit.Modal` closes it if no card is on screen 0.5 s after opening; a re-opened card must cancel its PopOut fade, as `PopIn` does).
+- World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance; a stud-sized billboard people stand next to needs a `DistanceLowerLimit` (the gate sign / lock).
   Owner-only labels set the `OwnerOnly` attribute; don't toggle them per
   player on the server.
 - Studio checklist for UI changes: `docs/UI_TEST.md`.

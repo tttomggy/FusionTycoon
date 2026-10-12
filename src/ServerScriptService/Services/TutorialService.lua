@@ -150,6 +150,9 @@ local function enter(player: Player, t: any, index: number)
 		if skip and skip(player) then
 			index += 1
 		else
+			-- Timed steps count from here (the client starts its own timer
+			-- later, after its explain card, so it never beats this clock).
+			enteredAt[player] = os.clock()
 			local counter = COUNTERS[step.Id]
 			t.Base = if counter then counter(player) else 0
 			if step.Id == "pull" and not t.PullsGranted and not t.Replay then

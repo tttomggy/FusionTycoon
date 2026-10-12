@@ -31,10 +31,12 @@ local LogService = game:GetService("LogService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -563,14 +565,70 @@ local function testTopStack(): { string }
 		return { "FAIL top stack: the announcement line never emptied" }
 	end
 
-	local objective = TopStack.GetY("Objective")
-	local chip = TopStack.GetY("Chip")
-	local announce = TopStack.GetY("Announce")
-	local status = TopStack.GetY("Status")
-	local ordered = objective <= chip and chip <= announce and announce <= status
-	table.insert(lines, if ordered
-		then ("PASS top stack slots in order (%d / %d / %d / %d)"):format(objective, chip, announce, status)
-		else ("FAIL top stack slots out of order (%d / %d / %d / %d)"):format(objective, chip, announce, status))
+	-- The slots rise strictly top to bottom, at both layouts: the same plan
+	-- the stack uses, with every slot occupied (a 89 px bar, the 44 px chip,
+	-- a 64 px line), the objective bar clear of the Roblox top bar and the
+	-- last slot inside the screen. (The live Ys alone cannot be compared:
+	-- an EMPTY objective slot has no bar to order, and the chip then keeps
+	-- its place beside the top bar at y 12, which is below nothing.)
+	for _, phone in { false, true } do
+		local cardTop = UIKit.GetCardTopFor(phone)
+		local plan = TopStack.PlanFor(cardTop, 89, 44, 64)
+		local view = (if phone then Vector2.new(844, 390) else Vector2.new(1920, 1080)) / (if phone then UITheme.PhoneScale else 1)
+		local strict = plan.Objective < plan.Chip and plan.Chip < plan.Announce and plan.Announce < plan.Status
+		local clear = plan.Objective >= cardTop and cardTop >= UIKit.TOP_BAR_HEIGHT + UIKit.CARD_TOP_GAP
+		local inside = plan.Status + 64 <= view.Y
+		local label = if phone then "phone" else "desktop"
+		table.insert(lines, if strict and clear and inside
+			then ("PASS top stack slots in order (%s: %d / %d / %d / %d)"):format(label, plan.Objective, plan.Chip, plan.Announce, plan.Status)
+			else ("FAIL top stack slots out of order (%s: %d / %d / %d / %d, bar top %d, view %d)"):format(label, plan.Objective, plan.Chip, plan.Announce, plan.Status, cardTop, view.Y))
+	end
+	-- The live slots: the ones in use rise strictly and sit inside the screen.
+	local view = UIKit.GetLogicalViewport()
+	local used: { { Name: string, Y: number, Height: number } } = {}
+	for _, slot in { "Objective", "Chip", "Announce" } do
+		local height = TopStack.GetHeight(slot)
+		if height > 0 then
+			table.insert(used, { Name = slot, Y = TopStack.GetY(slot), Height = height })
+		end
+	end
+	local liveOk = true
+	local liveText: { string } = {}
+	for index, entry in used do
+		table.insert(liveText, ("%s %d+%d"):format(entry.Name, entry.Y, entry.Height))
+		if entry.Y < 0 or entry.Y + entry.Height > view.Y or (index > 1 and entry.Y <= used[index - 1].Y) then
+			liveOk = false
+		end
+		if entry.Name == "Objective" and entry.Y < UIKit.GetCardTop() then
+			liveOk = false
+		end
+	end
+	table.insert(lines, if liveOk
+		then ("PASS top stack live slots in order and on screen (%s)"):format(table.concat(liveText, ", "))
+		else ("FAIL top stack live slots (%s)"):format(table.concat(liveText, ", ")))
+
+	-- The heist's gate sign and lock are world billboards: closer than
+	-- GateSignMinDistance they must stop growing (a 160 px bar and a 230 px
+	-- disc once filled the screen), and at that distance stay under 80 px.
+	local plotsFolder = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	local gateChecked, gateBad = 0, {}
+	if plotsFolder then
+		local camera = Workspace.CurrentCamera
+		local fov = if camera then math.rad(camera.FieldOfView) else math.rad(70)
+		local pixelsPerStud = 1080 / (2 * PlotLayout.ShieldFence.GateSignMinDistance * math.tan(fov / 2))
+		for _, gui in plotsFolder:GetDescendants() do
+			if gui:IsA("BillboardGui") and (gui.Name == "GateSign" or gui.Name == "ShieldLockIcon") then
+				gateChecked += 1
+				local tall = gui.Size.Y.Scale * pixelsPerStud
+				if gui.DistanceLowerLimit < PlotLayout.ShieldFence.GateSignMinDistance - 0.01 or tall > 80 then
+					table.insert(gateBad, ("%s limit %.0f, %.0f px"):format(gui:GetFullName(), gui.DistanceLowerLimit, tall))
+				end
+			end
+		end
+	end
+	table.insert(lines, if #gateBad == 0
+		then ("PASS gate sign and lock stop growing up close (%d billboards)"):format(gateChecked)
+		else "FAIL gate sign / lock billboards: " .. table.concat(gateBad, "; "))
 
 	local shown: { string } = {}
 	local function item(name: string, priority: number?)
@@ -641,6 +699,24 @@ type ProbeLine = { Ok: boolean, Name: string, Detail: string? }
 
 local TIMED_REVEAL_WAIT = 3 -- the last step's pop-ins are staggered up to 1.5 s
 
+local PRESENT_WAIT = 30
+
+-- A dim backdrop must have a card with it: asks UIKit which modals dim the
+-- screen without a card on screen (a moment later, since a card that just
+-- closed is still fading).
+local function dimLine(label: string): ProbeLine
+	local bad = UIKit.GetDimProblems()
+	if #bad > 0 then
+		task.wait(0.25)
+		bad = UIKit.GetDimProblems()
+	end
+	return {
+		Ok = #bad == 0,
+		Name = ("tutorial %s: no dim backdrop without a card on screen"):format(label),
+		Detail = table.concat(bad, ", "),
+	}
+end
+
 local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 	local TutorialController = require(script.Parent.TutorialController) :: any
@@ -654,7 +730,9 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		local current = TutorialController.GetPresentedStep()
 		return current ~= nil and current.Id == stepId
 	end
-	while not presented() and os.clock() - started < 8 do
+	-- The presenter plays one step at a time (the previous step's minimum
+	-- banner time, "✓ Nice!", the pause, then this card): give it time.
+	while not presented() and os.clock() - started < PRESENT_WAIT do
 		task.wait(0.1)
 	end
 	if not presented() or not step then
@@ -668,7 +746,7 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	local cardOpen = TutorialCards.IsOpen() or TutorialExplain.IsOpen()
 	if step.Card then
 		local waited = os.clock()
-		while not TutorialExplain.IsOpen() and os.clock() - waited < 4 do
+		while not TutorialExplain.IsOpen() and os.clock() - waited < 10 do
 			task.wait(0.1)
 		end
 		local body = TutorialExplain.GetBody()
@@ -677,9 +755,19 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 			Name = ("tutorial %s: its explain card opens first (text >= 22 px)"):format(stepId),
 			Detail = if body then ("%d px"):format(body.TextSize) else "no card",
 		})
+		-- Read time: OK is off at first (✕ and a tap outside too), on after 1.5 s.
 		task.wait(0.4)
+		local lockedEarly = not TutorialExplain.IsOkReady()
+		table.insert(lines, dimLine(stepId .. " (card up)"))
+		task.wait(TutorialConfig.CardReadSeconds)
+		table.insert(lines, {
+			Ok = lockedEarly and TutorialExplain.IsOkReady(),
+			Name = ("tutorial %s: the card's OK turns on after %.1f s"):format(stepId, TutorialConfig.CardReadSeconds),
+			Detail = ("off at 0.4 s: %s, on at %.1f s: %s"):format(tostring(lockedEarly), 0.4 + TutorialConfig.CardReadSeconds, tostring(TutorialExplain.IsOkReady())),
+		})
 		TutorialExplain.PressOk()
 		task.wait(0.2)
+		table.insert(lines, dimLine(stepId .. " (after OK)"))
 		local banner = TutorialBanner.IsShown()
 		table.insert(lines, {
 			Ok = step.CardEnds == true or banner,
@@ -697,6 +785,20 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		table.insert(lines, { Ok = not anyCard, Name = "tutorial: no card shows before the claim" })
 	end
 	task.wait(0.5) -- the slide-in
+	table.insert(lines, dimLine(stepId))
+	-- The objective bar sits fully on screen, under the Roblox top bar.
+	if TutorialBanner.IsShown() then
+		local barBody = TutorialBanner.GetFrame()
+		local barView = UIKit.GetLogicalViewport()
+		local barTop, barHeight = visibleRect(barBody, nil, screenScale(barBody))
+		local barLeft = barBody.AbsolutePosition.X / screenScale(barBody)
+		local barRight = barLeft + barBody.AbsoluteSize.X / screenScale(barBody)
+		table.insert(lines, {
+			Ok = barTop >= UIKit.GetCardTop() - 1 and barTop + barHeight <= barView.Y and barLeft >= 0 and barRight <= barView.X + 1,
+			Name = ("tutorial %s: the objective bar is fully on screen below the top bar"):format(stepId),
+			Detail = ("top %.0f (min %d), bottom %.0f of %.0f, x %.0f-%.0f of %.0f"):format(barTop, UIKit.GetCardTop(), barTop + barHeight, barView.Y, barLeft, barRight, barView.X),
+		})
+	end
 	local text = TutorialBanner.GetBaseText()
 	local words = #text:split(" ")
 	table.insert(lines, {

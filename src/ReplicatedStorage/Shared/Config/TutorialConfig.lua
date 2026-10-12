@@ -81,6 +81,7 @@ export type Step = {
 	Card: ExplainCard?, -- opens first (never at the claim), then the banner
 	CardEnds: boolean?, -- OK on the card completes the step
 	CardDelay: number?, -- seconds after the step starts before the card opens
+	HoldSeconds: number?, -- CardEnds: after OK the banner stays this long (at least) before the step ends
 }
 
 -- The saved layout version (Tutorial 3 = 3, 11 steps; 2 = Tutorial 2's 10;
@@ -100,8 +101,19 @@ TutorialConfig.GoalPathSessions = 2 -- the goal path is on by default this many 
 -- width minus this margin (real px) on each side.
 TutorialConfig.ObjectiveWidth = 600
 TutorialConfig.ObjectiveMarginPhone = 32 -- both sides together (16 each)
-TutorialConfig.StepDelay = 0.4 -- after a step's ✓, the next banner slides in
+TutorialConfig.StepDelay = 0.4 -- the default ✓ hold (Banner.Complete without a time)
 TutorialConfig.WelcomeSeconds = 2 -- "WELCOME TO YOUR LAB!" auto-fades, no button
+
+-- Pacing (Tutorial 4). The client plays the steps ONE AT A TIME, in order
+-- (TutorialController), whatever the server's step already is:
+--   done -> "✓ Nice!" NiceSeconds -> the bar slides out -> SettleSeconds of
+--   nothing new -> the next step's explain card (never before the player has
+--   closed whatever the step opened).
+TutorialConfig.NiceSeconds = 1.2
+TutorialConfig.SettleSeconds = 0.8
+TutorialConfig.CardReadSeconds = 1.5 -- an explain card's OK is off this long (fill bar)
+TutorialConfig.BannerMinSeconds = 3 -- an instruction stays up at least this long before it can change
+TutorialConfig.AlreadyDoneText = "Already done ✓" -- a step whose action was done early
 
 -- The arrow path (client-only: a flat ">" of two thin Neon bars per arrow,
 -- TutorialPath).
@@ -173,6 +185,7 @@ TutorialConfig.Steps = {
 			Model = "Pedestal1",
 		},
 		CardEnds = true,
+		HoldSeconds = 4, -- after OK the pedestals earn on screen for at least 4 s
 		Banner = "Your orbs make money!",
 		Target = "Pedestal1",
 		Seconds = 30,
@@ -256,7 +269,7 @@ TutorialConfig.Steps = {
 		Kind = "Timed",
 		Icon = "🎉",
 		Banner = "You're ready!",
-		Seconds = 3,
+		Seconds = 4,
 	},
 } :: { Step }
 
