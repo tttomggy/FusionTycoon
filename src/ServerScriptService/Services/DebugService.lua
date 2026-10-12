@@ -248,6 +248,8 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 			tool:Destroy()
 			task.wait(0.1)
 		end
+		humanoid:UnequipTools()
+		tutorialProbe(player, { Kind = "WeaponReleased" }, result)
 	else
 		result(true, "combat: weapons are held (skipped: no living character)")
 	end

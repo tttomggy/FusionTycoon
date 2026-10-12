@@ -1788,6 +1788,13 @@ person, R15, 100% camera zoom; check each from the front and the side.
   IN the right hand (never floating at the chest or in the torso) and the
   right arm must visibly lift when a weapon comes out, also while
   standing still and while walking.
+- [ ] **Swing fix (C0 pose), third person, Harris's avatar AND a blocky
+  R15:** `/weapons all`; equip the Bat: the right arm lifts and stays up,
+  the bat tip is clearly visible away from the body. Swing it 3 times:
+  cock back over the shoulder, big arc down and across to the left, settle.
+  Same for the Slap Glove (wide flat backhand at shoulder height). Unequip:
+  the arm drops back to rest. Fuse explain card: a click during the 1.5 s
+  fill wobbles the OK; the first click after it closes the card.
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +

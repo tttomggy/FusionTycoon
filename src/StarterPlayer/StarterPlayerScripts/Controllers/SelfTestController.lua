@@ -299,6 +299,10 @@ end
 local function measurePlacedCards(label: string): number
 	local view = UIKit.GetLogicalViewport()
 	local found = 0
+	-- Let the card's layout settle first (AbsoluteSize changes land a frame
+	-- late and the card re-places itself on the next one).
+	RunService.Heartbeat:Wait()
+	RunService.Heartbeat:Wait()
 	for _, gui in localPlayer:WaitForChild("PlayerGui"):GetDescendants() do
 		if gui:IsA("GuiObject") and gui:GetAttribute("CardPlaced") == true and gui.Visible then
 			local screen = gui:FindFirstAncestorWhichIsA("ScreenGui")
@@ -901,52 +905,115 @@ local function probeBigCard(expect: string): { ProbeLine }
 	}
 end
 
--- A weapon the server just equipped on this character: the arm is out while
--- it is held, and moves in the swing / kick / toss (measured on the right
--- shoulder, in torso space).
+-- The hand's rest position (UpperTorso space) while no weapon is held,
+-- sampled every frame so a probe can compare against it after the server has
+-- already equipped the weapon.
+local restHand: Vector3? = nil
+RunService.Heartbeat:Connect(function()
+	local character = localPlayer.Character
+	if not character then
+		return
+	end
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local holding = WeaponPose.IsHolding(character)
+	local tool = character:FindFirstChildOfClass("Tool")
+	if not holding and not tool then
+		restHand = WeaponPose.GetHandOffset(character)
+	end
+end)
+
+-- A weapon the server just equipped on this character. Everything is read
+-- from where the RIGHT HAND is DRAWN (RightHand.Position in UpperTorso
+-- space, sampled on Heartbeat after the joints solved), never from the
+-- joint values we wrote.
 local function probeWeapon(weaponId: string): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local CombatController = require(script.Parent.CombatController) :: any
 	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
 	local character = localPlayer.Character
-	local rest = if character then WeaponPose.GetRestDirection(character) else nil
-	if not character or not rest then
+	local rest = restHand
+	if not character or not rest or not WeaponPose.GetHandOffset(character) then
 		table.insert(lines, { Ok = true, Name = ("combat %s: the arm pose (skipped: not an R15 rig)"):format(weaponId) })
 		return lines
 	end
+	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
 	local started = os.clock()
 	while not WeaponPose.IsHolding(character) and os.clock() - started < 2 do
 		task.wait(0.05)
 	end
 	task.wait(0.35) -- the 0.15 s raise
-	local function angle(a: Vector3, b: Vector3): number
-		return math.acos(math.clamp(a.Unit:Dot(b.Unit), -1, 1))
+	RunService.Heartbeat:Wait()
+	local held = WeaponPose.GetHandOffset(character) :: Vector3
+	local gun = weapon.Kind == "Ranged" or weapon.Kind == "Freeze"
+	if gun then
+		-- Aimed: the hand is up around shoulder height (UpperTorso top is y +1.0).
+		local torso = character:FindFirstChild("UpperTorso") :: BasePart?
+		local shoulderY = if torso then torso.Size.Y / 2 - 0.3 else 0.7
+		table.insert(lines, {
+			Ok = WeaponPose.IsHolding(character) and math.abs(held.Y - shoulderY) <= 0.8 and held.Z < -0.8,
+			Name = ("combat %s: the hand is raised to about shoulder height while aiming"):format(weaponId),
+			Detail = ("hand y %.2f (shoulder %.2f), z %.2f"):format(held.Y, shoulderY, held.Z),
+		})
+	else
+		local forward = rest.Z - held.Z -- torso space: forward is -Z
+		table.insert(lines, {
+			Ok = WeaponPose.IsHolding(character) and (held - rest).Magnitude >= 1 and forward >= 0.5,
+			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose while held"):format(weaponId),
+			Detail = ("moved %.2f studs, %.2f forward"):format((held - rest).Magnitude, forward),
+		})
 	end
-	local held = WeaponPose.GetArmDirection(character)
-	local out = if held then angle(rest, held) else 0
-	table.insert(lines, {
-		Ok = WeaponPose.IsHolding(character) and out >= 0.8,
-		Name = ("combat %s: the right arm is raised while it is held"):format(weaponId),
-		Detail = ("%.2f rad from hanging"):format(out),
-	})
-	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
+	local tool = character:FindFirstChildOfClass("Tool")
+	if tool and weapon.Kind == "Melee" then
+		local clearance = WeaponPose.GetToolClearance(character, tool) or 0
+		table.insert(lines, {
+			Ok = clearance >= 1.5,
+			Name = ("combat %s: the held weapon reaches 1.5 studs clear of the torso"):format(weaponId),
+			Detail = ("%.2f studs"):format(clearance),
+		})
+	end
+
 	local played = CombatController.PlayPose(weaponId)
-	local biggest = 0
+	local travelled = 0
+	local last = held
 	local sampled = os.clock()
 	while os.clock() - sampled < 0.6 do
-		local now = WeaponPose.GetArmDirection(character)
-		if now and held then
-			biggest = math.max(biggest, angle(held, now))
-		end
 		RunService.Heartbeat:Wait()
+		local now = WeaponPose.GetHandOffset(character)
+		if now then
+			travelled += (now - last).Magnitude
+			last = now
+		end
 	end
-	local need = if weapon.Kind == "Melee" then 0.6 elseif weapon.Kind == "Peel" then 0.4 else 0.15
+	local need = if weapon.Kind == "Melee" then 2 elseif weapon.Kind == "Peel" then 1 else 0.2
 	table.insert(lines, {
-		Ok = played and biggest >= need,
-		Name = ("combat %s: the shoulder moves during the %s"):format(weaponId, if weapon.Kind == "Melee" then "swing" elseif weapon.Kind == "Peel" then "toss" else "shot (aim + recoil)"),
-		Detail = ("%.2f rad (needs %.2f)"):format(biggest, need),
+		Ok = played and travelled >= need,
+		Name = ("combat %s: the hand is drawn travelling during the %s"):format(weaponId, if weapon.Kind == "Melee" then "swing" elseif weapon.Kind == "Peel" then "toss" else "shot (aim + recoil)"),
+		Detail = ("%.2f studs (needs %.1f)"):format(travelled, need),
 	})
 	return lines
+end
+
+-- After the server took the weapon away: the hand is back at rest and
+-- BaseC0 is gone.
+local function probeWeaponReleased(): { ProbeLine }
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local character = localPlayer.Character
+	local rest = restHand
+	if not character or not rest or not WeaponPose.GetHandOffset(character) then
+		return { { Ok = true, Name = "combat: the arm is back at rest after unequip (skipped: not an R15 rig)" } }
+	end
+	task.wait(0.5)
+	RunService.Heartbeat:Wait()
+	local now = WeaponPose.GetHandOffset(character) :: Vector3
+	local away = (now - rest).Magnitude
+	local stored = WeaponPose.HasBaseStored(character)
+	return {
+		{
+			Ok = away <= 0.3 and not stored,
+			Name = "combat: after unequip the hand is back at rest and no BaseC0 is left behind",
+			Detail = ("%.2f studs from rest, base stored %s"):format(away, tostring(stored)),
+		},
+	}
 end
 
 local function probeTutorial(payload: any)
@@ -958,6 +1025,8 @@ local function probeTutorial(payload: any)
 			return probeBigCard(payload.Expect)
 		elseif payload.Kind == "Weapon" then
 			return probeWeapon(payload.Weapon)
+		elseif payload.Kind == "WeaponReleased" then
+			return probeWeaponReleased()
 		end
 		return {}
 	end)

@@ -310,7 +310,9 @@ local function place()
 	if not frame or not frame.Visible then
 		return
 	end
-	local height = frame.AbsoluteSize.Y / UIKit.EffectiveScale(frame)
+	-- Whole design px, like the /selftest measurement (AbsoluteSize is rounded
+	-- to device pixels, so a fractional plan would sit up to a pixel off).
+	local height = math.round(frame.AbsoluteSize.Y / UIKit.EffectiveScale(frame))
 	if height < 1 then
 		return
 	end
@@ -377,6 +379,14 @@ local function ensureBuilt(parent: Instance): Frame
 		if not popping and math.abs(height - lastHeight) > 1 then
 			lastHeight = height
 			place()
+			-- The size can still be settling (AutomaticSize lands a frame
+			-- later): re-place on the frame after, once it is final.
+			task.defer(function()
+				RunService.Heartbeat:Wait()
+				if not popping then
+					place()
+				end
+			end)
 		end
 	end)
 	UIKit.LayoutChanged:Connect(place)

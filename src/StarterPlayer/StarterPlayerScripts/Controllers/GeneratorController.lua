@@ -39,6 +39,7 @@ local SIZE_CHECK_DELAY = 1
 local SIZE_TOLERANCE = 0.01
 
 local warnedSizes: { [string]: boolean } = {}
+local sizeChecks: { [string]: thread } = {}
 
 local localPlayer = Players.LocalPlayer
 
@@ -132,7 +133,16 @@ end
 local function bump(id: string, model: Model, body: BasePart)
 	PartKit.Pulse(body, BUMP_SCALE, BUMP_SECONDS)
 	if RunService:IsStudio() then
-		task.delay(SIZE_CHECK_DELAY, checkSize, id, model)
+		-- MAX xN fires many bumps: only the check after the LAST one counts
+		-- (an earlier one would catch the body mid-pulse).
+		local pending = sizeChecks[id]
+		if pending then
+			task.cancel(pending)
+		end
+		sizeChecks[id] = task.delay(SIZE_CHECK_DELAY, function()
+			sizeChecks[id] = nil
+			checkSize(id, model)
+		end)
 	end
 end
 

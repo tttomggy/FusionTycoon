@@ -7,32 +7,30 @@
 	character that holds a weapon (yours from your click, theirs from the
 	HitFx you cause).
 
-	THE POSE IS ABSOLUTE. While a weapon is in the hand this module sets the
-	RightShoulder's Motor6D.Transform to the whole arm pose (hold + swing /
-	recoil / toss), not an offset on top of whatever Animate plays. So it
-	cannot "fight" the tool-hold animation (Animate's `toolnone` plays at
-	Idle priority and the idle / run animations override its arm anyway):
-	the shoulder is ours while we hold, the Animator keeps the elbow and
-	everything else, and when the weapon goes away we stop writing and the
-	Animator takes the arm back by itself.
-
-	The Animator rewrites Transform on its own step of the frame and the
-	engine reads it again at the physics step, so the same value is written
-	at RenderStepped, Stepped (PreSimulation) and Heartbeat: whichever of
-	them lands after the Animator and before the next draw wins, and since
-	the pose is absolute, writing it three times is harmless.
+	THE POSE GOES THROUGH THE JOINT'S C0, NEVER Transform. In 2026 Roblox
+	ignores client writes to Motor6D.Transform while an animation plays (fixed
+	simulation / Server Authority), and an Avatar Joint Upgrade rig may drive
+	the shoulder through an AnimationConstraint instead. The Animator never
+	touches C0 (or an Attachment's CFrame), so those writes always show.
+	While a weapon is held: joint = BaseC0 rotated by the pose, position kept.
+	BaseC0 (a stored attribute on the joint, like the BaseSize rule) is the
+	untouched value; the pose is NEVER built from the live C0, or it would
+	compound. Release / respawn / weapon switch restore BaseC0 and clear the
+	attribute. The Animator keeps writing Transform, so walk / idle sway adds
+	on top of our pose, and Animate's `toolnone` track (which raises the arm
+	in Transform too) is stopped while we hold.
 
 	  Hold(c, weapon)      the weapon came up: the 0.15 s raise, then the
 	                       held pose (guns: arm straight out, aimed)
-	  Release(c)           the weapon is gone: stop writing, restore
+	  Release(c)           the weapon is gone: restore BaseC0
 	  Swing(c, id)         "Bat" | "SlapGlove": wind back, then a big fast arc
 	                       across (about 0.35 s)
 	  Recoil(c)            a 0.1 s gun kick
 	  Throw(c)             the Banana Peel's overhand toss
 	  SetAimPitch(c, rad)  where a gun is aimed (pitch only)
 
-	/selftest: GetArmDirection(c) (where the arm points, in torso space) and
-	GetRestDirection(c) (where it would hang). R15 only.
+	/selftest: GetHandOffset(c) = RightHand.Position in UpperTorso space (what
+	is DRAWN, read after the joints solve) and HasBaseStored(c). R15 only.
 ]]
 local RunService = game:GetService("RunService")
 
@@ -85,8 +83,18 @@ local SWINGS: { [string]: SwingShape } = {
 	},
 }
 
+-- The joint we pose: the RightShoulder Motor6D (C0) or, on an Avatar Joint
+-- Upgrade rig, the AnimationConstraint's Attachment0 (CFrame).
+type Joint = {
+	Instance: Instance, -- the Motor6D, or Attachment0
+	Property: string, -- "C0" | "CFrame"
+	Attribute: string, -- "BaseC0" | "BaseCFrame"
+	Base: CFrame,
+}
+
 type State = {
-	Motor: Motor6D,
+	Joint: Joint,
+	Animator: Animator?,
 	WeaponId: string,
 	Gun: boolean,
 	HoldPitch: number,
@@ -97,7 +105,8 @@ type State = {
 	ThrowAt: number?,
 	AimPitch: number,
 	AimTarget: number,
-	Pose: CFrame, -- the last computed Transform
+	Pose: Vector3, -- the last computed pose: pitch, yaw, roll in torso axes
+	Written: CFrame, -- the last value written to the joint
 }
 
 local states: { [Model]: State } = {}
@@ -112,18 +121,88 @@ local function easeIn(t: number): number
 	return t * t
 end
 
-local function findShoulder(character: Model): Motor6D?
-	local arm = character:FindFirstChild("RightUpperArm")
-	local motor = arm and arm:FindFirstChild("RightShoulder")
-	return if motor and motor:IsA("Motor6D") then motor else nil
+local function jointValue(joint: Joint): CFrame
+	return (joint.Instance :: any)[joint.Property]
 end
 
--- The pose in the torso's axes (pitch, yaw, roll), turned into the
--- Transform the joint needs: Transform acts inside C0's frame, so an avatar
--- whose shoulder C0 is rotated still raises its arm FORWARD.
-local function transformFor(motor: Motor6D, pitch: number, yaw: number, roll: number): CFrame
-	local rotation = motor.C0 - motor.C0.Position
-	return rotation:Inverse() * CFrame.fromOrientation(pitch, yaw, roll) * rotation
+local function setJoint(joint: Joint, value: CFrame)
+	local instance = joint.Instance :: any
+	instance[joint.Property] = value
+end
+
+-- The shoulder joint to pose, with its untouched base value.
+local function findJoint(character: Model): Joint?
+	local arm = character:FindFirstChild("RightUpperArm")
+	if not arm then
+		return nil
+	end
+	local motor = arm:FindFirstChild("RightShoulder")
+	if motor and motor:IsA("Motor6D") and motor.Enabled then
+		local stored = motor:GetAttribute("BaseC0")
+		return {
+			Instance = motor :: Instance,
+			Property = "C0",
+			Attribute = "BaseC0",
+			Base = if typeof(stored) == "CFrame" then stored else motor.C0,
+		}
+	end
+	for _, child in arm:GetChildren() do
+		if child:IsA("AnimationConstraint") and child.Enabled and child.Attachment0 and child.Attachment1 then
+			local attachment = child.Attachment0 :: Attachment
+			local stored = attachment:GetAttribute("BaseCFrame")
+			return {
+				Instance = attachment :: Instance,
+				Property = "CFrame",
+				Attribute = "BaseCFrame",
+				Base = if typeof(stored) == "CFrame" then stored else attachment.CFrame,
+			}
+		end
+	end
+	return nil
+end
+
+-- The joint value for a pose given in the torso's axes (pitch, yaw, roll):
+-- the base position with the base rotation turned by the pose. (Same as
+-- BaseC0 * Transform with Transform = R^-1 * pose * R, so an avatar whose
+-- shoulder C0 is rotated still raises its arm FORWARD.)
+local function jointFor(base: CFrame, pose: Vector3): CFrame
+	return CFrame.new(base.Position) * CFrame.fromOrientation(pose.X, pose.Y, pose.Z) * (base - base.Position)
+end
+
+-- Animate's tool-hold track also raises the arm; with our pose it would
+-- double-raise, so it is faded out while we hold.
+local function stopToolHold(state: State)
+	local animator = state.Animator
+	if not animator or not animator.Parent then
+		return
+	end
+	for _, track in animator:GetPlayingAnimationTracks() do
+		local animation = track.Animation
+		if animation and (animation.Name == "ToolNoneAnim" or (animation.Parent and animation.Parent.Name == "toolnone")) then
+			track:Stop(0.1)
+		end
+	end
+end
+
+-- Writes the pose; if something else moved the joint (the Humanoid rescaling
+-- the rig) the base follows its position, and the rotation stays ours.
+local function write(state: State)
+	local joint = state.Joint
+	local live = jointValue(joint)
+	if (live.Position - state.Written.Position).Magnitude > 1e-3 then
+		joint.Base = CFrame.new(live.Position) * (joint.Base - joint.Base.Position)
+		joint.Instance:SetAttribute(joint.Attribute, joint.Base)
+	end
+	state.Written = jointFor(joint.Base, state.Pose)
+	setJoint(joint, state.Written)
+end
+
+local function restore(state: State)
+	local joint = state.Joint
+	if joint.Instance.Parent then
+		setJoint(joint, joint.Base)
+		joint.Instance:SetAttribute(joint.Attribute, nil)
+	end
 end
 
 -- The swing's offsets at `elapsed`; nil once it is over.
@@ -190,15 +269,15 @@ local function compute(state: State, now: number, dt: number)
 		end
 	end
 
-	state.Pose = transformFor(state.Motor, pitch, yaw, roll)
+	state.Pose = Vector3.new(pitch, yaw, roll)
 end
 
 local function apply()
 	for character, state in states do
-		if not character.Parent or not state.Motor.Parent then
+		if not character.Parent or not state.Joint.Instance.Parent then
 			states[character] = nil
 		else
-			state.Motor.Transform = state.Pose
+			write(state)
 		end
 	end
 end
@@ -215,10 +294,11 @@ local function onRender()
 	local dt = math.min(now - lastStep, 0.1)
 	lastStep = now
 	for character, state in states do
-		if not character.Parent or not state.Motor.Parent then
+		if not character.Parent or not state.Joint.Instance.Parent then
 			states[character] = nil
 		else
 			compute(state, now, dt)
+			stopToolHold(state)
 		end
 	end
 	apply()
@@ -233,48 +313,49 @@ local function ensureRunning()
 	end
 	lastStep = os.clock()
 	table.insert(connections, RunService.RenderStepped:Connect(onRender))
-	table.insert(connections, RunService.Stepped:Connect(apply))
-	table.insert(connections, RunService.Heartbeat:Connect(apply))
 end
 
 --[[ Public API ------------------------------------------------------------------------ ]]
 
 -- A weapon came up in `character`'s hand.
 function WeaponPose.Hold(character: Model, weapon: CombatConfig.Weapon)
-	local motor = findShoulder(character)
-	if not motor then
-		return
-	end
 	local old = states[character]
 	if old then
-		-- Switching straight from one weapon to another: nothing to restore.
-		old.Motor.Transform = CFrame.new()
+		-- Switching straight from one weapon to another: back to BaseC0 first.
+		restore(old)
+		states[character] = nil
 	end
+	local joint = findJoint(character)
+	if not joint then
+		return
+	end
+	joint.Instance:SetAttribute(joint.Attribute, joint.Base)
 	local gun = weapon.Kind == "Ranged" or weapon.Kind == "Freeze"
 	local state: State = {
-		Motor = motor,
+		Joint = joint,
+		Animator = character:FindFirstChildWhichIsA("Animator", true),
 		WeaponId = weapon.Id,
 		Gun = gun,
 		HoldPitch = if gun then GUN_HOLD_PITCH else (HOLD_PITCH[weapon.Id] or 1.3),
 		HeldAt = os.clock(),
 		AimPitch = 0,
 		AimTarget = 0,
-		Pose = CFrame.new(),
+		Pose = Vector3.zero,
+		Written = jointValue(joint),
 	}
 	states[character] = state
 	compute(state, os.clock(), 0)
-	state.Motor.Transform = state.Pose
+	stopToolHold(state)
+	write(state)
 	ensureRunning()
 end
 
--- The weapon is gone: stop writing; the Animator takes the arm back.
+-- The weapon is gone: BaseC0 back, attribute cleared.
 function WeaponPose.Release(character: Model)
 	local state = states[character]
 	if state then
 		states[character] = nil
-		if state.Motor.Parent then
-			state.Motor.Transform = CFrame.new()
-		end
+		restore(state)
 	end
 end
 
@@ -318,23 +399,47 @@ end
 
 --[[ /selftest -------------------------------------------------------------------------- ]]
 
--- Where the right arm points now, in the torso's axes (the shoulder's C0 and
--- Transform applied to "straight down"). nil without an R15 shoulder.
-function WeaponPose.GetArmDirection(character: Model): Vector3?
-	local motor = findShoulder(character)
-	if not motor then
+-- RightHand.Position in UpperTorso space: what is DRAWN (the joints solved),
+-- not the value we wrote. Sample on Heartbeat. nil without an R15 hand.
+function WeaponPose.GetHandOffset(character: Model): Vector3?
+	local hand = character:FindFirstChild("RightHand")
+	local torso = character:FindFirstChild("UpperTorso")
+	if not (hand and hand:IsA("BasePart") and torso and torso:IsA("BasePart")) then
 		return nil
 	end
-	return (motor.C0 * motor.Transform):VectorToWorldSpace(Vector3.new(0, -1, 0))
+	return torso.CFrame:PointToObjectSpace(hand.Position)
 end
 
--- Where it would hang with no pose at all.
-function WeaponPose.GetRestDirection(character: Model): Vector3?
-	local motor = findShoulder(character)
-	if not motor then
+-- Whether the shoulder still carries a stored base (false once released).
+function WeaponPose.HasBaseStored(character: Model): boolean
+	local arm = character:FindFirstChild("RightUpperArm")
+	if not arm then
+		return false
+	end
+	for _, descendant in arm:GetDescendants() do
+		if descendant:GetAttribute("BaseC0") ~= nil or descendant:GetAttribute("BaseCFrame") ~= nil then
+			return true
+		end
+	end
+	return false
+end
+
+-- How far the held tool's parts reach beyond the UpperTorso's surface (studs).
+function WeaponPose.GetToolClearance(character: Model, tool: Instance): number?
+	local torso = character:FindFirstChild("UpperTorso")
+	if not (torso and torso:IsA("BasePart")) then
 		return nil
 	end
-	return motor.C0:VectorToWorldSpace(Vector3.new(0, -1, 0))
+	local half = torso.Size / 2
+	local best = 0
+	for _, part in tool:GetDescendants() do
+		if part:IsA("BasePart") then
+			local at = torso.CFrame:PointToObjectSpace(part.Position)
+			local outside = Vector3.new(math.max(math.abs(at.X) - half.X, 0), math.max(math.abs(at.Y) - half.Y, 0), math.max(math.abs(at.Z) - half.Z, 0))
+			best = math.max(best, outside.Magnitude)
+		end
+	end
+	return best
 end
 
 return WeaponPose

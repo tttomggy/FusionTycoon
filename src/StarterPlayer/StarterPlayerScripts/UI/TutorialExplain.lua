@@ -49,6 +49,17 @@ local okReady = false -- the read time is over: OK, ✕ and a tap outside work
 local readToken = 0
 local readFill: Frame
 
+-- A small wobble of the OK: "not yet".
+local function shakeOk()
+	okButton.Rotation = 0
+	local info = TweenInfo.new(0.05, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 0, true)
+	local tween = TweenService:Create(okButton, info, { Rotation = 3 })
+	tween.Completed:Once(function()
+		okButton.Rotation = 0
+	end)
+	tween:Play()
+end
+
 local function finish()
 	local callback = onOk
 	onOk = nil
@@ -210,6 +221,8 @@ local function build()
 		ZIndex = content.ZIndex + 1,
 		OnClick = function()
 			if not okReady then
+				-- A click during the fill doesn't count: shake so they know to wait.
+				shakeOk()
 				return
 			end
 			closingByOk = true

@@ -57,22 +57,42 @@ never sold, server authority are unchanged.
   guns point straight forward; the glove sits on the hand. Gun muzzles and
   the Bat / Glove trail points are `Attachment`s on the Handle
   (`Muzzle`, `TrailA`, `TrailB`).
-- **Poses** (`Effects/WeaponPose`, client, no animation uploads): while a
-  weapon is in a hand (anyone's) the RightShoulder's `Motor6D.Transform` is
-  set to an ABSOLUTE arm pose (hold + swing / recoil / toss), not an offset
-  over Animate. Roblox's own `toolnone` plays at Idle priority and the
-  idle / run animations override its arm, so an offset on top of it was not
-  reliable; now the shoulder is ours while we hold (the Animator keeps the
-  elbow and the rest) and when the weapon goes (`Release`) we stop writing
-  and the Animator takes the arm back. The Animator rewrites `Transform`
-  on its own step, so the same pose is written at RenderStepped, Stepped
-  and Heartbeat: whichever lands after the Animator wins, and writing an
-  absolute pose three times is harmless. The pitch/yaw are conjugated by the
-  shoulder's `C0` rotation, so an avatar with a rotated shoulder still
-  raises its arm forward. Nothing of ours stops or replaces the Animate
-  script. Hold = arm raised (guns: straight out, pitched at your aim, pitch
-  only, camera free), equip raise 0.15 s, Bat / Glove swing (wind back,
-  ±75° arc across, settle ≈ 0.35 s), 0.1 s recoil, peel toss. R15 only.
+- **Poses** (`Effects/WeaponPose`, client, no animation uploads): the arm
+  pose goes through the shoulder's **`C0`, not `Motor6D.Transform`**. Why:
+  in 2026 Roblox ignores client writes to `Transform` while an animation
+  plays (fixed simulation / Server Authority; staff confirmed it, no
+  workaround), which is why the trail played but the arm hung straight down
+  (the old /selftest only read back the value it had just written). The
+  Animator never touches `C0`, so a `C0` write always shows. On `Hold` the
+  joint's base is stored as the `BaseC0` attribute (the `BaseSize` idea);
+  every frame `C0 = BaseC0 position * pose rotation * BaseC0 rotation` (the
+  pose is in torso axes, so a rotated shoulder still raises the arm
+  forward). It is never built from the live C0. `Release`, respawn and a
+  weapon switch restore `BaseC0` and clear the attribute; if the Humanoid
+  rescales the rig (live position != what we wrote) the base position
+  follows it. An Avatar Joint Upgrade rig whose shoulder is an
+  `AnimationConstraint` gets the same treatment on `Attachment0.CFrame`
+  (`BaseCFrame`). `Transform` is never written, so walk / idle sway adds on
+  top, and Animate's `toolnone` track (which also raises the arm) is stopped
+  while we hold. Hold = arm raised (guns: straight out, pitched at your aim,
+  pitch only, camera free), equip raise 0.15 s, Bat / Glove swing (cock
+  back, ~163° of yaw arc across, settle ≈ 0.35 s), 0.1 s recoil, peel toss.
+  R15 only. **Plan B** (if C0 and the attachment both fail on an avatar):
+  `KeyframeSequence`s built in code, registered with
+  `KeyframeSequenceProvider:RegisterKeyframeSequence`, played at `Action4`
+  (Studio only until published as assets). Not built.
+- **Rig diagnosis (not yet logged):** the prompt asked for a one-off Studio
+  log of whether `RightUpperArm.RightShoulder` exists/enabled, whether an
+  `AnimationConstraint` joins `UpperTorso` and `RightUpperArm`, and the
+  place's Workspace simulation settings. That needs Studio; `findJoint`
+  handles both cases, so nothing depends on the answer. Add what Harris's
+  monkey shows here.
+- **/selftest measures what is drawn:** `RightHand.Position` in `UpperTorso`
+  space on Heartbeat (`WeaponPose.GetHandOffset`), never the joint values.
+  Held: >= 1 stud (and >= 0.5 forward) from the rest pose sampled before
+  equip; guns: about shoulder height; swing: >= 2 studs of hand travel;
+  released: within 0.3 studs of rest and no `BaseC0` left; Bat: tool parts
+  reach >= 1.5 studs clear of the UpperTorso.
 - **Holding it:** `Humanoid:EquipTool` builds the `RightGrip` weld; the
   server checks it (`CombatService.GetGripProblem`: the weld exists and the
   Handle is within 1.5 studs of RightHand) when a tool is equipped and
