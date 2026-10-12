@@ -33,6 +33,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
@@ -714,9 +715,11 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		Name = ("tutorial %s: the objective bar (width, text size, step counter)"):format(stepId),
 		Detail = ("%.0f px wide, text %d, %s"):format(objectiveBar.AbsoluteSize.X, label.TextSize, TutorialBanner.GetStepText()),
 	})
-	-- The hand: its fingertip lies inside the button it points at (the
-	-- Fuse panel's buttons and the contextual button are closed / out of
-	-- reach in this drive).
+	-- The hand: it never overlaps the button it points at, and its
+	-- fingertip is within 12 px of the button's top-centre (above it) or
+	-- bottom-centre (a button too near the top of the screen gets the hand
+	-- below it). The Fuse panel's buttons and the contextual button are
+	-- closed / out of reach in this drive.
 	if step.Hand then
 		local until_ = os.clock() + 3
 		local tip = TutorialHand.GetTip()
@@ -725,15 +728,28 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 			tip = TutorialHand.GetTip()
 		end
 		local target = TutorialHand.GetTarget()
-		local inside = false
-		if tip and target then
+		local rect = TutorialHand.GetRect()
+		local clear, tipOk = false, false
+		local detail = "no hand"
+		if tip and target and rect then
 			local p, sz = target.AbsolutePosition, target.AbsoluteSize
-			inside = tip.X >= p.X and tip.X <= p.X + sz.X and tip.Y >= p.Y and tip.Y <= p.Y + sz.Y
+			local overlapX = rect.Position.X < p.X + sz.X and rect.Position.X + rect.Size.X > p.X
+			local overlapY = rect.Position.Y < p.Y + sz.Y and rect.Position.Y + rect.Size.Y > p.Y
+			clear = not (overlapX and overlapY)
+			local edgeY = if tip.Y <= p.Y + sz.Y / 2 then p.Y else p.Y + sz.Y
+			local distance = (tip - Vector2.new(p.X + sz.X / 2, edgeY)).Magnitude
+			tipOk = distance <= 12
+			detail = ("tip %.0f,%.0f (%.1f px from the edge centre) hand %.0f,%.0f target %.0f,%.0f %.0fx%.0f"):format(tip.X, tip.Y, distance, rect.Position.X, rect.Position.Y, p.X, p.Y, sz.X, sz.Y)
 		end
 		table.insert(lines, {
-			Ok = inside,
-			Name = ("tutorial %s: the hand's tip is inside its target"):format(stepId),
-			Detail = if tip and target then ("tip %.0f,%.0f target %.0f,%.0f %.0fx%.0f"):format(tip.X, tip.Y, target.AbsolutePosition.X, target.AbsolutePosition.Y, target.AbsoluteSize.X, target.AbsoluteSize.Y) else "no hand",
+			Ok = clear,
+			Name = ("tutorial %s: the hand does not cover its target"):format(stepId),
+			Detail = detail,
+		})
+		table.insert(lines, {
+			Ok = tipOk,
+			Name = ("tutorial %s: the hand's tip is within 12 px of its target's edge"):format(stepId),
+			Detail = detail,
 		})
 	end
 	-- The HUD set: each key shown exactly from the step that introduces it
@@ -783,6 +799,54 @@ local function probeBigCard(expect: string): { ProbeLine }
 	}
 end
 
+-- A weapon the server just equipped on this character: the arm is out while
+-- it is held, and moves in the swing / kick / toss (measured on the right
+-- shoulder, in torso space).
+local function probeWeapon(weaponId: string): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local CombatController = require(script.Parent.CombatController) :: any
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local character = localPlayer.Character
+	local rest = if character then WeaponPose.GetRestDirection(character) else nil
+	if not character or not rest then
+		table.insert(lines, { Ok = true, Name = ("combat %s: the arm pose (skipped: not an R15 rig)"):format(weaponId) })
+		return lines
+	end
+	local started = os.clock()
+	while not WeaponPose.IsHolding(character) and os.clock() - started < 2 do
+		task.wait(0.05)
+	end
+	task.wait(0.35) -- the 0.15 s raise
+	local function angle(a: Vector3, b: Vector3): number
+		return math.acos(math.clamp(a.Unit:Dot(b.Unit), -1, 1))
+	end
+	local held = WeaponPose.GetArmDirection(character)
+	local out = if held then angle(rest, held) else 0
+	table.insert(lines, {
+		Ok = WeaponPose.IsHolding(character) and out >= 0.8,
+		Name = ("combat %s: the right arm is raised while it is held"):format(weaponId),
+		Detail = ("%.2f rad from hanging"):format(out),
+	})
+	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
+	local played = CombatController.PlayPose(weaponId)
+	local biggest = 0
+	local sampled = os.clock()
+	while os.clock() - sampled < 0.6 do
+		local now = WeaponPose.GetArmDirection(character)
+		if now and held then
+			biggest = math.max(biggest, angle(held, now))
+		end
+		RunService.Heartbeat:Wait()
+	end
+	local need = if weapon.Kind == "Melee" then 0.6 elseif weapon.Kind == "Peel" then 0.4 else 0.15
+	table.insert(lines, {
+		Ok = played and biggest >= need,
+		Name = ("combat %s: the shoulder moves during the %s"):format(weaponId, if weapon.Kind == "Melee" then "swing" elseif weapon.Kind == "Peel" then "toss" else "shot (aim + recoil)"),
+		Detail = ("%.2f rad (needs %.2f)"):format(biggest, need),
+	})
+	return lines
+end
+
 local function probeTutorial(payload: any)
 	local lines: { ProbeLine } = {}
 	local ok, result = pcall(function()
@@ -790,6 +854,8 @@ local function probeTutorial(payload: any)
 			return probeStep(payload.StepIndex, payload.StepId)
 		elseif payload.Kind == "BigCard" then
 			return probeBigCard(payload.Expect)
+		elseif payload.Kind == "Weapon" then
+			return probeWeapon(payload.Weapon)
 		end
 		return {}
 	end)

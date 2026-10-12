@@ -813,20 +813,16 @@ local function onToolAdded(player: Player, character: Model, tool: Instance)
 	if not weapon then
 		return
 	end
-	WeaponPose.Equip(character)
+	WeaponPose.Hold(character, weapon)
 	local root = getRoot(player)
 	if root then
 		SoundKit.PlayAt("Equip", root.Position)
 	end
-	if isGun(weapon) then
-		WeaponPose.SetAim(character, true, 0)
-	end
 end
 
 local function onToolRemoved(character: Model, tool: Instance)
-	local weapon = if tool:IsA("Tool") then CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) else nil
-	if weapon and isGun(weapon) then
-		WeaponPose.SetAim(character, false)
+	if tool:IsA("Tool") and CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) then
+		WeaponPose.Release(character)
 	end
 end
 
@@ -858,11 +854,22 @@ local function stepAim()
 		if isGun(weapon) and character:FindFirstChild(weapon.Id) then
 			local direction = aimDirection()
 			if direction then
-				WeaponPose.SetAim(character, true, math.asin(math.clamp(direction.Y, -1, 1)))
+				WeaponPose.SetAimPitch(character, math.asin(math.clamp(direction.Y, -1, 1)))
 			end
 			return
 		end
 	end
+end
+
+-- /selftest: plays `weaponId`'s swing / shot / toss on your own character
+-- as if you had clicked (the tool must be equipped); returns whether it was.
+function CombatController.PlayPose(weaponId: string): boolean
+	local weapon = CombatConfig.GetWeapon(weaponId)
+	if not weapon or not findHeldTool(localPlayer, weapon.Id) then
+		return false
+	end
+	performFor(localPlayer, weapon)
+	return true
 end
 
 function CombatController.Init()

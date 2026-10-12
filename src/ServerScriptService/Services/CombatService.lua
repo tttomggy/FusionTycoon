@@ -296,6 +296,76 @@ end
 
 --[[ Tools ---------------------------------------------------------------------------- ]]
 
+--[[ Holding it ------------------------------------------------------------------------
+	Humanoid:EquipTool welds the Handle to the right hand (a "RightGrip" weld
+	in the hand). It is the engine's job, so this only checks it landed:
+	the weld exists and the Handle is within GRIP_REACH studs of the hand.
+	A tool that is not in a hand (or an avatar whose weld never formed) is
+	repaired with the same weld the engine builds, so a weapon can never sit
+	in front of the chest.
+]]
+local GRIP_REACH = 1.5
+
+local function getHand(character: Model): BasePart?
+	local hand = character:FindFirstChild("RightHand") or character:FindFirstChild("Right Arm")
+	return if hand and hand:IsA("BasePart") then hand else nil
+end
+
+-- Why `tool` (equipped on `character`) is not held (nil = it is).
+function CombatService.GetGripProblem(character: Model, tool: Tool): string?
+	local hand = getHand(character)
+	local handle = tool:FindFirstChild("Handle")
+	if not hand or not handle or not handle:IsA("BasePart") then
+		return "no RightHand or no Handle"
+	end
+	local grip = hand:FindFirstChild("RightGrip")
+	if not grip or not grip:IsA("JointInstance") and not grip:IsA("WeldConstraint") then
+		return "no RightGrip weld in the hand"
+	end
+	local distance = (handle.Position - hand.Position).Magnitude
+	if distance > GRIP_REACH then
+		return ("the Handle is %.1f studs from the hand"):format(distance)
+	end
+	return nil
+end
+
+-- Rebuilds the RightGrip the way the engine does (attachment frame, the
+-- tool's Grip).
+local function repairGrip(character: Model, tool: Tool)
+	local hand = getHand(character)
+	local handle = tool:FindFirstChild("Handle")
+	if not hand or not handle or not handle:IsA("BasePart") then
+		return
+	end
+	local old = hand:FindFirstChild("RightGrip")
+	if old then
+		old:Destroy()
+	end
+	local attachment = hand:FindFirstChild("RightGripAttachment")
+	local weld = Instance.new("Weld")
+	weld.Name = "RightGrip"
+	weld.Part0 = hand
+	weld.Part1 = handle
+	weld.C0 = if attachment and attachment:IsA("Attachment") then attachment.CFrame else CFrame.new()
+	weld.C1 = tool.Grip
+	weld.Parent = hand
+end
+
+local function watchGrip(tool: Tool)
+	tool.Equipped:Connect(function()
+		task.wait(0.15) -- the engine's weld, then a physics step
+		local character = tool.Parent
+		if tool.Parent ~= character or not character or not character:IsA("Model") then
+			return
+		end
+		local problem = CombatService.GetGripProblem(character, tool)
+		if problem then
+			warn(("CombatService: %s is not held (%s); rebuilding RightGrip"):format(tool.Name, problem))
+			repairGrip(character, tool)
+		end
+	end)
+end
+
 -- Puts every owned weapon in the Backpack (once each; none left over).
 local function giveTools(player: Player)
 	local backpack = player:FindFirstChildOfClass("Backpack")
@@ -317,7 +387,9 @@ local function giveTools(player: Player)
 	end
 	for _, weapon in CombatConfig.Weapons do
 		if owned[weapon.Id] and not backpack:FindFirstChild(weapon.Id) and not (character and character:FindFirstChild(weapon.Id)) then
-			WeaponKit.Build(weapon.Id).Parent = backpack
+			local tool = WeaponKit.Build(weapon.Id)
+			watchGrip(tool)
+			tool.Parent = backpack
 		end
 	end
 end

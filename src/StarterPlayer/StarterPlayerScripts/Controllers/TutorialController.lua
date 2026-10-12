@@ -90,6 +90,7 @@ local pedestalPops: { BillboardGui } = {}
 local lastSub: string? = nil
 local pressing = false
 local cardUp = false -- an explain card is open: banner, path and hand wait
+local openSeen = false -- an Open step's card / panel has been up (it ends when it is closed)
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
 
@@ -244,9 +245,12 @@ local function beginGuidance(index: number)
 	end
 	local t = TycoonController.GetTutorial()
 	cardUp = false
+	openSeen = false
 	stepStart = os.clock()
 	advanceSentFor = nil
 	lastSub = step.Sub
+	-- The event card gets its "OK, got it" while this step runs.
+	EventInfoCard.SetTutorialOk(step.Id == "events")
 	TutorialBanner.Show(step.Banner, step.Sub, step.Icon, index, #TutorialConfig.Steps)
 	TutorialBanner.SetSkip(if t.Replay then function()
 		sendAdvance(index)
@@ -308,8 +312,9 @@ local function changeStep(newStep: number?, finished: boolean)
 	local previous = presentedStep()
 	presented = nil
 	stopGuidance()
+	-- A card the player opened stays open: only the "OK, got it" button goes.
 	if previous and previous.Id == "events" then
-		EventInfoCard.Hide()
+		EventInfoCard.SetTutorialOk(false)
 	end
 	task.spawn(function()
 		if previousIndex ~= nil then
@@ -335,6 +340,7 @@ end
 local function finishTutorial()
 	TutorialCards.Close()
 	TutorialExplain.Close()
+	EventInfoCard.SetTutorialOk(false)
 	TutorialBanner.SetSkip(nil)
 	ToastController.FlushHeld()
 end
@@ -446,10 +452,19 @@ local function stepFrame()
 			sendAdvance(index)
 		end
 	elseif tutorialStep.Kind == "Open" then
-		local opened = (tutorialStep.Id == "events" and EventInfoCard.IsOpen())
+		-- Done when the player CLOSES what they opened (✕, a tap outside, the
+		-- card's OK); it stays open until then, and the Seconds fallback only
+		-- applies to a player who never opened it.
+		local open = (tutorialStep.Id == "events" and EventInfoCard.IsOpen())
 			or (tutorialStep.Id == "rebirth" and RebirthPanel.IsOpen())
-		if opened or elapsed >= (tutorialStep.Seconds or 0) then
+		if open then
+			openSeen = true
+		end
+		if (openSeen and not open) or (not openSeen and elapsed >= (tutorialStep.Seconds or 0)) then
 			sendAdvance(index)
+		end
+		if open then
+			TutorialHand.SetTarget(nil) -- it is already open: nothing to point at
 		end
 	elseif shortfall and elapsed >= (tutorialStep.SkipSeconds or 3) then
 		sendAdvance(index)

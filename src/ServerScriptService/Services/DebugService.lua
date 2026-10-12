@@ -183,6 +183,21 @@ local function waitForReport(player: Player, stage: string): any?
 	return nil
 end
 
+-- Asks the client what it shows right now (SelfTestController's probe) and
+-- turns each line it reports into a result.
+local function tutorialProbe(player: Player, payload: { [string]: any }, result: (boolean, string, string?) -> ())
+	payload.Stage = "TutorialProbe"
+	RemoteEvents.SelfTest:FireClient(player, payload)
+	local report = waitForReport(player, "TutorialProbe")
+	if not report or typeof(report.Lines) ~= "table" then
+		result(false, ("tutorial probe (%s)"):format(tostring(payload.Kind)), "no report from the client")
+		return
+	end
+	for _, line in report.Lines do
+		result(line.Ok == true, tostring(line.Name), line.Detail)
+	end
+end
+
 local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	-- Every weapon is a Handle plus parts welded to it: massless, nothing
 	-- collides, and it fits a 4.5-stud box.
@@ -211,6 +226,30 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 		local why = CombatService.WhyNotHittable(player)
 		data.Rebirths = rebirths
 		result(why == "NeedsRebirth", "combat: a Rebirth-0 player can't be hit", tostring(why))
+	end
+
+	-- Each weapon, equipped through the server on the tester: the RightGrip
+	-- weld exists, the Handle is within 1.5 studs of RightHand, and (the
+	-- client measures it) the arm is out while held and moves in a swing /
+	-- kick / toss. The tool is destroyed afterwards.
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if character and humanoid and humanoid.Health > 0 then
+		humanoid:UnequipTools()
+		for _, weapon in CombatConfig.Weapons do
+			local tool = WeaponKit.Build(weapon.Id)
+			humanoid:EquipTool(tool)
+			task.wait(0.4)
+			local problem = if tool.Parent == character then CombatService.GetGripProblem(character, tool) else "the tool did not equip"
+			result(problem == nil, ("combat: the %s is held (RightGrip weld, Handle within 1.5 studs of RightHand)"):format(weapon.Name), problem)
+			if tool.Parent == character then
+				tutorialProbe(player, { Kind = "Weapon", Weapon = weapon.Id }, result)
+			end
+			tool:Destroy()
+			task.wait(0.1)
+		end
+	else
+		result(true, "combat: weapons are held (skipped: no living character)")
 	end
 
 	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
@@ -251,21 +290,6 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 		"combat: knocking a thief returns the orb, inventories unchanged",
 		("carrying %s, back %s, counts %d/%d -> %d/%d"):format(tostring(stillCarrying), tostring(back), thiefBefore, victimBefore, count(player), count(victim))
 	)
-end
-
--- Asks the client what it shows right now (SelfTestController's probe) and
--- turns each line it reports into a result.
-local function tutorialProbe(player: Player, payload: { [string]: any }, result: (boolean, string, string?) -> ())
-	payload.Stage = "TutorialProbe"
-	RemoteEvents.SelfTest:FireClient(player, payload)
-	local report = waitForReport(player, "TutorialProbe")
-	if not report or typeof(report.Lines) ~= "table" then
-		result(false, ("tutorial probe (%s)"):format(tostring(payload.Kind)), "no report from the client")
-		return
-	end
-	for _, line in report.Lines do
-		result(line.Ok == true, tostring(line.Name), line.Detail)
-	end
 end
 
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())

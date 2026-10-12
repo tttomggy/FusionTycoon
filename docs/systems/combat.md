@@ -57,13 +57,28 @@ never sold, server authority are unchanged.
   guns point straight forward; the glove sits on the hand. Gun muzzles and
   the Bat / Glove trail points are `Attachment`s on the Handle
   (`Muzzle`, `TrailA`, `TrailB`).
-- **Poses** (`Effects/WeaponPose`, client, no animation uploads): a rotation
-  of the right shoulder added each RenderStepped on top of the Animate
-  script's tool hold. It rides `Motor6D.C0`, not `Transform`, because the
-  Animator rewrites `Transform` on its own step and can overwrite an edit
-  before it is drawn; nothing writes `C0` back. Equip raise 0.15 s, Bat /
-  Glove swing (wind back, fast arc, settle ≈ 0.35 s), gun aim pose pitched
-  at your aim (pitch only, camera free), 0.1 s recoil, peel toss. R15 only.
+- **Poses** (`Effects/WeaponPose`, client, no animation uploads): while a
+  weapon is in a hand (anyone's) the RightShoulder's `Motor6D.Transform` is
+  set to an ABSOLUTE arm pose (hold + swing / recoil / toss), not an offset
+  over Animate. Roblox's own `toolnone` plays at Idle priority and the
+  idle / run animations override its arm, so an offset on top of it was not
+  reliable; now the shoulder is ours while we hold (the Animator keeps the
+  elbow and the rest) and when the weapon goes (`Release`) we stop writing
+  and the Animator takes the arm back. The Animator rewrites `Transform`
+  on its own step, so the same pose is written at RenderStepped, Stepped
+  and Heartbeat: whichever lands after the Animator wins, and writing an
+  absolute pose three times is harmless. The pitch/yaw are conjugated by the
+  shoulder's `C0` rotation, so an avatar with a rotated shoulder still
+  raises its arm forward. Nothing of ours stops or replaces the Animate
+  script. Hold = arm raised (guns: straight out, pitched at your aim, pitch
+  only, camera free), equip raise 0.15 s, Bat / Glove swing (wind back,
+  ±75° arc across, settle ≈ 0.35 s), 0.1 s recoil, peel toss. R15 only.
+- **Holding it:** `Humanoid:EquipTool` builds the `RightGrip` weld; the
+  server checks it (`CombatService.GetGripProblem`: the weld exists and the
+  Handle is within 1.5 studs of RightHand) when a tool is equipped and
+  rebuilds the weld the way the engine does if not (with a `warn`). Grip
+  values are tiny (|GripPos| ≤ 0.1) and every model part is welded to the
+  Handle only.
 - **Effects** (`Effects/WeaponFx`, client): swing `Trail` (white Bat, red
   Glove, during the swing only), white flash ring on a hit (BillboardGui
   circle stroke), muzzle flash (PointLight + Neon ball + sparks), cyan
@@ -88,5 +103,10 @@ never sold, server authority are unchanged.
   tutorial's action button). The unlock card shows the big turning model
   (`TutorialConfig.Card.Weapon`).
 - **/selftest:** each weapon's `WeaponKit.Validate` (Handle, every part
-  welded + massless, nothing collides, fits 4.5 studs) and the placed peel
-  (3 petals × 3 segments + a touch hitbox).
+  welded + massless, nothing collides, fits 4.5 studs), the placed peel
+  (3 petals × 3 segments + a touch hitbox), and each weapon EQUIPPED on the
+  tester through the server (a temporary tool, destroyed afterwards):
+  `RightGrip` exists, the Handle is within 1.5 studs of RightHand, and the
+  client measures the right arm (angle from hanging ≥ 0.8 rad while held;
+  the shoulder moves ≥ 0.6 rad in a swing, 0.4 in the toss, 0.15 in a
+  shot).

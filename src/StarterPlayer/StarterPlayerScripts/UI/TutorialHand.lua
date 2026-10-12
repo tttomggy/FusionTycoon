@@ -4,13 +4,15 @@
 	------------
 	Tutorial 2's two pointers, both drawn here and nowhere else:
 
-	  * THE HAND 👆: one for the whole UI, never a rectangle. A big glyph with
-	    a drop shadow that sits just below-right of its target and bobs toward
-	    it (a 👇 above the target when the target is on the lower half of the
-	    screen, where there is no room below). Its target is any GuiObject: a
-	    HUD button, a panel button (AUTO-FILL, FUSE) or the contextual button.
-	    It follows the target every frame and hides when the target isn't
-	    on screen. Above every panel, never takes a tap.
+	  * THE HAND 👇: one for the whole UI, never a rectangle. A big glyph with
+	    a drop shadow that sits ABOVE its target, fingertip about 6 px over
+	    the target's top edge (centred), and bobs down toward it; it never
+	    covers the target (and so never its text). A target too near the top
+	    of the screen for that gets the hand BELOW it, a 👆 pointing up. Its
+	    target is any GuiObject: a HUD button, a panel button (AUTO-FILL,
+	    FUSE) or the contextual button. It follows the target every frame and
+	    hides when the target isn't on screen. Above every panel, never takes
+	    a tap.
 	  * THE CONTEXTUAL BUTTON: a big green button just above the bottom bar,
 	    labelled with the action ("PULL", "UPGRADE", "FUSE", "BUY"), shown
 	    while you stand at a world target so nobody needs to know about E.
@@ -36,12 +38,15 @@ local Fonts = UITheme.Fonts
 local HAND_DISPLAY_ORDER = 175 -- over every modal (the Tutorial cards are 165)
 local BUTTON_DISPLAY_ORDER = 62 -- over the HUD, under every panel
 local HAND_SIZE = 64
-local BOB_PIXELS = 12
 local BOB_SECONDS = 0.45
--- The fingertip inside the glyph box (fractions of HAND_SIZE).
+-- The fingertip inside the glyph (fractions of HAND_SIZE). The hand's box
+-- (the rect /selftest checks) ends exactly AT the fingertip, so the box
+-- itself never reaches the target: the glyph is shifted inside it.
 local TIP_X = 0.5
-local TIP_UP = 0.12 -- 👆: near the top
-local TIP_DOWN = 0.88 -- 👇: near the bottom
+local TIP_UP = 0.12 -- 👆: near the top of the glyph
+local TIP_DOWN = 0.88 -- 👇: near the bottom of the glyph
+local TIP_GAP = 6 -- px between the fingertip and the target's edge (nearest the bob)
+local BOB_PIXELS = 5 -- the tip bobs from TIP_GAP to TIP_GAP + this away
 local BUTTON_SIZE = { Desktop = Vector2.new(280, 84), Phone = Vector2.new(240, 72) }
 local BUTTON_GAP = 14 -- above the bottom bar's reserve
 
@@ -51,6 +56,7 @@ local handLabel: TextLabel
 local handShadow: TextLabel
 local target: GuiObject? = nil
 local tipAbs: Vector2? = nil
+local rectAbs: { Position: Vector2, Size: Vector2 }? = nil
 
 local buttonGui: ScreenGui
 local buttonHolder: Frame
@@ -102,6 +108,7 @@ local function placeHand()
 	if not gui or not isOnScreen(gui) then
 		handRoot.Visible = false
 		tipAbs = nil
+		rectAbs = nil
 		return
 	end
 	-- AbsolutePosition is measured BELOW the Roblox top bar even in an
@@ -113,32 +120,41 @@ local function placeHand()
 	if not centreVisible(gui, absPos + absSize / 2) then
 		handRoot.Visible = false
 		tipAbs = nil
+		rectAbs = nil
 		return
 	end
-	local viewport = UIKit.GetLogicalViewport()
-	local centreY = (absPos.Y + inset + absSize.Y / 2) / scale
-	local below = centreY < viewport.Y * 0.6
+	local top = (absPos.Y + inset) / scale
+	local bottom = top + absSize.Y / scale
+	-- Above the target unless that would run off the top of the screen.
+	local above = top - TIP_GAP - BOB_PIXELS - HAND_SIZE >= 0
 	local bob = math.sin(os.clock() * (math.pi * 2) / (BOB_SECONDS * 2)) * 0.5 + 0.5 -- 0..1
-	local heightLogical = absSize.Y / scale
-	local toward = bob * math.min(BOB_PIXELS, heightLogical * 0.3)
-	handLabel.Text = if below then "👆" else "👇"
+	local away = TIP_GAP + (1 - bob) * BOB_PIXELS -- nearest the target at the bottom of the bob
+	handLabel.Text = if above then "👇" else "👆"
 	handShadow.Text = handLabel.Text
-	-- The fingertip lands inside the target: low in it for a 👆 (the hand
-	-- hangs below), high in it for a 👇 (the hand hangs above), nudged
-	-- toward its middle as it bobs.
+	-- The glyph sits in the box so its fingertip is on the box's edge.
+	local glyphY = if above then HAND_SIZE * (1 - TIP_DOWN) else -HAND_SIZE * TIP_UP
+	handLabel.Position = UDim2.fromOffset(0, glyphY)
+	handShadow.Position = UDim2.fromOffset(4, glyphY + 5)
 	local tipX = (absPos.X + absSize.X * 0.5) / scale
-	local tipY = (absPos.Y + inset) / scale + heightLogical * (if below then 0.65 else 0.35) + (if below then -toward else toward)
+	local tipY = if above then top - away else bottom + away
 	local x = tipX - HAND_SIZE * TIP_X
-	local y = tipY - HAND_SIZE * (if below then TIP_UP else TIP_DOWN)
+	local y = if above then tipY - HAND_SIZE else tipY
 	handRoot.Position = UDim2.fromOffset(x, y)
 	handRoot.Visible = true
 	tipAbs = Vector2.new(tipX * scale, tipY * scale - inset)
+	rectAbs = { Position = Vector2.new(x * scale, y * scale - inset), Size = Vector2.new(HAND_SIZE * scale, HAND_SIZE * scale) }
 end
 
 -- Where the fingertip is, in the same px space as a GuiObject's
--- AbsolutePosition (/selftest: it must lie inside the target's rect).
+-- AbsolutePosition (/selftest: within 12 px of the target's top-centre).
 function TutorialHand.GetTip(): Vector2?
 	return if handRoot.Visible then tipAbs else nil
+end
+
+-- The hand's box in the same px space (/selftest: it must not overlap the
+-- target's rect).
+function TutorialHand.GetRect(): { Position: Vector2, Size: Vector2 }?
+	return if handRoot.Visible then rectAbs else nil
 end
 
 function TutorialHand.SetTarget(gui: GuiObject?)

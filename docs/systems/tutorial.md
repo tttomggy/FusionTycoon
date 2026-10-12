@@ -25,7 +25,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   moved every 0.3 s; spacing widens past 120 studs; hidden within 6 studs) +
   the goal arrow's bouncing pill and floor ring (`GoalMarkerController.
   SetTutorialTarget`; heist > tutorial > event > goal) · **one hand 👆**
-  (`TutorialHand`, a glyph with a shadow whose fingertip lands inside its target (`GetTip`, checked by `/selftest`), bobbing toward it, 👇 above on the lower half of the screen, above every modal; never a rectangle; the top-bar inset (`GuiService:GetGuiInset`) is added back to the target's `AbsolutePosition`, it tracks the target every frame and hides when the target is off screen or scrolled out) on the exact thing to press: the big button;
+  (`TutorialHand`, a glyph with a shadow ABOVE its target: the fingertip is ~6 px over the target's top edge, centred, bobbing down toward it (5 px), and the hand's box never overlaps the target, so it never covers the label; a target too near the top of the screen for that gets a 👆 below it. `GetTip` / `GetRect` are checked by `/selftest` (no overlap, tip within 12 px of the edge centre); above every modal; never a rectangle; the top-bar inset (`GuiService:GetGuiInset`) is added back to the target's `AbsolutePosition`, it tracks the target every frame and hides when the target is off screen or scrolled out) on the exact thing to press: the big button;
   AUTO-FILL then FUSE in the Fuse panel (2 taps, the odds aren't part of
   it); the event chip; REBIRTH · the **contextual button** (a big green
   "UPGRADE" / "PULL" / "FUSE" / "BUY" above the bottom bar, shown at a
@@ -54,8 +54,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   on the real server action (an OnSync predicate: claimed, a generator
   level, each of the 2 pulls, a fusion, Multiplier level 1; a replay too);
   `Timed` (the client asks after `Seconds`, the server re-checks its own
-  clock) and `Open` (event card / Rebirth panel opened, or after `Seconds`;
-  the server can't watch a UI, so any time is allowed) through remote
+  clock) and `Open` (the event card / Rebirth panel: done when the player CLOSES
+  it (✕, a tap outside, or the "OK, got it" button the event card shows
+  while the "Lab weather!" step runs); the card stays open until then and
+  nothing in the tutorial closes it; `Seconds` is only a fallback for a
+  player who never opens it; the server can't watch a UI, so any time is
+  allowed) through remote
   `TutorialAdvance { Step }` (C→S, re-checked: current step; the Multiplier
   Pad's skip only while level 1 is unaffordable and after 3 s). **Data:**
   `PlayerData.Tutorial = { Ver, Step, Done, FreeFuse, FreePulls,

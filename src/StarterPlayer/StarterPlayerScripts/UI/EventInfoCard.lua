@@ -19,6 +19,11 @@
 	whenever its height changes (content, a phone switch).
 	Between events it explains the NEXT one. It only opens on a tap of the
 	chip (EventController); it never opens itself.
+
+	While the tutorial's "Lab weather!" step runs (SetTutorialOk) the card
+	ends with an "OK, got it" button: the step completes when the player
+	closes the card (that button, the ✕ or a tap outside), and nothing in
+	the tutorial closes it for them.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -46,6 +51,7 @@ local adminLabel: TextLabel
 local shownId: string? = nil
 local shownNow = false
 local order = 0
+local tutorialOk = false -- the tutorial's "OK, got it" button at the bottom
 
 --[[ Helpers -------------------------------------------------------------------- ]]
 
@@ -276,6 +282,21 @@ local function buildContent(id: string)
 		ZIndex = z,
 		Parent = body,
 	})
+	if tutorialOk then
+		UIKit.Button({
+			Name = "TutorialOk",
+			Parent = body,
+			Style = "Green",
+			Text = "OK, got it",
+			TextSize = 22,
+			Size = UDim2.new(1, 0, 0, 48),
+			LayoutOrder = nextOrder(),
+			ZIndex = z + 1,
+			OnClick = function()
+				EventInfoCard.Hide()
+			end,
+		})
+	end
 end
 
 -- Centres the card for its current height (design px: AbsoluteSize over
@@ -379,6 +400,21 @@ function EventInfoCard.Show(parent: Instance, id: string, now: boolean)
 	place()
 	UIKit.PopIn(frame)
 	EventInfoCard.Refresh()
+end
+
+-- The tutorial's "OK, got it" button on/off (rebuilds an open card).
+function EventInfoCard.SetTutorialOk(on: boolean)
+	if tutorialOk == on then
+		return
+	end
+	tutorialOk = on
+	local frame = holder
+	local id = shownId
+	if frame and frame.Visible and id then
+		buildContent(id)
+		place()
+		EventInfoCard.Refresh()
+	end
 end
 
 function EventInfoCard.Hide()

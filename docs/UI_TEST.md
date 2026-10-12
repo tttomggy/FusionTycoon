@@ -1782,6 +1782,12 @@ person, R15, 100% camera zoom; check each from the front and the side.
   core on top, 3 coil rings on the barrel. Slap Glove: a big red glove ON
   the hand (4 fingers, a thumb, a white cuff). Banana Peel: a banana in the
   fist curving up and forward.
+- [ ] **Avatars:** check all of the above with a default blocky R15 AND
+  Harris's small-bodied monkey avatar (Test → Player with his avatar, plus
+  a spawned R15 dummy that equips through the server). The weapon must be
+  IN the right hand (never floating at the chest or in the torso) and the
+  right arm must visibly lift when a weapon comes out, also while
+  standing still and while walking.
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +
@@ -1811,7 +1817,10 @@ person, R15, 100% camera zoom; check each from the front and the side.
   gone while the tutorial runs; the green action button is never covered.
 - [ ] Unlock card: `/weapons reset` then `/weapons all`: "You got a Bat!"
   shows the big turning model, not the emoji.
-- [ ] `/selftest`: PASS "the Bat / Laser Gun / Freeze Ray / Slap Glove /
+- [ ] `/selftest`: PASS "the <weapon> is held (RightGrip weld, Handle
+  within 1.5 studs of RightHand)", "the right arm is raised while it is
+  held", "the shoulder moves during the swing / shot / toss" for each
+  weapon, and "the Bat / Laser Gun / Freeze Ray / Slap Glove /
   Banana Peel model has a Handle, every part welded + massless, fits 4.5
   studs" and "the placed Banana Peel is 3 petals…".
 - [ ] Sounds are silent until Harris picks the Swing / Shoot / Equip / Bonk
@@ -1907,9 +1916,11 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
 
 - [ ] **Hand position:** in the Fuse panel the 👆 sits on AUTO-FILL (not
   the "2 orbs 55%" chip), then on FUSE; at REBIRTH it is on the button, not
-  by the "Goal complete!" toast. Its fingertip is inside the button at every
-  step, on a phone too; it follows the Fuse panel as it pops in, hides while
-  its target is scrolled / off screen.
+  by the "Goal complete!" toast. The hand sits ABOVE the button (a 👇, the
+  fingertip ~6 px over the top edge, bobbing down toward it) and never
+  covers the label (UPGRADE / PULL / FUSE...); a button near the top of the
+  screen gets a 👆 below it. Same on a phone; it follows the Fuse panel as
+  it pops in, hides while its target is scrolled / off screen.
 - [ ] **One arrow size:** small lime ">" arrows all the way to the target,
   no big chevrons at the end. The bouncing goal arrow stays.
 - [ ] **Explain cards:** none before the claim. Then one big card before
@@ -1922,8 +1933,14 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   the Roblox top bar, 520-640 px wide, 48 px icon, 36 px instruction, lime
   "24m" pill, "3 / 11" under it, a small pulse on each change. Phone: full
   width minus 16 px margins, 28 px text, clear of the top-left buttons.
+- [ ] **Open steps wait for you:** at "Lab weather!" tap the event chip:
+  the info card stays open (with an "OK, got it" at the bottom) as long as
+  you like, even past 6 s; the step completes only when you close it (✕,
+  tap outside or OK). Same for the Rebirth panel. If you never open it the
+  step still moves on after its few seconds.
 - [ ] `/selftest`: "its explain card opens first", "the objective bar",
-  "the hand's tip is inside its target" pass.
+  "the hand does not cover its target", "the hand's tip is within 12 px of
+  its target's edge" pass.
 
 **Part B: the top of the screen (TopStack).**
 
