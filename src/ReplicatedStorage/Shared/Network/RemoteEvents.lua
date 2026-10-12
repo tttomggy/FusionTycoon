@@ -29,8 +29,8 @@ local REMOTE_EVENT_NAMES = {
 	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
 	"RequestHit", -- client -> server: { Weapon, TargetUserId?, Origin, Direction } a weapon swing / shot / peel (all re-checked)
-	"HitReceived", -- server -> the target: { Impulse, Seconds, Freeze? } ragdoll (or freeze) yourself now
-	"HitFx", -- server -> all: { Weapon, Position, From?, To?, Kind } the bonk / beam / freeze / slip effect
+	"HitReceived", -- server -> the target: { Impulse, Seconds, Spin?, Freeze? } ragdoll (or freeze) yourself now
+	"HitFx", -- server -> all: { Weapon, Kind, From?, To?, Attacker?, Target? } Kind = Bonk | Swing | Beam | FreezeBeam | Freeze | Slip | Throw (UserIds for Attacker / Target)
 	"WeaponUnlocked", -- server -> client: { Weapon } a weapon was just earned (the unlock card)
 	"ClaimQuest", -- client -> server: { Id } claim a finished quest ("pull20", ... or "chain"); re-checked complete and unclaimed
 	"QuestResult", -- server -> client: { Id, Result = "Claimed" | "Refused", Reason?, Lines? } the claim and what it paid

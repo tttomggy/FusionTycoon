@@ -16,6 +16,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local UIKit = require(script.Parent.UIKit)
+local WeaponViewport = require(script.Parent.WeaponViewport)
 
 local TutorialCards = {}
 
@@ -25,11 +26,13 @@ local Fonts = UITheme.Fonts
 local MAX_SIZE = Vector2.new(460, 300)
 local DISPLAY_ORDER = 165 -- over every panel (Rebirth 145, its confirm 160)
 local ICON_HEIGHT = 64
+local WEAPON_HEIGHT = 100 -- the unlock card's turning weapon model
 local NAV_HEIGHT = 52
 local ARROW_SIZE = 52
 
 local modal: UIKit.Modal? = nil
 local iconLabel: TextLabel
+local weaponHolder: Frame
 local bodyLabel: TextLabel
 local prevHolder: Frame
 local nextHolder: Frame
@@ -49,6 +52,19 @@ local function render()
 	end
 	m.Title.Text = card.Title
 	iconLabel.Text = card.Icon
+	iconLabel.Visible = card.Weapon == nil
+	for _, child in weaponHolder:GetChildren() do
+		child:Destroy()
+	end
+	local top = ICON_HEIGHT
+	if card.Weapon then
+		top = WEAPON_HEIGHT
+		WeaponViewport.Create(card.Weapon, weaponHolder)
+	end
+	weaponHolder.Size = UDim2.new(1, 0, 0, top)
+	weaponHolder.Visible = card.Weapon ~= nil
+	bodyLabel.Position = UDim2.fromOffset(8, top + 4)
+	bodyLabel.Size = UDim2.new(1, -16, 1, -(top + NAV_HEIGHT + 16 + UITheme.ShadowOffset))
 	bodyLabel.Text = card.Body
 	local slideshow = #cards > 1
 	local last = index >= #cards
@@ -100,6 +116,15 @@ local function build()
 		ZIndex = content.ZIndex + 1,
 		Parent = content,
 	})
+	weaponHolder = Instance.new("Frame")
+	weaponHolder.Name = "Weapon"
+	weaponHolder.BackgroundTransparency = 1
+	weaponHolder.AnchorPoint = Vector2.new(0.5, 0)
+	weaponHolder.Position = UDim2.fromScale(0.5, 0)
+	weaponHolder.Size = UDim2.new(1, 0, 0, WEAPON_HEIGHT)
+	weaponHolder.Visible = false
+	weaponHolder.ZIndex = content.ZIndex + 1
+	weaponHolder.Parent = content
 	bodyLabel = UIKit.Label({
 		Name = "Body",
 		Font = Fonts.BodyHeavy,

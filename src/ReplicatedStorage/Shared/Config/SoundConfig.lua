@@ -61,11 +61,17 @@ SoundConfig.Slots = {
 	Station = { Id = asset(10066947742), Volume = 0.5 },
 	-- Combat (CombatController). EMPTY until picked from the Creator Store
 	-- (creator id 1): a cartoon bonk, a laser zap, an ice crackle, a
-	-- banana slip. Silent meanwhile (an empty Id is no error).
+	-- banana slip (list in docs/SOUNDS.md). Silent meanwhile (an empty Id is
+	-- no error).
 	Bonk = { Id = "", Volume = 0.6, SpeedJitter = { 0.9, 1.1 }, RollOffMaxDistance = 120 },
 	Laser = { Id = "", Volume = 0.5, RollOffMaxDistance = 150 },
 	Freeze = { Id = "", Volume = 0.5, RollOffMaxDistance = 120 },
 	Slip = { Id = "", Volume = 0.6, RollOffMaxDistance = 120 },
+	-- A melee swing's whoosh (Bat, Slap Glove), a gun's trigger-and-kick, and
+	-- a weapon coming up in the hand. Same rule: silent until picked.
+	Swing = { Id = "", Volume = 0.5, SpeedJitter = { 0.95, 1.1 }, RollOffMaxDistance = 90 },
+	Shoot = { Id = "", Volume = 0.45, RollOffMaxDistance = 120 },
+	Equip = { Id = "", Volume = 0.4, RollOffMaxDistance = 60 },
 } :: { [string]: Slot }
 
 -- At most this many sounds of one slot play at once; extra plays are
