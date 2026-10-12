@@ -49,6 +49,7 @@ export type Card = {
 	Icon: string,
 	Title: string,
 	Body: string,
+	Weapon: string?, -- a CombatConfig weapon id: its turning model replaces the Icon (the unlock card)
 }
 
 -- An explain card shown before a step's banner (Tutorial 3): big image,

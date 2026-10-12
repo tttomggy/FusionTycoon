@@ -31,8 +31,12 @@
 	  * Hitting a carrying thief: HeistService.KnockCarrier (the orb goes
 	    home, the owner sees SAVED). Analytics: Hit (weapon), ThiefKnocked,
 	    GuardKnocked.
-	  * HitFx { Weapon, Kind, From, To } to everyone: the bonk / beam /
-	    freeze / slip effects (CombatController).
+	  * HitFx { Weapon, Kind, From, To, Attacker?, Target? } to everyone: the
+	    bonk / beam / freeze / slip effects, a Swing for every accepted melee
+	    swing (a miss too, so others see it), a Throw when a peel lands
+	    (CombatController). Attacker / Target are UserIds.
+	  * The tools are WeaponKit.Build (models welded to a Handle); the placed
+	    peel is WeaponKit.BuildPlaced.
 
 	Follows the ServiceTemplate contract.
 ]]
@@ -42,8 +46,7 @@ local Workspace = game:GetService("Workspace")
 
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
-local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
-local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local WeaponKit = require(ReplicatedStorage.Shared.Modules.WeaponKit)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
@@ -58,7 +61,6 @@ local TycoonService: TycoonServiceModule
 local CombatService = {}
 CombatService.Name = "CombatService"
 
-local World = UITheme.World
 local MAX_COORDINATE = 1e5
 local ROOT_JOINT_NAMES = { RootJoint = true, Root = true }
 local FOLDER_NAME = "CombatObjects"
@@ -71,7 +73,7 @@ local state = {
 	-- userId -> the joints swapped out for the current ragdoll
 	joints = {} :: { [number]: { Joint } },
 	-- userId -> placed banana peels
-	peels = {} :: { [number]: { BasePart } },
+	peels = {} :: { [number]: { Model } },
 	folder = nil :: Folder?,
 }
 
@@ -220,13 +222,13 @@ local function swapJoints(player: Player)
 end
 
 -- Ragdolls `target` for RagdollSeconds with `impulse` (studs/s).
-local function ragdoll(target: Player, impulse: Vector3)
+local function ragdoll(target: Player, impulse: Vector3, spin: boolean)
 	local seconds = CombatConfig.RagdollSeconds
 	local now = serverNow()
 	target:SetAttribute("RagdollUntil", now + seconds)
 	target:SetAttribute("ImmuneUntil", now + seconds + CombatConfig.GetUpImmuneSeconds)
 	swapJoints(target)
-	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds })
+	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds, Spin = spin })
 	local character = target.Character
 	task.delay(seconds, function()
 		if target.Character == character then
@@ -277,13 +279,15 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 		local away = targetRoot.Position - from
 		local flat = Vector3.new(away.X, 0, away.Z)
 		local direction = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, 1)
-		ragdoll(target, direction * weapon.Knockback + Vector3.new(0, CombatConfig.UpwardKick, 0))
+		ragdoll(target, direction * weapon.Knockback + Vector3.new(0, CombatConfig.UpwardKick, 0), weapon.Kind == "Peel")
 	end
 	RemoteEvents.HitFx:FireAllClients({
 		Weapon = weapon.Id,
 		Kind = if weapon.Kind == "Freeze" then "Freeze" elseif weapon.Kind == "Peel" then "Slip" else "Bonk",
 		From = from,
 		To = targetRoot.Position,
+		Attacker = if attacker then attacker.UserId else nil,
+		Target = target.UserId,
 	})
 	if attacker then
 		AnalyticsKit.Custom(attacker, "Hit", nil, weapon.Id)
@@ -291,36 +295,6 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 end
 
 --[[ Tools ---------------------------------------------------------------------------- ]]
-
-local HANDLES: { [string]: { Size: Vector3, Color: Color3 } } = {
-	Bat = { Size = Vector3.new(0.5, 0.5, 4), Color = World.WeaponWood },
-	LaserGun = { Size = Vector3.new(0.6, 0.9, 2), Color = World.WeaponBody },
-	FreezeRay = { Size = Vector3.new(0.6, 0.9, 2.2), Color = World.Ice },
-	SlapGlove = { Size = Vector3.new(1.2, 1.2, 0.6), Color = World.GloveRed },
-	BananaPeel = { Size = Vector3.new(1, 0.4, 1), Color = World.Banana },
-}
-
-local function buildTool(weapon: CombatConfig.Weapon): Tool
-	local tool = Instance.new("Tool")
-	tool.Name = weapon.Id
-	tool.ToolTip = weapon.Name
-	tool.CanBeDropped = false
-	tool.RequiresHandle = true
-	tool:SetAttribute("Weapon", weapon.Id)
-	local look = HANDLES[weapon.Id] or HANDLES.Bat
-	local handle = Instance.new("Part")
-	handle.Name = "Handle"
-	handle.Size = look.Size
-	handle.Color = look.Color
-	handle.Material = Enum.Material.SmoothPlastic
-	handle.CanCollide = false
-	handle.CanQuery = false
-	handle.CanTouch = false
-	handle.Massless = true
-	handle.Parent = tool
-	tool.GripPos = Vector3.new(0, 0, -look.Size.Z / 2 + 0.4)
-	return tool
-end
 
 -- Puts every owned weapon in the Backpack (once each; none left over).
 local function giveTools(player: Player)
@@ -343,7 +317,7 @@ local function giveTools(player: Player)
 	end
 	for _, weapon in CombatConfig.Weapons do
 		if owned[weapon.Id] and not backpack:FindFirstChild(weapon.Id) and not (character and character:FindFirstChild(weapon.Id)) then
-			buildTool(weapon).Parent = backpack
+			WeaponKit.Build(weapon.Id).Parent = backpack
 		end
 	end
 end
@@ -424,19 +398,22 @@ local function placePeel(owner: Player, weapon: CombatConfig.Weapon, at: Vector3
 	if not ground then
 		return false
 	end
-	local peel = PartKit.Part({
-		Name = "BananaPeel",
-		Size = CombatConfig.Peel.Size,
-		CFrame = CFrame.new(ground.Position + Vector3.new(0, CombatConfig.Peel.Size.Y / 2, 0)),
-		Color = World.Banana,
-		CanCollide = false,
-		Parent = getFolder(),
-	})
-	peel.CanQuery = false
-	peel.CanTouch = true
+	local peel = WeaponKit.BuildPlaced()
+	peel:PivotTo(CFrame.new(ground.Position) * CFrame.Angles(0, math.random() * math.pi * 2, 0))
 	peel:SetAttribute("OwnerUserId", owner.UserId)
+	peel.Parent = getFolder()
+	local hitbox = peel:FindFirstChild("Hitbox") :: BasePart
 	table.insert(peels, peel)
-	peel.Touched:Connect(function(hit: BasePart)
+	-- Everyone sees the throw arc (the client hides the peel until it lands).
+	local ownerRoot = getRoot(owner)
+	RemoteEvents.HitFx:FireAllClients({
+		Weapon = weapon.Id,
+		Kind = "Throw",
+		From = if ownerRoot then ownerRoot.Position + Vector3.new(0, 1, 0) else ground.Position + Vector3.new(0, 3, 0),
+		To = ground.Position,
+		Attacker = owner.UserId,
+	})
+	hitbox.Touched:Connect(function(hit: BasePart)
 		if not peel.Parent then
 			return
 		end
@@ -445,7 +422,7 @@ local function placePeel(owner: Player, weapon: CombatConfig.Weapon, at: Vector3
 		if not victim or victim == owner or CombatService.WhyNotHittable(victim) then
 			return
 		end
-		local position = peel.Position
+		local position = hitbox.Position
 		peel:Destroy()
 		CombatService.ApplyHit(if owner.Parent then owner else nil, victim, weapon, position)
 	end)
@@ -490,6 +467,15 @@ local function onRequestHit(attacker: Player, payload: unknown)
 	end
 
 	if weapon.Kind == "Melee" then
+		-- Every accepted swing is seen by everyone, hit or miss (the cooldown
+		-- above rate-limits it).
+		RemoteEvents.HitFx:FireAllClients({
+			Weapon = weapon.Id,
+			Kind = "Swing",
+			From = root.Position,
+			To = root.Position + root.CFrame.LookVector * weapon.Range,
+			Attacker = attacker.UserId,
+		})
 		local targetId = RemoteGuard.Int(p.TargetUserId, 1, 2 ^ 53)
 		local target = targetId and Players:GetPlayerByUserId(targetId)
 		local targetRoot = target and getRoot(target)
@@ -534,6 +520,7 @@ local function onRequestHit(attacker: Player, payload: unknown)
 			Kind = if weapon.Kind == "Freeze" then "FreezeBeam" else "Beam",
 			From = origin,
 			To = endPoint,
+			Attacker = attacker.UserId,
 		})
 	elseif weapon.Kind == "Peel" then
 		local at = vector(p.Origin)
@@ -571,7 +558,7 @@ end
 local function onPlayerRemoving(player: Player)
 	state.lastSwing[player.UserId] = nil
 	state.joints[player.UserId] = nil
-	local peels: { BasePart } = state.peels[player.UserId] or {}
+	local peels: { Model } = state.peels[player.UserId] or {}
 	for _, peel in peels do
 		peel:Destroy()
 	end

@@ -45,7 +45,16 @@ needs to change.
 | `RevealMinor` | 15675055424 | Roblox_UI_Cute_Pop | 0.45 | Other fusion reveals (RevealEffects), skipped-card pulls (ResultController) | picked by Claude |
 | `Toast` | 15675059323 | Roblox_UI_Bright_Click | 0.35 | Top announcement banners (AnnouncementController); the Settings volume preview | picked by Claude |
 | `Station` | 10066947742 | RBLX UI Purchase (SFX) | 0.5 | A station purchase: Multiplier Pad, gacha (TycoonService, at the pad) | server-played, still follows each player's volume; picked by Claude |
-| `Bonk` | **empty** | (pick: a cartoon bonk) | 0.6 | A Bat / Slap Glove / Laser hit lands, at the target (CombatController, `PlayAt`) | positional, RollOffMaxDistance 120, PlaybackSpeed 0.9–1.1; silent until an id is set |
-| `Laser` | **empty** | (pick: a short laser zap) | 0.5 | A Laser Gun shot, at the shooter | positional, RollOffMaxDistance 150; silent until an id is set |
-| `Freeze` | **empty** | (pick: an ice crackle) | 0.5 | A Freeze Ray shot and the freeze | positional, RollOffMaxDistance 120; silent until an id is set |
-| `Slip` | **empty** | (pick: a cartoon slip) | 0.6 | Someone steps on a Banana Peel | positional, RollOffMaxDistance 120; silent until an id is set |
+| `Bonk` | **empty** | (pick: a cartoon bonk, a short hollow "bonk" / wooden thunk with a boing, 0.3–0.6 s) | 0.6 | A Bat / Slap Glove / Laser hit lands, at the target (CombatController, `PlayAt`) | positional, RollOffMaxDistance 120, PlaybackSpeed 0.9–1.1; silent until an id is set |
+| `Laser` | **empty** | (pick: a short sci-fi laser zap, a bright "pew", 0.2–0.5 s) | 0.5 | A Laser Gun shot, at the muzzle | positional, RollOffMaxDistance 150; silent until an id is set |
+| `Freeze` | **empty** | (pick: an ice crackle: a glassy freeze-over "shhk" with crystal tinkles, 0.5–1 s) | 0.5 | A Freeze Ray shot (at the muzzle) and the freeze landing (at the target) | positional, RollOffMaxDistance 120; silent until an id is set |
+| `Slip` | **empty** | (pick: a cartoon slip: a rising slide-whistle "wheeeee" or a squeaky skid, 0.4–0.8 s) | 0.6 | Someone steps on a Banana Peel | positional, RollOffMaxDistance 120; silent until an id is set |
+| `Swing` | **empty** | (pick: a quick whoosh, airy and short, 0.2–0.35 s; it plays at the start of every Bat / Slap Glove swing, hit or miss) | 0.5 | A melee swing starts, at the swinger (yours the moment you click, others from `HitFx` Swing) | positional, RollOffMaxDistance 90, PlaybackSpeed 0.95–1.1; silent until an id is set |
+| `Shoot` | **empty** | (pick: a soft mechanical trigger click plus a small air thump, 0.1–0.25 s; layered under Laser / Freeze) | 0.45 | A gun fires, at the shooter (Freeze Ray plays it at 0.8 speed) | positional, RollOffMaxDistance 120; silent until an id is set |
+| `Equip` | **empty** | (pick: a light metallic "shink" / holster slide, 0.15–0.3 s) | 0.4 | A weapon comes up in someone's hand, at them | positional, RollOffMaxDistance 60; silent until an id is set |
+
+> **For Harris:** the seven combat slots above are still empty. I couldn't
+> look up Creator Store ids from the build environment, so none are picked;
+> each row says what it should sound like. Search the Creator Store
+> (Audio → Sound effects) for the creator "Roblox", put the numeric id
+> into the slot in `SoundConfig.lua`, and tune `Volume`.

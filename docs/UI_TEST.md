@@ -1769,6 +1769,54 @@ Rebirth 2–3), `/weapons all` for the Slap Glove and Banana Peel.
   enforced on the server", "knocking a thief returns the orb" (2 players),
   and the junk-remote fuzz (RequestHit) with no error or change.
 
+## 38b. Weapons 2 (models, feel, bar)
+
+Studio: Test → 2 players. `/rebirths 3` on both, `/weapons all`. Third
+person, R15, 100% camera zoom; check each from the front and the side.
+
+- [ ] **Held right:** Bat: in the right hand, pointing up and a little
+  forward (not across the chest), black grip wrap in the fist, lime
+  stripes, dents, a knob below the hand. Laser Gun: a chunky blaster
+  pointing straight forward from the fist, cyan core visible in the side
+  window. Freeze Ray: white / ice-blue blaster, a glass tank with a glowing
+  core on top, 3 coil rings on the barrel. Slap Glove: a big red glove ON
+  the hand (4 fingers, a thumb, a white cuff). Banana Peel: a banana in the
+  fist curving up and forward.
+- [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
+- [ ] Bat swing: wind back to the right, fast arc across to the left,
+  settle; a white trail only while it moves; on a hit a white ring flash +
+  BONK!. Slap Glove: a flat backhand with a **red** trail.
+- [ ] Swing at nobody: the swing and trail still play, and the **other
+  player** sees them too.
+- [ ] Guns: while equipped the right arm is out in an aim pose and follows
+  where you aim up and down; the camera stays free. Laser shot: a 0.1 s
+  recoil kick, a muzzle flash, a **cyan** beam for 0.12 s, a small burst
+  where it ends. Freeze Ray: an icy cone of sparkles + a light-blue beam.
+  The other player sees the same.
+- [ ] Frozen target: icy tint **and** frost particles for the 3 s, then both
+  go.
+- [ ] Banana Peel: a toss pose, a banana flies in a spinning arc and the
+  splayed peel (3 yellow petals, brown stem) appears where it lands; the
+  first enemy to step on it gets SLIP! and **spins** as they fall.
+- [ ] Weapon bar at **1920×1080**: five 64 px rounded slots centred 12 px
+  above the bottom buttons, each with the turning model, key number top-left
+  (owned) and the name under it; never overlapping the bottom bar.
+  Equipped = lime ring + a 4 px lift. Use a weapon: a dark clock-wipe
+  shrinks clockwise with the seconds left. `/weapons reset`: the Glove and
+  Peel show dim with 🔒 "Quest", an unearned rebirth weapon 🔒 "R2" / "R3".
+  Carry a stolen orb: the whole bar dims.
+- [ ] Weapon bar on the **phone** (touch emulator, 844×390): 52 px slots,
+  the bar fits the width, clear of the bottom buttons; a tap equips.
+- [ ] Restart the tutorial (`/tutorial reset`) at Rebirth 1+: the bar is
+  gone while the tutorial runs; the green action button is never covered.
+- [ ] Unlock card: `/weapons reset` then `/weapons all`: "You got a Bat!"
+  shows the big turning model, not the emoji.
+- [ ] `/selftest`: PASS "the Bat / Laser Gun / Freeze Ray / Slap Glove /
+  Banana Peel model has a Handle, every part welded + massless, fits 4.5
+  studs" and "the placed Banana Peel is 3 petals…".
+- [ ] Sounds are silent until Harris picks the Swing / Shoot / Equip / Bonk
+  / Laser / Freeze / Slip ids (`docs/SOUNDS.md`).
+
 ## 39. Stacking
 
 Studio: `/give` an Epic with `/give <itemId> rainbow`, then `/event

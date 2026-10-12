@@ -12,6 +12,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
+local WeaponKit = require(ReplicatedStorage.Shared.Modules.WeaponKit)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
@@ -183,6 +184,26 @@ local function waitForReport(player: Player, stage: string): any?
 end
 
 local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- Every weapon is a Handle plus parts welded to it: massless, nothing
+	-- collides, and it fits a 4.5-stud box.
+	for _, weapon in CombatConfig.Weapons do
+		local tool = WeaponKit.Build(weapon.Id)
+		local why = WeaponKit.Validate(tool)
+		local extent = WeaponKit.GetExtent(tool)
+		tool:Destroy()
+		result(why == nil, ("combat: the %s model has a Handle, every part welded + massless, fits %.1f studs"):format(weapon.Name, WeaponKit.MAX_EXTENT), why or tostring(extent))
+	end
+	local placed = WeaponKit.BuildPlaced()
+	local hitbox = placed:FindFirstChild("Hitbox")
+	local petals = 0
+	for _, child in placed:GetChildren() do
+		if child.Name:sub(1, 5) == "Petal" then
+			petals += 1
+		end
+	end
+	result(hitbox ~= nil and hitbox:IsA("BasePart") and hitbox.CanTouch and petals == 9, "combat: the placed Banana Peel is 3 petals (3 segments each) round a touch hitbox", ("hitbox %s, %d petal parts"):format(tostring(hitbox), petals))
+	placed:Destroy()
+
 	local data = PlayerDataService.GetData(player)
 	if data then
 		local rebirths = data.Rebirths

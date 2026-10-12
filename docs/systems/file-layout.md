@@ -34,6 +34,8 @@ src/ReplicatedStorage/Shared/
                  ball path), PortalKit (the Rebirth Portal), FloorKit (the 2nd
                  floor), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
+                 WeaponKit (the five weapon models: Tool, viewport model,
+                 placed peel, selftest validation),
                  ShopPrices (live Robux prices), ShopState (Server
                  Overclock, real sale windows), DealState (the current
                  deal on the UTC clock),
@@ -79,8 +81,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   Boards), AdminController (admin panel + broadcasts),
                   ShopController, DailyController (when the daily card
                   opens, ClaimDaily)…
-    Effects/      RevealEffects
-    UI/           UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
+    Effects/      RevealEffects, WeaponPose, WeaponFx (weapon feel)
+    UI/           WeaponViewport (turning weapon model in a ViewportFrame),
+                  UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
                   Shadow/PopIn/PopOut/Modal/MutationPill), UpgradesPanel,
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),

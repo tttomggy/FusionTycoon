@@ -5,25 +5,35 @@
 	The client half of weapons and ragdoll (CombatConfig; CombatService
 	decides every hit).
 
-	  * Weapon bar: the default Backpack bar is replaced by a row of glyph
-	    circles (built from UITheme, no images) centred above the bottom
-	    buttons: number keys 1-5 or a tap equip / unequip; a dark wipe shows
-	    each weapon's cooldown; weapons a rebirth will unlock show greyed
-	    with "R1" / "R2" / "R3" (a tap says "Unlocks at Rebirth N"); the
-	    whole bar greys while you carry a stolen orb (hands full).
+	  * Weapon bar: the default Backpack bar is replaced by rounded-square
+	    slots (64 px, 52 on a phone) above the bottom buttons, each a
+	    ViewportFrame with the real WeaponKit model slowly turning, the key
+	    number top-left and the name under it. Keys 1-5 or a tap equip /
+	    unequip. Equipped = a lime ring + a 4 px lift; cooldown = a dark
+	    radial sweep + the seconds left; not yet earned = a dim model with a
+	    lock and "R2" / "R3" / "Quest" (a tap says how); the whole bar dims
+	    while you carry a stolen orb (hands full), and it is off at Rebirth 0
+	    and while the tutorial runs.
 	  * Using one (Tool.Activated): melee sends the nearest eligible player
 	    in front of you; ranged and the Freeze Ray send where you aim (the
 	    mouse on a computer, the camera's centre on a touch screen); the
 	    Banana Peel goes on the ground in front of you. RequestHit only; the
 	    server re-checks everything.
+	  * Feel (all local, WeaponPose / WeaponFx): an equip raise, the Bat and
+	    Glove swing with a trail, guns hold an aim pose pitched at your aim,
+	    recoil + a muzzle flash on a shot, a throw for the peel. Everyone
+	    sees yours through HitFx (Swing / Beam / FreezeBeam / Throw carry the
+	    Attacker), the same code runs for theirs.
 	  * HitReceived: you ragdoll (Humanoid Physics state + the impulse; the
-	    server swaps your joints and restores them) and prompts switch off
-	    until you're up; or you freeze (40% speed). The server's times rule.
-	  * Every client: HitFx effects (BONK! pop with stars, a thin Neon beam
-	    seen from the side, SLIP!), the icy tint on frozen players, a faint
-	    shimmer on immune ones, and the sound slots.
-	  * WeaponUnlocked: the tutorial-style card "🏏 You got a Bat!" (after
-	    the tutorial, if it's still running).
+	    server swaps your joints and restores them; a peel adds a spin) and
+	    prompts switch off until you're up; or you freeze (40% speed). The
+	    server's times rule.
+	  * Every client: HitFx effects (BONK! pop with stars + a white ring, a
+	    thin Neon beam seen from the side, an icy cone, SLIP!), the icy tint
+	    and frost on frozen players, a faint shimmer on immune ones, and the
+	    sound slots.
+	  * WeaponUnlocked: the tutorial-style card "You got a Bat!" with the
+	    big turning model (after the tutorial, if it's still running).
 ]]
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
@@ -37,10 +47,15 @@ local Workspace = game:GetService("Workspace")
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
+local WeaponKit = require(ReplicatedStorage.Shared.Modules.WeaponKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
 local UIKit = require(UI.UIKit)
 local TutorialCards = require(UI.TutorialCards)
+local WeaponViewport = require(UI.WeaponViewport)
+local Effects = script.Parent.Parent.Effects
+local WeaponPose = require(Effects.WeaponPose)
+local WeaponFx = require(Effects.WeaponFx)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
 
@@ -50,12 +65,22 @@ local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 local World = UITheme.World
 
-local SLOT_SIZE = { Desktop = 56, Phone = 52 }
+local SLOT_SIZE = { Desktop = 64, Phone = 52 }
 local SLOT_GAP = 10
+local SLOT_RADIUS = 12
+local LIFT = 4 -- the equipped slot rises this far
+local NAME_HEIGHT = 14
+local NAME_GAP = 2
+local LIFT_TWEEN = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local SWEEP_DARK = 0.35 -- the cooldown wipe's transparency
+local LOCKED_DIM = 0.75
+local CARRYING_DIM = 0.55
 -- Above the HUD's bottom row (22 margin + 64 / 60 button + 5 shadow) + a gap.
 local BAR_BOTTOM = { Desktop = 22 + 64 + 5 + 12, Phone = 22 + 60 + 5 + 12 }
-local BEAM_SECONDS = 0.18
-local BEAM_THICKNESS = 0.25
+local LASER_BEAM_SECONDS = 0.12
+local FREEZE_BEAM_SECONDS = 0.18
+local FREEZE_CONE_STUDS = 24
+local SPIN_IMPULSE = Vector3.new(0, 14, 5) -- per unit of mass: a peel slip spins you
 local POP_SECONDS = 0.9
 local SHIMMER_SPEED = 10
 local SHIMMER_MAX = 0.45
@@ -63,7 +88,21 @@ local KEY_CODES = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum
 
 local localPlayer = Players.LocalPlayer
 
-type Slot = { Weapon: CombatConfig.Weapon, Button: TextButton, Holder: Frame, Wipe: Frame, Badge: TextLabel }
+type Slot = {
+	Weapon: CombatConfig.Weapon,
+	Owned: boolean,
+	Holder: Frame, -- the lifting panel holder
+	Body: Frame,
+	Stroke: UIStroke,
+	Viewport: ViewportFrame,
+	Name: TextLabel,
+	Seconds: TextLabel,
+	Sweep: Frame,
+	SweepRight: UIGradient,
+	SweepLeft: UIGradient,
+	Lifted: boolean,
+	Dim: number,
+}
 
 local screenGui: ScreenGui
 local bar: Frame
@@ -132,9 +171,7 @@ local function toggleEquip(weapon: CombatConfig.Weapon)
 		return
 	end
 	if not ownedWeapons()[weapon.Id] then
-		if weapon.UnlockRebirth then
-			ToastController.Show(("Unlocks at Rebirth %d"):format(weapon.UnlockRebirth), "Neutral")
-		end
+		ToastController.Show(if weapon.UnlockRebirth then ("Unlocks at Rebirth %d"):format(weapon.UnlockRebirth) else "Earned from a quest", "Neutral")
 		return
 	end
 	if isCarrying() then
@@ -152,6 +189,61 @@ local function toggleEquip(weapon: CombatConfig.Weapon)
 	end
 end
 
+-- One half of the clock-wipe: a clipped half of the slot holding a full-size
+-- dark frame whose gradient has a hard edge through the slot's centre.
+-- Rotating the gradient to the angle sweeps the edge round like a clock hand
+-- (UIGradient rotation is clockwise, 0 = left -> right); the dark side is
+-- the half the gradient runs TOWARD. With the right half at min(angle, 180)
+-- and the left at max(angle, 180) the lit part is a pie from 12 o'clock
+-- clockwise, growing as the cooldown runs out.
+local function sweepHalf(parent: Frame, right: boolean, zIndex: number): UIGradient
+	local clip = Instance.new("Frame")
+	clip.Name = if right then "RightHalf" else "LeftHalf"
+	clip.BackgroundTransparency = 1
+	clip.ClipsDescendants = true
+	clip.Position = UDim2.fromScale(if right then 0.5 else 0, 0)
+	clip.Size = UDim2.fromScale(0.5, 1)
+	clip.ZIndex = zIndex
+	clip.Parent = parent
+	local dark = Instance.new("Frame")
+	dark.Name = "Dark"
+	dark.BackgroundColor3 = Colors.Ink
+	dark.BorderSizePixel = 0
+	dark.Position = UDim2.fromScale(if right then -1 else 0, 0)
+	dark.Size = UDim2.fromScale(2, 1)
+	dark.ZIndex = zIndex
+	dark.Parent = clip
+	local gradient = Instance.new("UIGradient")
+	-- Clear on the gradient's near side, dark where it runs toward.
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.499, 1),
+		NumberSequenceKeypoint.new(0.501, SWEEP_DARK),
+		NumberSequenceKeypoint.new(1, SWEEP_DARK),
+	})
+	gradient.Parent = dark
+	return gradient
+end
+
+local function slotLabel(text: string, size: number, color: Color3, props: { [string]: any }): TextLabel
+	local label = UIKit.Label({
+		Text = text,
+		Font = Fonts.Display,
+		TextSize = size,
+		TextColor3 = color,
+		Stroke = UITheme.Stroke.Text,
+		TextXAlignment = Enum.TextXAlignment.Center,
+	})
+	for key, value in props do
+		(label :: any)[key] = value
+	end
+	return label
+end
+
+local function lockedText(weapon: CombatConfig.Weapon): string
+	return if weapon.UnlockRebirth then ("R%d"):format(weapon.UnlockRebirth) else "Quest"
+end
+
 local function rebuildBar()
 	for _, child in bar:GetChildren() do
 		if not child:IsA("UIListLayout") then
@@ -160,64 +252,154 @@ local function rebuildBar()
 	end
 	slots = {}
 	local owned = ownedWeapons()
-	local size = if UIKit.IsPhone() then SLOT_SIZE.Phone else SLOT_SIZE.Desktop
+	local phone = UIKit.IsPhone()
+	local size = if phone then SLOT_SIZE.Phone else SLOT_SIZE.Desktop
 	local key = 0
 	for order, weapon in CombatConfig.Weapons do
 		local has = owned[weapon.Id] == true
-		-- Quest weapons only show once earned; rebirth ones always (greyed).
-		if has or weapon.UnlockRebirth then
-			local button, holder = UIKit.Button({
-				Name = weapon.Id,
-				Parent = bar,
-				Style = if has then "Violet" else "Disabled",
-				Text = weapon.Glyph,
-				TextSize = math.floor(size * 0.5),
-				Size = UDim2.fromOffset(size, size),
-				Radius = 999,
-				LayoutOrder = order,
-				ShadowOffset = UITheme.SmallShadowOffset,
-				OnClick = function()
-					toggleEquip(weapon)
-				end,
+		local cell = Instance.new("Frame")
+		cell.Name = weapon.Id
+		cell.BackgroundTransparency = 1
+		cell.LayoutOrder = order
+		cell.Size = UDim2.fromOffset(size, LIFT + size + NAME_GAP + NAME_HEIGHT)
+		cell.Parent = bar
+
+		local body, holder = UIKit.Panel({
+			Name = "Slot",
+			Parent = cell,
+			Size = UDim2.fromOffset(size, size),
+			Position = UDim2.fromOffset(0, LIFT),
+			Color = Colors.Panel,
+			Radius = SLOT_RADIUS,
+			StrokeThickness = 2,
+			ShadowOffset = UITheme.SmallShadowOffset,
+		})
+		body.ClipsDescendants = true
+		local z = body.ZIndex
+
+		local viewport = WeaponViewport.Create(weapon.Id, body, { Phase = order, ZIndex = z + 1 })
+		viewport.AnchorPoint = Vector2.new(0.5, 0.5)
+		viewport.Position = UDim2.fromScale(0.5, 0.5)
+		viewport.Size = UDim2.new(1, -8, 1, -8)
+
+		local sweep = Instance.new("Frame")
+		sweep.Name = "Cooldown"
+		sweep.BackgroundTransparency = 1
+		sweep.Size = UDim2.fromScale(1, 1)
+		sweep.ZIndex = z + 3
+		sweep.Visible = false
+		sweep.Parent = body
+		local sweepRight = sweepHalf(sweep, true, z + 3)
+		local sweepLeft = sweepHalf(sweep, false, z + 3)
+
+		local seconds = slotLabel("", math.floor(size * 0.36), Colors.Text, {
+			Name = "Seconds",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromScale(1, 0.5),
+			ZIndex = z + 4,
+			Visible = false,
+			Parent = body,
+		})
+
+		if has then
+			key += 1
+			local badge = Instance.new("Frame")
+			badge.Name = "Key"
+			badge.BackgroundColor3 = Colors.PanelTop
+			badge.BorderSizePixel = 0
+			badge.Position = UDim2.fromOffset(3, 3)
+			badge.Size = UDim2.fromOffset(18, 18)
+			badge.ZIndex = z + 5
+			badge.Parent = body
+			UIKit.Corner(badge, 6)
+			slotLabel(tostring(key), 13, Colors.Text, {
+				Size = UDim2.fromScale(1, 1),
+				ZIndex = z + 6,
+				Parent = badge,
 			})
-			local wipe = Instance.new("Frame")
-			wipe.Name = "Cooldown"
-			wipe.AnchorPoint = Vector2.new(0, 1)
-			wipe.Position = UDim2.fromScale(0, 1)
-			wipe.Size = UDim2.fromScale(1, 0)
-			wipe.BackgroundColor3 = Colors.Black
-			wipe.BackgroundTransparency = 0.45
-			wipe.BorderSizePixel = 0
-			wipe.ZIndex = button.ZIndex + 3
-			wipe.Parent = button
-			UIKit.Corner(wipe, 999)
-			if has then
-				key += 1
-			end
-			local badge = UIKit.Label({
-				Name = "Badge",
-				Text = if has then tostring(key) else ("R%d"):format(weapon.UnlockRebirth or 0),
-				Font = Fonts.Display,
-				TextSize = 13,
-				TextColor3 = Colors.Text,
-				Stroke = UITheme.Stroke.Text,
-				AnchorPoint = Vector2.new(1, 0),
-				Position = UDim2.new(1, 2, 0, -4),
-				Size = UDim2.fromOffset(26, 16),
-				TextXAlignment = Enum.TextXAlignment.Right,
-				ZIndex = button.ZIndex + 4,
-				Parent = holder,
+		else
+			slotLabel("🔒", math.floor(size * 0.34), Colors.Text, {
+				Name = "Lock",
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.34),
+				Size = UDim2.fromScale(1, 0.4),
+				ZIndex = z + 5,
+				Parent = body,
 			})
-			table.insert(slots, { Weapon = weapon, Button = button, Holder = holder, Wipe = wipe, Badge = badge })
+			slotLabel(lockedText(weapon), 14, Colors.Text, {
+				Name = "LockText",
+				AnchorPoint = Vector2.new(0.5, 1),
+				Position = UDim2.new(0.5, 0, 1, -4),
+				Size = UDim2.new(1, 0, 0, 16),
+				ZIndex = z + 5,
+				Parent = body,
+			})
 		end
+
+		local nameLabel = UIKit.Label({
+			Name = "WeaponName",
+			Text = weapon.Name,
+			Font = Fonts.BodyHeavy,
+			TextSize = 12,
+			TextColor3 = if has then Colors.Muted else Colors.Faint,
+			TextXAlignment = Enum.TextXAlignment.Center,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, LIFT + size + NAME_GAP),
+			Size = UDim2.fromOffset(size + SLOT_GAP, NAME_HEIGHT),
+			Parent = cell,
+		})
+		UIKit.FitText(nameLabel, 12, 9)
+
+		local tap = Instance.new("TextButton")
+		tap.Name = "Tap"
+		tap.Text = ""
+		tap.AutoButtonColor = false
+		tap.BackgroundTransparency = 1
+		tap.Size = UDim2.fromScale(1, 1)
+		tap.ZIndex = z + 8
+		tap.Parent = body
+		tap.Activated:Connect(function()
+			toggleEquip(weapon)
+		end)
+
+		local stroke = body:FindFirstChildOfClass("UIStroke") :: UIStroke
+		table.insert(slots, {
+			Weapon = weapon,
+			Owned = has,
+			Holder = holder,
+			Body = body,
+			Stroke = stroke,
+			Viewport = viewport,
+			Name = nameLabel,
+			Seconds = seconds,
+			Sweep = sweep,
+			SweepRight = sweepRight,
+			SweepLeft = sweepLeft,
+			Lifted = false,
+			Dim = -1,
+		})
 	end
-	bar.Position = UDim2.new(0.5, 0, 1, -(if UIKit.IsPhone() then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop))
-	-- No bar at all before Rebirth 1: nobody can hit you, you can't hit
-	-- anyone, and three greyed slots are noise for a new player.
-	screenGui.Enabled = TycoonController.GetRebirths() >= 1
+	bar.Position = UDim2.new(0.5, 0, 1, -(if phone then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop))
+end
+
+local function setSlotDim(slot: Slot, dim: number)
+	if slot.Dim == dim then
+		return
+	end
+	slot.Dim = dim
+	WeaponViewport.SetDim(slot.Viewport, dim)
+	slot.Body.BackgroundTransparency = dim * 0.5
+	slot.Name.TextTransparency = dim * 0.6
 end
 
 local function refreshBar()
+	-- No bar before Rebirth 1 (nobody can hit you, you can't hit anyone) and
+	-- none while the tutorial runs: its action button owns that space.
+	screenGui.Enabled = TycoonController.GetRebirths() >= 1 and not TycoonController.IsTutorialActive()
+	if not screenGui.Enabled then
+		return
+	end
 	local carrying = isCarrying()
 	local character = localPlayer.Character
 	local now = os.clock()
@@ -225,13 +407,25 @@ local function refreshBar()
 		local weapon = slot.Weapon
 		local last = lastLocalSwing[weapon.Id]
 		local left = if last then math.max(0, weapon.Cooldown - (now - last)) else 0
-		slot.Wipe.Size = UDim2.fromScale(1, if weapon.Cooldown > 0 then left / weapon.Cooldown else 0)
-		local equipped = character ~= nil and character:FindFirstChild(weapon.Id) ~= nil
-		local stroke = slot.Button:FindFirstChildOfClass("UIStroke")
-		if stroke then
-			stroke.Color = if equipped then World.AccentGold else Colors.Ink
+		if left > 0 and slot.Owned then
+			local angle = 360 * (1 - left / weapon.Cooldown) -- 0 = just used: all dark
+			slot.SweepRight.Rotation = math.min(angle, 180)
+			slot.SweepLeft.Rotation = math.max(angle, 180)
+			slot.Seconds.Text = if left >= 10 then ("%d"):format(math.ceil(left)) else ("%.1f"):format(left)
+			slot.Sweep.Visible = true
+			slot.Seconds.Visible = true
+		elseif slot.Sweep.Visible then
+			slot.Sweep.Visible = false
+			slot.Seconds.Visible = false
 		end
-		slot.Button.BackgroundTransparency = if carrying then 0.5 else 0
+		local equipped = slot.Owned and character ~= nil and character:FindFirstChild(weapon.Id) ~= nil
+		if equipped ~= slot.Lifted then
+			slot.Lifted = equipped
+			TweenService:Create(slot.Holder, LIFT_TWEEN, { Position = UDim2.fromOffset(0, if equipped then 0 else LIFT) }):Play()
+			slot.Stroke.Color = if equipped then World.WeaponLime else Colors.Ink
+			slot.Stroke.Thickness = if equipped then 3 else 2
+		end
+		setSlotDim(slot, if not slot.Owned then LOCKED_DIM elseif carrying then CARRYING_DIM else 0)
 	end
 end
 
@@ -282,6 +476,42 @@ local function aimDirection(): Vector3?
 	return if direction.Magnitude > 0.01 then direction.Unit else nil
 end
 
+--[[ Feel: the pose + effects of anyone's swing, kick or toss ------------------------- ]]
+
+local function findHeldTool(player: Player, weaponId: string): Tool?
+	local character = player.Character
+	local tool = character and character:FindFirstChild(weaponId)
+	return if tool and tool:IsA("Tool") then tool else nil
+end
+
+-- `player` uses `weapon`: their arm swings / kicks / tosses, with the trail
+-- or muzzle flash and the sound. Yours runs the moment you click; everyone
+-- else's runs from the HitFx you cause.
+local function performFor(player: Player, weapon: CombatConfig.Weapon)
+	local character = player.Character
+	local root = getRoot(player)
+	if not character or not root then
+		return
+	end
+	local tool = findHeldTool(player, weapon.Id)
+	if weapon.Kind == "Melee" then
+		local seconds = WeaponPose.Swing(character, weapon.Id)
+		if tool and seconds > 0 then
+			WeaponFx.Trail(tool, if weapon.Id == "SlapGlove" then World.GloveRed else Colors.White, seconds)
+		end
+		SoundKit.PlayAt("Swing", root.Position)
+	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
+		local freezing = weapon.Kind == "Freeze"
+		WeaponPose.Recoil(character)
+		if tool then
+			WeaponFx.MuzzleFlash(tool, if freezing then World.Ice else World.WeaponLaser)
+		end
+		SoundKit.PlayAt("Shoot", root.Position, if freezing then { PlaybackSpeed = 0.8 } else nil)
+	elseif weapon.Kind == "Peel" then
+		WeaponPose.Throw(character)
+	end
+end
+
 local function use(weapon: CombatConfig.Weapon)
 	if isCarrying() then
 		ToastController.Show("Hands full: run it home!", "Neutral")
@@ -295,6 +525,7 @@ local function use(weapon: CombatConfig.Weapon)
 		return
 	end
 	lastLocalSwing[weapon.Id] = os.clock()
+	performFor(localPlayer, weapon)
 	if weapon.Kind == "Melee" then
 		local target = meleeTarget(weapon)
 		RemoteEvents.RequestHit:FireServer({ Weapon = weapon.Id, TargetUserId = if target then target.UserId else nil })
@@ -350,6 +581,9 @@ local function onHitReceived(payload: any)
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 	if typeof(payload.Impulse) == "Vector3" then
 		root:ApplyImpulse(payload.Impulse * root.AssemblyMass)
+	end
+	if payload.Spin == true then
+		root:ApplyAngularImpulse(SPIN_IMPULSE * root.AssemblyMass)
 	end
 	ProximityPromptService.Enabled = false
 	local character = localPlayer.Character
@@ -412,30 +646,47 @@ local function popText(position: Vector3, text: string, color: Color3)
 	end)
 end
 
--- A thin Neon cylinder between two points (seen from the side, never a
--- flat circle facing up), gone in BEAM_SECONDS.
-local function beam(from: Vector3, to: Vector3, color: Color3)
-	local length = (to - from).Magnitude
-	if length < 0.1 then
-		return
+-- The peel is hidden from the player's own eyes while the thrown banana
+-- flies (the server places it at once; the arc lands it).
+local function hidePeelFor(peel: Instance, seconds: number)
+	local hidden = true
+	local function hide(instance: Instance)
+		if instance:IsA("BasePart") then
+			instance.LocalTransparencyModifier = 1
+		end
 	end
-	local part = Instance.new("Part")
-	part.Name = "WeaponBeam"
-	part.Shape = Enum.PartType.Cylinder
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CastShadow = false
-	part.Material = Enum.Material.Neon
-	part.Color = color
-	part.Size = Vector3.new(length, BEAM_THICKNESS, BEAM_THICKNESS)
-	part.CFrame = CFrame.lookAt((from + to) / 2, to) * CFrame.Angles(0, math.rad(90), 0)
-	part.Parent = Workspace.Terrain
-	TweenService:Create(part, TweenInfo.new(BEAM_SECONDS), { Transparency = 1 }):Play()
-	task.delay(BEAM_SECONDS, function()
-		part:Destroy()
+	for _, descendant in peel:GetDescendants() do
+		hide(descendant)
+	end
+	peel.DescendantAdded:Connect(function(descendant)
+		if hidden then
+			hide(descendant)
+		end
 	end)
+	task.delay(seconds, function()
+		hidden = false
+		for _, descendant in peel:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				descendant.LocalTransparencyModifier = 0
+			end
+		end
+	end)
+end
+
+local function watchPeels(folder: Instance)
+	folder.ChildAdded:Connect(function(child)
+		if child.Name == "BananaPeel" then
+			hidePeelFor(child, WeaponFx.THROW_SECONDS)
+		end
+	end)
+end
+
+-- Where a shot leaves from: the attacker's muzzle if their tool is in
+-- hand, else the server's origin.
+local function muzzlePosition(attacker: Player?, weaponId: string, fallback: Vector3): Vector3
+	local tool = if attacker then findHeldTool(attacker, weaponId) else nil
+	local muzzle = if tool then WeaponKit.GetMuzzle(tool) else nil
+	return if muzzle then muzzle.WorldPosition else fallback
 end
 
 local function onHitFx(payload: any)
@@ -444,21 +695,46 @@ local function onHitFx(payload: any)
 	end
 	local from = if typeof(payload.From) == "Vector3" then payload.From else nil
 	local to = if typeof(payload.To) == "Vector3" then payload.To else nil
+	local weapon = CombatConfig.GetWeapon(payload.Weapon)
+	local attacker = if typeof(payload.Attacker) == "number" then Players:GetPlayerByUserId(payload.Attacker) else nil
+	-- Your own swing / shot already played when you clicked.
+	local theirs = attacker ~= nil and attacker ~= localPlayer
 	if payload.Kind == "Bonk" and to then
 		popText(to, "💫 BONK! 💫", World.AccentGold)
+		WeaponFx.FlashRing(to, Colors.White)
 		SoundKit.PlayAt("Bonk", to)
+	elseif payload.Kind == "Swing" then
+		if theirs and weapon then
+			performFor(attacker :: Player, weapon)
+		end
 	elseif payload.Kind == "Slip" and to then
 		popText(to, "🍌 SLIP!", World.Banana)
 		SoundKit.PlayAt("Slip", to)
 	elseif payload.Kind == "Freeze" and to then
 		popText(to, "🥶 FROZEN!", World.Ice)
 		SoundKit.PlayAt("Freeze", to)
+	elseif payload.Kind == "Throw" and from and to then
+		if theirs and weapon then
+			performFor(attacker :: Player, weapon)
+		end
+		WeaponFx.Throw(from, to)
 	elseif payload.Kind == "Beam" and from and to then
-		beam(from, to, World.WeaponLaser)
-		SoundKit.PlayAt("Laser", from)
+		if theirs and weapon then
+			performFor(attacker :: Player, weapon)
+		end
+		local start = muzzlePosition(attacker, "LaserGun", from)
+		WeaponFx.Beam(start, to, World.WeaponLaser, LASER_BEAM_SECONDS)
+		WeaponFx.Impact(to, World.WeaponLaser)
+		SoundKit.PlayAt("Laser", start)
 	elseif payload.Kind == "FreezeBeam" and from and to then
-		beam(from, to, World.Ice)
-		SoundKit.PlayAt("Freeze", from)
+		if theirs and weapon then
+			performFor(attacker :: Player, weapon)
+		end
+		local start = muzzlePosition(attacker, "FreezeRay", from)
+		WeaponFx.Beam(start, to, World.Ice, FREEZE_BEAM_SECONDS)
+		WeaponFx.FreezeCone(start, start + (to - start).Unit * math.min((to - start).Magnitude, FREEZE_CONE_STUDS))
+		WeaponFx.Impact(to, World.Ice)
+		SoundKit.PlayAt("Freeze", start)
 	end
 end
 
@@ -478,7 +754,9 @@ local function stepLooks()
 					end
 				end
 				tinted[character] = originals
+				WeaponFx.Frost.On(character)
 			elseif not frozen and tinted[character] then
+				WeaponFx.Frost.Off(character)
 				for part, color in tinted[character] do
 					if part.Parent then
 						part.Color = color
@@ -515,9 +793,75 @@ local function showUnlocks()
 	if weapon then
 		TutorialCards.ShowStep({
 			Icon = weapon.Glyph,
+			Weapon = weapon.Id,
 			Title = ("You got a %s!"):format(weapon.Name),
 			Body = weapon.Blurb,
 		}, nil, showUnlocks)
+	end
+end
+
+--[[ Watching tools in hand (everyone's) ---------------------------------------------- ]]
+
+local function isGun(weapon: CombatConfig.Weapon): boolean
+	return weapon.Kind == "Ranged" or weapon.Kind == "Freeze"
+end
+
+-- A weapon came up in `character`'s hand: the raise, the sound, and the aim
+-- pose for guns.
+local function onToolAdded(player: Player, character: Model, tool: Instance)
+	local weapon = if tool:IsA("Tool") then CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) else nil
+	if not weapon then
+		return
+	end
+	WeaponPose.Equip(character)
+	local root = getRoot(player)
+	if root then
+		SoundKit.PlayAt("Equip", root.Position)
+	end
+	if isGun(weapon) then
+		WeaponPose.SetAim(character, true, 0)
+	end
+end
+
+local function onToolRemoved(character: Model, tool: Instance)
+	local weapon = if tool:IsA("Tool") then CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) else nil
+	if weapon and isGun(weapon) then
+		WeaponPose.SetAim(character, false)
+	end
+end
+
+local function watchPlayer(player: Player)
+	local function watchCharacter(character: Model)
+		for _, child in character:GetChildren() do
+			onToolAdded(player, character, child)
+		end
+		character.ChildAdded:Connect(function(child)
+			onToolAdded(player, character, child)
+		end)
+		character.ChildRemoved:Connect(function(child)
+			onToolRemoved(character, child)
+		end)
+	end
+	player.CharacterAdded:Connect(watchCharacter)
+	if player.Character then
+		watchCharacter(player.Character)
+	end
+end
+
+-- Your gun arm follows where you aim (pitch only; the camera stays free).
+local function stepAim()
+	local character = localPlayer.Character
+	if not character then
+		return
+	end
+	for _, weapon in CombatConfig.Weapons do
+		if isGun(weapon) and character:FindFirstChild(weapon.Id) then
+			local direction = aimDirection()
+			if direction then
+				WeaponPose.SetAim(character, true, math.asin(math.clamp(direction.Y, -1, 1)))
+			end
+			return
+		end
 	end
 end
 
@@ -526,6 +870,7 @@ function CombatController.Init()
 		StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Backpack, false)
 	end)
 	screenGui = UIKit.Screen("WeaponBar", 41)
+	screenGui.Enabled = false -- refreshBar turns it on at Rebirth 1+ (and off during the tutorial)
 	bar = Instance.new("Frame")
 	bar.Name = "Bar"
 	bar.BackgroundTransparency = 1
@@ -550,6 +895,7 @@ function CombatController.Init()
 	end)
 	UIKit.LayoutChanged:Connect(rebuildBar)
 	rebuildBar()
+	refreshBar()
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
 		if processed then
@@ -596,6 +942,21 @@ function CombatController.Init()
 		refreshBar()
 		stepFreeze()
 		stepLooks()
+		stepAim()
+	end)
+
+	for _, player in Players:GetPlayers() do
+		watchPlayer(player)
+	end
+	Players.PlayerAdded:Connect(watchPlayer)
+	local existing = Workspace:FindFirstChild("CombatObjects")
+	if existing then
+		watchPeels(existing)
+	end
+	Workspace.ChildAdded:Connect(function(child)
+		if child.Name == "CombatObjects" then
+			watchPeels(child)
+		end
 	end)
 end
 
