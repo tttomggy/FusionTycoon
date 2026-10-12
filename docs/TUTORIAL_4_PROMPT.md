@@ -9,6 +9,32 @@ another branch, say so in the FIRST line**, because Harris tests
 Harris tested on Oct 12. The hand / Open-step / weapon fix (`f22f4d6`) was
 not in his build, so check those again too.
 
+## 0. FIRST: the objective bar is pushed off the top of the screen
+
+In Harris's screenshot (1920×1080, step 4/11), only the bottom of the
+objective bar shows: "4 / 11" at the very top, and the instruction text is
+**above the screen**. That's the `/selftest` FAIL "top stack slots out of
+order (79 / 12 / 64 / 64)".
+
+**Two related bugs in the same shot:**
+- A **giant "🛡 LOCKED · 0:34" bar** (about 160 px tall, pink, text about
+  90 px) covers the top right. It's the heist status bar from TopStack, or
+  the gate sign, drawn at the wrong scale.
+- A **huge pink round lock button** (about 230 px) sits bottom right.
+
+**Fix:**
+- TopStack slot Ys must be computed top to bottom from `GetCardTop`. The
+  objective bar's top is ≥ the Roblox top bar (58 px) + 8, fully on screen.
+- Status bars keep the normal HUD sizes: 44–56 px tall, text 18–24 px.
+- Find what built the giant lock button. If it's new (a LOCK shortcut?),
+  it must follow the UI rules: ≤ 64 px, placed in the HUD stack. LOCK
+  stays console-only, so a HUD button may only *point* to the console,
+  never lock.
+
+**`/selftest`:** every TopStack element's rect is fully inside the
+viewport and below the top bar, and no HUD element is taller than 80 px
+(except modals).
+
 ## 1. A dim screen with nothing on it
 
 During the tutorial the game sometimes darkens with **no card, no text and
