@@ -3,15 +3,17 @@
 	----------------
 	What you see after a fusion or a gacha pull:
 
-	  * Big result card (centre) - pulls and fusion successes the player's
-	    RevealRule picks (SettingsConfig; default Epic+, or Diamond+). Sunburst, tier name, 132 px orb, DISPLAY IT / NICE.
+	  * Big result card (centre) - every single pull and every successful
+	    single fusion ("RARE ORB!"); BEST OF 10 and Auto-Fuse / Fuse All
+	    follow the player's RevealRule (SettingsConfig; default Epic+, or
+	    Diamond+). Sunburst, tier name, 132 px orb, DISPLAY IT / NICE.
 	    Fusion cards wait for FusionController.FusionResolved, i.e. after the
 	    machine's reveal animation, so the card never spoils it.
 	  * Fail card (bottom) - a failed fusion, 3 s, with an AGAIN button.
 	  * Skipped-card lines (bottom) - a pull or BEST OF 10 whose big card
 	    the player's RevealRule skips (Settings): one small line each,
-	    2.5 s, at most 3. A skipped fusion success gets none: your own top
-	    banner already shows it (FusionBannerShows).
+	    2.5 s, at most 3. A single fusion success is never skipped (it
+	    always has its big card, and no top banner).
 
 	  * Pull x10 grid (centre) - all ten pulls popping in 0.06 s apart; the
 	    best one (by GetItemCashPerSecond) is outlined and, if it qualifies,
@@ -23,7 +25,6 @@
 	  * Welcome-back card (modal) - offline earnings, once per snapshot that
 	    brings new PendingOffline; COLLECT fires ClaimOffline and bursts coins.
 
-	Rare fusion successes keep the top banner (AnnouncementController).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -1558,8 +1559,9 @@ function ResultController.CloseCards()
 	closeBigCard()
 end
 
--- The player's RevealRule (SettingsConfig), for BEST OF 10 / ×10, Auto-Fuse
--- and fusion results (a single pull always gets the big card): Secret and
+-- The player's RevealRule (SettingsConfig), for BEST OF 10 / ×10 and
+-- Auto-Fuse / Fuse All (a single pull and a single fusion always get the
+-- big card): Secret and
 -- event-only mutations always; otherwise per tier (Never / Golden+ / … /
 -- Always).
 function ResultController.ShowsBigCardFor(tier: string, mutation: string?): boolean
@@ -1567,16 +1569,11 @@ function ResultController.ShowsBigCardFor(tier: string, mutation: string?): bool
 end
 
 -- Does your own "FUSION SUCCESS!" top banner (AnnouncementController) show
--- this fusion result? Every success without a big card. The one rule both
--- sides read: the banner shows exactly then, and the skipped line doesn't.
-function ResultController.FusionBannerShows(result: any): boolean
-	if typeof(result) ~= "table" or not result.Success or not result.Upgraded or typeof(result.NewItem) ~= "table" then
-		return false
-	end
-	local item = result.NewItem
-	return typeof(item.Tier) == "string"
-		and result.Added == nil
-		and not ResultController.ShowsBigCardFor(item.Tier, topOf(item))
+-- this fusion result? Never for a single fusion: every success gets the big
+-- card, so the banner and the skipped line are both gone. (Kept as the one
+-- place both sides ask, and for /trailer.)
+function ResultController.FusionBannerShows(_result: any): boolean
+	return false
 end
 
 -- "GOLDEN kept" (carried over from the inputs) or "GOLDEN rolled!" (a
@@ -1619,9 +1616,15 @@ local function onFusionResolved(result: any)
 		MutationConfig.GetStackLabel(newItem.Mutation, newItem.EventMutations),
 		result.MutationSource
 	)
-	if ResultController.ShowsBigCardFor(newItem.Tier, topOf(newItem)) then
+	-- EVERY successful single fusion gets the big card, at every tier and
+	-- for every player (the reveal rule in ⚙ only covers BEST OF 10 and
+	-- Auto-Fuse): "RARE ORB!". A Rare closes by itself, like a single pull.
+	local tier = newItem.Tier :: string
+	do
 		showBigCard({
 			Caption = "FUSION SUCCESS",
+			Headline = tier:upper() .. " ORB!",
+			AutoCloseSeconds = if tier == "Rare" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,
 			SourceLine = sourceLine,
 			Item = newItem,
 			Description = ("%dx %s → %s · earns %s/s on a pedestal"):format(
@@ -1631,11 +1634,12 @@ local function onFusionResolved(result: any)
 				NumberFormat.Money(earnRate(newItem))
 			),
 		})
-	elseif not ResultController.FusionBannerShows(result) then
-		-- Your own fusion's top banner already shows this result (and the
-		-- kept / rolled line); only a result without one gets the line.
-		showSkippedLine(newItem, sourceLine)
 	end
+end
+
+-- /selftest: runs the fusion result path with a payload.
+function ResultController.SelfTestFusionResolved(result: any)
+	onFusionResolved(result)
 end
 
 -- Daily / gift rewards (payload.Reward) reveal only once the daily card

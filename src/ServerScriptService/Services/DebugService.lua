@@ -148,7 +148,8 @@ local GIFTS_COMMAND = "/gifts"
 	change an item mid-fuzz).
 ]]
 local SELFTEST_COMMAND = "/selftest"
-local SELFTEST_REPORT_TIMEOUT = 90
+local SELFTEST_REPORT_TIMEOUT = 90 -- the client's big stages (Fuzz, Done)
+local SELFTEST_PROBE_TIMEOUT = 10 -- one tutorial / combat probe
 local SELFTEST_SLOT_COUNT = 200
 local selfTestReports: { [number]: { any } } = {}
 
@@ -166,9 +167,10 @@ local NUMBER_FORMAT_CASES: { { any } } = {
 	{ -1234, "$-1.23K" },
 }
 
-local function waitForReport(player: Player, stage: string): any?
+local function waitForReport(player: Player, stage: string, timeout: number?): any?
 	local started = os.clock()
-	while os.clock() - started < SELFTEST_REPORT_TIMEOUT and player.Parent do
+	local limit = timeout or SELFTEST_REPORT_TIMEOUT
+	while os.clock() - started < limit and player.Parent do
 		local queue = selfTestReports[player.UserId]
 		if queue then
 			for index, report in queue do
@@ -188,9 +190,12 @@ end
 local function tutorialProbe(player: Player, payload: { [string]: any }, result: (boolean, string, string?) -> ())
 	payload.Stage = "TutorialProbe"
 	RemoteEvents.SelfTest:FireClient(player, payload)
-	local report = waitForReport(player, "TutorialProbe")
+	local report = waitForReport(player, "TutorialProbe", SELFTEST_PROBE_TIMEOUT)
 	if not report or typeof(report.Lines) ~= "table" then
-		result(false, ("tutorial probe (%s)"):format(tostring(payload.Kind)), "no report from the client")
+		local which = if payload.Kind == "Weapon" or payload.Kind == "Switch" then "combat " .. tostring(payload.Weapon or payload.To or "")
+			elseif payload.Kind == "WeaponReleased" then "combat release"
+			else "tutorial " .. tostring(payload.StepId or payload.Kind)
+		result(false, which, "no report from the client")
 		return
 	end
 	for _, line in report.Lines do
@@ -235,8 +240,13 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if character and humanoid and humanoid.Health > 0 then
-		humanoid:UnequipTools()
+		local function sampleRest()
+			humanoid:UnequipTools()
+			task.wait(0.3)
+			tutorialProbe(player, { Kind = "SampleRest" }, result)
+		end
 		for _, weapon in CombatConfig.Weapons do
+			sampleRest()
 			local tool = WeaponKit.Build(weapon.Id)
 			humanoid:EquipTool(tool)
 			task.wait(0.4)
@@ -248,7 +258,25 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 			tool:Destroy()
 			task.wait(0.1)
 		end
-		humanoid:UnequipTools()
+		-- Switches without an UnequipTools in between: EquipTool of the second
+		-- tool takes the first out of the hand the way a slot press does.
+		for _, pair in { { "Bat", "SlapGlove" }, { "LaserGun", "FreezeRay" }, { "SlapGlove", "Bat" } } do
+			sampleRest()
+			local first, second = WeaponKit.Build(pair[1]), WeaponKit.Build(pair[2])
+			humanoid:EquipTool(first)
+			task.wait(0.5)
+			humanoid:EquipTool(second)
+			task.wait(0.5)
+			if second.Parent == character then
+				tutorialProbe(player, { Kind = "Switch", From = pair[1], To = pair[2], Weapon = pair[2] }, result)
+			else
+				result(false, ("combat switch %s -> %s"):format(pair[1], pair[2]), "the second tool did not equip")
+			end
+			first:Destroy()
+			second:Destroy()
+			task.wait(0.1)
+		end
+		sampleRest()
 		tutorialProbe(player, { Kind = "WeaponReleased" }, result)
 	else
 		result(true, "combat: weapons are held (skipped: no living character)")
@@ -369,6 +397,11 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 				end
 			end
 			FusionService.HandleFusionRequest(player, { Uids = commons })
+			-- The tutorial fusion (Common x2 -> Rare) now opens the big card too:
+			-- the step flow waits for it like the pull's. (The server-driven
+			-- fusion has no client request, so the client feeds the same
+			-- result through ResultController.)
+			tutorialProbe(player, { Kind = "BigCard", Expect = "RARE ORB!", FakeFusion = true }, result)
 		elseif step.Id == "multiplier" then
 			-- The "come back with $X" branch: the skip after SkipSeconds.
 			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
@@ -516,23 +549,88 @@ local function runProgressionSelfTest(player: Player, result: (boolean, string, 
 	PlayerDataService.SyncTycoon(player)
 end
 
-local function runSelfTest(player: Player)
-	local passed, failed = 0, 0
-	local function result(ok: boolean, name: string, detail: string?)
-		if ok then
-			passed += 1
-			print(("[SelfTest] PASS %s"):format(name))
-		else
-			failed += 1
-			warn(("[SelfTest] FAIL %s%s"):format(name, if detail then ": " .. detail else ""))
+local function runAutoDisplaySelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- Auto-display: 6 random items -> the pedestals hold the best by $/s,
+	-- in order, in the same sync; then a new best item (what a fusion adds)
+	-- lands on pedestal 1 in the same sync. The test items are removed after.
+	local added: { string } = {}
+	local tiers = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
+	local mutations = { nil, "Golden", "Diamond" }
+	for _ = 1, 6 do
+		local tier = tiers[math.random(1, #tiers)]
+		local def = ItemConfig.PickRandomOfTier(tier)
+		if def then
+			local item = PlayerDataService.AddItem(player, def.Id, tier, mutations[math.random(1, 3)])
+			if item then
+				table.insert(added, item.Uid)
+			end
 		end
 	end
-	local storeKind = PlayerDataService.GetStoreKind()
-	if storeKind == "Live" then
-		warn("[SelfTest] refused: saves go to the LIVE store")
+	PlayerDataService.SyncTycoon(player)
+	local function rate(uid: string?): number
+		local item = uid and PlayerDataService.GetItemByUid(player, uid)
+		return if item then TycoonConfig.GetStackCashPerSecond(item) else -1
+	end
+	local displays = PlayerDataService.GetPedestalDisplays(player)
+	local order = PlayerDataService.GetPedestalOrder(player)
+	local count = #order
+	local best = -1
+	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in inventory do
+		if not PlayerDataService.IsItemCarried(player, item.Uid) then
+			best = math.max(best, TycoonConfig.GetStackCashPerSecond(item))
+		end
+	end
+	local ordered = rate(displays[1]) == best
+	for position = 2, count do
+		local index, previous = order[position], order[position - 1]
+		if displays[index] and rate(displays[index]) > rate(displays[previous]) then
+			ordered = false
+		end
+	end
+	result(ordered, ("auto-display: the %d unlocked pedestals hold the best by $/s, in fill order"):format(count))
+	local def = ItemConfig.PickRandomOfTier("Secret")
+	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
+	if top then
+		table.insert(added, top.Uid)
+		PlayerDataService.SyncTycoon(player)
+		result(PlayerDataService.GetPedestalDisplays(player)[1] == top.Uid, "auto-display: a new best item is on pedestal 1 in the same sync")
+	end
+	PlayerDataService.RemoveItemsByUid(player, added)
+	PlayerDataService.SyncTycoon(player)
+end
+
+-- One section of the run: a header, then the body in a pcall so an error is
+-- a FAIL line and the next section still runs.
+local function runSection(title: string, result: (boolean, string, string?) -> (), body: () -> ())
+	print(("[SelfTest] == %s =="):format(title))
+	local ok, err = pcall(body)
+	if not ok then
+		result(false, title .. " (errored)", tostring(err))
+	end
+end
+
+local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
+	print(("[SelfTest] running for %s"):format(player.Name))
+	if only == "combat" then
+		print("[SelfTest] == 10. combat ==")
+		runCombatSelfTest(player, result)
+		return
+	elseif only == "cards" then
+		print("[SelfTest] == cards ==")
+		RemoteEvents.SelfTest:FireClient(player, { Only = "cards" })
+		local done = waitForReport(player, "Done")
+		if not done then
+			result(false, "cards", "no report from the client")
+		else
+			for _, line in (if typeof(done.Panels) == "table" then done.Panels else {}) do
+				if typeof(line) == "string" then
+					result(line:sub(1, 4) == "PASS", line:sub(6))
+				end
+			end
+		end
 		return
 	end
-	print(("[SelfTest] running for %s (store: %s)"):format(player.Name, storeKind))
 	local eventId = Workspace:GetAttribute("EventId")
 	if typeof(eventId) == "string" and eventId ~= "" then
 		print(("[SelfTest] note: %s is running; an event can change items during the fuzz"):format(eventId))
@@ -662,71 +760,59 @@ local function runSelfTest(player: Player)
 		local clientErrors = if typeof(done.ClientErrors) == "table" then done.ClientErrors else {}
 		result(#clientErrors == 0, "no client errors during the test", table.concat(clientErrors, " | "))
 	end
-	selfTestReports[player.UserId] = nil
 
-	-- 8. Auto-display: 6 random items -> the pedestals hold the best by $/s,
-	-- in order, in the same sync; then a new best item (what a fusion adds)
-	-- lands on pedestal 1 in the same sync. The test items are removed after.
-	local added: { string } = {}
-	local tiers = { "Common", "Rare", "Epic", "Legendary", "Mythic" }
-	local mutations = { nil, "Golden", "Diamond" }
-	for _ = 1, 6 do
-		local tier = tiers[math.random(1, #tiers)]
-		local def = ItemConfig.PickRandomOfTier(tier)
-		if def then
-			local item = PlayerDataService.AddItem(player, def.Id, tier, mutations[math.random(1, 3)])
-			if item then
-				table.insert(added, item.Uid)
-			end
-		end
-	end
-	PlayerDataService.SyncTycoon(player)
-	local function rate(uid: string?): number
-		local item = uid and PlayerDataService.GetItemByUid(player, uid)
-		return if item then TycoonConfig.GetStackCashPerSecond(item) else -1
-	end
-	local displays = PlayerDataService.GetPedestalDisplays(player)
-	local order = PlayerDataService.GetPedestalOrder(player)
-	local count = #order
-	local best = -1
-	local inventory: { any } = PlayerDataService.GetInventory(player) or {}
-	for _, item in inventory do
-		if not PlayerDataService.IsItemCarried(player, item.Uid) then
-			best = math.max(best, TycoonConfig.GetStackCashPerSecond(item))
-		end
-	end
-	local ordered = rate(displays[1]) == best
-	for position = 2, count do
-		local index, previous = order[position], order[position - 1]
-		if displays[index] and rate(displays[index]) > rate(displays[previous]) then
-			ordered = false
-		end
-	end
-	result(ordered, ("auto-display: the %d unlocked pedestals hold the best by $/s, in fill order"):format(count))
-	local def = ItemConfig.PickRandomOfTier("Secret")
-	local top = def and PlayerDataService.AddItem(player, def.Id, "Secret", "Rainbow")
-	if top then
-		table.insert(added, top.Uid)
-		PlayerDataService.SyncTycoon(player)
-		result(PlayerDataService.GetPedestalDisplays(player)[1] == top.Uid, "auto-display: a new best item is on pedestal 1 in the same sync")
-	end
-	PlayerDataService.RemoveItemsByUid(player, added)
-	PlayerDataService.SyncTycoon(player)
+	-- 8. Auto-display (see runAutoDisplaySelfTest).
+	runSection("8. auto-display", result, function()
+		runAutoDisplaySelfTest(player, result)
+	end)
 
 	-- 9. The tutorial, driven step by step on the real paths (the remote's
 	-- own handlers): every step completes in order, no shop / deal pop-up
 	-- while it runs, and a save left mid-way resumes at its step. The
 	-- tester's own tutorial state is restored after.
-	runTutorialSelfTest(player, result)
+	runSection("9. tutorial", result, function()
+		runTutorialSelfTest(player, result)
+	end)
 
 	-- 10. Combat: a Rebirth-0 player is never hittable; the cooldown is the
 	-- server's; a hit on a carrying thief sends the orb home with both
 	-- inventories unchanged (needs a second player: Test -> 2 players).
-	runCombatSelfTest(player, result)
+	runSection("10. combat", result, function()
+		runCombatSelfTest(player, result)
+	end)
 
 	-- 11. Progression: stacking, the fusion intersection, the 2nd floor,
 	-- quest / power-up refusals (the junk fuzz above covered their remotes).
-	runProgressionSelfTest(player, result)
+	runSection("11. progression", result, function()
+		runProgressionSelfTest(player, result)
+	end)
+end
+
+local function runSelfTest(player: Player, only: string?)
+	local passed, failed = 0, 0
+	local function result(ok: boolean, name: string, detail: string?)
+		if ok then
+			passed += 1
+			print(("[SelfTest] PASS %s"):format(name))
+		else
+			failed += 1
+			warn(("[SelfTest] FAIL %s%s"):format(name, if detail then ": " .. detail else ""))
+		end
+	end
+	local storeKind = PlayerDataService.GetStoreKind()
+	if storeKind == "Live" then
+		warn("[SelfTest] refused: saves go to the LIVE store")
+		return
+	end
+	print(("[SelfTest] store: %s%s"):format(storeKind, if only then ", only: " .. only else ""))
+	-- The report queue lives for the WHOLE run (every probe's report needs it)
+	-- and is cleared on every way out.
+	selfTestReports[player.UserId] = {}
+	local ok, err = pcall(runSelfTestBody, player, result, only)
+	if not ok then
+		result(false, "self-test aborted", tostring(err))
+	end
+	selfTestReports[player.UserId] = nil
 	print(("[SelfTest] done: %d passed, %d failed"):format(passed, failed))
 end
 
@@ -737,7 +823,7 @@ local function onPlayerChatted(player: Player, message: string)
 	local lower = message:lower()
 	local command, argument = lower:match("^(%S+)%s*(.*)$")
 	if command == SELFTEST_COMMAND then
-		task.spawn(runSelfTest, player)
+		task.spawn(runSelfTest, player, if argument ~= "" then argument else nil)
 		return
 	end
 

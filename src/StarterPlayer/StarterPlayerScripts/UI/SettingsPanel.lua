@@ -395,7 +395,7 @@ local function build()
 
 	-- Section: Big reveal card. (Future sections append below.)
 	sectionTitle("Big reveal card")
-	note("Single pulls always get the big card. Pick when BEST OF 10, Auto-Fuse and fusions do; the rest pop a small line.")
+	note("Single pulls and single fusions always get the big card. Pick when BEST OF 10 and Auto-Fuse do; the rest pop a small line.")
 	for _, tier in SettingsConfig.RevealTiers do
 		tierRow(tier)
 	end

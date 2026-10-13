@@ -216,6 +216,54 @@ local function cardFailures(label: string, failures: { string }): string
 	return ("FAIL cards centred (%s): %s"):format(label, table.concat(failures, "; "))
 end
 
+-- A fake successful single fusion (Common x2 -> Rare), as FusionResolved
+-- would carry it.
+local function fakeFusionResult(): any
+	local def = ItemConfig.GetItemsByTier("Rare")[1]
+	return {
+		Success = true,
+		Upgraded = true,
+		Count = 2,
+		ConsumedTier = "Common",
+		NewItem = { Uid = "selftest-fusion", ItemId = if def then def.Id else "", Tier = "Rare" },
+	}
+end
+
+-- Every successful single fusion opens the big card whatever the reveal rule
+-- says, with no top banner; Fuse All / Auto-Fuse keep the rule.
+local function testFusionCard(): { string }
+	local ResultController = require(script.Parent.ResultController) :: any
+	local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig) :: any
+	local TycoonController = require(script.Parent.TycoonController) :: any
+	local lines: { string } = {}
+	local ok, err = pcall(function()
+		ResultController.CloseCards()
+		local fake = fakeFusionResult()
+		ResultController.SelfTestFusionResolved(fake)
+		local started = os.clock()
+		while not ResultController.IsBigCardOpen() and os.clock() - started < 2 do
+			task.wait(0.1)
+		end
+		local headline = ResultController.GetBigCardHeadline()
+		table.insert(lines, ("%s single fusion: the big card opens with RARE ORB! (got %s)"):format(if headline == "RARE ORB!" then "PASS" else "FAIL", tostring(headline)))
+		table.insert(lines, ("%s single fusion: no top banner (FusionBannerShows)"):format(if ResultController.FusionBannerShows(fake) == false then "PASS" else "FAIL"))
+		ResultController.CloseCards()
+		-- Fuse All / Auto-Fuse: still the player's reveal rule.
+		local rule = TycoonController.GetRevealRule()
+		local follows = true
+		for _, tier in { "Common", "Rare", "Epic", "Legendary", "Mythic" } do
+			if ResultController.ShowsBigCardFor(tier, nil) ~= SettingsConfig.ShowsBigCard(tier, nil, rule) then
+				follows = false
+			end
+		end
+		table.insert(lines, ("%s Fuse All / Auto-Fuse follow the reveal rule"):format(if follows then "PASS" else "FAIL"))
+	end)
+	if not ok then
+		table.insert(lines, "FAIL single fusion big card: " .. tostring(err))
+	end
+	return lines
+end
+
 local function testCardMath(): { string }
 	local lines: { string } = {}
 	local margin = UIKit.MODAL_MARGIN
@@ -889,8 +937,11 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	return lines
 end
 
-local function probeBigCard(expect: string): { ProbeLine }
+local function probeBigCard(expect: string, fakeFusion: boolean?): { ProbeLine }
 	local ResultController = require(script.Parent.ResultController) :: any
+	if fakeFusion then
+		ResultController.SelfTestFusionResolved(fakeFusionResult())
+	end
 	local started = os.clock()
 	while not ResultController.IsBigCardOpen() and os.clock() - started < 3 do
 		task.wait(0.1)
@@ -899,72 +950,89 @@ local function probeBigCard(expect: string): { ProbeLine }
 	return {
 		{
 			Ok = ResultController.IsBigCardOpen() and headline == expect,
-			Name = "a single pull of a Common opens the big card",
+			Name = if fakeFusion then "a single fusion (Common x2 -> Rare) opens the big card" else "a single pull of a Common opens the big card",
 			Detail = ("headline %s"):format(tostring(headline)),
 		},
 	}
 end
 
--- The hand's rest position (UpperTorso space) while no weapon is held,
--- sampled every frame so a probe can compare against it after the server has
--- already equipped the weapon.
+-- The rest pose, sampled on request (the server unequips everything, waits
+-- 0.3 s, then asks): the hand in UpperTorso space and the three joint values.
 local restHand: Vector3? = nil
-RunService.Heartbeat:Connect(function()
-	local character = localPlayer.Character
-	if not character then
-		return
-	end
-	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
-	local holding = WeaponPose.IsHolding(character)
-	local tool = character:FindFirstChildOfClass("Tool")
-	if not holding and not tool then
-		restHand = WeaponPose.GetHandOffset(character)
-	end
-end)
+local restJoints: { CFrame? } = {}
 
--- A weapon the server just equipped on this character. Everything is read
--- from where the RIGHT HAND is DRAWN (RightHand.Position in UpperTorso
--- space, sampled on Heartbeat after the joints solved), never from the
--- joint values we wrote.
-local function probeWeapon(weaponId: string): { ProbeLine }
-	local lines: { ProbeLine } = {}
-	local CombatController = require(script.Parent.CombatController) :: any
+local function missingRig(character: Model?): boolean
+	return character == nil or character:FindFirstChild("RightHand") == nil or character:FindFirstChild("UpperTorso") == nil
+end
+
+local function probeSampleRest(): { ProbeLine }
 	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
 	local character = localPlayer.Character
-	local rest = restHand
-	if not character or not rest or not WeaponPose.GetHandOffset(character) then
-		table.insert(lines, { Ok = true, Name = ("combat %s: the arm pose (skipped: not an R15 rig)"):format(weaponId) })
-		return lines
+	if missingRig(character) then
+		restHand = nil
+		return {}
 	end
-	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
-	local started = os.clock()
-	while not WeaponPose.IsHolding(character) and os.clock() - started < 2 do
-		task.wait(0.05)
-	end
+	RunService.Heartbeat:Wait()
+	restHand = WeaponPose.GetHandOffset(character)
+	restJoints = WeaponPose.GetJointValues(character)
+	return {}
+end
+
+-- The held check: the hand is DRAWN away from its rest pose (RightHand in
+-- UpperTorso space, sampled on Heartbeat; never the joint values we wrote).
+-- Returns the hand's held position.
+local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatConfig.Weapon, label: string): Vector3
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local rest = restHand :: Vector3
 	task.wait(0.35) -- the 0.15 s raise
 	RunService.Heartbeat:Wait()
 	local held = WeaponPose.GetHandOffset(character) :: Vector3
-	local gun = weapon.Kind == "Ranged" or weapon.Kind == "Freeze"
-	if gun then
-		-- Aimed: the hand is up around shoulder height (UpperTorso top is y +1.0).
+	local holding = WeaponPose.GetHeldWeapon(character) == weapon.Id
+	if weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
+		-- Aimed: the hand is up around shoulder height.
 		local torso = character:FindFirstChild("UpperTorso") :: BasePart?
 		local shoulderY = if torso then torso.Size.Y / 2 - 0.3 else 0.7
 		table.insert(lines, {
-			Ok = WeaponPose.IsHolding(character) and math.abs(held.Y - shoulderY) <= 0.8 and held.Z < -0.8,
-			Name = ("combat %s: the hand is raised to about shoulder height while aiming"):format(weaponId),
+			Ok = holding and math.abs(held.Y - shoulderY) <= 0.8 and held.Z < -0.8,
+			Name = ("combat %s: the hand is raised to about shoulder height while aiming"):format(label),
 			Detail = ("hand y %.2f (shoulder %.2f), z %.2f"):format(held.Y, shoulderY, held.Z),
 		})
 	else
 		local forward = rest.Z - held.Z -- torso space: forward is -Z
 		table.insert(lines, {
-			Ok = WeaponPose.IsHolding(character) and (held - rest).Magnitude >= 1 and forward >= 0.5,
-			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose while held"):format(weaponId),
-			Detail = ("moved %.2f studs, %.2f forward"):format((held - rest).Magnitude, forward),
+			Ok = holding and (held - rest).Magnitude >= 1 and forward >= 0.5,
+			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose while held"):format(label),
+			Detail = ("moved %.2f studs, %.2f forward, pose %s"):format((held - rest).Magnitude, forward, tostring(WeaponPose.GetHeldWeapon(character))),
 		})
 	end
-	local tool = character:FindFirstChildOfClass("Tool")
+	return held
+end
+
+-- A weapon the server just equipped on this character. Everything is read
+-- from where the RIGHT HAND is DRAWN, never from the joint values we wrote.
+local function probeWeapon(weaponId: string): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local CombatController = require(script.Parent.CombatController) :: any
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local character = localPlayer.Character
+	if missingRig(character) then
+		table.insert(lines, { Ok = true, Name = ("combat %s: the arm pose (skipped: no RightHand / UpperTorso, not an R15 rig)"):format(weaponId) })
+		return lines
+	end
+	local char = character :: Model
+	if not restHand then
+		table.insert(lines, { Ok = false, Name = ("combat %s: the arm pose"):format(weaponId), Detail = "no rest-pose sample" })
+		return lines
+	end
+	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
+	local started = os.clock()
+	while WeaponPose.GetHeldWeapon(char) ~= weaponId and os.clock() - started < 2 do
+		task.wait(0.05)
+	end
+	local held = probeHeld(lines, char, weapon, weaponId)
+	local tool = char:FindFirstChildOfClass("Tool")
 	if tool and weapon.Kind == "Melee" then
-		local clearance = WeaponPose.GetToolClearance(character, tool) or 0
+		local clearance = WeaponPose.GetToolClearance(char, tool) or 0
 		table.insert(lines, {
 			Ok = clearance >= 1.5,
 			Name = ("combat %s: the held weapon reaches 1.5 studs clear of the torso"):format(weaponId),
@@ -973,45 +1041,100 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 	end
 
 	local played = CombatController.PlayPose(weaponId)
-	local travelled = 0
+	local peak, travelled, visible = 0, 0, 0
 	local last = held
 	local sampled = os.clock()
-	while os.clock() - sampled < 0.6 do
+	local lastFrame = sampled
+	while os.clock() - sampled < 1 do
 		RunService.Heartbeat:Wait()
-		local now = WeaponPose.GetHandOffset(character)
+		local now = WeaponPose.GetHandOffset(char)
+		local clock = os.clock()
 		if now then
+			peak = math.max(peak, (now - held).Magnitude)
 			travelled += (now - last).Magnitude
+			if (now - held).Magnitude >= 0.3 then
+				visible += clock - lastFrame
+			end
 			last = now
 		end
+		lastFrame = clock
 	end
-	local need = if weapon.Kind == "Melee" then 2 elseif weapon.Kind == "Peel" then 1 else 0.2
-	table.insert(lines, {
-		Ok = played and travelled >= need,
-		Name = ("combat %s: the hand is drawn travelling during the %s"):format(weaponId, if weapon.Kind == "Melee" then "swing" elseif weapon.Kind == "Peel" then "toss" else "shot (aim + recoil)"),
-		Detail = ("%.2f studs (needs %.1f)"):format(travelled, need),
-	})
+	if weapon.Kind == "Melee" then
+		table.insert(lines, {
+			Ok = played and peak >= 2.5,
+			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 2.5 studs"):format(weaponId),
+			Detail = ("peak %.2f studs"):format(peak),
+		})
+		table.insert(lines, {
+			Ok = played and visible >= 0.5,
+			Name = ("combat %s: the swing stays visible for >= 0.5 s"):format(weaponId),
+			Detail = ("%.2f s away from the held pose"):format(visible),
+		})
+	else
+		local need = if weapon.Kind == "Peel" then 1 else 0.2
+		table.insert(lines, {
+			Ok = played and travelled >= need,
+			Name = ("combat %s: the hand is drawn travelling during the %s"):format(weaponId, if weapon.Kind == "Peel" then "toss" else "shot (aim + recoil)"),
+			Detail = ("%.2f studs (needs %.1f)"):format(travelled, need),
+		})
+	end
 	return lines
 end
 
--- After the server took the weapon away: the hand is back at rest and
--- BaseC0 is gone.
+-- A slot-to-slot switch (no unequip in between): the NEW weapon's hand is held.
+local function probeSwitch(fromId: string, toId: string): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local character = localPlayer.Character
+	local label = ("switch %s -> %s"):format(fromId, toId)
+	if missingRig(character) then
+		table.insert(lines, { Ok = true, Name = ("combat %s (skipped: not an R15 rig)"):format(label) })
+		return lines
+	end
+	if not restHand then
+		table.insert(lines, { Ok = false, Name = ("combat %s"):format(label), Detail = "no rest-pose sample" })
+		return lines
+	end
+	probeHeld(lines, character :: Model, CombatConfig.GetWeapon(toId) :: CombatConfig.Weapon, label)
+	return lines
+end
+
+local function jointsAtRest(a: { CFrame? }, b: { CFrame? }): string?
+	for index = 1, 3 do
+		local x, y = a[index], b[index]
+		if x and y then
+			local moved = (x.Position - y.Position).Magnitude
+			local rx, ry, rz = x:ToObjectSpace(y):ToOrientation()
+			if moved > 0.02 or math.max(math.abs(rx), math.abs(ry), math.abs(rz)) > 0.02 then
+				return ("joint %d off its base (%.3f studs)"):format(index, moved)
+			end
+		end
+	end
+	return nil
+end
+
+-- After the server took the weapon away: the hand is back at rest, the
+-- shoulder / waist / elbow are at base and no BaseC0 is left.
 local function probeWeaponReleased(): { ProbeLine }
 	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
 	local character = localPlayer.Character
-	local rest = restHand
-	if not character or not rest or not WeaponPose.GetHandOffset(character) then
-		return { { Ok = true, Name = "combat: the arm is back at rest after unequip (skipped: not an R15 rig)" } }
+	if missingRig(character) then
+		return { { Ok = true, Name = "combat release: the arm is back at rest after unequip (skipped: not an R15 rig)" } }
 	end
+	local rest = restHand
+	if not rest then
+		return { { Ok = false, Name = "combat release: the arm is back at rest after unequip", Detail = "no rest-pose sample" } }
+	end
+	local char = character :: Model
 	task.wait(0.5)
 	RunService.Heartbeat:Wait()
-	local now = WeaponPose.GetHandOffset(character) :: Vector3
-	local away = (now - rest).Magnitude
-	local stored = WeaponPose.HasBaseStored(character)
+	local away = ((WeaponPose.GetHandOffset(char) :: Vector3) - rest).Magnitude
+	local stored = WeaponPose.HasBaseStored(char)
+	local joints = jointsAtRest(WeaponPose.GetJointValues(char), restJoints)
 	return {
 		{
-			Ok = away <= 0.3 and not stored,
-			Name = "combat: after unequip the hand is back at rest and no BaseC0 is left behind",
-			Detail = ("%.2f studs from rest, base stored %s"):format(away, tostring(stored)),
+			Ok = away <= 0.3 and not stored and joints == nil,
+			Name = "combat release: after unequip the hand is back at rest, Waist / RightElbow at base, no BaseC0 left",
+			Detail = ("%.2f studs from rest, base stored %s, %s"):format(away, tostring(stored), tostring(joints or "joints at base")),
 		},
 	}
 end
@@ -1022,9 +1145,13 @@ local function probeTutorial(payload: any)
 		if payload.Kind == "Step" then
 			return probeStep(payload.StepIndex, payload.StepId)
 		elseif payload.Kind == "BigCard" then
-			return probeBigCard(payload.Expect)
+			return probeBigCard(payload.Expect, payload.FakeFusion == true)
 		elseif payload.Kind == "Weapon" then
 			return probeWeapon(payload.Weapon)
+		elseif payload.Kind == "SampleRest" then
+			return probeSampleRest()
+		elseif payload.Kind == "Switch" then
+			return probeSwitch(payload.From, payload.To)
 		elseif payload.Kind == "WeaponReleased" then
 			return probeWeaponReleased()
 		end
@@ -1080,6 +1207,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testCardMath() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testFusionCard() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testHudOrder() do

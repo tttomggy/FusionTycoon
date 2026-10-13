@@ -22,9 +22,12 @@
 
 	  Hold(c, weapon)      the weapon came up: the 0.15 s raise, then the
 	                       held pose (guns: arm straight out, aimed)
-	  Release(c)           the weapon is gone: restore BaseC0
-	  Swing(c, id)         "Bat" | "SlapGlove": wind back, then a big fast arc
-	                       across (about 0.35 s)
+	  Release(c, id?)      the weapon is gone: restore BaseC0 (only if `id` is
+	                       the held weapon: a slot switch fires the new tool's
+	                       ChildAdded before the old one's ChildRemoved)
+	  Swing(c, id)         "Bat" | "SlapGlove": wind back, hold, a big fast arc
+	                       across, follow-through, settle (about 0.7 s); the
+	                       Waist twists and the RightElbow snaps straight too
 	  Recoil(c)            a 0.1 s gun kick
 	  Throw(c)             the Banana Peel's overhand toss
 	  SetAimPitch(c, rad)  where a gun is aimed (pitch only)
@@ -55,45 +58,67 @@ local HOLD_PITCH: { [string]: number } = {
 }
 local GUN_HOLD_PITCH = math.pi / 2
 
+-- One keyframe of a swing, as offsets from the hold.
+export type SwingKey = {
+	Arm: Vector3, -- shoulder pitch, yaw, roll (torso axes)
+	Waist: number, -- Waist twist about the spine (negative = to the right)
+	Elbow: number, -- RightElbow bend (0 = straight)
+}
+
+-- wind -> hold at the top -> arc (accelerating) -> follow-through -> settle.
 export type SwingShape = {
-	Wind: Vector3, -- pitch, yaw, roll offsets from the hold at the end of the wind-up
-	Arc: Vector3, -- ... at the end of the fast arc
+	Wind: SwingKey,
+	Arc: SwingKey, -- the end of the fast arc (the impact: elbow snapped straight)
+	Follow: SwingKey, -- past the left hip
 	WindSeconds: number,
+	HoldSeconds: number,
 	ArcSeconds: number,
+	FollowSeconds: number,
 	SettleSeconds: number,
 }
 
 local SWINGS: { [string]: SwingShape } = {
-	-- Raised and cocked back to the right, then a big arc across and down to
-	-- the left.
+	-- Raised and cocked back over the right shoulder, a beat at the top, a big
+	-- sweep down and across to the left, through past the left hip. 0.68 s.
 	Bat = {
-		Wind = Vector3.new(0.5, -1.35, 0.3),
-		Arc = Vector3.new(-0.45, 1.5, 0),
-		WindSeconds = 0.1,
+		Wind = { Arm = Vector3.new(0.55, -1.4, 0.3), Waist = -0.5, Elbow = 0.6 },
+		Arc = { Arm = Vector3.new(-0.5, 1.5, 0), Waist = 0.6, Elbow = 0 },
+		Follow = { Arm = Vector3.new(-0.75, 2.0, 0), Waist = 0.75, Elbow = 0.15 },
+		WindSeconds = 0.18,
+		HoldSeconds = 0.06,
 		ArcSeconds = 0.14,
-		SettleSeconds = 0.11,
+		FollowSeconds = 0.1,
+		SettleSeconds = 0.2,
 	},
-	-- A flat backhand slap.
+	-- A wide, flat backhand at shoulder height, same shape.
 	SlapGlove = {
-		Wind = Vector3.new(0.2, -1.4, 0),
-		Arc = Vector3.new(0, 1.35, 0),
-		WindSeconds = 0.1,
+		Wind = { Arm = Vector3.new(0.1, -1.5, 0), Waist = -0.45, Elbow = 0.45 },
+		Arc = { Arm = Vector3.new(0, 1.4, 0), Waist = 0.55, Elbow = 0 },
+		Follow = { Arm = Vector3.new(-0.1, 1.85, 0), Waist = 0.7, Elbow = 0.1 },
+		WindSeconds = 0.18,
+		HoldSeconds = 0.06,
 		ArcSeconds = 0.13,
-		SettleSeconds = 0.12,
+		FollowSeconds = 0.1,
+		SettleSeconds = 0.2,
 	},
 }
 
--- The joint we pose: the RightShoulder Motor6D (C0) or, on an Avatar Joint
--- Upgrade rig, the AnimationConstraint's Attachment0 (CFrame).
+local ZERO_KEY: SwingKey = { Arm = Vector3.zero, Waist = 0, Elbow = 0 }
+
+-- A joint we pose: a Motor6D (C0) or, on an Avatar Joint Upgrade rig, the
+-- AnimationConstraint's Attachment0 (CFrame).
 type Joint = {
 	Instance: Instance, -- the Motor6D, or Attachment0
 	Property: string, -- "C0" | "CFrame"
 	Attribute: string, -- "BaseC0" | "BaseCFrame"
 	Base: CFrame,
+	Written: CFrame, -- the last value written
 }
 
 type State = {
-	Joint: Joint,
+	Shoulder: Joint,
+	Waist: Joint?,
+	Elbow: Joint?,
 	Animator: Animator?,
 	WeaponId: string,
 	Gun: boolean,
@@ -105,8 +130,9 @@ type State = {
 	ThrowAt: number?,
 	AimPitch: number,
 	AimTarget: number,
-	Pose: Vector3, -- the last computed pose: pitch, yaw, roll in torso axes
-	Written: CFrame, -- the last value written to the joint
+	Pose: Vector3, -- the shoulder: pitch, yaw, roll in torso axes
+	WaistYaw: number,
+	ElbowBend: number,
 }
 
 local states: { [Model]: State } = {}
@@ -130,31 +156,36 @@ local function setJoint(joint: Joint, value: CFrame)
 	instance[joint.Property] = value
 end
 
--- The shoulder joint to pose, with its untouched base value.
-local function findJoint(character: Model): Joint?
-	local arm = character:FindFirstChild("RightUpperArm")
-	if not arm then
+-- `partName`'s joint `jointName` (RightUpperArm / RightShoulder, UpperTorso /
+-- Waist, RightLowerArm / RightElbow), with its untouched base value.
+local function findJoint(character: Model, partName: string, jointName: string): Joint?
+	local part = character:FindFirstChild(partName)
+	if not part then
 		return nil
 	end
-	local motor = arm:FindFirstChild("RightShoulder")
+	local motor = part:FindFirstChild(jointName)
 	if motor and motor:IsA("Motor6D") and motor.Enabled then
 		local stored = motor:GetAttribute("BaseC0")
+		local base = if typeof(stored) == "CFrame" then stored else motor.C0
 		return {
 			Instance = motor :: Instance,
 			Property = "C0",
 			Attribute = "BaseC0",
-			Base = if typeof(stored) == "CFrame" then stored else motor.C0,
+			Base = base,
+			Written = motor.C0,
 		}
 	end
-	for _, child in arm:GetChildren() do
+	for _, child in part:GetChildren() do
 		if child:IsA("AnimationConstraint") and child.Enabled and child.Attachment0 and child.Attachment1 then
 			local attachment = child.Attachment0 :: Attachment
 			local stored = attachment:GetAttribute("BaseCFrame")
+			local base = if typeof(stored) == "CFrame" then stored else attachment.CFrame
 			return {
 				Instance = attachment :: Instance,
 				Property = "CFrame",
 				Attribute = "BaseCFrame",
-				Base = if typeof(stored) == "CFrame" then stored else attachment.CFrame,
+				Base = base,
+				Written = attachment.CFrame,
 			}
 		end
 	end
@@ -184,45 +215,92 @@ local function stopToolHold(state: State)
 	end
 end
 
--- Writes the pose; if something else moved the joint (the Humanoid rescaling
--- the rig) the base follows its position, and the rotation stays ours.
-local function write(state: State)
-	local joint = state.Joint
+-- Writes one joint; if something else moved it (the Humanoid rescaling the
+-- rig) the base follows its position, and the rotation stays ours.
+local function writeJoint(joint: Joint, value: (CFrame) -> CFrame)
 	local live = jointValue(joint)
-	if (live.Position - state.Written.Position).Magnitude > 1e-3 then
+	if (live.Position - joint.Written.Position).Magnitude > 1e-3 then
 		joint.Base = CFrame.new(live.Position) * (joint.Base - joint.Base.Position)
 		joint.Instance:SetAttribute(joint.Attribute, joint.Base)
 	end
-	state.Written = jointFor(joint.Base, state.Pose)
-	setJoint(joint, state.Written)
+	joint.Written = value(joint.Base)
+	setJoint(joint, joint.Written)
 end
 
-local function restore(state: State)
-	local joint = state.Joint
-	if joint.Instance.Parent then
+local function write(state: State)
+	local pose = state.Pose
+	writeJoint(state.Shoulder, function(base)
+		return jointFor(base, pose)
+	end)
+	local waist, elbow = state.Waist, state.Elbow
+	if waist then
+		local yaw = state.WaistYaw
+		writeJoint(waist, function(base)
+			return base * CFrame.Angles(0, yaw, 0)
+		end)
+	end
+	if elbow then
+		local bend = state.ElbowBend
+		writeJoint(elbow, function(base)
+			return base * CFrame.Angles(bend, 0, 0)
+		end)
+	end
+end
+
+local function restoreJoint(joint: Joint?)
+	if joint and joint.Instance.Parent then
 		setJoint(joint, joint.Base)
 		joint.Instance:SetAttribute(joint.Attribute, nil)
 	end
 end
 
+local function restore(state: State)
+	restoreJoint(state.Shoulder)
+	restoreJoint(state.Waist)
+	restoreJoint(state.Elbow)
+end
+
+local function lerpKey(a: SwingKey, b: SwingKey, t: number): SwingKey
+	return {
+		Arm = a.Arm:Lerp(b.Arm, t),
+		Waist = a.Waist + (b.Waist - a.Waist) * t,
+		Elbow = a.Elbow + (b.Elbow - a.Elbow) * t,
+	}
+end
+
 -- The swing's offsets at `elapsed`; nil once it is over.
-local function swingOffset(shape: SwingShape, elapsed: number): Vector3?
+local function swingOffset(shape: SwingShape, elapsed: number): SwingKey?
 	local windEnd = shape.WindSeconds
-	local arcEnd = windEnd + shape.ArcSeconds
-	if elapsed >= arcEnd + shape.SettleSeconds then
+	local holdEnd = windEnd + shape.HoldSeconds
+	local arcEnd = holdEnd + shape.ArcSeconds
+	local followEnd = arcEnd + shape.FollowSeconds
+	if elapsed >= followEnd + shape.SettleSeconds then
 		return nil
 	elseif elapsed < windEnd then
-		return Vector3.zero:Lerp(shape.Wind, easeOut(elapsed / windEnd))
+		return lerpKey(ZERO_KEY, shape.Wind, easeOut(elapsed / windEnd))
+	elseif elapsed < holdEnd then
+		return shape.Wind
 	elseif elapsed < arcEnd then
-		return shape.Wind:Lerp(shape.Arc, easeIn((elapsed - windEnd) / shape.ArcSeconds))
+		return lerpKey(shape.Wind, shape.Arc, easeIn((elapsed - holdEnd) / shape.ArcSeconds))
+	elseif elapsed < followEnd then
+		return lerpKey(shape.Arc, shape.Follow, easeOut((elapsed - arcEnd) / shape.FollowSeconds))
 	end
-	return shape.Arc:Lerp(Vector3.zero, easeOut((elapsed - arcEnd) / shape.SettleSeconds))
+	return lerpKey(shape.Follow, ZERO_KEY, easeOut((elapsed - followEnd) / shape.SettleSeconds))
+end
+
+function WeaponPose.GetSwingSeconds(weaponId: string): number
+	local shape = SWINGS[weaponId]
+	if not shape then
+		return 0
+	end
+	return shape.WindSeconds + shape.HoldSeconds + shape.ArcSeconds + shape.FollowSeconds + shape.SettleSeconds
 end
 
 -- Computes the state's pose for this frame (RenderStepped only: it
 -- integrates the aim smoothing with dt).
 local function compute(state: State, now: number, dt: number)
 	local pitch, yaw, roll = state.HoldPitch, 0, 0
+	local waistYaw, elbowBend = 0, 0
 
 	-- The raise from hanging down to the held pose.
 	local raise = (now - state.HeldAt) / EQUIP_SECONDS
@@ -240,9 +318,11 @@ local function compute(state: State, now: number, dt: number)
 	if swingAt and shape then
 		local offset = swingOffset(shape, now - swingAt)
 		if offset then
-			pitch += offset.X
-			yaw += offset.Y
-			roll += offset.Z
+			pitch += offset.Arm.X
+			yaw += offset.Arm.Y
+			roll += offset.Arm.Z
+			waistYaw += offset.Waist
+			elbowBend += offset.Elbow
 		else
 			state.SwingAt, state.Swing = nil, nil
 		end
@@ -270,11 +350,13 @@ local function compute(state: State, now: number, dt: number)
 	end
 
 	state.Pose = Vector3.new(pitch, yaw, roll)
+	state.WaistYaw = waistYaw
+	state.ElbowBend = elbowBend
 end
 
 local function apply()
 	for character, state in states do
-		if not character.Parent or not state.Joint.Instance.Parent then
+		if not character.Parent or not state.Shoulder.Instance.Parent then
 			states[character] = nil
 		else
 			write(state)
@@ -294,7 +376,7 @@ local function onRender()
 	local dt = math.min(now - lastStep, 0.1)
 	lastStep = now
 	for character, state in states do
-		if not character.Parent or not state.Joint.Instance.Parent then
+		if not character.Parent or not state.Shoulder.Instance.Parent then
 			states[character] = nil
 		else
 			compute(state, now, dt)
@@ -321,18 +403,26 @@ end
 function WeaponPose.Hold(character: Model, weapon: CombatConfig.Weapon)
 	local old = states[character]
 	if old then
-		-- Switching straight from one weapon to another: back to BaseC0 first.
+		-- Switching straight from one weapon to another: back to base first.
 		restore(old)
 		states[character] = nil
 	end
-	local joint = findJoint(character)
-	if not joint then
+	local shoulder = findJoint(character, "RightUpperArm", "RightShoulder")
+	if not shoulder then
 		return
 	end
-	joint.Instance:SetAttribute(joint.Attribute, joint.Base)
+	local waist = findJoint(character, "UpperTorso", "Waist")
+	local elbow = findJoint(character, "RightLowerArm", "RightElbow")
+	for _, joint in { shoulder, waist :: Joint, elbow :: Joint } do
+		if joint then
+			joint.Instance:SetAttribute(joint.Attribute, joint.Base)
+		end
+	end
 	local gun = weapon.Kind == "Ranged" or weapon.Kind == "Freeze"
 	local state: State = {
-		Joint = joint,
+		Shoulder = shoulder,
+		Waist = waist,
+		Elbow = elbow,
 		Animator = character:FindFirstChildWhichIsA("Animator", true),
 		WeaponId = weapon.Id,
 		Gun = gun,
@@ -341,7 +431,8 @@ function WeaponPose.Hold(character: Model, weapon: CombatConfig.Weapon)
 		AimPitch = 0,
 		AimTarget = 0,
 		Pose = Vector3.zero,
-		Written = jointValue(joint),
+		WaistYaw = 0,
+		ElbowBend = 0,
 	}
 	states[character] = state
 	compute(state, os.clock(), 0)
@@ -350,13 +441,22 @@ function WeaponPose.Hold(character: Model, weapon: CombatConfig.Weapon)
 	ensureRunning()
 end
 
--- The weapon is gone: BaseC0 back, attribute cleared.
-function WeaponPose.Release(character: Model)
+-- The weapon is gone: base values back, attributes cleared. With `weaponId`,
+-- only if that weapon is the one held: on a slot-to-slot switch the NEW
+-- tool can arrive before the OLD one leaves, and the old one's release must
+-- not wipe the new pose.
+function WeaponPose.Release(character: Model, weaponId: string?)
 	local state = states[character]
-	if state then
+	if state and (weaponId == nil or state.WeaponId == weaponId) then
 		states[character] = nil
 		restore(state)
 	end
+end
+
+-- The id of the weapon whose pose is up, if any.
+function WeaponPose.GetHeldWeapon(character: Model): string?
+	local state = states[character]
+	return if state then state.WeaponId else nil
 end
 
 function WeaponPose.IsHolding(character: Model): boolean
@@ -372,7 +472,7 @@ function WeaponPose.Swing(character: Model, weaponId: string): number
 	end
 	state.SwingAt = os.clock()
 	state.Swing = shape
-	return shape.WindSeconds + shape.ArcSeconds + shape.SettleSeconds
+	return WeaponPose.GetSwingSeconds(weaponId)
 end
 
 function WeaponPose.Recoil(character: Model)
@@ -410,13 +510,32 @@ function WeaponPose.GetHandOffset(character: Model): Vector3?
 	return torso.CFrame:PointToObjectSpace(hand.Position)
 end
 
--- Whether the shoulder still carries a stored base (false once released).
-function WeaponPose.HasBaseStored(character: Model): boolean
-	local arm = character:FindFirstChild("RightUpperArm")
-	if not arm then
-		return false
+-- The live joint values (Motor6D C0, or the AnimationConstraint's Attachment0
+-- CFrame) of the shoulder, waist and elbow: /selftest compares them before a
+-- weapon and after its release.
+function WeaponPose.GetJointValues(character: Model): { CFrame? }
+	local values: { CFrame? } = {}
+	for index, pair in { { "RightUpperArm", "RightShoulder" }, { "UpperTorso", "Waist" }, { "RightLowerArm", "RightElbow" } } do
+		local part = character:FindFirstChild(pair[1])
+		local motor = part and part:FindFirstChild(pair[2])
+		if motor and motor:IsA("Motor6D") and motor.Enabled then
+			values[index] = motor.C0
+		elseif part then
+			for _, child in part:GetChildren() do
+				if child:IsA("AnimationConstraint") and child.Attachment0 then
+					values[index] = child.Attachment0.CFrame
+					break
+				end
+			end
+		end
 	end
-	for _, descendant in arm:GetDescendants() do
+	return values
+end
+
+-- Whether any pose joint (shoulder, waist, elbow) still carries a stored base
+-- (false once released).
+function WeaponPose.HasBaseStored(character: Model): boolean
+	for _, descendant in character:GetDescendants() do
 		if descendant:GetAttribute("BaseC0") ~= nil or descendant:GetAttribute("BaseCFrame") ~= nil then
 			return true
 		end

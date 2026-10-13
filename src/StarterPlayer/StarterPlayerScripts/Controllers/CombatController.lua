@@ -808,11 +808,26 @@ end
 
 -- A weapon came up in `character`'s hand: the raise, the sound, and the aim
 -- pose for guns.
+local toolEventsLogged = 0
+
+-- Studio only, a few lines per run: the order of tool ChildAdded / ChildRemoved
+-- on a slot switch (the new tool's Add arrives BEFORE the old one's Remove).
+local function logToolEvent(what: string, tool: Instance)
+	if toolEventsLogged >= 8 or not RunService:IsStudio() or not tool:GetAttribute("Weapon") then
+		return
+	end
+	toolEventsLogged += 1
+	print(("[CombatController] tool event: %s %s"):format(what, tool.Name))
+end
+
+-- A weapon came up in `character`'s hand: the raise, the sound, and the aim
+-- pose for guns.
 local function onToolAdded(player: Player, character: Model, tool: Instance)
 	local weapon = if tool:IsA("Tool") then CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) else nil
 	if not weapon then
 		return
 	end
+	logToolEvent("added", tool)
 	WeaponPose.Hold(character, weapon)
 	local root = getRoot(player)
 	if root then
@@ -820,9 +835,22 @@ local function onToolAdded(player: Player, character: Model, tool: Instance)
 	end
 end
 
-local function onToolRemoved(character: Model, tool: Instance)
-	if tool:IsA("Tool") and CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) then
-		WeaponPose.Release(character)
+local function onToolRemoved(player: Player, character: Model, tool: Instance)
+	if not (tool:IsA("Tool") and CombatConfig.GetWeapon(tool:GetAttribute("Weapon"))) then
+		return
+	end
+	logToolEvent("removed", tool)
+	-- Only the removed weapon's own pose goes: on a slot switch the new tool
+	-- was already added and its pose must stay.
+	WeaponPose.Release(character, tostring(tool:GetAttribute("Weapon")))
+	-- Whatever order the events fired in, a weapon still in the hand is held.
+	for _, child in character:GetChildren() do
+		if child ~= tool and child:IsA("Tool") then
+			local other = CombatConfig.GetWeapon(child:GetAttribute("Weapon"))
+			if other and WeaponPose.GetHeldWeapon(character) ~= other.Id then
+				WeaponPose.Hold(character, other)
+			end
+		end
 	end
 end
 
@@ -835,7 +863,7 @@ local function watchPlayer(player: Player)
 			onToolAdded(player, character, child)
 		end)
 		character.ChildRemoved:Connect(function(child)
-			onToolRemoved(character, child)
+			onToolRemoved(player, character, child)
 		end)
 	end
 	player.CharacterAdded:Connect(watchCharacter)
