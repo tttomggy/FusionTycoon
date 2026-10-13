@@ -596,20 +596,32 @@ local function onHitReceived(payload: any)
 	end
 	ragdolledUntil = serverNow() + seconds
 	humanoid:UnequipTools()
+	local character = localPlayer.Character :: Model
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
 	-- The server launches you itself (ServerLaunch) when it could take the
 	-- root's network ownership: then no client impulse (never both). Only
 	-- when it couldn't, this is the fallback.
 	if payload.ServerLaunch ~= true then
+		-- Same recipe as the server's, on this side: the ground controller off
+		-- (PlatformStand), the velocity SET on every part, then back up.
+		humanoid.PlatformStand = true
 		if typeof(payload.Impulse) == "Vector3" then
-			root:ApplyImpulse(payload.Impulse * root.AssemblyMass)
+			for _, part in character:GetDescendants() do
+				if part:IsA("BasePart") and not part.Anchored then
+					part.AssemblyLinearVelocity = payload.Impulse
+				end
+			end
 		end
 		if payload.Spin == true then
-			root:ApplyAngularImpulse(CombatConfig.SpinImpulse * root.AssemblyMass)
+			root.AssemblyAngularVelocity = CombatConfig.SpinImpulse
 		end
+		task.delay(seconds, function()
+			if humanoid.Parent then
+				humanoid.PlatformStand = false
+			end
+		end)
 	end
 	ProximityPromptService.Enabled = false
-	local character = localPlayer.Character
 	task.delay(seconds, function()
 		ProximityPromptService.Enabled = true
 		if localPlayer.Character == character and humanoid.Parent then

@@ -109,6 +109,9 @@ local function getRig(character: Model): Rig?
 end
 
 local function getTrack(rig: Rig, name: string): AnimationTrack?
+	if forceFallback then
+		return nil -- /selftest: no cached track either
+	end
 	local cached = rig.Tracks[name]
 	if cached then
 		return cached
@@ -184,6 +187,9 @@ end
 --[[ Public API ------------------------------------------------------------------------ ]]
 
 function WeaponAnimator.Hold(character: Model, weapon: CombatConfig.Weapon): boolean
+	if forceFallback then
+		return false -- /selftest: the live "no id, not Studio" path: no track at all
+	end
 	local clips = CLIPS[weapon.Id]
 	local rig = getRig(character)
 	if not clips or not rig then

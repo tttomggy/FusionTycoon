@@ -254,7 +254,8 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 		saved[name] = victim:GetAttribute(name)
 	end
 	printPhysicsSettings(victimRoot)
-	for _, spec in { { "Bat", 10 }, { "SlapGlove", 15 } } do
+	CombatService.SetLaunchLogging(true)
+	for _, spec in { { "Bat", 12 }, { "SlapGlove", 20 } } do
 		local weapon = CombatConfig.GetWeapon(spec[1] :: string) :: CombatConfig.Weapon
 		for _, name in attributes do
 			victim:SetAttribute(name, nil)
@@ -266,6 +267,14 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 		local moved = (Vector3.new(victimRoot.Position.X, 0, victimRoot.Position.Z) - Vector3.new(before.X, 0, before.Z)).Magnitude
 		result(moved >= (spec[2] :: number), ("combat launch: the %s launches the target >= %d studs in 0.6 s (server-measured)"):format(weapon.Name, spec[2] :: number), ("%.1f studs"):format(moved))
 		task.wait(CombatConfig.RagdollSeconds + 0.5)
+		-- Standing again: not platform-standing, and the player owns the root.
+		local humanoid = victim.Character and victim.Character:FindFirstChildOfClass("Humanoid")
+		local okOwner, owner = pcall(victimRoot.GetNetworkOwner, victimRoot)
+		result(
+			humanoid ~= nil and not humanoid.PlatformStand and okOwner and owner == victim,
+			("combat launch: after the %s the target is standing (no PlatformStand) and owned by the player again"):format(weapon.Name),
+			("PlatformStand %s, owner %s"):format(tostring(humanoid and humanoid.PlatformStand), if okOwner then tostring(owner) else "error")
+		)
 		for _, name in attributes do
 			victim:SetAttribute(name, nil)
 		end
@@ -276,6 +285,7 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 		end
 		task.wait(0.2)
 	end
+	CombatService.SetLaunchLogging(false)
 	for _, name in attributes do
 		victim:SetAttribute(name, saved[name])
 	end

@@ -43,6 +43,12 @@ CombatConfig.RagdollSeconds = 1.5
 CombatConfig.GetUpImmuneSeconds = 3
 CombatConfig.SpawnProtectSeconds = 5
 CombatConfig.RangeSlack = 4 -- studs of lag allowance on the server's range checks
+-- Knockback is a launch VELOCITY (studs/s, SET on every part of the ragdolled
+-- character; CombatService.launch). Targets: the Bat throws about 15-20
+-- studs, the Slap Glove about 25-30 with a spin. These Knockback values and
+-- this hop are the first guess for that (hop 25 = ~0.26 s of air, then the
+-- ragdoll slides): tune them in the 2-player test; /selftest combat measures
+-- >= 12 (Bat) / >= 20 (Glove) studs in 0.6 s on the server.
 CombatConfig.UpwardKick = 25 -- added to every knockback (a little hop)
 CombatConfig.HitsPerSecond = 4 -- RequestHit rate limit (spam is dropped)
 CombatConfig.HitBurst = 6

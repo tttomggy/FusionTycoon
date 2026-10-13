@@ -41,6 +41,7 @@
 	Follows the ServiceTemplate contract.
 ]]
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
@@ -72,6 +73,9 @@ local state = {
 	lastSwing = {} :: { [number]: { [string]: number } },
 	-- userId -> the joints swapped out for the current ragdoll
 	joints = {} :: { [number]: { Joint } },
+	-- userId -> the character launched by a hit (PlatformStand / ownership to undo)
+	launches = {} :: { [number]: Launch },
+	logLaunch = false,
 	-- userId -> placed banana peels
 	peels = {} :: { [number]: { Model } },
 	folder = nil :: Folder?,
@@ -221,46 +225,109 @@ local function swapJoints(player: Player)
 	state.joints[player.UserId] = joints
 end
 
--- The whole character's mass: every BasePart (the Motor6Ds were swapped for
--- BallSockets, so AssemblyMass is only the root's assembly now).
-local function characterMass(character: Model): number
-	local mass = 0
-	for _, part in character:GetDescendants() do
-		if part:IsA("BasePart") then
-			mass += part.Mass
-		end
-	end
-	return mass
+local HEARTBEAT_REASSERTS = 3 -- server Heartbeats the launch velocity is re-checked
+local REASSERT_BELOW = 0.6 -- ... only while the root is slower than this share of the target
+
+type Launch = { Character: Model, Humanoid: Humanoid?, Root: BasePart }
+
+local function flatSpeed(velocity: Vector3): number
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 end
 
--- The server-owned launch: the server takes the root's network ownership and
--- applies the impulse itself (a client-side impulse on your own character is
--- corrected away under fixed simulation / Server Authority). Every part
--- gets impulse * its own mass, i.e. the whole character's mass in total, so
--- they all leave at `impulse` studs/s. Returns false when ownership can't be
--- taken (the client then applies the impulse as the fallback; never both).
+-- Sets every loose part of `character` to `velocity` (studs/s). SETTING the
+-- velocity, not applying an impulse: the Humanoid's ground controller and the
+-- old owner's last physics frames cannot cancel it the way they ate impulses.
+local function setCharacterVelocity(character: Model, velocity: Vector3)
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") and not part.Anchored then
+			part.AssemblyLinearVelocity = velocity
+		end
+	end
+end
+
+-- Studio-only log of the target root's flat speed for 10 Heartbeats after a
+-- launch (CombatService.SetLaunchLogging; /selftest turns it on).
+local function logLaunch(root: BasePart, label: string)
+	task.spawn(function()
+		local speeds: { string } = {}
+		for _ = 1, 10 do
+			RunService.Heartbeat:Wait()
+			table.insert(speeds, ("%.1f"):format(flatSpeed(root.AssemblyLinearVelocity)))
+		end
+		print(("[CombatService] %s: target root flat speed over 10 Heartbeats: %s"):format(label, table.concat(speeds, ", ")))
+	end)
+end
+
+-- The server-owned launch (classic client ownership is what this place
+-- uses: the target's root was owned by Player2). In order:
+--   1. humanoid.PlatformStand = true (replicates; the ground controller is
+--      off, so nothing brakes the flight; the Humanoid state itself is the
+--      owning client's to set, which CombatController does),
+--   2. the server takes the root's network ownership (pcall),
+--   3. every part's AssemblyLinearVelocity = the launch velocity,
+--   4. for the next 3 server Heartbeats it is set again, but only while the
+--      root's flat speed is still below 60% of the target (the old owner's
+--      last frames can overwrite it; this never adds speed twice).
+-- Returns false when ownership can't be taken (the client then does the same
+-- on its side as the fallback; never both).
 local function launch(target: Player, impulse: Vector3, spin: boolean): boolean
 	local character = target.Character
 	local root = getRoot(target)
 	if not character or not root then
 		return false
 	end
-	if not pcall(root.SetNetworkOwner, root, nil) then
-		return false
-	end
 	local humanoid = getHumanoid(target)
 	if humanoid then
-		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+		humanoid.PlatformStand = true
 	end
-	for _, part in character:GetDescendants() do
-		if part:IsA("BasePart") and not part.Anchored then
-			part:ApplyImpulse(impulse * part.Mass)
+	if not pcall(root.SetNetworkOwner, root, nil) then
+		if humanoid then
+			humanoid.PlatformStand = false
 		end
+		return false
 	end
+	state.launches[target.UserId] = { Character = character, Humanoid = humanoid, Root = root }
+	setCharacterVelocity(character, impulse)
 	if spin then
-		root:ApplyAngularImpulse(CombatConfig.SpinImpulse * characterMass(character))
+		root.AssemblyAngularVelocity = CombatConfig.SpinImpulse
 	end
+	if state.logLaunch then
+		logLaunch(root, "launch")
+	end
+	local wanted = flatSpeed(impulse)
+	task.spawn(function()
+		for _ = 1, HEARTBEAT_REASSERTS do
+			RunService.Heartbeat:Wait()
+			if not root.Parent or state.launches[target.UserId] == nil then
+				return
+			end
+			if flatSpeed(root.AssemblyLinearVelocity) < wanted * REASSERT_BELOW then
+				setCharacterVelocity(character, impulse)
+			end
+		end
+	end)
 	return true
+end
+
+-- Gets the target standing again: PlatformStand off, the player owns their
+-- character again, then GettingUp. Safe to call twice, on respawn and on
+-- leaving mid-ragdoll (nobody is left platform-standing).
+local function endLaunch(userId: number, player: Player?)
+	local launched = state.launches[userId]
+	state.launches[userId] = nil
+	if not launched then
+		return
+	end
+	local humanoid = launched.Humanoid
+	if humanoid and humanoid.Parent then
+		humanoid.PlatformStand = false
+	end
+	if player and player.Parent and launched.Root.Parent then
+		pcall(launched.Root.SetNetworkOwner, launched.Root, player)
+	end
+	if humanoid and humanoid.Parent then
+		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+	end
 end
 
 -- Ragdolls `target` for RagdollSeconds with `impulse` (studs/s).
@@ -276,18 +343,8 @@ local function ragdoll(target: Player, impulse: Vector3, spin: boolean)
 	task.delay(seconds, function()
 		if target.Character == character then
 			restoreJoints(target.UserId)
-			if serverLaunch then
-				-- Get up: the player drives their character again.
-				local root = getRoot(target)
-				if root then
-					pcall(root.SetNetworkOwner, root, target)
-				end
-				local humanoid = getHumanoid(target)
-				if humanoid then
-					humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-				end
-			end
 		end
+		endLaunch(target.UserId, target)
 	end)
 end
 
@@ -685,6 +742,7 @@ end
 
 local function onCharacterAdded(player: Player, character: Model)
 	restoreJoints(player.UserId)
+	endLaunch(player.UserId, nil)
 	player:SetAttribute("SpawnProtectUntil", serverNow() + CombatConfig.SpawnProtectSeconds)
 	player:SetAttribute("RagdollUntil", nil)
 	player:SetAttribute("FrozenUntil", nil)
@@ -708,11 +766,17 @@ end
 local function onPlayerRemoving(player: Player)
 	state.lastSwing[player.UserId] = nil
 	state.joints[player.UserId] = nil
+	endLaunch(player.UserId, nil)
 	local peels: { Model } = state.peels[player.UserId] or {}
 	for _, peel in peels do
 		peel:Destroy()
 	end
 	state.peels[player.UserId] = nil
+end
+
+-- /selftest: print the target root's flat speed for 10 Heartbeats per launch.
+function CombatService.SetLaunchLogging(on: boolean)
+	state.logLaunch = on
 end
 
 function CombatService:Init()

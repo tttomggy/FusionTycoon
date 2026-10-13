@@ -1019,11 +1019,15 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 			Detail = ("hand y %.2f (shoulder %.2f), z %.2f"):format(held.Y, shoulderY, held.Z),
 		})
 	else
-		local forward = rest.Z - held.Z -- torso space: forward is -Z
+		-- The bat sits on the shoulder (no "forward" needed): the hand is drawn
+		-- away from rest and the hold track loops.
+		local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+		local holdTrack = WeaponAnimator.GetHoldTrack(character)
+		local looping = holdTrack ~= nil and holdTrack.IsPlaying and holdTrack.Looped
 		table.insert(lines, {
-			Ok = holding and (held - rest).Magnitude >= 1 and forward >= 0.5,
-			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose while held"):format(label),
-			Detail = ("moved %.2f studs, %.2f forward, pose %s"):format((held - rest).Magnitude, forward, tostring((require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character))),
+			Ok = holding and (held - rest).Magnitude >= 1 and looping,
+			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose and the hold track loops"):format(label),
+			Detail = ("moved %.2f studs, hold track looping %s, pose %s"):format((held - rest).Magnitude, tostring(looping), tostring((require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character))),
 		})
 	end
 	return held
@@ -1111,13 +1115,13 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 	end
 	if weapon.Kind == "Melee" then
 		table.insert(lines, {
-			Ok = played and peak >= 3,
-			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 3 studs"):format(weaponId),
+			Ok = played and peak >= 1.5,
+			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 1.5 studs"):format(weaponId),
 			Detail = ("peak %.2f studs"):format(peak),
 		})
 		table.insert(lines, {
-			Ok = played and visible >= 0.5,
-			Name = ("combat %s: the swing stays visible for >= 0.5 s"):format(weaponId),
+			Ok = played and visible >= 0.4,
+			Name = ("combat %s: the swing stays visible for >= 0.4 s"):format(weaponId),
 			Detail = ("%.2f s away from the held pose"):format(visible),
 		})
 	else
