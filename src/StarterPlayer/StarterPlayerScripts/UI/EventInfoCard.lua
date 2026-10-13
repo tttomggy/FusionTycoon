@@ -26,7 +26,6 @@
 	the tutorial closes it for them.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local RunService = game:GetService("RunService")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -53,9 +52,6 @@ local shownId: string? = nil
 local shownNow = false
 local order = 0
 local tutorialOk = false -- the tutorial's "OK, got it" button at the bottom
-local POP_SETTLE_SECONDS = 0.3 -- PopIn is 0.18 s; the Back ease overshoots
-local popping = false -- the PopIn tween runs: AbsoluteSize and PopScale disagree
-local settleToken = 0
 
 --[[ Helpers -------------------------------------------------------------------- ]]
 
@@ -319,26 +315,14 @@ local function place()
 	UIKit.FitHeight(frame, height)
 end
 
--- Re-centres once the layout has settled (the AutomaticSize height lands a
--- frame after the content changes) and again when the PopIn tween is over,
--- measured at rest.
+-- Re-centres through UIKit.SettleCard: one place() per Heartbeat, skipping
+-- frames where the PopScale moved (the measured size is stale then), until
+-- the height and the drawn centre hold still.
 local function settle()
-	settleToken += 1
-	local mine = settleToken
-	popping = true
-	task.spawn(function()
-		RunService.Heartbeat:Wait()
-		RunService.Heartbeat:Wait()
-		if mine ~= settleToken then
-			return
-		end
-		task.wait(POP_SETTLE_SECONDS)
-		if mine ~= settleToken then
-			return
-		end
-		popping = false
-		place()
-	end)
+	local frame = holder
+	if frame then
+		UIKit.SettleCard(frame, place)
+	end
 end
 
 local function ensureBuilt(parent: Instance): Frame
@@ -369,27 +353,14 @@ local function ensureBuilt(parent: Instance): Frame
 	-- Placed by UIKit.FitHeight (centred in the card band).
 	panelHolder:SetAttribute("CardPlaced", true)
 	holder = panelHolder
-	local lastHeight = 0
+	-- Only kicks the settle loop (it never places directly); a change the loop
+	-- itself causes is ignored while it runs.
 	panelHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		local height = panelHolder.AbsoluteSize.Y / UIKit.EffectiveScale(panelHolder)
-		-- PopIn / PopOut scale both sides of the ratio; only a real height
-		-- change (content, phone switch) re-centres. Mid-tween the
-		-- AbsoluteSize lags the PopScale by a frame (a 1-3% error that was
-		-- baked into the position), so the settle pass below re-centres.
-		if not popping and math.abs(height - lastHeight) > 1 then
-			lastHeight = height
-			place()
-			-- The size can still be settling (AutomaticSize lands a frame
-			-- later): re-place on the frame after, once it is final.
-			task.defer(function()
-				RunService.Heartbeat:Wait()
-				if not popping then
-					place()
-				end
-			end)
+		if panelHolder.Visible and panelHolder:GetAttribute("Settling") ~= true then
+			settle()
 		end
 	end)
-	UIKit.LayoutChanged:Connect(place)
+	UIKit.LayoutChanged:Connect(settle)
 	return panelHolder
 end
 
@@ -459,9 +430,8 @@ end
 
 function EventInfoCard.Hide()
 	local frame = holder
-	settleToken += 1
-	popping = false
 	if frame then
+		UIKit.CancelSettle(frame)
 		frame.Visible = false
 	end
 end

@@ -347,10 +347,22 @@ end
 local function measurePlacedCards(label: string): number
 	local view = UIKit.GetLogicalViewport()
 	local found = 0
-	-- Let the card's layout settle first (AbsoluteSize changes land a frame
-	-- late and the card re-places itself on the next one).
+	-- Let the cards' settle loops (UIKit.SettleCard) finish first: wait for
+	-- every placed card's `Settling` attribute to clear, up to 1 s.
 	RunService.Heartbeat:Wait()
-	RunService.Heartbeat:Wait()
+	local waited = os.clock()
+	repeat
+		local settling = false
+		for _, gui in localPlayer:WaitForChild("PlayerGui"):GetDescendants() do
+			if gui:IsA("GuiObject") and gui:GetAttribute("CardPlaced") == true and gui:GetAttribute("Settling") == true then
+				settling = true
+				break
+			end
+		end
+		if settling then
+			RunService.Heartbeat:Wait()
+		end
+	until not settling or os.clock() - waited > 1
 	for _, gui in localPlayer:WaitForChild("PlayerGui"):GetDescendants() do
 		if gui:IsA("GuiObject") and gui:GetAttribute("CardPlaced") == true and gui.Visible then
 			local screen = gui:FindFirstAncestorWhichIsA("ScreenGui")
@@ -389,10 +401,18 @@ local function testPlacedCards(): { string }
 			end
 			local hud = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
 			if hud then
-				eventInfo.Show(hud, "GoldenRain", false)
-				task.wait(0.4)
-				measurePlacedCards(label)
-				eventInfo.Hide()
+				-- Both the NEXT-event card and a RUNNING one (Night), with the
+				-- tutorial's OK row off and on.
+				for _, now in { false, true } do
+					for _, okRow in { false, true } do
+						eventInfo.SetTutorialOk(okRow)
+						eventInfo.Show(hud, if now then "Night" else "GoldenRain", now)
+						measurePlacedCards(("%s %s%s"):format(label, if now then "running" else "next", if okRow then " +OK" else ""))
+						eventInfo.Hide()
+						task.wait(0.1)
+					end
+				end
+				eventInfo.SetTutorialOk(false)
 			end
 		end)
 		if not ok then
@@ -1176,6 +1196,27 @@ local function run(payload: any)
 			table.insert(errors, message)
 		end
 	end)
+	if typeof(payload) == "table" and payload.Only == "cards" then
+		-- /selftest cards: only the card-placement checks.
+		cardLines = {}
+		local lines: { string } = {}
+		local ok, err = pcall(function()
+			testPlacedCards()
+			for _, line in cardLines do
+				table.insert(lines, line)
+			end
+			for _, line in testCardMath() do
+				table.insert(lines, line)
+			end
+		end)
+		if not ok then
+			table.insert(lines, "FAIL cards: " .. tostring(err))
+		end
+		connection:Disconnect()
+		RemoteEvents.SelfTestReport:FireServer({ Stage = "Done", Panels = lines })
+		running = false
+		return
+	end
 	local otherUserId = if typeof(payload) == "table" and typeof(payload.OtherUserId) == "number" then payload.OtherUserId else 1
 	local slots = if typeof(payload) == "table" and typeof(payload.Slots) == "table" then payload.Slots else {}
 	local dealSlots = if typeof(payload) == "table" and typeof(payload.DealSlots) == "table" then payload.DealSlots else {}

@@ -87,12 +87,33 @@ never sold, server authority are unchanged.
   place's Workspace simulation settings. That needs Studio; `findJoint`
   handles both cases, so nothing depends on the answer. Add what Harris's
   monkey shows here.
+- **Slot switch (Swing fix 2):** Roblox fires the new tool's `ChildAdded`
+  BEFORE the old tool's `ChildRemoved`, so the old release used to wipe the
+  new weapon's pose (Freeze Ray and Slap Glove hung straight down).
+  `WeaponPose.Release(character, weaponId)` now only releases that weapon,
+  and `CombatController.onToolRemoved` re-`Hold`s any weapon `Tool` still in
+  the hand, so the pose is right in either order. (Studio prints the first 8
+  tool events as `[CombatController] tool event: …`; not yet read in Studio.)
+- **The swing is ~0.68 s:** wind 0.18 (bat cocked over the right shoulder),
+  hold 0.06, arc 0.14 (accelerating, big sweep to the left, elbow snapped
+  straight at the end), follow-through 0.1 (past the left hip), settle 0.2.
+  The `Waist` Motor6D twists ~0.5 rad right on the wind and ~0.6 left through
+  the arc, `RightElbow` bends ~0.6 on the wind: both use the same
+  `BaseC0` / `BaseCFrame` rules as the shoulder (stored on Hold, never built
+  from the live value, restored and cleared on Release; AJU rigs via the
+  AnimationConstraint). Slap Glove: the same shape, flat at shoulder height.
 - **/selftest measures what is drawn:** `RightHand.Position` in `UpperTorso`
   space on Heartbeat (`WeaponPose.GetHandOffset`), never the joint values.
-  Held: >= 1 stud (and >= 0.5 forward) from the rest pose sampled before
-  equip; guns: about shoulder height; swing: >= 2 studs of hand travel;
-  released: within 0.3 studs of rest and no `BaseC0` left; Bat: tool parts
-  reach >= 1.5 studs clear of the UpperTorso.
+  The rest pose is sampled explicitly (server: `UnequipTools`, 0.3 s, then a
+  `SampleRest` probe). Held: >= 1 stud (and >= 0.5 forward) from rest; guns:
+  about shoulder height; swing: the hand's PEAK distance from its held
+  position >= 2.5 studs and away from it (>= 0.3 stud) for >= 0.5 s
+  (Bat and Glove); Bat: tool parts reach >= 1.5 studs clear of the
+  UpperTorso; slot switches Bat → SlapGlove, LaserGun → FreezeRay,
+  SlapGlove → Bat (no unequip between) measure the new weapon's held hand;
+  released: hand within 0.3 studs of rest, shoulder / Waist / RightElbow at
+  their base and no `BaseC0` / `BaseCFrame` left. "Skipped: not an R15 rig"
+  only when `RightHand` / `UpperTorso` is really missing.
 - **Holding it:** `Humanoid:EquipTool` builds the `RightGrip` weld; the
   server checks it (`CombatService.GetGripProblem`: the weld exists and the
   Handle is within 1.5 studs of RightHand) when a tool is equipped and

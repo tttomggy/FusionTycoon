@@ -1795,6 +1795,14 @@ person, R15, 100% camera zoom; check each from the front and the side.
   Same for the Slap Glove (wide flat backhand at shoulder height). Unequip:
   the arm drops back to rest. Fuse explain card: a click during the 1.5 s
   fill wobbles the OK; the first click after it closes the card.
+- [ ] **Swing fix 2 (3rd person, Harris's avatar AND a blocky R15):**
+  `/weapons all`, then switch slot to slot Bat → Laser → Freeze → Glove →
+  Banana: every weapon is held up, none hangs at the side. 3 Bat swings and
+  3 slaps: you can see the cock-back, a beat at the top, the body twist, the
+  big sweep and the follow-through past the left hip (~0.7 s). Fuse 2
+  Commons: the big "RARE ORB!" card appears (no top banner), a Rare closes
+  itself after 2 s; Fuse All / Auto-Fuse still follow the ⚙ rule. Event
+  info card (next and running, phone and desktop): centred, never drifts.
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +

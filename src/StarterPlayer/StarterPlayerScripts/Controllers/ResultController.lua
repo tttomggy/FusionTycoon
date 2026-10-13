@@ -331,7 +331,7 @@ local function showBigCard(info: BigCardInfo)
 	})
 
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 	local autoClose = info.AutoCloseSeconds
 	if autoClose then
@@ -544,7 +544,7 @@ local function showEventMutationCard(item: any, newIndex: boolean, added: string
 	})
 
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 	-- The major reveal: a shake and the reveal sound.
 	RevealEffects.ShakeCamera(EVENT_SHAKE_MAGNITUDE, EVENT_SHAKE_SECONDS)
@@ -726,7 +726,7 @@ local function showMultiCard(items: { any }, title: string?)
 	})
 
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 	task.spawn(function()
 		for _, card in cards do
@@ -881,7 +881,7 @@ local function showRebirthCard(rebirths: number)
 		end,
 	})
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 end
 
@@ -995,7 +995,7 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 		OnClick = closeBigCard,
 	})
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 end
 
@@ -1236,7 +1236,7 @@ local function showFuseAllCard(result: any)
 	})
 
 	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeight(holder, holder.Size.Y.Offset)
+	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
 	UIKit.PopIn(holder)
 	if typeof(best) == "table" and tierRank(best.Tier) >= LEGENDARY_RANK then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)

@@ -40,7 +40,17 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   billboards' size cap, and per tutorial step: no dim backdrop without a
   card on screen, the card's read-time OK, the objective bar fully on
   screen) and prints PASS / FAIL lines;
-  it refuses unless saves go to the mock store or `FT_StudioTest_1`. Its
+  it refuses unless saves go to the mock store or `FT_StudioTest_1`.
+  **The report queue lives for the whole run** (it used to be cleared after
+  step 7, so every later client probe waited the full 90 s and combat never
+  ran). Each section prints a `[SelfTest] == N. name ==` header and runs in
+  a `pcall` (an error is a FAIL line, the next section still runs); each
+  tutorial / combat probe has its own 10 s timeout and a missing report is a
+  FAIL named after it (`combat SlapGlove: no report from the client`); the
+  `done: N passed, M failed` line always prints. **`/selftest combat`** runs
+  only the combat section (weapon probes, slot-to-slot switch probes,
+  release); **`/selftest cards`** only the card-placement checks (desktop +
+  phone, next and running events, tutorial OK row on/off). Its
   last part drives a reset tutorial through every step on the real
   handlers (upgrade, tutorial pulls, fusion, `TutorialService.Advance`),
   checks no shop / deal pop-up showed and that a mid-way save resumes, then

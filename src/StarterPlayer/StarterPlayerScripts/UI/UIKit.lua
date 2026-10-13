@@ -1237,6 +1237,101 @@ function UIKit.FitHeight(holder: GuiObject, height: number, margin: number?): nu
 	return fit
 end
 
+--[[ Card settling -------------------------------------------------------------------
+	A card whose height is measured (AbsoluteSize / every UIScale) used to be
+	placed from a size that lagged its own PopScale by a frame, so a phone
+	card could sit 24 px off-centre. SettleCard owns the placing instead: after
+	any change it runs `place` once per Heartbeat, SKIPPING any frame where the
+	PopScale moved since the last one (the size is stale then), and stops once
+	two frames in a row measure the same height (0.5 px) with the drawn centre
+	within 1 px of the plan, or after 30 frames (warn). While it runs the
+	holder carries `Settling = true` (/selftest waits for it to clear). Callers'
+	AbsoluteSize handlers only kick it; they never place directly.
+]]
+local SETTLE_MAX_FRAMES = 30
+local settleTokens: { [GuiObject]: number } = setmetatable({}, { __mode = "k" }) :: any
+
+-- The card as drawn, in logical px: top and height of the holder plus its
+-- shadow (what you see).
+local function drawnRect(holder: GuiObject): (number, number)
+	local screen = holder:FindFirstAncestorWhichIsA("ScreenGui")
+	local mobile = screen and screen:FindFirstChild("MobileScale")
+	local screenScale = if mobile and mobile:IsA("UIScale") then mobile.Scale else 1
+	local inset = GuiService:GetGuiInset().Y
+	local top = holder.AbsolutePosition.Y + inset
+	local bottom = top + holder.AbsoluteSize.Y
+	local shadow = holder:FindFirstChild("Shadow")
+	if shadow and shadow:IsA("GuiObject") and shadow.Visible then
+		bottom = math.max(bottom, shadow.AbsolutePosition.Y + inset + shadow.AbsoluteSize.Y)
+	end
+	return top / screenScale, (bottom - top) / screenScale
+end
+
+local function centreError(holder: GuiObject): number
+	local phone = UIKit.IsPhone()
+	local view = UIKit.GetLogicalViewport()
+	local top, height = drawnRect(holder)
+	local bandTop = UIKit.GetCardTopFor(phone)
+	local bandBottom = view.Y - UIKit.GetCardBottomFor(phone)
+	if height > bandBottom - bandTop + 0.5 then
+		return math.abs(top - bandTop)
+	end
+	return math.abs(top + height / 2 - (bandTop + bandBottom) / 2)
+end
+
+function UIKit.CancelSettle(holder: GuiObject)
+	settleTokens[holder] = (settleTokens[holder] or 0) + 1
+	holder:SetAttribute("Settling", false)
+end
+
+function UIKit.SettleCard(holder: GuiObject, place: () -> ())
+	local mine = (settleTokens[holder] or 0) + 1
+	settleTokens[holder] = mine
+	holder:SetAttribute("Settling", true)
+	task.spawn(function()
+		local popScale = getPopScale(holder)
+		local lastScale = popScale.Scale
+		local lastHeight: number? = nil
+		for frame = 1, SETTLE_MAX_FRAMES do
+			RunService.Heartbeat:Wait()
+			if settleTokens[holder] ~= mine then
+				return -- a newer loop (or a cancel) owns the attribute now
+			end
+			if not holder.Parent or not holder.Visible then
+				break
+			end
+			local scale = popScale.Scale
+			local moved = math.abs(scale - lastScale) > 1e-4
+			lastScale = scale
+			if not moved then
+				place()
+				local height = holder.AbsoluteSize.Y / effectiveScale(holder)
+				local agreed = lastHeight ~= nil and math.abs(height - lastHeight) <= 0.5
+				lastHeight = height
+				if agreed and centreError(holder) <= 1 then
+					holder:SetAttribute("Settling", false)
+					return
+				end
+			else
+				lastHeight = nil
+			end
+			if frame == SETTLE_MAX_FRAMES then
+				warn(("UIKit.SettleCard: %s did not settle in %d frames"):format(holder:GetFullName(), SETTLE_MAX_FRAMES))
+			end
+		end
+		holder:SetAttribute("Settling", false)
+	end)
+end
+
+-- FitHeight for a card of a fixed design height, settled by SettleCard.
+function UIKit.FitHeightSettled(holder: GuiObject, height: number): number
+	local fit = UIKit.FitHeight(holder, height)
+	UIKit.SettleCard(holder, function()
+		UIKit.FitHeight(holder, height)
+	end)
+	return fit
+end
+
 -- Re-placed on every viewport change (UIKit.Modal registers here).
 local cardPlacers: { () -> () } = {}
 
