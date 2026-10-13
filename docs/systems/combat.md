@@ -81,12 +81,61 @@ never sold, server authority are unchanged.
   `KeyframeSequence`s built in code, registered with
   `KeyframeSequenceProvider:RegisterKeyframeSequence`, played at `Action4`
   (Studio only until published as assets). Not built.
-- **Rig diagnosis (not yet logged):** the prompt asked for a one-off Studio
-  log of whether `RightUpperArm.RightShoulder` exists/enabled, whether an
-  `AnimationConstraint` joins `UpperTorso` and `RightUpperArm`, and the
-  place's Workspace simulation settings. That needs Studio; `findJoint`
-  handles both cases, so nothing depends on the answer. Add what Harris's
-  monkey shows here.
+- **Rig diagnosis (still to read in Studio):** `/selftest combat` with 2
+  players prints once `[SelfTest] physics: Workspace {UseFixedSimulation=…,
+  …}; target root network owner: …` (every Workspace property of that list
+  that exists on the build, and `root:GetNetworkOwner()` for the target).
+  Paste that line here. `WeaponPose.findJoint` handles both a Motor6D and an
+  `AnimationConstraint` shoulder, and the tracks do not care.
+- **Real animation tracks (Combat feel):** the C0 pose proved the arm can
+  move, but three joints driven from code never read as a swing. Every
+  weapon now plays Animator tracks (`Effects/WeaponAnimator`, local on every
+  client for every character, same `onToolAdded` / `onToolRemoved` /
+  `performFor` paths as `WeaponPose`; Animator tracks are not affected by
+  the Transform rule). The clips are built in code in
+  `Shared/Anim/WeaponAnims` (R15 `KeyframeSequence`s, only the joints a clip
+  needs so walk / run keep driving the rest): `BatHold` / `GloveHold` /
+  `GunAim` (looped, Action), `BatSwing` ~0.55 s (load 0.18, whip to the
+  `Hit` marker at 0.28 with the torso snapping ~140° left and a front-foot
+  step, follow-through, recover), `GloveSlap` ~0.5 s, `GunRecoil` 0.12 s,
+  `PeelThrow` 0.35 s (Action2). Source per clip (`CombatConfig.
+  AnimationIds`): an id set = that asset; empty in Studio =
+  `KeyframeSequenceProvider:RegisterKeyframeSequence` (temporary id); empty
+  live = the C0 `WeaponPose` fallback and one warn. While tracks play
+  `WeaponPose` writes nothing (no C0, no attributes), `toolnone` is stopped,
+  and the trail starts from the `Hit` marker (fallback: 55% of the clip).
+  Gun aim no longer follows your pitch (a track is fixed); the C0 fallback
+  still does. Joint signs / angles were authored without Studio: **judge
+  them by eye** and adjust the tables at the top of `WeaponAnims`.
+- **Publishing the clips:** in Studio run `/anim export`; open
+  `ServerStorage.WeaponAnimExports`; for each KeyframeSequence right-click
+  → **Save to Roblox**, then copy the asset id from the dialog / Creator
+  Hub and paste `rbxassetid://<id>` into `CombatConfig.AnimationIds` under
+  the clip's name (BatHold, BatSwing, GloveHold, GloveSlap, GunAim,
+  GunRecoil, PeelThrow). Restart Play: the ids are used instead of the
+  in-code clips (and a live server needs them).
+- **Hits launch the target (server-owned):** before, `onHitReceived` did a
+  client `root:ApplyImpulse(impulse * AssemblyMass)`. The server had just
+  swapped the Motor6Ds for BallSockets (so `AssemblyMass` is only the root's
+  assembly) and under fixed simulation / Server Authority a client impulse
+  on your own character can be corrected away: Player2 never flew.
+  `CombatService.launch` now takes `SetNetworkOwner(nil)` on the target's
+  root (pcall), sets the server Humanoid to Physics, applies
+  `impulse * part.Mass` to EVERY BasePart (the whole character's mass in
+  total) plus the spin (`CombatConfig.SpinImpulse`; Peel AND Slap Glove), and
+  hands ownership back with `GettingUp` after `RagdollSeconds`. `HitReceived`
+  carries `ServerLaunch = true`; the client applies the impulse itself only
+  when it is false (ownership failed), never both. `/selftest combat` with 2
+  players hits the other player with the Bat and Glove and the SERVER
+  measures the root's flat travel 0.6 s later (Bat ≥ 10, Glove ≥ 15 studs).
+  Knockback numbers are unchanged (Bat 60, Glove 120, + hop 25): tune them
+  against that check once Studio has run it.
+- **Landed-hit feel (every client):** attacker's swing track at speed 0 for
+  0.06 s (hit-stop); camera shake 0.15 s for the attacker, 0.3 s for the
+  target; the target flashes white 0.1 s; a bigger `BONK!` / `SLAP!` pop; the
+  Bonk sound slot is wired (empty). A hit on an immune / spawn-protected
+  target pops "🛡 IMMUNE" for the attacker only (`HitFx { Kind = "Immune" }`
+  sent with `FireClient`).
 - **Slot switch (Swing fix 2):** Roblox fires the new tool's `ChildAdded`
   BEFORE the old tool's `ChildRemoved`, so the old release used to wipe the
   new weapon's pose (Freeze Ray and Slap Glove hung straight down).
@@ -111,6 +160,10 @@ never sold, server authority are unchanged.
   (Bat and Glove); Bat: tool parts reach >= 1.5 studs clear of the
   UpperTorso; slot switches Bat → SlapGlove, LaserGun → FreezeRay,
   SlapGlove → Bat (no unequip between) measure the new weapon's held hand;
+  with tracks the peak is Bat / Glove >= 3 studs, plus "a looping hold
+  track plays while held", "the action track plays, is >= 0.4 s and its Hit
+  marker fires once", "release: no weapon track playing", and "live
+  fallback" (no id → the C0 pose still runs and restores);
   released: hand within 0.3 studs of rest, shoulder / Waist / RightElbow at
   their base and no `BaseC0` / `BaseCFrame` left. "Skipped: not an R15 rig"
   only when `RightHand` / `UpperTorso` is really missing.

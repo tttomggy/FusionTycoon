@@ -1803,6 +1803,15 @@ person, R15, 100% camera zoom; check each from the front and the side.
   Commons: the big "RARE ORB!" card appears (no top banner), a Rare closes
   itself after 2 s; Fuse All / Auto-Fuse still follow the ⚙ rule. Event
   info card (next and running, phone and desktop): centred, never drifts.
+- [ ] **Combat feel (Studio, Test → 2 players, Player1 bats Player2):**
+  Player2 flies 15+ studs (Glove: 25+ and a spin); both cameras shake, the
+  hit freezes the swing for a blink, the target flashes white, a big BONK! /
+  SLAP! pops. Hitting during the get-up shows 🛡 IMMUNE for the attacker only.
+  In 3rd person the bat swing and the slap read from across the street (a big
+  horizontal swing with the body twisting, a lunge, a follow-through). The
+  tutorial is skipped on join; `/tutorial reset` still runs it.
+  `/anim export` → Save to Roblox → paste the ids into
+  `CombatConfig.AnimationIds` → restart: still works.
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +

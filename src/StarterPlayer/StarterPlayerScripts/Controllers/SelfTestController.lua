@@ -1007,7 +1007,7 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 	task.wait(0.35) -- the 0.15 s raise
 	RunService.Heartbeat:Wait()
 	local held = WeaponPose.GetHandOffset(character) :: Vector3
-	local holding = WeaponPose.GetHeldWeapon(character) == weapon.Id
+	local holding = (require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character) == weapon.Id
 	if weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
 		-- Aimed: the hand is up around shoulder height.
 		local torso = character:FindFirstChild("UpperTorso") :: BasePart?
@@ -1022,7 +1022,7 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 		table.insert(lines, {
 			Ok = holding and (held - rest).Magnitude >= 1 and forward >= 0.5,
 			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose while held"):format(label),
-			Detail = ("moved %.2f studs, %.2f forward, pose %s"):format((held - rest).Magnitude, forward, tostring(WeaponPose.GetHeldWeapon(character))),
+			Detail = ("moved %.2f studs, %.2f forward, pose %s"):format((held - rest).Magnitude, forward, tostring((require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character))),
 		})
 	end
 	return held
@@ -1046,7 +1046,7 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 	end
 	local weapon = CombatConfig.GetWeapon(weaponId) :: CombatConfig.Weapon
 	local started = os.clock()
-	while WeaponPose.GetHeldWeapon(char) ~= weaponId and os.clock() - started < 2 do
+	while CombatController.GetHeldPoseWeapon(char) ~= weaponId and os.clock() - started < 2 do
 		task.wait(0.05)
 	end
 	local held = probeHeld(lines, char, weapon, weaponId)
@@ -1060,7 +1060,22 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		})
 	end
 
+	-- The tracks: a looping hold track plays while held; the swing track
+	-- plays, is >= 0.4 s long and fires its Hit marker exactly once.
+	local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+	local holdTrack = WeaponAnimator.GetHoldTrack(char)
+	table.insert(lines, {
+		Ok = holdTrack ~= nil and holdTrack.IsPlaying and holdTrack.Looped,
+		Name = ("combat %s: the held weapon plays a looping hold track"):format(weaponId),
+		Detail = if holdTrack then ("playing %s, looped %s"):format(tostring(holdTrack.IsPlaying), tostring(holdTrack.Looped)) else "no hold track (C0 fallback)",
+	})
+	local actionTrack = WeaponAnimator.GetActionTrack(char)
+	local hits = 0
+	local hitConnection = if actionTrack then actionTrack:GetMarkerReachedSignal("Hit"):Connect(function()
+		hits += 1
+	end) else nil
 	local played = CombatController.PlayPose(weaponId)
+	local trackPlaying = false
 	local peak, travelled, visible = 0, 0, 0
 	local last = held
 	local sampled = os.clock()
@@ -1069,6 +1084,9 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		RunService.Heartbeat:Wait()
 		local now = WeaponPose.GetHandOffset(char)
 		local clock = os.clock()
+		if actionTrack and actionTrack.IsPlaying then
+			trackPlaying = true
+		end
 		if now then
 			peak = math.max(peak, (now - held).Magnitude)
 			travelled += (now - last).Magnitude
@@ -1079,10 +1097,21 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		end
 		lastFrame = clock
 	end
+	if hitConnection then
+		hitConnection:Disconnect()
+	end
+	if weapon.Kind == "Melee" or weapon.Kind == "Peel" then
+		local length = if actionTrack then actionTrack.Length else 0
+		table.insert(lines, {
+			Ok = played and trackPlaying and length >= (if weapon.Kind == "Melee" then 0.4 else 0.3) and hits == 1,
+			Name = ("combat %s: the action track plays, is long enough and its Hit marker fires once"):format(weaponId),
+			Detail = ("playing %s, length %.2f s, Hit fired %d x"):format(tostring(trackPlaying), length, hits),
+		})
+	end
 	if weapon.Kind == "Melee" then
 		table.insert(lines, {
-			Ok = played and peak >= 2.5,
-			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 2.5 studs"):format(weaponId),
+			Ok = played and peak >= 3,
+			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 3 studs"):format(weaponId),
 			Detail = ("peak %.2f studs"):format(peak),
 		})
 		table.insert(lines, {
@@ -1150,11 +1179,46 @@ local function probeWeaponReleased(): { ProbeLine }
 	local away = ((WeaponPose.GetHandOffset(char) :: Vector3) - rest).Magnitude
 	local stored = WeaponPose.HasBaseStored(char)
 	local joints = jointsAtRest(WeaponPose.GetJointValues(char), restJoints)
+	local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+	local playing = WeaponAnimator.AnyPlaying(char)
 	return {
 		{
-			Ok = away <= 0.3 and not stored and joints == nil,
-			Name = "combat release: after unequip the hand is back at rest, Waist / RightElbow at base, no BaseC0 left",
-			Detail = ("%.2f studs from rest, base stored %s, %s"):format(away, tostring(stored), tostring(joints or "joints at base")),
+			Ok = away <= 0.3 and not stored and joints == nil and not playing,
+			Name = "combat release: after unequip no weapon track plays, the hand is back at rest and no BaseC0 is left",
+			Detail = ("%.2f studs from rest, base stored %s, %s, track playing %s"):format(away, tostring(stored), tostring(joints or "joints at base"), tostring(playing)),
+		},
+	}
+end
+
+-- The live fallback (no id, not Studio): WeaponAnimator.Hold says no and the
+-- C0 WeaponPose still runs, then restores.
+local function probeFallback(): { ProbeLine }
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+	local character = localPlayer.Character
+	if missingRig(character) then
+		return { { Ok = true, Name = "combat live fallback: the C0 pose still runs (skipped: not an R15 rig)" } }
+	end
+	local char = character :: Model
+	task.wait(0.3)
+	local rest = WeaponPose.GetHandOffset(char) :: Vector3
+	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
+	WeaponAnimator.SelfTestForceFallback(true)
+	local usedTrack = WeaponAnimator.Hold(char, bat)
+	WeaponAnimator.SelfTestForceFallback(false)
+	WeaponPose.Hold(char, bat)
+	task.wait(0.4)
+	RunService.Heartbeat:Wait()
+	local moved = ((WeaponPose.GetHandOffset(char) :: Vector3) - rest).Magnitude
+	local holding = WeaponPose.GetHeldWeapon(char) == "Bat"
+	WeaponPose.Release(char, "Bat")
+	task.wait(0.2)
+	local stored = WeaponPose.HasBaseStored(char)
+	return {
+		{
+			Ok = not usedTrack and holding and moved >= 1 and not stored,
+			Name = "combat live fallback: with no id the C0 pose still runs (and restores)",
+			Detail = ("track used %s, pose held %s, hand moved %.2f studs, base left %s"):format(tostring(usedTrack), tostring(holding), moved, tostring(stored)),
 		},
 	}
 end
@@ -1174,6 +1238,8 @@ local function probeTutorial(payload: any)
 			return probeSwitch(payload.From, payload.To)
 		elseif payload.Kind == "WeaponReleased" then
 			return probeWeaponReleased()
+		elseif payload.Kind == "Fallback" then
+			return probeFallback()
 		end
 		return {}
 	end)

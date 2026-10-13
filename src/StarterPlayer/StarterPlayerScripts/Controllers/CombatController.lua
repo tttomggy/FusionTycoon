@@ -55,6 +55,7 @@ local TutorialCards = require(UI.TutorialCards)
 local WeaponViewport = require(UI.WeaponViewport)
 local Effects = script.Parent.Parent.Effects
 local WeaponPose = require(Effects.WeaponPose)
+local WeaponAnimator = require(Effects.WeaponAnimator)
 local WeaponFx = require(Effects.WeaponFx)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
@@ -80,8 +81,12 @@ local BAR_BOTTOM = { Desktop = 22 + 64 + 5 + 12, Phone = 22 + 60 + 5 + 12 }
 local LASER_BEAM_SECONDS = 0.12
 local FREEZE_BEAM_SECONDS = 0.18
 local FREEZE_CONE_STUDS = 24
-local SPIN_IMPULSE = Vector3.new(0, 14, 5) -- per unit of mass: a peel slip spins you
 local POP_SECONDS = 0.9
+local TRAIL_SECONDS = 0.3 -- the swing trail, from the clip's Hit marker
+local HIT_STOP_SECONDS = 0.06
+local SHAKE_ATTACKER_SECONDS = 0.15
+local SHAKE_TARGET_SECONDS = 0.3
+local FLASH_SECONDS = 0.1
 local SHIMMER_SPEED = 10
 local SHIMMER_MAX = 0.45
 local KEY_CODES = { Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four, Enum.KeyCode.Five }
@@ -495,19 +500,32 @@ local function performFor(player: Player, weapon: CombatConfig.Weapon)
 	end
 	local tool = findHeldTool(player, weapon.Id)
 	if weapon.Kind == "Melee" then
-		local seconds = WeaponPose.Swing(character, weapon.Id)
-		if tool and seconds > 0 then
-			WeaponFx.Trail(tool, if weapon.Id == "SlapGlove" then World.GloveRed else Colors.White, seconds)
+		local color = if weapon.Id == "SlapGlove" then World.GloveRed else Colors.White
+		-- The animation track first: the trail starts at its "Hit" marker (the
+		-- whip / slap keyframe), not at a fixed time. Without a track the C0
+		-- pose runs and the trail starts at once.
+		local seconds = WeaponAnimator.Swing(character, weapon.Id, function()
+			if tool and tool.Parent then
+				WeaponFx.Trail(tool, color, TRAIL_SECONDS)
+			end
+		end)
+		if seconds == 0 then
+			seconds = WeaponPose.Swing(character, weapon.Id)
+			if tool and seconds > 0 then
+				WeaponFx.Trail(tool, color, seconds)
+			end
 		end
 		SoundKit.PlayAt("Swing", root.Position)
 	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
 		local freezing = weapon.Kind == "Freeze"
+		WeaponAnimator.Recoil(character)
 		WeaponPose.Recoil(character)
 		if tool then
 			WeaponFx.MuzzleFlash(tool, if freezing then World.Ice else World.WeaponLaser)
 		end
 		SoundKit.PlayAt("Shoot", root.Position, if freezing then { PlaybackSpeed = 0.8 } else nil)
 	elseif weapon.Kind == "Peel" then
+		WeaponAnimator.Throw(character)
 		WeaponPose.Throw(character)
 	end
 end
@@ -579,11 +597,16 @@ local function onHitReceived(payload: any)
 	ragdolledUntil = serverNow() + seconds
 	humanoid:UnequipTools()
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	if typeof(payload.Impulse) == "Vector3" then
-		root:ApplyImpulse(payload.Impulse * root.AssemblyMass)
-	end
-	if payload.Spin == true then
-		root:ApplyAngularImpulse(SPIN_IMPULSE * root.AssemblyMass)
+	-- The server launches you itself (ServerLaunch) when it could take the
+	-- root's network ownership: then no client impulse (never both). Only
+	-- when it couldn't, this is the fallback.
+	if payload.ServerLaunch ~= true then
+		if typeof(payload.Impulse) == "Vector3" then
+			root:ApplyImpulse(payload.Impulse * root.AssemblyMass)
+		end
+		if payload.Spin == true then
+			root:ApplyAngularImpulse(CombatConfig.SpinImpulse * root.AssemblyMass)
+		end
 	end
 	ProximityPromptService.Enabled = false
 	local character = localPlayer.Character
@@ -616,12 +639,52 @@ end
 
 --[[ Effects (every client) --------------------------------------------------------------- ]]
 
-local function popText(position: Vector3, text: string, color: Color3)
+-- A short camera shake (Humanoid.CameraOffset), strongest first.
+local shakeToken = 0
+local function shakeCamera(seconds: number, amplitude: number)
+	local humanoid = getHumanoid()
+	if not humanoid then
+		return
+	end
+	shakeToken += 1
+	local mine = shakeToken
+	local started = os.clock()
+	task.spawn(function()
+		while shakeToken == mine and os.clock() - started < seconds and humanoid.Parent do
+			local fade = 1 - (os.clock() - started) / seconds
+			humanoid.CameraOffset = Vector3.new((math.random() - 0.5) * 2, (math.random() - 0.5) * 2, 0) * amplitude * fade
+			RunService.RenderStepped:Wait()
+		end
+		if shakeToken == mine and humanoid.Parent then
+			humanoid.CameraOffset = Vector3.zero
+		end
+	end)
+end
+
+-- The target's body flashes white for FLASH_SECONDS.
+local function flashWhite(character: Model)
+	local originals: { [BasePart]: Color3 } = {}
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" and not part:IsDescendantOf(character:FindFirstChildOfClass("Tool") or character) then
+			originals[part] = part.Color
+			part.Color = Colors.White
+		end
+	end
+	task.delay(FLASH_SECONDS, function()
+		for part, color in originals do
+			if part.Parent then
+				part.Color = color
+			end
+		end
+	end)
+end
+
+local function popText(position: Vector3, text: string, color: Color3, boost: number?)
 	local anchor = Instance.new("Attachment")
 	anchor.WorldPosition = position + Vector3.new(0, 3, 0)
 	anchor.Parent = Workspace.Terrain
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(180, 70)
+	gui.Size = UDim2.fromOffset(180 * (boost or 1), 70 * (boost or 1))
 	gui.AlwaysOnTop = false
 	gui.LightInfluence = 0
 	gui.MaxDistance = 120
@@ -700,9 +763,31 @@ local function onHitFx(payload: any)
 	-- Your own swing / shot already played when you clicked.
 	local theirs = attacker ~= nil and attacker ~= localPlayer
 	if payload.Kind == "Bonk" and to then
-		popText(to, "💫 BONK! 💫", World.AccentGold)
+		-- A landed hit: a bigger pop, hit-stop on the attacker's swing, a
+		-- camera shake for the attacker (short) and the target (longer), and
+		-- the target flashes white. (The Bonk sound slot is wired and empty.)
+		local glove = payload.Weapon == "SlapGlove"
+		popText(to, if glove then "👋 SLAP! 👋" else "💫 BONK! 💫", World.AccentGold, 1.5)
 		WeaponFx.FlashRing(to, Colors.White)
 		SoundKit.PlayAt("Bonk", to)
+		local attackerCharacter = attacker and attacker.Character
+		if attackerCharacter then
+			WeaponAnimator.HitStop(attackerCharacter, HIT_STOP_SECONDS)
+		end
+		if attacker == localPlayer then
+			shakeCamera(SHAKE_ATTACKER_SECONDS, 0.35)
+		end
+		local victim = if typeof(payload.Target) == "number" then Players:GetPlayerByUserId(payload.Target) else nil
+		if victim == localPlayer then
+			shakeCamera(SHAKE_TARGET_SECONDS, 0.6)
+		end
+		if victim and victim.Character then
+			flashWhite(victim.Character)
+		end
+	elseif payload.Kind == "Immune" and to then
+		-- Only the attacker is told: a hit on an immune / spawn-protected
+		-- target does nothing, and says so.
+		popText(to, "🛡 IMMUNE", Colors.Muted)
 	elseif payload.Kind == "Swing" then
 		if theirs and weapon then
 			performFor(attacker :: Player, weapon)
@@ -810,6 +895,18 @@ end
 -- pose for guns.
 local toolEventsLogged = 0
 
+-- The arm: an animation track when there is a clip, else the C0 pose.
+local function poseHold(character: Model, weapon: CombatConfig.Weapon)
+	if not WeaponAnimator.Hold(character, weapon) then
+		WeaponPose.Hold(character, weapon)
+	end
+end
+
+-- The weapon whose pose is up (track or C0), for /selftest and the re-hold.
+function CombatController.GetHeldPoseWeapon(character: Model): string?
+	return WeaponAnimator.GetHeldWeapon(character) or WeaponPose.GetHeldWeapon(character)
+end
+
 -- Studio only, a few lines per run: the order of tool ChildAdded / ChildRemoved
 -- on a slot switch (the new tool's Add arrives BEFORE the old one's Remove).
 local function logToolEvent(what: string, tool: Instance)
@@ -828,7 +925,7 @@ local function onToolAdded(player: Player, character: Model, tool: Instance)
 		return
 	end
 	logToolEvent("added", tool)
-	WeaponPose.Hold(character, weapon)
+	poseHold(character, weapon)
 	local root = getRoot(player)
 	if root then
 		SoundKit.PlayAt("Equip", root.Position)
@@ -842,13 +939,15 @@ local function onToolRemoved(player: Player, character: Model, tool: Instance)
 	logToolEvent("removed", tool)
 	-- Only the removed weapon's own pose goes: on a slot switch the new tool
 	-- was already added and its pose must stay.
-	WeaponPose.Release(character, tostring(tool:GetAttribute("Weapon")))
+	local removedId = tostring(tool:GetAttribute("Weapon"))
+	WeaponAnimator.Release(character, removedId)
+	WeaponPose.Release(character, removedId)
 	-- Whatever order the events fired in, a weapon still in the hand is held.
 	for _, child in character:GetChildren() do
 		if child ~= tool and child:IsA("Tool") then
 			local other = CombatConfig.GetWeapon(child:GetAttribute("Weapon"))
-			if other and WeaponPose.GetHeldWeapon(character) ~= other.Id then
-				WeaponPose.Hold(character, other)
+			if other and CombatController.GetHeldPoseWeapon(character) ~= other.Id then
+				poseHold(character, other)
 			end
 		end
 	end

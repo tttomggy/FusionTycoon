@@ -10,7 +10,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
-  `/tutorial step <n>`, `/weapons all | reset`, `/quest complete <id>`
+  `/tutorial step <n>`, `/weapons all | reset`, `/anim export` (every weapon clip as a KeyframeSequence in `ServerStorage.WeaponAnimExports`; see combat.md for Save to Roblox), `/quest complete <id>`
   (a daily id or `chain`; the warning lists today's) / `/quest reset`,
   `/powerup <key> <n>`,
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,

@@ -1,5 +1,15 @@
 # The first-time tutorial
 
+**Studio skips it on join:** `DebugConfig.SkipTutorialInStudio = true`
+(Shared/Config/DebugConfig.lua) marks the tutorial Done for every player who
+joins in Studio (Player1, Player2 …) on their first sync
+(`TutorialService.check`, once per join): the full HUD, no banner, cards or
+hand. Only the Done state changes (no rewards, free pulls untouched).
+`TutorialService.ShouldSkipOnJoin(isStudio)` is false on a live server
+(`/selftest` asserts it). `/tutorial reset` and Settings' "Replay tutorial"
+still run it afterwards in that session, and `runTutorialSelfTest` swaps the
+tutorial state as before so it still drives every step.
+
 Moved out of CLAUDE.md (verbatim). Read this file when a task touches this system.
 
 - **Tutorial 2** (mandatory, first time; `TutorialConfig` steps + HUD

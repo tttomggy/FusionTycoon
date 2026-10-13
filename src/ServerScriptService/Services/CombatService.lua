@@ -221,6 +221,48 @@ local function swapJoints(player: Player)
 	state.joints[player.UserId] = joints
 end
 
+-- The whole character's mass: every BasePart (the Motor6Ds were swapped for
+-- BallSockets, so AssemblyMass is only the root's assembly now).
+local function characterMass(character: Model): number
+	local mass = 0
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") then
+			mass += part.Mass
+		end
+	end
+	return mass
+end
+
+-- The server-owned launch: the server takes the root's network ownership and
+-- applies the impulse itself (a client-side impulse on your own character is
+-- corrected away under fixed simulation / Server Authority). Every part
+-- gets impulse * its own mass, i.e. the whole character's mass in total, so
+-- they all leave at `impulse` studs/s. Returns false when ownership can't be
+-- taken (the client then applies the impulse as the fallback; never both).
+local function launch(target: Player, impulse: Vector3, spin: boolean): boolean
+	local character = target.Character
+	local root = getRoot(target)
+	if not character or not root then
+		return false
+	end
+	if not pcall(root.SetNetworkOwner, root, nil) then
+		return false
+	end
+	local humanoid = getHumanoid(target)
+	if humanoid then
+		humanoid:ChangeState(Enum.HumanoidStateType.Physics)
+	end
+	for _, part in character:GetDescendants() do
+		if part:IsA("BasePart") and not part.Anchored then
+			part:ApplyImpulse(impulse * part.Mass)
+		end
+	end
+	if spin then
+		root:ApplyAngularImpulse(CombatConfig.SpinImpulse * characterMass(character))
+	end
+	return true
+end
+
 -- Ragdolls `target` for RagdollSeconds with `impulse` (studs/s).
 local function ragdoll(target: Player, impulse: Vector3, spin: boolean)
 	local seconds = CombatConfig.RagdollSeconds
@@ -228,11 +270,23 @@ local function ragdoll(target: Player, impulse: Vector3, spin: boolean)
 	target:SetAttribute("RagdollUntil", now + seconds)
 	target:SetAttribute("ImmuneUntil", now + seconds + CombatConfig.GetUpImmuneSeconds)
 	swapJoints(target)
-	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds, Spin = spin })
+	local serverLaunch = launch(target, impulse, spin)
+	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds, Spin = spin, ServerLaunch = serverLaunch })
 	local character = target.Character
 	task.delay(seconds, function()
 		if target.Character == character then
 			restoreJoints(target.UserId)
+			if serverLaunch then
+				-- Get up: the player drives their character again.
+				local root = getRoot(target)
+				if root then
+					pcall(root.SetNetworkOwner, root, target)
+				end
+				local humanoid = getHumanoid(target)
+				if humanoid then
+					humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+				end
+			end
 		end
 	end)
 end
@@ -279,7 +333,11 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 		local away = targetRoot.Position - from
 		local flat = Vector3.new(away.X, 0, away.Z)
 		local direction = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, 1)
-		ragdoll(target, direction * weapon.Knockback + Vector3.new(0, CombatConfig.UpwardKick, 0), weapon.Kind == "Peel")
+		ragdoll(
+			target,
+			direction * weapon.Knockback + Vector3.new(0, CombatConfig.UpwardKick, 0),
+			weapon.Kind == "Peel" or weapon.Id == "SlapGlove"
+		)
 	end
 	RemoteEvents.HitFx:FireAllClients({
 		Weapon = weapon.Id,
@@ -521,6 +579,15 @@ local function vector(value: unknown): Vector3?
 	return v
 end
 
+-- A swing or shot that landed on a target who can't be hit (immune after a
+-- get-up, or spawn-protected) is shown to the ATTACKER only, so a hit that
+-- does nothing never looks like a bug.
+local function notifyIgnored(attacker: Player, targetRoot: BasePart, why: string)
+	if why == "Immune" or why == "SpawnProtected" then
+		RemoteEvents.HitFx:FireClient(attacker, { Kind = "Immune", To = targetRoot.Position, Attacker = attacker.UserId })
+	end
+end
+
 local function onRequestHit(attacker: Player, payload: unknown)
 	if not RemoteGuard.Allow(attacker, "RequestHit", CombatConfig.HitsPerSecond, CombatConfig.HitBurst) then
 		return
@@ -551,9 +618,10 @@ local function onRequestHit(attacker: Player, payload: unknown)
 		local targetId = RemoteGuard.Int(p.TargetUserId, 1, 2 ^ 53)
 		local target = targetId and Players:GetPlayerByUserId(targetId)
 		local targetRoot = target and getRoot(target)
-		if not target or target == attacker or not targetRoot or CombatService.WhyNotHittable(target) then
+		if not target or target == attacker or not targetRoot then
 			return
 		end
+		local why = CombatService.WhyNotHittable(target)
 		local offset = targetRoot.Position - root.Position
 		if offset.Magnitude > weapon.Range + CombatConfig.RangeSlack then
 			return
@@ -565,6 +633,10 @@ local function onRequestHit(attacker: Player, payload: unknown)
 			if angle > CombatConfig.MeleeMaxAngle then
 				return
 			end
+		end
+		if why then
+			notifyIgnored(attacker, targetRoot, why)
+			return
 		end
 		CombatService.ApplyHit(attacker, target, weapon, root.Position)
 	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
@@ -584,8 +656,14 @@ local function onRequestHit(attacker: Player, payload: unknown)
 		local endPoint = if hit then hit.Position else origin + direction.Unit * weapon.Range
 		local character = hit and hit.Instance:FindFirstAncestorWhichIsA("Model")
 		local target = character and Players:GetPlayerFromCharacter(character)
-		if target and target ~= attacker and not CombatService.WhyNotHittable(target) then
-			CombatService.ApplyHit(attacker, target, weapon, origin)
+		if target and target ~= attacker then
+			local why = CombatService.WhyNotHittable(target)
+			local targetRoot = getRoot(target)
+			if not why then
+				CombatService.ApplyHit(attacker, target, weapon, origin)
+			elseif targetRoot then
+				notifyIgnored(attacker, targetRoot, why)
+			end
 		end
 		RemoteEvents.HitFx:FireAllClients({
 			Weapon = weapon.Id,

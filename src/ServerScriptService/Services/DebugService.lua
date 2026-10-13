@@ -7,12 +7,14 @@
 -- player-facing feature; delete this file if it's no longer needed.
 local RunService = game:GetService("RunService")
 local Players = game:GetService("Players")
+local ServerStorage = game:GetService("ServerStorage")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local WeaponKit = require(ReplicatedStorage.Shared.Modules.WeaponKit)
+local WeaponAnims = require(ReplicatedStorage.Shared.Anim.WeaponAnims)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
@@ -103,6 +105,7 @@ local TUTORIAL_COMMAND = "/tutorial"
 -- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
 -- takes them all (rebirth ones come back on the next sync).
 local WEAPONS_COMMAND = "/weapons"
+local ANIM_COMMAND = "/anim"
 -- "/quest complete <id>" latches a daily ("pull20", ...) or "chain" done;
 -- "/quest reset" hands today's dailies out again and restarts the chain.
 local QUEST_COMMAND = "/quest"
@@ -203,6 +206,82 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 	end
 end
 
+local runLaunchSelfTest: (Player, (boolean, string, string?) -> ()) -> ()
+
+-- Prints once per run: the physics / authority settings and who owns the
+-- target's root (Studio shows the 2026 names that exist on this build).
+local function printPhysicsSettings(targetRoot: BasePart)
+	local found: { string } = {}
+	for _, name in { "UseFixedSimulation", "PhysicsSteppingMethod", "ModelStreamingBehavior", "StreamingEnabled", "SignalBehavior", "AuthorityMode", "ServerAuthority", "InterpolationThrottling", "PhysicsAuthority" } do
+		local ok, value = pcall(function()
+			return (Workspace :: any)[name]
+		end)
+		if ok then
+			table.insert(found, ("%s=%s"):format(name, tostring(value)))
+		end
+	end
+	local ok, owner = pcall(targetRoot.GetNetworkOwner, targetRoot)
+	print(("[SelfTest] physics: Workspace {%s}; target root network owner: %s"):format(table.concat(found, ", "), if ok then tostring(owner) else "error " .. tostring(owner)))
+end
+
+-- 2 players (Test -> 2 players): the attacker hits the other player through
+-- CombatService.ApplyHit and the SERVER measures how far the target's root
+-- moved 0.6 s later: a hit must launch (Bat >= 10 studs, Glove >= 15).
+function runLaunchSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local target: Player? = nil
+	for _, candidate in Players:GetPlayers() do
+		if candidate ~= player and PlayerDataService.IsDataLoaded(candidate) and candidate.Character then
+			target = candidate
+		end
+	end
+	if not target then
+		result(true, "combat launch: a hit launches the target (skipped: needs a second player, Test -> 2 players)")
+		return
+	end
+	local victim = target :: Player
+	local attackerData, victimData = PlayerDataService.GetData(player), PlayerDataService.GetData(victim)
+	local victimRoot = victim.Character and victim.Character:FindFirstChild("HumanoidRootPart")
+	if not attackerData or not victimData or not victimRoot or not victimRoot:IsA("BasePart") then
+		result(true, "combat launch: a hit launches the target (skipped: no data or character)")
+		return
+	end
+	local savedRebirths = { attackerData.Rebirths, victimData.Rebirths }
+	attackerData.Rebirths = math.max(1, attackerData.Rebirths)
+	victimData.Rebirths = math.max(1, victimData.Rebirths)
+	local attributes = { "ImmuneUntil", "SpawnProtectUntil", "RagdollUntil", "FrozenUntil" }
+	local saved: { [string]: any } = {}
+	for _, name in attributes do
+		saved[name] = victim:GetAttribute(name)
+	end
+	printPhysicsSettings(victimRoot)
+	for _, spec in { { "Bat", 10 }, { "SlapGlove", 15 } } do
+		local weapon = CombatConfig.GetWeapon(spec[1] :: string) :: CombatConfig.Weapon
+		for _, name in attributes do
+			victim:SetAttribute(name, nil)
+		end
+		local home = victimRoot.CFrame
+		local before = victimRoot.Position
+		CombatService.ApplyHit(player, victim, weapon, before - Vector3.new(0, 0, 3))
+		task.wait(0.6)
+		local moved = (Vector3.new(victimRoot.Position.X, 0, victimRoot.Position.Z) - Vector3.new(before.X, 0, before.Z)).Magnitude
+		result(moved >= (spec[2] :: number), ("combat launch: the %s launches the target >= %d studs in 0.6 s (server-measured)"):format(weapon.Name, spec[2] :: number), ("%.1f studs"):format(moved))
+		task.wait(CombatConfig.RagdollSeconds + 0.5)
+		for _, name in attributes do
+			victim:SetAttribute(name, nil)
+		end
+		local character = victim.Character
+		if character then
+			character:PivotTo(home)
+			victimRoot.AssemblyLinearVelocity = Vector3.zero
+		end
+		task.wait(0.2)
+	end
+	for _, name in attributes do
+		victim:SetAttribute(name, saved[name])
+	end
+	attackerData.Rebirths, victimData.Rebirths = savedRebirths[1], savedRebirths[2]
+end
+
 local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	-- Every weapon is a Handle plus parts welded to it: massless, nothing
 	-- collides, and it fits a 4.5-stud box.
@@ -278,9 +357,12 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 		end
 		sampleRest()
 		tutorialProbe(player, { Kind = "WeaponReleased" }, result)
+		tutorialProbe(player, { Kind = "Fallback" }, result)
 	else
 		result(true, "combat: weapons are held (skipped: no living character)")
 	end
+
+	runLaunchSelfTest(player, result)
 
 	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
 	CombatService.ResetCooldowns(player)
@@ -323,6 +405,7 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 end
 
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	result(not TutorialService.ShouldSkipOnJoin(false), "tutorial: a live server (not Studio) never skips the tutorial on join")
 	-- No lab yet: claim one through the real claim path, release it after.
 	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
@@ -916,6 +999,28 @@ local function onPlayerChatted(player: Player, message: string)
 		else
 			warn("DebugService: /weapons all | /weapons reset")
 		end
+	elseif command == ANIM_COMMAND then
+		if argument == "export" then
+			-- Every weapon clip as a KeyframeSequence in
+			-- ServerStorage.WeaponAnimExports: right-click each -> Save to
+			-- Roblox, then paste the ids into CombatConfig.AnimationIds.
+			local old = ServerStorage:FindFirstChild("WeaponAnimExports")
+			if old then
+				old:Destroy()
+			end
+			local folder = Instance.new("Folder")
+			folder.Name = "WeaponAnimExports"
+			for _, name in WeaponAnims.Names do
+				local sequence = WeaponAnims.Build(name)
+				if sequence then
+					sequence.Parent = folder
+				end
+			end
+			folder.Parent = ServerStorage
+			print(("DebugService: %d weapon clips in ServerStorage.WeaponAnimExports (right-click each -> Save to Roblox, paste the ids into CombatConfig.AnimationIds)"):format(#folder:GetChildren()))
+		else
+			warn("DebugService: /anim export")
+		end
 	elseif command == TUTORIAL_COMMAND then
 		local verb, rawStep = argument:match("^(%S+)%s*(%S*)$")
 		if verb == "reset" then
@@ -1128,7 +1233,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /quest complete <id>|reset, /powerup <key> <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /anim export, /quest complete <id>|reset, /powerup <key> <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()

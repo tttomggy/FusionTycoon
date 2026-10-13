@@ -48,6 +48,22 @@ CombatConfig.HitsPerSecond = 4 -- RequestHit rate limit (spam is dropped)
 CombatConfig.HitBurst = 6
 CombatConfig.MeleeMaxAngle = 100 -- degrees off your facing a melee target may be
 
+CombatConfig.SpinImpulse = Vector3.new(0, 14, 5) -- per unit of mass: a peel slip / the glove spins you
+
+-- Published animation ids (Harris fills these after /anim export -> Save to
+-- Roblox). An id set = that asset; empty in Studio = the in-code clip
+-- (WeaponAnims) registered with KeyframeSequenceProvider; empty live = the
+-- C0 WeaponPose fallback. Keys are WeaponAnims clip names.
+CombatConfig.AnimationIds = {
+	BatHold = "",
+	BatSwing = "",
+	GloveHold = "",
+	GloveSlap = "",
+	GunAim = "",
+	GunRecoil = "",
+	PeelThrow = "",
+} :: { [string]: string }
+
 CombatConfig.Freeze = {
 	SpeedMultiplier = 0.4,
 	Seconds = 3,

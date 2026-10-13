@@ -36,8 +36,10 @@
 	:Start() resolves PlayerDataService / TycoonService and hooks the sync.
 ]]
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local DebugConfig = require(ReplicatedStorage.Shared.Config.DebugConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -128,6 +130,14 @@ local SKIPS: { [string]: (Player) -> boolean } = {
 
 --[[ Steps ------------------------------------------------------------------- ]]
 
+-- Players whose join-time Studio skip was already decided.
+local skipDecided: { [Player]: boolean } = {}
+
+-- Whether a joining player skips the tutorial: Studio only, never live.
+function TutorialService.ShouldSkipOnJoin(isStudio: boolean): boolean
+	return isStudio and DebugConfig.SkipTutorialInStudio == true
+end
+
 local function tutorialOf(player: Player): any
 	local data = PlayerDataService.GetData(player)
 	return data and data.Tutorial
@@ -174,7 +184,22 @@ end
 local function check(player: Player)
 	local data = PlayerDataService.GetData(player)
 	local t = data and data.Tutorial
-	if not data or not t or t.Done then
+	if not data or not t then
+		return
+	end
+	-- Studio skips the tutorial once per join (DebugConfig): only the Done
+	-- state changes, no rewards, free pulls untouched. /tutorial reset and
+	-- Replay still run it afterwards in the same session.
+	if not skipDecided[player] then
+		skipDecided[player] = true
+		if TutorialService.ShouldSkipOnJoin(RunService:IsStudio()) and not t.Done then
+			t.Done = true
+			t.Step = #TutorialConfig.Steps
+			t.Replay = false
+			return
+		end
+	end
+	if t.Done then
 		return
 	end
 	if t.Step == 0 then
@@ -305,6 +330,7 @@ function TutorialService:Init()
 	RemoteEvents.TutorialAdvance.OnServerEvent:Connect(onAdvance)
 	Players.PlayerRemoving:Connect(function(player: Player)
 		enteredAt[player] = nil
+		skipDecided[player] = nil
 	end)
 end
 
