@@ -180,3 +180,14 @@ gameplay. Wrap each call in pcall and send nothing in Studio.
 - **Checks:** `luau-lsp analyze` reports no new errors, and the
   PlotLayout / StreetLayout assertions pass. Commit per phase, push, and open
   the PR.
+
+## Launch checklist (Harris, in Studio, before publishing)
+
+- **Publish the weapon animations.** `/anim export` → right-click each
+  KeyframeSequence in `ServerStorage.WeaponAnimExports` → **Save to Roblox**
+  → paste the ids into `CombatConfig.AnimationIds`. Without them a live
+  server has no weapon animations: it falls back to the C0 `WeaponPose`, which
+  only drives a Motor6D shoulder (on an AnimationConstraint rig the fallback
+  does not move the hand, and `/selftest combat` reports "skipped:
+  AnimationConstraint rig").
+- Max Players 12, Lighting.Technology Future, no Baseplate (see CLAUDE.md).

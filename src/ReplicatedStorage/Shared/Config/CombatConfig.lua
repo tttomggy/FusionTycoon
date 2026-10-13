@@ -43,12 +43,17 @@ CombatConfig.RagdollSeconds = 1.5
 CombatConfig.GetUpImmuneSeconds = 3
 CombatConfig.SpawnProtectSeconds = 5
 CombatConfig.RangeSlack = 4 -- studs of lag allowance on the server's range checks
--- Knockback is a launch VELOCITY (studs/s, SET on every part of the ragdolled
--- character; CombatService.launch). Targets: the Bat throws about 15-20
--- studs, the Slap Glove about 25-30 with a spin. These Knockback values and
--- this hop are the first guess for that (hop 25 = ~0.26 s of air, then the
--- ragdoll slides): tune them in the 2-player test; /selftest combat measures
--- >= 12 (Bat) / >= 20 (Glove) studs in 0.6 s on the server.
+-- Knockback is the speed (studs/s) of a server-made LinearVelocity
+-- ("KnockbackMover" on the target's root) that is held for LaunchSeconds, then
+-- released: the body keeps that speed through the air (no drag) and the ragdoll
+-- slides to a stop. Distance ~ speed x (LaunchSeconds + airtime) + a short slide;
+-- with UpwardKick 25 the airtime is ~0.4 s after the mover ends. Targets:
+-- the Bat throws about 15-20 studs, the Slap Glove about 25-30 with a spin.
+-- These values are a computed first guess (30 x ~0.6 s = 18; 42 x ~0.6 s = 25
+-- + the slide): tune them in the 2-player test on the TARGET's screen;
+-- /selftest combat measures >= 12 (Bat) / >= 20 (Glove) studs in 0.6 s as the
+-- target's own client sees it.
+CombatConfig.LaunchSeconds = 0.2 -- how long the mover is held
 CombatConfig.UpwardKick = 25 -- added to every knockback (a little hop)
 CombatConfig.HitsPerSecond = 4 -- RequestHit rate limit (spam is dropped)
 CombatConfig.HitBurst = 6
@@ -91,7 +96,7 @@ CombatConfig.Weapons = {
 		Kind = "Melee",
 		Range = 7,
 		Cooldown = 1.2,
-		Knockback = 60,
+		Knockback = 30,
 		UnlockRebirth = 1,
 		Blurb = "Hit a thief to make them drop your orb.",
 	},
@@ -102,7 +107,7 @@ CombatConfig.Weapons = {
 		Kind = "Ranged",
 		Range = 60,
 		Cooldown = 3,
-		Knockback = 35,
+		Knockback = 20,
 		UnlockRebirth = 2,
 		Blurb = "Zap a runner from far away.",
 	},
@@ -124,7 +129,7 @@ CombatConfig.Weapons = {
 		Kind = "Melee",
 		Range = 6,
 		Cooldown = 2.5,
-		Knockback = 120,
+		Knockback = 42,
 		UnlockRebirth = nil,
 		Blurb = "One slap sends them flying.",
 	},
@@ -135,7 +140,7 @@ CombatConfig.Weapons = {
 		Kind = "Peel",
 		Range = 8,
 		Cooldown = 10,
-		Knockback = 30,
+		Knockback = 20,
 		UnlockRebirth = nil,
 		Blurb = "Drop it on the ground: the first enemy to step on it slips.",
 	},

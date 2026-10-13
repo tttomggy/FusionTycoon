@@ -1812,25 +1812,27 @@ person, R15, 100% camera zoom; check each from the front and the side.
   tutorial is skipped on join; `/tutorial reset` still runs it.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
-- [ ] **Gacha board** (Studio, at normal camera zoom): an UPRIGHT board
-  directly behind the Gacha Pad (about 4 studs past its far edge), facing the
-  walkway, dark frame with a thin gold strip along the top and sides, bottom
-  edge above your head on the pad. It shows SIX coloured tiles with spinning
-  orbs and huge %s, readable as you walk up the walkway; a never-found tier
-  is a black orb with "?" but keeps its %. Standing on the pad, E / R / ?
-  sit just under the board in the world (not mid-screen); the (i) opens the
-  ORBS & ODDS panel. `/rebirths 3`: the 🍀 Luck pill appears and the %s
-  change. Another player's board shows THEIR odds with no silhouettes and no
-  buttons. Phone emulator: the buttons are tappable (≥ 44 px). The tutorial's
-  big green PULL button still works (it uses the prompt directly).
+- [ ] **Gacha pop-up card** (Studio, any camera zoom): walk toward YOUR
+  Gacha Pad: at about 16 studs a card pops up above the pad (a quick
+  0.6 → 1 bounce) with six coloured tiles, spinning orbs, huge %s, the gold
+  price pill and the E / R / ? row under it; at the default camera the whole
+  card is on screen, zoomed out it just gets smaller. Walk away past 19
+  studs: it pops down and only the small GACHA + price label shows (the label
+  is also what other players' pads show). No flicker at the edge. A
+  never-found tier is a black orb with "?" but keeps its %. E / R / ? and the
+  (i) all work (the (i) opens the ORBS & ODDS panel); on the phone emulator
+  the buttons are ≥ 44 px and tappable. `/rebirths 3` then walk up: the 🍀 Luck
+  pill appears and the %s change. There is no physical board in the lab.
 - [ ] **Studio test start** (Test → 2 players, no commands typed): both
   players are at Rebirth 3 with the weapon bar. Player1 bats Player2 and
   Player2 flies; the Glove launches further with a spin. `/rebirths 0` on
   Player2, then hit them: "🛡 NEW LAB" over them (attacker only). `/rebirths
   0` on yourself with a weapon in hand: a click toasts "Fighting unlocks at
   Rebirth 1" at most every 3 s and nothing is sent.
-- [ ] **Knockback** (2 players): bat → Player2 flies about 15-20 studs; glove
-  → about 25-30 with a spin; Player2 stands up normally after.
+- [ ] **Knockback** (2 players): bat → ON PLAYER2'S OWN SCREEN Player2 flies
+  about 15-20 studs; glove → about 25-30 with a spin; Player2 stands up and
+  walks normally after (check the Explorer: no `KnockbackMover` left under the
+  character).
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +

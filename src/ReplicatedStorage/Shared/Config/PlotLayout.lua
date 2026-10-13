@@ -92,34 +92,30 @@ PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
---[[ Gacha display board -------------------------------------------------------------
-	An UPRIGHT board on two slim posts DIRECTLY BEHIND the Gacha Pad (about 4
-	studs past its far edge), facing the walkway (-X in plot space): you read
-	it straight on from the pad and from the walkway you walk up. Its body is
-	a dark SmoothPlastic frame; only a thin gold Neon strip runs along the top
-	and the two sides (the thin-band rule). It carries the odds card (client
-	SurfaceGui, GachaBoardController). Plot-local; the footprint is in the
-	assertion block.
+--[[ Gacha pop-up card ---------------------------------------------------------------
+	No physical board. A BillboardGui card (GachaBoardController) pops up
+	above YOUR Gacha Pad when your CHARACTER walks near it (Pet Simulator 99 /
+	Bubble Gum Simulator style). Sized in STUDS so it scales with zoom like a
+	world object; visibility follows the character's distance to the pad, not
+	the camera's. Far away (and on other players' pads) the small server
+	GachaLabel (name + price) shows instead.
 ]]
 PlotLayout.Gacha = {
-	BoardPosition = v3(28.5, 0, 22), -- foot of the board: pad centre 20 + radius 4.05 + ~4.4
-	BoardSize = v3(11, 7.5, 0.4), -- wide (along its face), tall, thick (the face part)
-	BottomY = 5.5, -- the bottom edge, above a character's head on the pad
-	TiltBackDegrees = 0, -- upright
-	YawTowardGateDegrees = 0, -- 0 = straight at the walkway
-	FrameMargin = 0.25, -- the dark frame body is this much bigger than the face on every side
-	FrameDepth = 0.4,
-	PostSize = v3(0.5, 5.6, 0.5),
-	PostSpread = 3.8, -- posts at +-this along the board's width
-	GoldStripThickness = 0.12, -- the thin Neon strip along the top and the two sides
-	GoldStripDepth = 0.3,
-	PixelsPerStud = 60,
-	MaxDistance = 100, -- the SurfaceGui draws this far
-	ButtonAnchorDrop = 0.6, -- the (invisible) anchor of the button row, under the bottom edge
-	ButtonMaxDistance = 60,
-	-- The ground rectangle kept clear for the whole board (posts, frame and
-	-- face): centre = BoardPosition.
-	Footprint = v3(3, 0, 11.8),
+	CardStuds = Vector2.new(11, 7.5), -- the BillboardGui's size in studs
+	DesignCanvas = Vector2.new(600, 410), -- the layout is built at this size, then scaled (UIScale) to the studs
+	-- Studs from the pad top to the card's bottom edge. A character is ~5.4
+	-- studs tall on the pad, so the card sits right at head height; any higher
+	-- and the top edge leaves the screen at the DEFAULT camera (12.5 studs
+	-- behind, FOV 70: the top corner is at 0.98 of the screen height at 5,
+	-- 1.08 at 5.8, 1.38 at 8). /selftest projects the four corners.
+	BottomAbovePad = 5,
+	PopInStuds = 16, -- the card pops IN when the character is closer than this to the pad
+	PopOutStuds = 19, -- ... and OUT beyond this (the gap stops flicker)
+	PopInSeconds = 0.2, -- UIScale 0.6 -> 1, Back-Out
+	PopOutSeconds = 0.12, -- UIScale 1 -> 0.6
+	PopFromScale = 0.6,
+	MaxDistance = 150, -- the camera's zoom never hides it
+	ButtonMaxDistance = 150,
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind
@@ -580,7 +576,6 @@ local function collectFootprints(): ({ Footprint }, { Footprint }, Footprint)
 	local footprints: { Footprint } = {
 		circle("ClaimStation", PlotLayout.CLAIM_STATION, stationRadius),
 		circle("GachaStation", PlotLayout.GACHA_STATION, stationRadius),
-		boxFootprint("GachaBoard", PlotLayout.Gacha.BoardPosition, PlotLayout.Gacha.Footprint.X, PlotLayout.Gacha.Footprint.Z),
 		circle("MultiplierStation", PlotLayout.MULTIPLIER_STATION, stationRadius),
 		circle("FusionMachine", PlotLayout.FUSION_MACHINE, PlotLayout.Machine.RimDiameter / 2),
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
@@ -715,29 +710,6 @@ function PlotLayout.CheckFloor2(): boolean
 	return true
 end
 
--- The Gacha board's own check (also run by /selftest): inside the walls and
--- clear of every other footprint and the walkway. Errors with the reason.
-function PlotLayout.CheckGachaBoard(): boolean
-	local footprints, factory, walkway = collectFootprints()
-	local board: Footprint? = nil
-	for _, footprint in footprints do
-		if footprint.Name == "GachaBoard" then
-			board = footprint
-		end
-	end
-	assert(board, "PlotLayout: the Gacha board has no footprint")
-	local minX, maxX, minZ, maxZ = bounds(board :: Footprint)
-	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
-	assert(minX >= -inner and maxX <= inner and minZ >= -inner and maxZ <= inner, "PlotLayout: the Gacha board sits outside the walls")
-	assert(not overlaps(board :: Footprint, walkway), "PlotLayout: the Gacha board is on the walkway")
-	for _, list in { footprints, factory } do
-		for _, other in list do
-			assert(other.Name == "GachaBoard" or not overlaps(board :: Footprint, other), ("PlotLayout: the Gacha board overlaps %s"):format(other.Name))
-		end
-	end
-	return true
-end
-
 local function checkLayout()
 	local footprints, factory, walkway = collectFootprints()
 	local belt = PlotLayout.FactoryBelt
@@ -818,6 +790,5 @@ local function checkLayout()
 end
 
 checkLayout()
-PlotLayout.CheckGachaBoard()
 
 return PlotLayout

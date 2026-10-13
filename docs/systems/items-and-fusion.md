@@ -36,44 +36,49 @@ with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
-**Gacha display board** (`Controllers/GachaBoardController`, client + the
-board built by `TycoonService.buildGachaBoard`): the odds are a real board in
-the world, not a billboard (a camera-distance billboard only showed when
-zoomed in, and a `CanvasGroup` in a BillboardGui rendered as a black box).
-UPRIGHT and DIRECTLY BEHIND every Gacha Pad (`PlotLayout.Gacha`: 11 × 7.5
-studs on two slim posts at (28.5, 0, 22), about 4 studs past the pad's far
-edge, bottom edge 5.5 so it shows above your head on the pad, facing the
-walkway (-X), no tilt and no yaw: you read it straight on from the pad and
-as you walk up). Its body is a dark SmoothPlastic frame 0.4 thick; only a
-THIN (0.12) Neon gold strip runs along the top and the two sides. Footprint
-in the assertion block / `CheckGachaBoard`. Its Front face carries a SurfaceGui every client
-builds for EVERY plot (60 px/stud, `MaxDistance` 100, no `CanvasGroup`, no
-fade): violet glass with diagonal stripes in a thick gold rim, a gold header
-ribbon (capsule icon, GACHA PAD, your (i) button), the `🍀 Luck ×N` pill and
-the live event chip, six tier tiles (tier gradient, a spinning 3D orb in a
-`ViewportFrame` built by `PedestalVisuals.BuildCarryOrb`, the % huge — 42 px =
-0.7 studs — white with a tier-coloured stroke, a name ribbon; Secret has an
-animated rainbow stroke and a sparkle; orbs only spin within 60 studs of the
-camera), mutation chips (event-only ones during their event) and a big gold
-price pill (`$285 / pull · ×10 $3.5K`, or `FREE · 2 left`). On YOUR board a
-never-found tier is a black silhouette orb with a "?" and STILL shows its %;
-other players' boards show no silhouettes and draw THAT owner's luck / price
-from attributes the server stamps on the board model (`Luck`, `PullCost`,
-`MultiCost`, `FreePulls`). Numbers: `FusionConfig.GetGachaOddsRows(luck,
-event)` (built on `GetGachaRates` and `MutationConfig.GetChance`;
-`FormatOdds` is built on the same rows), yours at
-`TycoonController.GetLuck()` (the server's `LuckBase` from each `SyncTycoon`
-× the live admin-luck value). The (i) button (SurfaceGui in PlayerGui with an
-`Adornee`, `Active` on your own) opens the per-orb panel (`UIKit.Modal`,
-tier % / orbs in the tier because `PickRandomOfTier` is uniform). The pad's
-PullPrompt / Pull10Prompt / HelpPrompt are `Style = Custom`, drawn as one
-row of round buttons in a pixel-size BillboardGui on the board's invisible
-`ButtonAnchor` under its bottom edge ([E] Pull + price, [R] ×10 + price,
-[?] help; key / gamepad glyph / words on touch; ≥ 44 px;
-`prompt:InputHoldBegin/End`). Paid-Random-Items compliance: every outcome's %
-is on the board before you pull, luck and the event are the live disclosure,
-a silhouette hides the look, never the odds. `TycoonConfig.MultiPullCount`
-(10) is shared.
+**Gacha pop-up card** (`Controllers/GachaBoardController`, client only): the
+odds are a BillboardGui card that pops up above YOUR Gacha Pad when your
+CHARACTER walks close (Pet Simulator 99 / Bubble Gum Simulator egg card).
+There is no physical board (the board attempt was dropped; the earlier
+camera-distance billboard failed for three reasons, each fixed here):
+1. **Sized in studs** (`PlotLayout.Gacha.CardStuds` 11 × 7.5, `Size =
+   UDim2.new(11, 0, 7.5, 0)`), so it scales with zoom like a world object and
+   never runs off the screen; the layout is built at a 600 × 410 design canvas
+   and scaled by a `UIScale` (`FitScale`) from the billboard's on-screen size.
+   `BottomAbovePad` = 5 studs puts the bottom edge at head height; any higher
+   and the top edge leaves the screen at the default camera (12.5 studs
+   behind, FOV 70), which `/selftest gacha` checks by projecting the four
+   corners at 1366 × 768 and 844 × 390.
+2. **Visibility follows the character, not the camera:** each frame the
+   distance from your `HumanoidRootPart` to the pad; inside 16 studs it pops
+   in (`Enabled`, `UIScale` 0.6 → 1 in 0.2 s, Back-Out), beyond 19 it pops
+   out (1 → 0.6 in 0.12 s, then `Enabled` off); `MaxDistance` 150.
+3. **No `CanvasGroup`**; the pop is a `UIScale` only.
+Far away, and on other players' pads, the small server `GachaLabel` (name +
+price, no odds lines) shows; the controller hides it while the card is up.
+Content (unchanged from the board): violet glass in a gold rim with diagonal
+stripes, a gold header ribbon (capsule icon, GACHA PAD, your (i) button), the
+`🍀 Luck ×N` pill and the live event chip, six tier tiles (tier gradient, a
+spinning 3D orb in a `ViewportFrame` built by `PedestalVisuals.BuildCarryOrb`,
+the % huge in white with a tier-coloured stroke, a name ribbon; Secret has an
+animated rainbow stroke and a sparkle; orbs spin only while the card is
+open), mutation chips, a gold price pill. A never-found tier is a black
+silhouette orb with "?" and STILL shows its %. The E / R / ? row is inside the
+same billboard, under the card (pixel-size, ≥ 44 px, pops with it); the
+three gacha prompts are `Style = Custom`, the buttons run
+`InputHoldBegin` / `End`. Numbers: `FusionConfig.GetGachaOddsRows(luck,
+event)` is the single source (see below). Every UI selftest reads the
+instance tree (`AbsoluteSize` > 0 on both axes, `Visible` up the chain,
+`TextBounds.Y` > 0) and every FAIL carries its measurements in `Detail`.
+Odds source: `FusionConfig.GetGachaOddsRows(luck, event)` (built on
+`GetGachaRates` and `MutationConfig.GetChance`; `FormatOdds` is built on the
+same rows), yours at `TycoonController.GetLuck()` (the server's `LuckBase`
+from each `SyncTycoon` × the live admin-luck value). The (i) button opens the
+per-orb panel (`UIKit.Modal`, tier % / orbs in the tier because
+`PickRandomOfTier` is uniform). `TycoonConfig.MultiPullCount` (10) is shared.
+Paid-Random-Items compliance: every outcome's % is on the card before you
+pull, luck and the event are the live disclosure, a silhouette hides the
+look, never the odds.
 
 
 - **Auto-display** (Playtest 7): players never choose. `ItemService.Arrange
@@ -184,9 +189,9 @@ a silhouette hides the look, never the odds. `TycoonConfig.MultiPullCount`
   levels · Core Engine LV 15" / "+23 levels across 3 generators", one
   bump per changed generator; the panel refreshes at most 4×/s.
 
-*Board bug fixed (Oct 13):* `buildTile` / `buildChip` returned their frames but
-never parented them, so the board drew only its header and price pill. The
-selftest read the controller's own `view.Tiles` table and passed anyway; every
-board / button check now reads the instance tree (`gui:GetDescendants()`,
-`AbsoluteSize` > 0 on both axes, `Visible` up the chain, `TextBounds.Y` > 0)
-and every FAIL carries its measurements in `Detail`.
+*Board bug fixed (Oct 13), kept for the lesson:* `buildTile` / `buildChip`
+returned their frames but never parented them, so the first board drew only
+its header and price pill. The selftest read the controller's own table and
+passed anyway; every card / button check now reads the instance tree
+(`gui:GetDescendants()`, `AbsoluteSize` > 0 on both axes, `Visible` up the
+chain, `TextBounds.Y` > 0) and every FAIL carries its measurements in `Detail`.

@@ -20,10 +20,12 @@
 	  * Ragdoll: the server owns the until-times (Player attributes
 	    RagdollUntil / ImmuneUntil / FrozenUntil / SpawnProtectUntil, server
 	    time). It swaps the target's Motor6Ds for BallSocketConstraints
-	    (replicated to everyone), fires HitReceived { Impulse, Seconds } to
-	    the target (whose client goes Physical and takes the impulse) and
-	    restores the joints after RagdollSeconds. A client that ignores it
-	    breaks nothing: the server's times still gate everything.
+	    (replicated to everyone), launches the target with a server-made
+	    LinearVelocity "KnockbackMover" on the root for LaunchSeconds (the
+	    target's own client simulates it; no ownership change), fires
+	    HitReceived { Impulse, Seconds } to the target (whose client goes
+	    Physical) and restores the joints after RagdollSeconds. A client that
+	    ignores it breaks nothing: the server's times still gate everything.
 	  * Freeze Ray: no ragdoll; FrozenUntil, the target's client walks at
 	    Freeze.SpeedMultiplier.
 	  * Banana Peel: placed near you (one out, LifetimeSeconds), the first
@@ -73,7 +75,7 @@ local state = {
 	lastSwing = {} :: { [number]: { [string]: number } },
 	-- userId -> the joints swapped out for the current ragdoll
 	joints = {} :: { [number]: { Joint } },
-	-- userId -> the character launched by a hit (PlatformStand / ownership to undo)
+	-- userId -> the character launched by a hit (PlatformStand / movers to undo)
 	launches = {} :: { [number]: Launch },
 	logLaunch = false,
 	-- userId -> placed banana peels
@@ -225,28 +227,35 @@ local function swapJoints(player: Player)
 	state.joints[player.UserId] = joints
 end
 
-local HEARTBEAT_REASSERTS = 3 -- server Heartbeats the launch velocity is re-checked
-local REASSERT_BELOW = 0.6 -- ... only while the root is slower than this share of the target
+type Launch = { Character: Model, Humanoid: Humanoid?, Root: BasePart, Token: number }
 
-type Launch = { Character: Model, Humanoid: Humanoid?, Root: BasePart }
+local MOVER_NAME = "KnockbackMover"
+local SPIN_MOVER_NAME = "KnockbackSpin"
+local MOVER_ATTACHMENT_NAME = "KnockbackAttachment"
+local LIMB_DRAG_CHECK_SECONDS = 0.1 -- when the root is checked for limb drag
+local LIMB_DRAG_LOST_SHARE = 0.4 -- more than this share of the speed lost: add UpperTorso
+local launchToken = 0
 
 local function flatSpeed(velocity: Vector3): number
 	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 end
 
--- Sets every loose part of `character` to `velocity` (studs/s). SETTING the
--- velocity, not applying an impulse: the Humanoid's ground controller and the
--- old owner's last physics frames cannot cancel it the way they ate impulses.
-local function setCharacterVelocity(character: Model, velocity: Vector3)
-	for _, part in character:GetDescendants() do
-		if part:IsA("BasePart") and not part.Anchored then
-			part.AssemblyLinearVelocity = velocity
+-- Destroys every knockback mover (and its attachment) left on `character`.
+local function destroyMovers(character: Model?)
+	if not character then
+		return
+	end
+	for _, descendant in character:GetDescendants() do
+		local name = descendant.Name
+		if name == MOVER_NAME or name == SPIN_MOVER_NAME or name == MOVER_ATTACHMENT_NAME then
+			descendant:Destroy()
 		end
 	end
 end
 
 -- Studio-only log of the target root's flat speed for 10 Heartbeats after a
--- launch (CombatService.SetLaunchLogging; /selftest turns it on).
+-- launch (CombatService.SetLaunchLogging; /selftest turns it on). This is
+-- what the SERVER sees: the truth is measured on the target's own client.
 local function logLaunch(root: BasePart, label: string)
 	task.spawn(function()
 		local speeds: { string } = {}
@@ -254,78 +263,98 @@ local function logLaunch(root: BasePart, label: string)
 			RunService.Heartbeat:Wait()
 			table.insert(speeds, ("%.1f"):format(flatSpeed(root.AssemblyLinearVelocity)))
 		end
-		print(("[CombatService] %s: target root flat speed over 10 Heartbeats: %s"):format(label, table.concat(speeds, ", ")))
+		print(("[CombatService] %s: target root flat speed over 10 Heartbeats (server view): %s"):format(label, table.concat(speeds, ", ")))
 	end)
 end
 
--- The server-owned launch (classic client ownership is what this place
--- uses: the target's root was owned by Player2). In order:
---   1. humanoid.PlatformStand = true (replicates; the ground controller is
---      off, so nothing brakes the flight; the Humanoid state itself is the
---      owning client's to set, which CombatController does),
---   2. the server takes the root's network ownership (pcall),
---   3. every part's AssemblyLinearVelocity = the launch velocity,
---   4. for the next 3 server Heartbeats it is set again, but only while the
---      root's flat speed is still below 60% of the target (the old owner's
---      last frames can overwrite it; this never adds speed twice).
--- Returns false when ownership can't be taken (the client then does the same
--- on its side as the fallback; never both).
-local function launch(target: Player, impulse: Vector3, spin: boolean): boolean
+-- A LinearVelocity on `part` (its own Attachment at the part's centre), the
+-- standard Roblox body mover. A constraint the server creates replicates to
+-- every client, and whoever owns the assembly (the target's own client)
+-- simulates it, so no ownership change is needed and it works whatever the
+-- ownership.
+local function addVelocityMover(part: BasePart, velocity: Vector3)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = MOVER_ATTACHMENT_NAME
+	attachment.Parent = part
+	local mover = Instance.new("LinearVelocity")
+	mover.Name = MOVER_NAME
+	mover.Attachment0 = attachment
+	mover.RelativeTo = Enum.ActuatorRelativeTo.World
+	mover.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+	mover.VectorVelocity = velocity
+	mover.MaxForce = math.huge
+	mover.Parent = part
+end
+
+-- The server-made launch. In order: any mover left from a earlier hit goes
+-- (a new hit REPLACES the old mover, never stacks), PlatformStand on (the
+-- ground controller is off, nothing brakes the flight), a LinearVelocity on
+-- the root for LaunchSeconds, and for the Glove / peel an AngularVelocity
+-- spin for the same time. If the limbs drag the root (more than 40% of the
+-- speed lost by LIMB_DRAG_CHECK_SECONDS) the same mover goes on UpperTorso
+-- too, not on every part.
+local function launch(target: Player, impulse: Vector3, spin: boolean)
 	local character = target.Character
 	local root = getRoot(target)
 	if not character or not root then
-		return false
+		return
 	end
+	destroyMovers(character)
+	launchToken += 1
+	local token = launchToken
 	local humanoid = getHumanoid(target)
 	if humanoid then
 		humanoid.PlatformStand = true
 	end
-	if not pcall(root.SetNetworkOwner, root, nil) then
-		if humanoid then
-			humanoid.PlatformStand = false
-		end
-		return false
-	end
-	state.launches[target.UserId] = { Character = character, Humanoid = humanoid, Root = root }
-	setCharacterVelocity(character, impulse)
+	state.launches[target.UserId] = { Character = character, Humanoid = humanoid, Root = root, Token = token }
+	addVelocityMover(root, impulse)
 	if spin then
-		root.AssemblyAngularVelocity = CombatConfig.SpinImpulse
+		local attachment = Instance.new("Attachment")
+		attachment.Name = MOVER_ATTACHMENT_NAME
+		attachment.Parent = root
+		local spinner = Instance.new("AngularVelocity")
+		spinner.Name = SPIN_MOVER_NAME
+		spinner.Attachment0 = attachment
+		spinner.RelativeTo = Enum.ActuatorRelativeTo.World
+		spinner.AngularVelocity = CombatConfig.SpinImpulse
+		spinner.MaxTorque = math.huge
+		spinner.Parent = root
 	end
 	if state.logLaunch then
 		logLaunch(root, "launch")
 	end
 	local wanted = flatSpeed(impulse)
-	task.spawn(function()
-		for _ = 1, HEARTBEAT_REASSERTS do
-			RunService.Heartbeat:Wait()
-			if not root.Parent or state.launches[target.UserId] == nil then
-				return
-			end
-			if flatSpeed(root.AssemblyLinearVelocity) < wanted * REASSERT_BELOW then
-				setCharacterVelocity(character, impulse)
-			end
+	task.delay(LIMB_DRAG_CHECK_SECONDS, function()
+		local launched = state.launches[target.UserId]
+		if not launched or launched.Token ~= token or not root.Parent then
+			return
+		end
+		local torso = character:FindFirstChild("UpperTorso")
+		if torso and torso:IsA("BasePart") and wanted > 0 and flatSpeed(root.AssemblyLinearVelocity) < wanted * (1 - LIMB_DRAG_LOST_SHARE) then
+			addVelocityMover(torso, impulse)
 		end
 	end)
-	return true
+	task.delay(CombatConfig.LaunchSeconds, function()
+		local launched = state.launches[target.UserId]
+		if launched and launched.Token == token then
+			destroyMovers(character)
+		end
+	end)
 end
 
--- Gets the target standing again: PlatformStand off, the player owns their
--- character again, then GettingUp. Safe to call twice, on respawn and on
--- leaving mid-ragdoll (nobody is left platform-standing).
-local function endLaunch(userId: number, player: Player?)
+-- Gets the target standing again: movers gone, PlatformStand off, then
+-- GettingUp. Safe to call twice, on respawn and on leaving mid-ragdoll
+-- (nobody is left platform-standing).
+local function endLaunch(userId: number, _player: Player?)
 	local launched = state.launches[userId]
 	state.launches[userId] = nil
 	if not launched then
 		return
 	end
+	destroyMovers(launched.Character)
 	local humanoid = launched.Humanoid
 	if humanoid and humanoid.Parent then
 		humanoid.PlatformStand = false
-	end
-	if player and player.Parent and launched.Root.Parent then
-		pcall(launched.Root.SetNetworkOwner, launched.Root, player)
-	end
-	if humanoid and humanoid.Parent then
 		humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
 	end
 end
@@ -337,14 +366,19 @@ local function ragdoll(target: Player, impulse: Vector3, spin: boolean)
 	target:SetAttribute("RagdollUntil", now + seconds)
 	target:SetAttribute("ImmuneUntil", now + seconds + CombatConfig.GetUpImmuneSeconds)
 	swapJoints(target)
-	local serverLaunch = launch(target, impulse, spin)
-	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds, Spin = spin, ServerLaunch = serverLaunch })
+	launch(target, impulse, spin)
+	RemoteEvents.HitReceived:FireClient(target, { Impulse = impulse, Seconds = seconds, Spin = spin })
 	local character = target.Character
+	local token = launchToken
 	task.delay(seconds, function()
 		if target.Character == character then
 			restoreJoints(target.UserId)
 		end
-		endLaunch(target.UserId, target)
+		-- A second hit in the meantime owns the launch now (and its own timer).
+		local launched = state.launches[target.UserId]
+		if launched and launched.Token == token then
+			endLaunch(target.UserId, target)
+		end
 	end)
 end
 

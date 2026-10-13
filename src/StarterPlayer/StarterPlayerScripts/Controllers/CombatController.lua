@@ -24,7 +24,7 @@
 	    recoil + a muzzle flash on a shot, a throw for the peel. Everyone
 	    sees yours through HitFx (Swing / Beam / FreezeBeam / Throw carry the
 	    Attacker), the same code runs for theirs.
-	  * HitReceived: you ragdoll (Humanoid Physics state + the impulse; the
+	  * HitReceived: you ragdoll (Humanoid Physics state; the launch is the server's KnockbackMover; the
 	    server swaps your joints and restores them; a peel adds a spin) and
 	    prompts switch off until you're up; or you freeze (40% speed). The
 	    server's times rule.
@@ -611,29 +611,9 @@ local function onHitReceived(payload: any)
 	humanoid:UnequipTools()
 	local character = localPlayer.Character :: Model
 	humanoid:ChangeState(Enum.HumanoidStateType.Physics)
-	-- The server launches you itself (ServerLaunch) when it could take the
-	-- root's network ownership: then no client impulse (never both). Only
-	-- when it couldn't, this is the fallback.
-	if payload.ServerLaunch ~= true then
-		-- Same recipe as the server's, on this side: the ground controller off
-		-- (PlatformStand), the velocity SET on every part, then back up.
-		humanoid.PlatformStand = true
-		if typeof(payload.Impulse) == "Vector3" then
-			for _, part in character:GetDescendants() do
-				if part:IsA("BasePart") and not part.Anchored then
-					part.AssemblyLinearVelocity = payload.Impulse
-				end
-			end
-		end
-		if payload.Spin == true then
-			root.AssemblyAngularVelocity = CombatConfig.SpinImpulse
-		end
-		task.delay(seconds, function()
-			if humanoid.Parent then
-				humanoid.PlatformStand = false
-			end
-		end)
-	end
+	-- The launch is the server's KnockbackMover (a LinearVelocity on your
+	-- root, simulated here because this client owns the character); nothing
+	-- to write from this side.
 	ProximityPromptService.Enabled = false
 	task.delay(seconds, function()
 		ProximityPromptService.Enabled = true

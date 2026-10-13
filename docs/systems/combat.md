@@ -115,45 +115,41 @@ never sold, server authority are unchanged.
   the clip's name (BatHold, BatSwing, GloveHold, GloveSlap, GunAim,
   GunRecoil, PeelThrow). Restart Play: the ids are used instead of the
   in-code clips (and a live server needs them).
-- **Knockback v2 (PlatformStand + velocity):** the first server launch
-  (`humanoid:ChangeState(Physics)` on the server plus `ApplyImpulse`) moved the
-  Bat target 0.1 studs: a player's Humanoid state is not the server's to set,
-  so the Humanoid stayed in Running and its ground controller braked the
-  horizontal velocity to almost nothing within a few frames, and the old
-  owner's client could overwrite the velocity for a frame or two after
-  `SetNetworkOwner(nil)`. Now (`CombatService.launch`): 1. `PlatformStand =
-  true` on the server (replicates, the ground controller is off; the client
-  keeps its own `ChangeState(Physics)`), 2. `SetNetworkOwner(nil)` (pcall),
-  3. `AssemblyLinearVelocity = launch velocity` SET on every part (not an
-  impulse), 4. for the next 3 server Heartbeats it is set again, only while
-  the root's flat speed is under 60% of the target, so it never adds speed
-  twice. Get-up (`endLaunch`, also on respawn and on leaving): `PlatformStand
-  = false`, ownership back to the player, `GettingUp`. The client fallback (only
-  when ownership could not be taken) does the same on its side. The first
-  attempt's speed log ("10 Heartbeats of the target's flat speed") is printed
-  by `CombatService.SetLaunchLogging(true)` during `/selftest combat`; the
-  measured before/after numbers are Harris's to quote from that run. Final
-  numbers live in `CombatConfig` (Bat 60 + hop 25, Glove 120 + hop 25), with a
-  comment: tune them in the 2-player test toward Bat 15-20 / Glove 25-30
-  studs. `/selftest combat` needs the server-measured Bat >= 12 and Glove
-  >= 20 studs in 0.6 s, and "standing (not PlatformStand), owned by the
-  player again" after `RagdollSeconds`.
-- **Hits launch the target (server-owned), first version:** before, `onHitReceived` did a
-  client `root:ApplyImpulse(impulse * AssemblyMass)`. The server had just
-  swapped the Motor6Ds for BallSockets (so `AssemblyMass` is only the root's
-  assembly) and under fixed simulation / Server Authority a client impulse
-  on your own character can be corrected away: Player2 never flew.
-  `CombatService.launch` now takes `SetNetworkOwner(nil)` on the target's
-  root (pcall), sets the server Humanoid to Physics, applies
-  `impulse * part.Mass` to EVERY BasePart (the whole character's mass in
-  total) plus the spin (`CombatConfig.SpinImpulse`; Peel AND Slap Glove), and
-  hands ownership back with `GettingUp` after `RagdollSeconds`. `HitReceived`
-  carries `ServerLaunch = true`; the client applies the impulse itself only
-  when it is false (ownership failed), never both. `/selftest combat` with 2
-  players hits the other player with the Bat and Glove and the SERVER
-  measures the root's flat travel 0.6 s later (Bat ≥ 10, Glove ≥ 15 studs).
-  Knockback numbers are unchanged (Bat 60, Glove 120, + hop 25): tune them
-  against that check once Studio has run it.
+- **Knockback v3 (a server-made body mover):** v1 (`ChangeState` + impulse)
+  moved the Bat target 0.1 studs; v2 (`PlatformStand`, `SetNetworkOwner(nil)`,
+  SET `AssemblyLinearVelocity`, 3-Heartbeat re-assert) showed a velocity of
+  exactly 60.0 for 10 Heartbeats in the server log and still nothing moved on
+  the target's screen: the server was reading back its own write, and the
+  ownership handoff on a player character is not reliable here (the target's
+  client keeps simulating its character). v3 stops fighting over ownership.
+  `CombatService.launch` (no `SetNetworkOwner` anywhere): `PlatformStand =
+  true` on the server, then a `LinearVelocity` named `KnockbackMover` on the
+  target's `HumanoidRootPart` (its own Attachment at the root's centre,
+  `RelativeTo = World`, `VelocityConstraintMode = Vector`, `VectorVelocity` =
+  flat direction × knockback + `UpwardKick`, `MaxForce = math.huge`), destroyed
+  after `CombatConfig.LaunchSeconds` = 0.2 s; the Glove / peel add an
+  `AngularVelocity` (`KnockbackSpin`, `MaxTorque = math.huge`, the
+  `SpinImpulse` rate) for the same 0.2 s. Why it works: a constraint the
+  server creates replicates to every client and whoever owns the assembly
+  (the target's client) simulates it, whatever the ownership. If the limbs drag
+  the root (more than 40% of the speed lost 0.1 s in) the same mover is added
+  to `UpperTorso` too (not to every part). Clean-up: `endLaunch` (ragdoll
+  timer, respawn, leaving) and a second hit destroy every `KnockbackMover` /
+  `KnockbackSpin` / attachment and always reset `PlatformStand`; a new hit
+  REPLACES the old mover (a launch token stops the first hit's timers from
+  ending the second). The client (`onHitReceived`) keeps `ChangeState(Physics)`,
+  `UnequipTools`, prompts off and `GettingUp`; it writes no velocity or impulse
+  and has no `ServerLaunch` branch.
+  **Measured on the target's screen:** `/selftest combat` asks Player2's OWN
+  client (a `RootPos` probe) for its root just before the hit and 0.6 s after;
+  the test fails if that client doesn't answer; Bat ≥ 12 studs, Glove ≥ 20, the
+  server-side distance is printed next to it for comparison; 0.5 s after the
+  ragdoll ends a `GetUp` probe checks, on the target client, state not
+  Physics, `PlatformStand` off, no mover left. Numbers: the Bat 30, Glove 42
+  (the Laser Gun and peel 20) with `UpwardKick` 25 are computed first guesses
+  (speed × (0.2 s + ~0.4 s of air) + a short slide ≈ 18 and ≈ 25 + slide);
+  nothing could be run, so the before / after numbers are Harris's to quote
+  from `/selftest combat`.
 - **Landed-hit feel (every client):** attacker's swing track at speed 0 for
   0.06 s (hit-stop); camera shake 0.15 s for the attacker, 0.3 s for the
   target; the target flashes white 0.1 s; a bigger `BONK!` / `SLAP!` pop; the

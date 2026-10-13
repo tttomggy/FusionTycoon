@@ -2,39 +2,46 @@
 --[[
 	GachaBoardController
 	--------------------
-	The Gacha odds as a real BOARD in the world (Pet Simulator 99 / Bubble
-	Gum Simulator egg-card style), not a billboard: PlotLayout.Gacha, built
-	by TycoonService.buildGachaBoard directly behind every lab's Gacha Pad,
-	upright and facing the walkway. This controller
-	draws its face, for EVERY plot's board, and one row of round buttons for
-	YOUR pad.
+	The Gacha odds CARD: a BillboardGui that pops up above YOUR Gacha Pad when
+	your CHARACTER walks close (Pet Simulator 99 / Bubble Gum Simulator egg
+	card). No physical board. Three things this card does that the earlier
+	attempts did not:
 
-	  * The face (a SurfaceGui in PlayerGui, Adornee = the board's Face,
-	    60 px/stud, MaxDistance 100, LightInfluence 0, no CanvasGroup, no
-	    fade: it is always there). Deep violet glass with diagonal stripes in
-	    a thick gold rim; a gold header ribbon (capsule icon, "GACHA PAD",
-	    your (i) button); the 🍀 Luck pill when luck > x1 and the live event
-	    chip; six tier tiles (the tier's gradient, a spinning 3D orb in a
-	    ViewportFrame built by PedestalVisuals, the % huge in white with a
-	    tier-coloured stroke, a name ribbon); mutation chips (event-only ones
-	    during their event); a big gold price pill.
-	  * Your board: a tier you never found is a black silhouette orb with a
-	    "?" and STILL shows its %. Other players' boards: no silhouettes, at
-	    THAT owner's luck and price (attributes the server stamps on the
-	    board).
-	  * Odds: FusionConfig.GetGachaOddsRows(luck, EventState.GetOddsEvent()),
-	    the rows the roll uses; yours at TycoonController.GetLuck(). Refreshed
-	    on every sync and every 0.5 s.
-	  * The (i) panel (UIKit.Modal): every orb with its own %, found or not.
-	  * Buttons: the pad's three prompts are Style = Custom; PromptShown /
-	    PromptHidden say which are up. A BillboardGui with a PIXEL size, on
-	    the board's ButtonAnchor (just under its bottom edge): [E] Pull +
-	    price, [R] x10 + price, [?] help. The key on desktop, the gamepad
-	    glyph on a controller, words on touch; each >= 44 px; they run
-	    prompt:InputHoldBegin / End. No CanvasGroup; AlwaysOnTop false.
-	  * Orbs spin only while their board is within SPIN_STUDS of the camera.
+	  1. Sized in STUDS (PlotLayout.Gacha.CardStuds = 11 x 7.5), so it scales
+	     with zoom like a world object and never runs off the screen; the
+	     layout is built at a 600 x 410 design canvas and scaled by a UIScale
+	     (FitScale) from the billboard's on-screen size.
+	  2. Visibility follows the CHARACTER, never the camera: each frame the
+	     distance from your HumanoidRootPart to the pad; inside PopInStuds (16)
+	     it pops IN (Enabled, UIScale 0.6 -> 1 in 0.2 s, Back-Out); beyond
+	     PopOutStuds (19) it pops OUT (1 -> 0.6 in 0.12 s, then Enabled off);
+	     the gap stops flicker. MaxDistance 150, so zoom never hides it.
+	  3. No CanvasGroup anywhere; the pop is a UIScale only.
 
-	Compliance (Paid Random Items): every outcome's % is on the board before
+	The face: deep violet glass in a gold rim with diagonal stripes; a gold
+	header ribbon (capsule icon, "GACHA PAD", your (i) button); the Luck pill
+	when luck > x1 and the live event chip; six tier tiles (tier gradient, a
+	spinning 3D orb in a ViewportFrame built by PedestalVisuals, the % huge
+	in white with a tier-coloured stroke, a name ribbon; Secret has a rainbow
+	stroke and a sparkle); mutation chips; the gold price pill. A tier you
+	never found is a black silhouette orb with "?" and STILL shows its %.
+	Orbs spin only while the card is open.
+
+	The E / R / ? button row is INSIDE the same billboard, under the card
+	(pixel-size, >= 44 px, pops with it): the pad's three prompts are
+	Style = Custom; PromptShown / PromptHidden say which are up; the buttons
+	run prompt:InputHoldBegin / End. The key on desktop, the gamepad glyph on
+	a controller, words on touch.
+
+	Far away (beyond PopOutStuds) the small server "GachaLabel" (name + price)
+	shows instead; this controller hides it while the card is up. Only your own
+	pad has a card.
+
+	Odds: FusionConfig.GetGachaOddsRows(luck, EventState.GetOddsEvent()), the
+	rows the roll uses, at TycoonController.GetLuck(). Refreshed on every sync
+	and every 0.5 s. The (i) panel (UIKit.Modal): every orb with its own %.
+
+	Compliance (Paid Random Items): every outcome's % is on the card before
 	you pull; luck and the event are the live disclosure; a silhouette hides
 	the LOOK, never the odds.
 ]]
@@ -42,6 +49,7 @@ local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -63,14 +71,20 @@ local GachaBoardController = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local CANVAS = Vector2.new(PlotLayout.Gacha.BoardSize.X, PlotLayout.Gacha.BoardSize.Y) * PlotLayout.Gacha.PixelsPerStud -- 600 x 450
+local G = PlotLayout.Gacha
+local CANVAS = G.DesignCanvas -- 600 x 410: the layout is built here, then scaled to the studs
 local MARGIN = 14
-local SPIN_STUDS = 60 -- orbs spin only while the board is this close to the camera
-local TILE_SIZE = Vector2.new(184, 118)
-local TILE_GAP = 8
-local CHIP_HEIGHT = 26
-local BUTTON_SIZE = 58
-local BUTTON_ROW_HEIGHT = 92
+local SPIN_STUDS = 60 -- orbs spin only while the card is open (and this close to the camera)
+local TILE_SIZE = Vector2.new(184, 100)
+local TILE_GAP = 6
+local HEADER_Y = 12
+local HEADER_HEIGHT = 54
+local PILLS_Y = 70
+local TILES_Y = 100
+local CHIP_HEIGHT = 24
+local PRICE_HEIGHT = 44
+local BUTTON_SIZE = 56
+local BUTTON_ROW_HEIGHT = 88
 local BUTTON_ROW_WIDTH = 340
 local PANEL_DISPLAY_ORDER = 143
 local MUTATION_ICONS: { [string]: string } = {
@@ -104,27 +118,27 @@ type ButtonView = {
 
 type Spinner = { Viewport: ViewportFrame, Model: Model, Phase: number }
 
-type BoardView = {
-	Model: Model,
-	Face: BasePart,
-	Gui: SurfaceGui,
-	Own: boolean,
+type CardView = {
+	Billboard: BillboardGui,
+	Pad: BasePart,
+	Pop: UIScale, -- the pop-in / pop-out scale
+	Fit: UIScale, -- design canvas -> on-screen size
+	Canvas: Frame, -- the 600 x 410 design canvas (populate builds in here)
 	Tiles: { [string]: Frame },
 	Spinners: { Spinner },
 	Shimmer: UIGradient?,
 	Sparkle: TextLabel?,
 	Signature: string,
+	Label: Instance?, -- the small server GachaLabel
+	Open: boolean, -- the character is close (the pop-in side of the hysteresis)
+	Tween: Tween?,
 }
 
-local boards: { [Model]: BoardView } = {}
-local ownBoard: BoardView? = nil
+local card: CardView? = nil
 local ownStation: Instance? = nil
-local rowGui: BillboardGui? = nil
-local rowScale: UIScale? = nil
 local buttons: { [string]: ButtonView } = {}
 local shownPrompts: { [string]: Enum.ProximityPromptInputType } = {}
 local promptsByName: { [string]: ProximityPrompt } = {}
-local forceNear = false
 local panel: UIKit.Modal? = nil
 local panelList: ScrollingFrame? = nil
 
@@ -177,30 +191,16 @@ local function oddsEvent(rows: FusionConfig.GachaOddsRows, luck: number): string
 	return if #rows.Mutations ~= #normal.Mutations then id else nil
 end
 
--- Luck / price of the board's OWNER: yours from the client's own state, a
--- neighbour's from the attributes the server stamps on their board.
+-- Your luck and prices, from the client's own state.
 type Inputs = { Luck: number, Free: number, Cost: number, MultiCost: number }
 
-local function inputsFor(view: BoardView): Inputs
-	if view.Own then
-		local pulls = TycoonController.GetGachaPulls()
-		return {
-			Luck = TycoonController.GetLuck(),
-			Free = TycoonController.GetTutorial().FreePulls,
-			Cost = TycoonConfig.GetGachaPullCost(pulls),
-			MultiCost = TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount),
-		}
-	end
-	local model = view.Model
-	local function number(name: string, default: number): number
-		local value = model:GetAttribute(name)
-		return if typeof(value) == "number" then value else default
-	end
+local function currentInputs(): Inputs
+	local pulls = TycoonController.GetGachaPulls()
 	return {
-		Luck = number("Luck", 1),
-		Free = number("FreePulls", 0),
-		Cost = number("PullCost", TycoonConfig.GetGachaPullCost(0)),
-		MultiCost = number("MultiCost", TycoonConfig.GetGachaMultiPullCost(0, TycoonConfig.MultiPullCount)),
+		Luck = TycoonController.GetLuck(),
+		Free = TycoonController.GetTutorial().FreePulls,
+		Cost = TycoonConfig.GetGachaPullCost(pulls),
+		MultiCost = TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount),
 	}
 end
 
@@ -249,14 +249,14 @@ local function frame(parent: Instance, name: string, position: UDim2, size: UDim
 end
 
 -- The tier's orb in a ViewportFrame, built by the pedestals' own builder.
-local function buildOrbViewport(view: BoardView, parent: Instance, tier: string, silhouette: boolean)
+local function buildOrbViewport(view: CardView, parent: Instance, tier: string, silhouette: boolean)
 	local scene = UITheme.HeistScene
 	local viewport = Instance.new("ViewportFrame")
 	viewport.Name = "Orb"
 	viewport.BackgroundTransparency = 1
 	viewport.AnchorPoint = Vector2.new(0.5, 0)
 	viewport.Position = UDim2.new(0.5, 0, 0, 2)
-	viewport.Size = UDim2.fromOffset(52, 52)
+	viewport.Size = UDim2.fromOffset(44, 44)
 	viewport.Ambient = scene.Ambient
 	viewport.LightColor = scene.LightColor
 	viewport.LightDirection = scene.LightDirection
@@ -276,7 +276,7 @@ local function buildOrbViewport(view: BoardView, parent: Instance, tier: string,
 	table.insert(view.Spinners, { Viewport = viewport, Model = orb, Phase = math.random() * math.pi * 2 })
 end
 
-local function buildTile(view: BoardView, parent: Instance, row: FusionConfig.GachaTierOdds, silhouette: boolean): Frame
+local function buildTile(view: CardView, parent: Instance, row: FusionConfig.GachaTierOdds, silhouette: boolean): Frame
 	local tier = row.Tier
 	local accent = FusionConfig.TierAccentColors[tier] or Colors.Text
 	local stops = UITheme.GetTierOrb(tier)
@@ -318,32 +318,32 @@ local function buildTile(view: BoardView, parent: Instance, row: FusionConfig.Ga
 			Name = "Mark",
 			Text = "?",
 			Font = Fonts.Display,
-			TextSize = 32,
+			TextSize = 28,
 			TextColor3 = Colors.Muted,
 			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.new(0.5, 0, 0, 6),
-			Size = UDim2.fromOffset(52, 44),
+			Position = UDim2.new(0.5, 0, 0, 4),
+			Size = UDim2.fromOffset(44, 38),
 			TextXAlignment = Enum.TextXAlignment.Center,
 			ZIndex = 4,
 		})
 	end
 
-	-- The % is huge: 42 px at 60 px/stud = 0.7 studs, white with a thick
-	-- stroke in the tier colour.
+	-- The % is huge: 34 design px of a 600 x 410 canvas (11 x 7.5 studs) =
+	-- 0.62 studs, white with a thick stroke in the tier colour.
 	local percent = scaledText(tile, {
 		Name = "Percent",
 		Text = row.Text,
 		Font = Fonts.Display,
 		TextColor3 = Colors.White,
-		Position = UDim2.fromOffset(4, 54),
-		Size = UDim2.new(1, -8, 0, 42),
+		Position = UDim2.fromOffset(4, 44),
+		Size = UDim2.new(1, -8, 0, 34),
 		TextXAlignment = Enum.TextXAlignment.Center,
-	}, 42, 14)
+	}, 34, 12)
 	local percentStroke = UIKit.TextStroke(percent, 4)
 	percentStroke.Color = accent
 
 	-- The tier-name ribbon along the bottom.
-	local ribbon = frame(tile, "Ribbon", UDim2.new(0, 0, 1, -22), UDim2.new(1, 0, 0, 22), Colors.Ink)
+	local ribbon = frame(tile, "Ribbon", UDim2.new(0, 0, 1, -20), UDim2.new(1, 0, 0, 20), Colors.Ink)
 	ribbon.BackgroundTransparency = 0.3
 	UIKit.Corner(ribbon, 10)
 	scaledText(ribbon, {
@@ -353,7 +353,7 @@ local function buildTile(view: BoardView, parent: Instance, row: FusionConfig.Ga
 		TextColor3 = Colors.White,
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
-	}, 16, 8)
+	}, 14, 8)
 	tile.Parent = parent
 	return tile
 end
@@ -381,8 +381,8 @@ local function buildChip(parent: Instance, mutation: string, text: string, width
 end
 
 -- (Re)builds the face from scratch: the odds, luck, event, Index and price.
-local function populate(view: BoardView)
-	local gui = view.Gui
+local function populate(view: CardView)
+	local gui = view.Canvas
 	for _, child in gui:GetChildren() do
 		child:Destroy()
 	end
@@ -391,9 +391,9 @@ local function populate(view: BoardView)
 	view.Shimmer = nil
 	view.Sparkle = nil
 
-	local inputs = inputsFor(view)
+	local inputs = currentInputs()
 	local rows = currentRows(inputs.Luck)
-	local found = if view.Own then foundTiers() else nil
+	local found = foundTiers()
 
 	-- Deep violet glass in a thick gold rim, with diagonal stripes.
 	local root = Instance.new("Frame")
@@ -430,7 +430,7 @@ local function populate(view: BoardView)
 	stripeGradient.Parent = stripes
 
 	-- Header ribbon: capsule icon, GACHA PAD, (i).
-	local ribbon = frame(root, "Header", UDim2.fromOffset(MARGIN, 12), UDim2.fromOffset(CANVAS.X - MARGIN * 2, 54), Colors.White)
+	local ribbon = frame(root, "Header", UDim2.fromOffset(MARGIN, HEADER_Y), UDim2.fromOffset(CANVAS.X - MARGIN * 2, HEADER_HEIGHT), Colors.White)
 	UIKit.Corner(ribbon, 16)
 	UIKit.PairGradient(ribbon, UITheme.Gradients.Gold)
 	UIKit.Stroke(ribbon, 4, Colors.Ink)
@@ -455,7 +455,7 @@ local function populate(view: BoardView)
 		Size = UDim2.new(1, -64 - 64, 1, -8),
 	}, 44, 18)
 	UIKit.TextStroke(title, 4)
-	if view.Own then
+	do
 		local _, infoHolder = UIKit.Button({
 			Name = "Info",
 			Parent = ribbon,
@@ -474,7 +474,7 @@ local function populate(view: BoardView)
 	end
 
 	-- Luck pill and the live event chip, under the ribbon.
-	local pills = frame(root, "Pills", UDim2.fromOffset(MARGIN, 70), UDim2.fromOffset(CANVAS.X - MARGIN * 2, 26))
+	local pills = frame(root, "Pills", UDim2.fromOffset(MARGIN, PILLS_Y), UDim2.fromOffset(CANVAS.X - MARGIN * 2, 24))
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.FillDirection = Enum.FillDirection.Horizontal
 	pillLayout.Padding = UDim.new(0, 8)
@@ -483,7 +483,7 @@ local function populate(view: BoardView)
 	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	pillLayout.Parent = pills
 	if inputs.Luck > 1.0001 then
-		UIKit.Pill({ Name = "LuckPill", Parent = pills, Text = luckText(inputs.Luck), Gradient = UITheme.Gradients.Green, TextSize = 16, Height = 26, LayoutOrder = 1 })
+		UIKit.Pill({ Name = "LuckPill", Parent = pills, Text = luckText(inputs.Luck), Gradient = UITheme.Gradients.Green, TextSize = 15, Height = 24, LayoutOrder = 1 })
 	end
 	local eventId = oddsEvent(rows, inputs.Luck)
 	if eventId then
@@ -499,7 +499,7 @@ local function populate(view: BoardView)
 	end
 
 	-- Six tiles, 3 x 2.
-	local tiles = frame(root, "Tiles", UDim2.fromOffset(MARGIN, 100), UDim2.fromOffset(CANVAS.X - MARGIN * 2, TILE_SIZE.Y * 2 + TILE_GAP))
+	local tiles = frame(root, "Tiles", UDim2.fromOffset(MARGIN, TILES_Y), UDim2.fromOffset(CANVAS.X - MARGIN * 2, TILE_SIZE.Y * 2 + TILE_GAP))
 	local grid = Instance.new("UIGridLayout")
 	grid.CellSize = UDim2.fromOffset(TILE_SIZE.X, TILE_SIZE.Y)
 	grid.CellPadding = UDim2.fromOffset(TILE_GAP, TILE_GAP)
@@ -513,7 +513,7 @@ local function populate(view: BoardView)
 	end
 
 	-- Mutation chips.
-	local chips = frame(root, "Mutations", UDim2.fromOffset(MARGIN, 100 + TILE_SIZE.Y * 2 + TILE_GAP + 8), UDim2.fromOffset(CANVAS.X - MARGIN * 2, CHIP_HEIGHT))
+	local chips = frame(root, "Mutations", UDim2.fromOffset(MARGIN, TILES_Y + TILE_SIZE.Y * 2 + TILE_GAP + 6), UDim2.fromOffset(CANVAS.X - MARGIN * 2, CHIP_HEIGHT))
 	local chipLayout = Instance.new("UIListLayout")
 	chipLayout.FillDirection = Enum.FillDirection.Horizontal
 	chipLayout.Padding = UDim.new(0, 4)
@@ -533,14 +533,14 @@ local function populate(view: BoardView)
 		Text = priceText(inputs),
 		Gradient = UITheme.Gradients.Gold,
 		Font = Fonts.Display,
-		TextSize = 28,
-		Height = 46,
+		TextSize = 26,
+		Height = PRICE_HEIGHT,
 		StrokeThickness = 4,
 		TextStroke = 3,
 	})
 	local priceRoot = UIKit.PillRoot(price)
 	priceRoot.AnchorPoint = Vector2.new(0.5, 0)
-	priceRoot.Position = UDim2.new(0.5, 0, 0, CANVAS.Y - 46 - 18)
+	priceRoot.Position = UDim2.new(0.5, 0, 0, CANVAS.Y - PRICE_HEIGHT - 16)
 
 	local signature = { priceText(inputs), ("%.5f"):format(inputs.Luck), tostring(eventId) }
 	for _, row in rows.Tiers do
@@ -557,8 +557,8 @@ local function populate(view: BoardView)
 	view.Signature = table.concat(signature, "|")
 end
 
-local function signatureOf(view: BoardView): string
-	local inputs = inputsFor(view)
+local function signatureOf(): string
+	local inputs = currentInputs()
 	local rows = currentRows(inputs.Luck)
 	local signature = { priceText(inputs), ("%.5f"):format(inputs.Luck), tostring(oddsEvent(rows, inputs.Luck)) }
 	for _, row in rows.Tiers do
@@ -567,7 +567,7 @@ local function signatureOf(view: BoardView): string
 	for _, row in rows.Mutations do
 		table.insert(signature, row.Mutation .. row.Text)
 	end
-	if view.Own then
+	do
 		local found = foundTiers()
 		for _, tier in FusionConfig.TierOrder do
 			table.insert(signature, if found[tier] then "1" else "0")
@@ -814,12 +814,9 @@ local function refreshButtons()
 		local view = buttons[spec.Name]
 		if view then
 			local inputType = shownPrompts[spec.Name]
-			local visible = forceNear or inputType ~= nil
-			view.Holder.Visible = visible
+			view.Holder.Visible = true
 			view.Caption.Text = captionFor(spec.Name)
-			if visible then
-				showInput(view, spec, inputType)
-			end
+			showInput(view, spec, inputType)
 		end
 	end
 	-- Lay the visible ones out centred.
@@ -860,6 +857,8 @@ local function buildButtons(root: Instance)
 	local row = Instance.new("Frame")
 	row.Name = "Buttons"
 	row.BackgroundTransparency = 1
+	row.AnchorPoint = Vector2.new(0.5, 0)
+	row.Position = UDim2.new(0.5, 0, 1, 6) -- just under the card
 	row.Size = UDim2.fromOffset(BUTTON_ROW_WIDTH, BUTTON_ROW_HEIGHT)
 	row.Parent = root
 	for _, spec in BUTTON_SPECS do
@@ -937,158 +936,216 @@ local function buildButtons(root: Instance)
 			Badge = badge,
 			Prompt = nil,
 		}
-		holder.Visible = false
+		holder.Visible = true
 	end
 end
 
 
---[[ The button row (a pixel-size BillboardGui under the board) -------------------------- ]]
+--[[ The card (one BillboardGui above your pad) ---------------------------------------- ]]
 
-local function buildButtonRow(anchor: BasePart)
-	local G = PlotLayout.Gacha
+local function stepFitScale(view: CardView)
+	local size = view.Billboard.AbsoluteSize
+	if size.X > 1 and size.Y > 1 then
+		view.Fit.Scale = math.min(size.X / CANVAS.X, size.Y / CANVAS.Y)
+	end
+end
+
+local function setLabelEnabled(view: CardView, enabled: boolean)
+	local label = view.Label
+	if label and label.Parent and label:IsA("BillboardGui") then
+		label.Enabled = enabled
+	end
+end
+
+-- Pops the card in: Enabled, then UIScale 0.6 -> 1, Back-Out.
+local function popIn(view: CardView)
+	if view.Tween then
+		view.Tween:Cancel()
+		view.Tween = nil
+	end
+	view.Open = true
+	view.Billboard.Enabled = true
+	setLabelEnabled(view, false)
+	if view.Pop.Scale >= 1 then
+		return
+	end
+	if view.Pop.Scale < G.PopFromScale then
+		view.Pop.Scale = G.PopFromScale
+	end
+	local tween = TweenService:Create(view.Pop, TweenInfo.new(G.PopInSeconds, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 })
+	view.Tween = tween
+	tween:Play()
+end
+
+-- Pops it out: UIScale 1 -> 0.6, then Enabled off and the small label back.
+local function popOut(view: CardView)
+	if view.Tween then
+		view.Tween:Cancel()
+		view.Tween = nil
+	end
+	view.Open = false
+	local tween = TweenService:Create(view.Pop, TweenInfo.new(G.PopOutSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = G.PopFromScale })
+	view.Tween = tween
+	tween.Completed:Connect(function(state: Enum.PlaybackState)
+		if state == Enum.PlaybackState.Completed and not view.Open and card == view then
+			view.Billboard.Enabled = false
+			setLabelEnabled(view, true)
+		end
+	end)
+	tween:Play()
+end
+
+local function buildCard(pad: BasePart)
+	local studs = G.CardStuds
 	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "GachaButtons"
-	billboard.Adornee = anchor
-	billboard.Size = UDim2.fromOffset(BUTTON_ROW_WIDTH, BUTTON_ROW_HEIGHT)
-	-- Hangs BELOW the anchor (the board's bottom edge).
-	billboard.SizeOffset = Vector2.new(0, -0.5)
+	billboard.Name = "GachaCard"
+	billboard.Adornee = pad
+	billboard.Size = UDim2.new(studs.X, 0, studs.Y, 0)
+	-- The card's bottom edge sits BottomAbovePad studs over the pad's top.
+	billboard.StudsOffset = Vector3.new(0, pad.Size.Y / 2 + G.BottomAbovePad + studs.Y / 2, 0)
+	billboard.MaxDistance = G.MaxDistance
 	billboard.AlwaysOnTop = false
 	billboard.LightInfluence = 0
-	billboard.MaxDistance = G.ButtonMaxDistance
 	billboard.ResetOnSpawn = false
 	billboard.Active = true
-	local scale = Instance.new("UIScale")
-	scale.Scale = if UIKit.IsPhone() then UITheme.PhoneScale else 1
-	scale.Parent = billboard
-	rowScale = scale
+	billboard.ClipsDescendants = false
+	billboard.Enabled = false
+
+	-- Everything pops with this one scale (a UIScale, never a CanvasGroup).
+	local popRoot = Instance.new("Frame")
+	popRoot.Name = "PopRoot"
+	popRoot.BackgroundTransparency = 1
+	popRoot.Size = UDim2.fromScale(1, 1)
+	popRoot.Parent = billboard
+	local pop = Instance.new("UIScale")
+	pop.Name = "PopScale"
+	pop.Scale = G.PopFromScale
+	pop.Parent = popRoot
+
+	-- The design canvas, scaled to the card's on-screen size.
+	local canvas = Instance.new("Frame")
+	canvas.Name = "Canvas"
+	canvas.BackgroundTransparency = 1
+	canvas.AnchorPoint = Vector2.new(0.5, 0.5)
+	canvas.Position = UDim2.fromScale(0.5, 0.5)
+	canvas.Size = UDim2.fromOffset(CANVAS.X, CANVAS.Y)
+	canvas.Parent = popRoot
+	local fit = Instance.new("UIScale")
+	fit.Name = "FitScale"
+	fit.Parent = canvas
+
 	table.clear(buttons)
-	buildButtons(billboard)
-	rowGui = billboard
-	billboard.Parent = localPlayer:WaitForChild("PlayerGui")
-	refreshButtons()
-end
+	buildButtons(popRoot)
 
---[[ Boards ----------------------------------------------------------------------------- ]]
-
-local function ownerOf(instance: Instance): number?
-	local current: Instance? = instance
-	while current do
-		local owner = current:GetAttribute("OwnerUserId")
-		if typeof(owner) == "number" then
-			return owner
-		end
-		current = current.Parent
-	end
-	return nil
-end
-
-local function addBoard(model: Model)
-	if boards[model] then
-		return
-	end
-	local face = model:WaitForChild("Face", 10)
-	if not face or not face:IsA("BasePart") or boards[model] then
-		return
-	end
-	-- With streaming the Face can arrive before the ButtonAnchor: wait for
-	-- it too, or your button row would never be built.
-	model:WaitForChild("ButtonAnchor", 10)
-	if boards[model] then
-		return
-	end
-	local G = PlotLayout.Gacha
-	local own = ownerOf(model) == localPlayer.UserId
-	local surface = Instance.new("SurfaceGui")
-	surface.Name = "GachaBoard_" .. tostring(ownerOf(model) or 0)
-	surface.Adornee = face
-	surface.Face = Enum.NormalId.Front
-	surface.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud
-	surface.PixelsPerStud = G.PixelsPerStud
-	surface.LightInfluence = 0
-	surface.AlwaysOnTop = false
-	surface.ClipsDescendants = true
-	surface.Active = own
-	surface.ResetOnSpawn = false
-	;(surface :: any).MaxDistance = G.MaxDistance
-	surface:SetAttribute("Own", own)
-	local view: BoardView = {
-		Model = model,
-		Face = face,
-		Gui = surface,
-		Own = own,
+	local view: CardView = {
+		Billboard = billboard,
+		Pad = pad,
+		Pop = pop,
+		Fit = fit,
+		Canvas = canvas,
 		Tiles = {},
 		Spinners = {},
 		Shimmer = nil,
 		Sparkle = nil,
 		Signature = "",
+		Label = pad:FindFirstChild("GachaLabel"),
+		Open = false,
+		Tween = nil,
 	}
-	boards[model] = view
-	surface.Parent = localPlayer:WaitForChild("PlayerGui")
+	card = view
+	billboard.Parent = localPlayer:WaitForChild("PlayerGui")
 	populate(view)
-	model.Destroying:Connect(function()
-		boards[model] = nil
-		if ownBoard == view then
-			ownBoard = nil
+	refreshButtons()
+	pad.Destroying:Connect(function()
+		if card == view then
+			card = nil
 		end
-		surface:Destroy()
+		billboard:Destroy()
 	end)
-	if own then
-		ownBoard = view
-		ownStation = model.Parent and model.Parent:FindFirstChild("GachaStation")
-		local anchor = model:FindFirstChild("ButtonAnchor")
-		if anchor and anchor:IsA("BasePart") and not rowGui then
-			buildButtonRow(anchor)
-		end
-	end
 end
 
-local function consider(instance: Instance)
-	if instance.Name == "GachaBoard" and instance:IsA("Model") then
-		task.spawn(addBoard, instance)
+-- Your pad: Workspace.Plots[your plot].GachaStation.Pad (it exists once the lab is claimed).
+local function findOwnPad(): BasePart?
+	local plots = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	local plot = plots and plots:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
+	local station = plot and plot:FindFirstChild("GachaStation")
+	local pad = station and station:FindFirstChild("Pad")
+	if station and pad and pad:IsA("BasePart") then
+		ownStation = station
+		return pad
 	end
+	return nil
 end
 
 --[[ Per frame ------------------------------------------------------------------------- ]]
 
 local function stepFrame()
-	local camera = Workspace.CurrentCamera
-	if not camera then
+	local view = card
+	if not view then
 		return
 	end
+	if not view.Pad.Parent then
+		return
+	end
+	-- Distance from YOUR CHARACTER to the pad, never the camera's.
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if root and root:IsA("BasePart") then
+		local distance = (root.Position - view.Pad.Position).Magnitude
+		if not view.Open and distance < G.PopInStuds then
+			popIn(view)
+		elseif view.Open and distance > G.PopOutStuds then
+			popOut(view)
+		end
+	end
+	if not view.Billboard.Enabled then
+		return
+	end
+	stepFitScale(view)
+	local camera = Workspace.CurrentCamera
 	local now = os.clock()
-	for _, view in boards do
-		if view.Face.Parent and (view.Face.Position - camera.CFrame.Position).Magnitude <= SPIN_STUDS then
-			for _, spinner in view.Spinners do
-				if spinner.Model.Parent then
-					local angle = spinner.Phase + now * 1.1
-					spinner.Model:PivotTo(CFrame.Angles(0.25, angle, 0) * CFrame.new(0, math.sin(now * 1.6 + spinner.Phase) * 0.06, 0))
-				end
-			end
-			local shimmer, sparkle = view.Shimmer, view.Sparkle
-			if shimmer then
-				shimmer.Rotation = (now * 90) % 360
-			end
-			if sparkle then
-				sparkle.Rotation = (now * 120) % 360
-				sparkle.TextTransparency = 0.5 + 0.5 * math.sin(now * 5)
+	if camera and view.Open and (view.Pad.Position - camera.CFrame.Position).Magnitude <= SPIN_STUDS + 40 then
+		for _, spinner in view.Spinners do
+			if spinner.Model.Parent then
+				local angle = spinner.Phase + now * 1.1
+				spinner.Model:PivotTo(CFrame.Angles(0.25, angle, 0) * CFrame.new(0, math.sin(now * 1.6 + spinner.Phase) * 0.06, 0))
 			end
 		end
+	end
+	local shimmer, sparkle = view.Shimmer, view.Sparkle
+	if shimmer then
+		shimmer.Rotation = (now * 90) % 360
+	end
+	if sparkle then
+		sparkle.Rotation = (now * 120) % 360
+		sparkle.TextTransparency = 0.5 + 0.5 * math.sin(now * 5)
 	end
 end
 
 local function refresh()
-	for _, view in boards do
-		if view.Gui.Parent then
-			local now = signatureOf(view)
-			if now ~= view.Signature then
-				populate(view)
-				if view.Own then
-					refreshButtons()
-					if panel and panel.IsOpen() then
-						fillPanel()
-					end
-				end
-			end
+	local view = card
+	if not view then
+		local pad = findOwnPad()
+		if pad then
+			buildCard(pad)
+		end
+		return
+	end
+	if not view.Pad.Parent then
+		return
+	end
+	if not view.Label or not view.Label.Parent then
+		view.Label = view.Pad:FindFirstChild("GachaLabel")
+	end
+	if view.Billboard.Enabled then
+		setLabelEnabled(view, false) -- the card is up: no small label under it
+	end
+	local now = signatureOf()
+	if now ~= view.Signature then
+		populate(view)
+		refreshButtons()
+		if panel and panel.IsOpen() then
+			fillPanel()
 		end
 	end
 end
@@ -1118,65 +1175,23 @@ end
 -- Re-reads the odds, luck, event and Index now (the poll does it every 0.5 s).
 function GachaBoardController.RefreshNow()
 	refresh()
-end
-
--- Show the button row as if you stood on the pad (the prompts are not up).
-function GachaBoardController.SetForceNear(on: boolean)
-	forceNear = on
-	for name, prompt in promptsByName do
-		local view = buttons[name]
-		if view then
-			view.Prompt = prompt
-		end
+	if card then
+		stepFrame()
 	end
-	refreshButtons()
 end
 
--- Your board's face and its button-row anchor (nil before it streams in).
-function GachaBoardController.GetOwnBoard(): { Gui: SurfaceGui, Face: BasePart, Anchor: BasePart? }?
-	local view = ownBoard
+-- Your card (nil before your pad exists): the billboard, its pieces, and the
+-- state the pop logic is in. Every UI check reads the instance tree from
+-- Billboard down.
+function GachaBoardController.GetCard(): { Billboard: BillboardGui, Pad: BasePart, Canvas: Frame, Pop: UIScale, Fit: UIScale, Open: boolean, Label: Instance? }?
+	local view = card
 	if not view then
 		return nil
 	end
-	local anchor = view.Model:FindFirstChild("ButtonAnchor")
-	return { Gui = view.Gui, Face = view.Face, Anchor = if anchor and anchor:IsA("BasePart") then anchor else nil }
-end
-
--- Every board face this client draws: { Gui, Own, Spinners }.
-function GachaBoardController.GetBoards(): { { Gui: SurfaceGui, Own: boolean, Orbs: number, Tiles: number } }
-	local result = {}
-	for _, view in boards do
-		local orbs = 0
-		for _, spinner in view.Spinners do
-			if spinner.Viewport:FindFirstChildWhichIsA("Model") then
-				orbs += 1
-			end
-		end
-		local tiles = 0
-		for _ in view.Tiles do
-			tiles += 1
-		end
-		table.insert(result, { Gui = view.Gui, Own = view.Own, Orbs = orbs, Tiles = tiles })
+	if not view.Label or not view.Label.Parent then
+		view.Label = view.Pad:FindFirstChild("GachaLabel")
 	end
-	return result
-end
-
--- Rendered, on your board: tier -> { Text = the % label, Value = its number, Silhouette }.
-function GachaBoardController.GetTiles(): { [string]: { Text: string, Value: number, Silhouette: boolean } }
-	local result = {}
-	local view = ownBoard
-	if not view then
-		return result
-	end
-	for tier, tile in view.Tiles do
-		local percent = tile:FindFirstChild("Percent")
-		result[tier] = {
-			Text = if percent and percent:IsA("TextLabel") then percent.Text else "",
-			Value = (tile:GetAttribute("PercentValue") :: number?) or 0,
-			Silhouette = tile:GetAttribute("Silhouette") == true,
-		}
-	end
-	return result
+	return { Billboard = view.Billboard, Pad = view.Pad, Canvas = view.Canvas, Pop = view.Pop, Fit = view.Fit, Open = view.Open, Label = view.Label }
 end
 
 -- The rendered (i) panel lines: tier -> { Total (number), Orbs = { numbers } }.
@@ -1201,17 +1216,6 @@ function GachaBoardController.GetPanelLines(): { [string]: { Total: number, Orbs
 	return result
 end
 
-function GachaBoardController.GetButtons(): { { Name: string, Visible: boolean, Size: Vector2 } }
-	local result = {}
-	for _, spec in BUTTON_SPECS do
-		local view = buttons[spec.Name]
-		if view then
-			table.insert(result, { Name = spec.Name, Visible = view.Holder.Visible, Size = view.Button.AbsoluteSize })
-		end
-	end
-	return result
-end
-
 -- The custom prompts the engine has shown (PromptShown fired, not yet hidden).
 function GachaBoardController.GetShownPrompts(): { string }
 	local names = {}
@@ -1221,10 +1225,6 @@ function GachaBoardController.GetShownPrompts(): { string }
 		end
 	end
 	return names
-end
-
-function GachaBoardController.GetButtonRow(): BillboardGui?
-	return rowGui
 end
 
 function GachaBoardController.GetPanel(): UIKit.Modal?
@@ -1237,21 +1237,11 @@ function GachaBoardController.Init()
 	buildPanel()
 	ProximityPromptService.PromptShown:Connect(onPromptShown)
 	ProximityPromptService.PromptHidden:Connect(onPromptHidden)
-	UIKit.LayoutChanged:Connect(function(isPhone: boolean)
-		if rowScale then
-			rowScale.Scale = if isPhone then UITheme.PhoneScale else 1
-		end
-	end)
 	TycoonController.TycoonChanged:Connect(function()
 		refresh()
 	end)
+	RunService.Heartbeat:Connect(stepFrame)
 	task.spawn(function()
-		local plots = Workspace:WaitForChild(PlotNaming.PlotsFolderName)
-		for _, descendant in plots:GetDescendants() do
-			consider(descendant)
-		end
-		plots.DescendantAdded:Connect(consider)
-		RunService.Heartbeat:Connect(stepFrame)
 		while true do
 			task.wait(0.5)
 			refresh()

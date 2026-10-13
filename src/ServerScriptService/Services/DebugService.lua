@@ -252,9 +252,30 @@ local function printPhysicsSettings(targetRoot: BasePart)
 	print(("[SelfTest] physics: Workspace {%s}; target root network owner: %s"):format(table.concat(found, ", "), if ok then tostring(owner) else "error " .. tostring(owner)))
 end
 
+-- Asks `target`'s OWN client (it simulates its character) a combat probe and
+-- returns its report (nil when it never answers). The report queue for that
+-- player exists only for the call if it was not already there.
+local function askClient(target: Player, payload: { [string]: any }): any?
+	local had = selfTestReports[target.UserId] ~= nil
+	if not had then
+		selfTestReports[target.UserId] = {}
+	end
+	payload.Stage = "TutorialProbe"
+	RemoteEvents.SelfTest:FireClient(target, payload)
+	local report = waitForReport(target, "TutorialProbe", SELFTEST_PROBE_TIMEOUT)
+	if not had then
+		selfTestReports[target.UserId] = nil
+	end
+	return report
+end
+
 -- 2 players (Test -> 2 players): the attacker hits the other player through
--- CombatService.ApplyHit and the SERVER measures how far the target's root
--- moved 0.6 s later: a hit must launch (Bat >= 10 studs, Glove >= 15).
+-- CombatService.ApplyHit and the distance is measured ON THE TARGET'S OWN
+-- CLIENT (its root position just before the hit and 0.6 s after), because
+-- the server reading back its own velocity writes proved nothing. The
+-- server-side distance is printed next to it. The Bat must move the target
+-- >= 12 studs, the Glove >= 20; 0.5 s after the ragdoll ends the target's
+-- client must be standing (state not Physics, PlatformStand off, no mover).
 function runLaunchSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	local target: Player? = nil
 	for _, candidate in Players:GetPlayers() do
@@ -283,25 +304,57 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 	end
 	printPhysicsSettings(victimRoot)
 	CombatService.SetLaunchLogging(true)
+	local function clientPosition(): Vector3?
+		local report = askClient(victim, { Kind = "RootPos" })
+		if report and typeof(report.Lines) == "table" then
+			for _, line in report.Lines do
+				result(line.Ok == true, tostring(line.Name), line.Detail)
+			end
+		end
+		local data = report and report.Data
+		return if typeof(data) == "table" and typeof(data.Pos) == "Vector3" then data.Pos else nil
+	end
 	for _, spec in { { "Bat", 12 }, { "SlapGlove", 20 } } do
 		local weapon = CombatConfig.GetWeapon(spec[1] :: string) :: CombatConfig.Weapon
 		for _, name in attributes do
 			victim:SetAttribute(name, nil)
 		end
 		local home = victimRoot.CFrame
-		local before = victimRoot.Position
-		CombatService.ApplyHit(player, victim, weapon, before - Vector3.new(0, 0, 3))
-		task.wait(0.6)
-		local moved = (Vector3.new(victimRoot.Position.X, 0, victimRoot.Position.Z) - Vector3.new(before.X, 0, before.Z)).Magnitude
-		result(moved >= (spec[2] :: number), ("combat launch: the %s launches the target >= %d studs in 0.6 s (server-measured)"):format(weapon.Name, spec[2] :: number), ("%.1f studs"):format(moved))
-		task.wait(CombatConfig.RagdollSeconds + 0.5)
-		-- Standing again: not platform-standing, and the player owns the root.
+		local before = clientPosition()
+		local serverBefore = victimRoot.Position
+		if before then
+			CombatService.ApplyHit(player, victim, weapon, serverBefore - Vector3.new(0, 0, 3))
+			task.wait(0.6)
+			local after = clientPosition()
+			local serverMoved = (Vector3.new(victimRoot.Position.X, 0, victimRoot.Position.Z) - Vector3.new(serverBefore.X, 0, serverBefore.Z)).Magnitude
+			if after then
+				local moved = (Vector3.new(after.X, 0, after.Z) - Vector3.new(before.X, 0, before.Z)).Magnitude
+				result(
+					moved >= (spec[2] :: number),
+					("combat launch: the %s launches the target >= %d studs in 0.6 s (measured on the TARGET's client)"):format(weapon.Name, spec[2] :: number),
+					("target client %.1f studs, server view %.1f studs"):format(moved, serverMoved)
+				)
+			else
+				result(false, ("combat launch: the %s launch is measured on the target's client"):format(weapon.Name), ("the target client did not answer; server view %.1f studs"):format(serverMoved))
+			end
+		else
+			result(false, ("combat launch: the %s launch is measured on the target's client"):format(weapon.Name), "the target client did not answer before the hit")
+		end
+		-- 0.5 s after the ragdoll ends: standing again, on the target's client.
+		task.wait(math.max(0, CombatConfig.RagdollSeconds - 0.6) + 0.5)
+		local report = askClient(victim, { Kind = "GetUp" })
+		if report and typeof(report.Lines) == "table" then
+			for _, line in report.Lines do
+				result(line.Ok == true, tostring(line.Name):gsub("combat launch:", ("combat launch (%s):"):format(weapon.Name)), line.Detail)
+			end
+		else
+			result(false, ("combat launch (%s): after the get-up the target client is standing"):format(weapon.Name), "the target client did not answer")
+		end
 		local humanoid = victim.Character and victim.Character:FindFirstChildOfClass("Humanoid")
-		local okOwner, owner = pcall(victimRoot.GetNetworkOwner, victimRoot)
 		result(
-			humanoid ~= nil and not humanoid.PlatformStand and okOwner and owner == victim,
-			("combat launch: after the %s the target is standing (no PlatformStand) and owned by the player again"):format(weapon.Name),
-			("PlatformStand %s, owner %s"):format(tostring(humanoid and humanoid.PlatformStand), if okOwner then tostring(owner) else "error")
+			humanoid ~= nil and not humanoid.PlatformStand,
+			("combat launch: after the %s the server's view of the target has PlatformStand off"):format(weapon.Name),
+			("PlatformStand %s"):format(tostring(humanoid and humanoid.PlatformStand))
 		)
 		for _, name in attributes do
 			victim:SetAttribute(name, nil)
@@ -746,12 +799,35 @@ end
 -- server's luck now and under an admin-luck event (no persistent state is
 -- touched: Workspace attributes, restored), then its buttons.
 local function runGachaCardSelfTest(player: Player, result: (boolean, string, string?) -> ())
-	-- The board and its buttons only exist for a claimed lab.
+	-- The card only exists for a claimed lab.
 	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
-		result(false, "gacha board: a claimed lab to test on", "could not claim a lab for the tester (no free slot or no character)")
+		result(false, "gacha card: a claimed lab to test on", "could not claim a lab for the tester (no free slot or no character)")
 		return
 	end
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local plot = TycoonService.GetPlotForPlayer(player)
+	local station = plot and plot:FindFirstChild("GachaStation")
+	local pad = station and station:FindFirstChild("Pad")
+	if not (root and root:IsA("BasePart") and plot and pad and pad:IsA("BasePart")) then
+		result(false, "gacha card: standing next to the pad", ("root %s, plot %s, pad %s"):format(tostring(root), tostring(plot), tostring(pad)))
+		if releaseClaim then
+			releaseClaim()
+		end
+		return
+	end
+	local home = root.CFrame
+	local onPad = pad.CFrame + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
+	-- 25 studs from the pad, toward the middle of the lab.
+	local toward = plot:GetPivot().Position - pad.Position
+	local flat = Vector3.new(toward.X, 0, toward.Z)
+	flat = if flat.Magnitude > 1 then flat.Unit else Vector3.new(-1, 0, 0)
+	local away = CFrame.new(pad.Position + flat * 25 + Vector3.new(0, pad.Size.Y / 2 + 3, 0))
+
+	-- Next to the pad: wait 0.4 s, then everything is read from the card's tree.
+	root.CFrame = onPad
+	task.wait(0.4)
 	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player) }, result)
 	local oldLuck, oldUntil = Workspace:GetAttribute("AdminLuck"), Workspace:GetAttribute("AdminLuckUntil")
 	Workspace:SetAttribute("AdminLuck", 3)
@@ -762,23 +838,18 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	Workspace:SetAttribute("AdminLuck", oldLuck)
 	Workspace:SetAttribute("AdminLuckUntil", oldUntil)
 	PlayerDataService.SyncTycoon(player)
+	tutorialProbe(player, { Kind = "GachaButtons" }, result)
 
-	-- The buttons are measured with the character STANDING ON THE PAD, so
-	-- the real PromptShown has fired.
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	local plot = TycoonService.GetPlotForPlayer(player)
-	local station = plot and plot:FindFirstChild("GachaStation")
-	local pad = station and station:FindFirstChild("Pad")
-	if root and root:IsA("BasePart") and pad and pad:IsA("BasePart") then
-		local home = root.CFrame
-		root.CFrame = pad.CFrame + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
-		task.wait(0.8)
-		tutorialProbe(player, { Kind = "GachaButtons", OnPad = true }, result)
-		root.CFrame = home
-	else
-		result(false, "gacha board: standing on the pad for the button check", ("root %s, pad %s"):format(tostring(root), tostring(pad)))
-	end
+	-- 25 studs away: the card pops out and the small GACHA label shows.
+	root.CFrame = away
+	task.wait(0.6)
+	tutorialProbe(player, { Kind = "GachaFar" }, result)
+	-- Back on the pad: it pops in again.
+	root.CFrame = onPad
+	task.wait(0.5)
+	tutorialProbe(player, { Kind = "GachaBack" }, result)
+
+	root.CFrame = home
 	if releaseClaim then
 		releaseClaim()
 	end

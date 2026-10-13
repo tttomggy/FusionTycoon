@@ -56,7 +56,7 @@ TutorialController.Init() -- the first-time tutorial (banner, dotted path, hand)
 HudGate.Init() -- the progressive HUD: what a new player sees builds up with the tutorial
 CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
 JumpPadController.Init() -- the 2nd floor's jump pads launch your own character
-GachaBoardController.Init() -- the Gacha boards' faces (every plot) + your E / R / ? button row
+GachaBoardController.Init() -- the Gacha odds card that pops up above your pad (+ its E / R / ? buttons)
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

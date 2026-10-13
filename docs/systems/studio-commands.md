@@ -57,13 +57,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   FAIL named after it (`combat SlapGlove: no report from the client`); the
   `done: N passed, M failed` line always prints. **`/selftest combat`** runs
   only the combat section (weapon probes, slot-to-slot switch probes,
-  release); **`/selftest gacha`** only the Gacha board (claims a lab if needed, stands the character on the pad and waits for `PromptShown` before it measures the buttons; every UI check reads the instance tree, and every FAIL carries its measurements)
+  release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed, stands the character next to the pad, waits 0.4 s, reads the card from the instance tree; teleports 25 studs away and back to check the pop-out / pop-in and the small GACHA label; projects the card's four corners at 1366×768 and 844×390 at the default camera; every FAIL carries its measurements)
   (tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
-  event, the luck pill, silhouettes, the (i) panel sums; the board's 6 tiles
-  with orbs, % ≥ 0.5 studs tall, no `CanvasGroup`, `MaxDistance` ≥ 80, the
-  `PlotLayout.CheckGachaBoard` footprint, no silhouettes on other boards;
-  the 3 buttons ≥ 44 px and on screen at the default camera while standing
-  on the pad, desktop and phone, text fits);
+  event, the luck pill, silhouettes, the (i) panel sums; the card Enabled at
+  UIScale 1 with all 6 tiles drawn, orbs, % ≥ 0.5 studs tall, no
+  `CanvasGroup`, no `GachaBoard`; PromptShown for E / R / ? and 3 buttons
+  ≥ 44 px; text fits);
   **`/selftest cards`** only the card-placement checks (desktop +
   phone, next and running events, tutorial OK row on/off). Its
   last part drives a reset tutorial through every step on the real
