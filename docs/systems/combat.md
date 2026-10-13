@@ -81,12 +81,13 @@ never sold, server authority are unchanged.
   `KeyframeSequence`s built in code, registered with
   `KeyframeSequenceProvider:RegisterKeyframeSequence`, played at `Action4`
   (Studio only until published as assets). Not built.
-- **Rig diagnosis (still to read in Studio):** `/selftest combat` with 2
-  players prints once `[SelfTest] physics: Workspace {UseFixedSimulation=…,
-  …}; target root network owner: …` (every Workspace property of that list
-  that exists on the build, and `root:GetNetworkOwner()` for the target).
-  Paste that line here. `WeaponPose.findJoint` handles both a Motor6D and an
-  `AnimationConstraint` shoulder, and the tracks do not care.
+- **Rig diagnosis:** Harris's 2-player run printed `physics: … target root
+  network owner: Player2`, so this place uses **classic client network
+  ownership**, not Server Authority / fixed simulation (no property of the
+  tried list was reported). That is why the launch had to be rebuilt as below.
+  `/selftest combat` still prints the line each run. `WeaponPose.findJoint`
+  handles both a Motor6D and an `AnimationConstraint` shoulder, and the
+  tracks do not care.
 - **Real animation tracks (Combat feel):** the C0 pose proved the arm can
   move, but three joints driven from code never read as a swing. Every
   weapon now plays Animator tracks (`Effects/WeaponAnimator`, local on every
@@ -114,7 +115,30 @@ never sold, server authority are unchanged.
   the clip's name (BatHold, BatSwing, GloveHold, GloveSlap, GunAim,
   GunRecoil, PeelThrow). Restart Play: the ids are used instead of the
   in-code clips (and a live server needs them).
-- **Hits launch the target (server-owned):** before, `onHitReceived` did a
+- **Knockback v2 (PlatformStand + velocity):** the first server launch
+  (`humanoid:ChangeState(Physics)` on the server plus `ApplyImpulse`) moved the
+  Bat target 0.1 studs: a player's Humanoid state is not the server's to set,
+  so the Humanoid stayed in Running and its ground controller braked the
+  horizontal velocity to almost nothing within a few frames, and the old
+  owner's client could overwrite the velocity for a frame or two after
+  `SetNetworkOwner(nil)`. Now (`CombatService.launch`): 1. `PlatformStand =
+  true` on the server (replicates, the ground controller is off; the client
+  keeps its own `ChangeState(Physics)`), 2. `SetNetworkOwner(nil)` (pcall),
+  3. `AssemblyLinearVelocity = launch velocity` SET on every part (not an
+  impulse), 4. for the next 3 server Heartbeats it is set again, only while
+  the root's flat speed is under 60% of the target, so it never adds speed
+  twice. Get-up (`endLaunch`, also on respawn and on leaving): `PlatformStand
+  = false`, ownership back to the player, `GettingUp`. The client fallback (only
+  when ownership could not be taken) does the same on its side. The first
+  attempt's speed log ("10 Heartbeats of the target's flat speed") is printed
+  by `CombatService.SetLaunchLogging(true)` during `/selftest combat`; the
+  measured before/after numbers are Harris's to quote from that run. Final
+  numbers live in `CombatConfig` (Bat 60 + hop 25, Glove 120 + hop 25), with a
+  comment: tune them in the 2-player test toward Bat 15-20 / Glove 25-30
+  studs. `/selftest combat` needs the server-measured Bat >= 12 and Glove
+  >= 20 studs in 0.6 s, and "standing (not PlatformStand), owned by the
+  player again" after `RagdollSeconds`.
+- **Hits launch the target (server-owned), first version:** before, `onHitReceived` did a
   client `root:ApplyImpulse(impulse * AssemblyMass)`. The server had just
   swapped the Motor6Ds for BallSockets (so `AssemblyMass` is only the root's
   assembly) and under fixed simulation / Server Authority a client impulse

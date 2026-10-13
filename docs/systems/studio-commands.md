@@ -49,10 +49,13 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   FAIL named after it (`combat SlapGlove: no report from the client`); the
   `done: N passed, M failed` line always prints. **`/selftest combat`** runs
   only the combat section (weapon probes, slot-to-slot switch probes,
-  release); **`/selftest gacha`** only the Gacha Pad card
+  release); **`/selftest gacha`** only the Gacha board
   (tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
-  event, the luck pill, silhouettes, the (i) panel sums, the 3 buttons ≥ 44 px
-  on desktop and phone, text fits, the card only on your own pad);
+  event, the luck pill, silhouettes, the (i) panel sums; the board's 6 tiles
+  with orbs, % ≥ 0.5 studs tall, no `CanvasGroup`, `MaxDistance` ≥ 80, the
+  `PlotLayout.CheckGachaBoard` footprint, no silhouettes on other boards;
+  the 3 buttons ≥ 44 px and on screen at the default camera while standing
+  on the pad, desktop and phone, text fits);
   **`/selftest cards`** only the card-placement checks (desktop +
   phone, next and running events, tutorial OK row on/off). Its
   last part drives a reset tutorial through every step on the real

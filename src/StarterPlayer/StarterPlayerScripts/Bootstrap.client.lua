@@ -28,7 +28,7 @@ local TrailerController = require(Controllers.TrailerController)
 local TutorialController = require(Controllers.TutorialController)
 local CombatController = require(Controllers.CombatController)
 local JumpPadController = require(Controllers.JumpPadController)
-local GachaCardController = require(Controllers.GachaCardController)
+local GachaBoardController = require(Controllers.GachaBoardController)
 local HudGate = require(script.Parent.UI.HudGate)
 local TopStack = require(script.Parent.UI.TopStack)
 
@@ -56,7 +56,7 @@ TutorialController.Init() -- the first-time tutorial (banner, dotted path, hand)
 HudGate.Init() -- the progressive HUD: what a new player sees builds up with the tutorial
 CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
 JumpPadController.Init() -- the 2nd floor's jump pads launch your own character
-GachaCardController.Init() -- the Gacha Pad's odds card + button row (client-built, own pad only)
+GachaBoardController.Init() -- the Gacha boards' faces (every plot) + your E / R / ? button row
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

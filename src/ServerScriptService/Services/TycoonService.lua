@@ -565,21 +565,84 @@ local function bestTier(items: { PlayerDataService.InventoryItem }): string
 	return best
 end
 
+-- The Gacha display board: two slim posts and a tilted, Neon-rimmed board on
+-- the far side of the pad (PlotLayout.Gacha). Its Front face carries the
+-- odds card, a SurfaceGui every client builds (GachaBoardController); the
+-- invisible ButtonAnchor under its bottom edge hosts the E / R / ? row.
+-- Returns the model; refreshLabel stamps Luck / price attributes on it so
+-- other players' clients can draw THIS owner's odds.
+local function buildGachaBoard(plot: Model, origin: CFrame): Model
+	local G = PlotLayout.Gacha
+	local board = Instance.new("Model")
+	board.Name = "GachaBoard"
+	local foot = PartKit.At(origin, G.BoardPosition, 0)
+	-- A part's Front face looks along its -Z: aim -Z at the viewer, who stands
+	-- on the pad (-X of the board), turned toward the gate (+Z).
+	local yaw = math.rad(G.YawTowardGateDegrees)
+	local toViewer = Vector3.new(-math.cos(yaw), 0, math.sin(yaw))
+	local base = CFrame.lookAt(foot.Position, foot.Position + origin:VectorToWorldSpace(toViewer))
+	local tilt = base * CFrame.new(0, G.BottomY, 0) * CFrame.Angles(math.rad(G.TiltBackDegrees), 0, 0)
+	local size = G.BoardSize
+
+	PartKit.Part({
+		Name = "Face",
+		Size = size,
+		CFrame = tilt * CFrame.new(0, size.Y / 2, 0),
+		Color = World.Structure,
+		Parent = board,
+	})
+	-- The Neon rim: four thin bands (seen side-on, never a flat Neon disc).
+	local rim = G.RimThickness
+	local bands = {
+		{ "RimTop", Vector3.new(size.X + rim * 2, rim, G.RimDepth), Vector3.new(0, size.Y + rim / 2, 0) },
+		{ "RimBottom", Vector3.new(size.X + rim * 2, rim, G.RimDepth), Vector3.new(0, -rim / 2, 0) },
+		{ "RimLeft", Vector3.new(rim, size.Y, G.RimDepth), Vector3.new(-(size.X + rim) / 2, size.Y / 2, 0) },
+		{ "RimRight", Vector3.new(rim, size.Y, G.RimDepth), Vector3.new((size.X + rim) / 2, size.Y / 2, 0) },
+	}
+	for _, band in bands do
+		local part = PartKit.Part({
+			Name = band[1],
+			Size = band[2],
+			CFrame = tilt * CFrame.new(band[3]),
+			Color = World.AccentGold,
+			Material = Enum.Material.Neon,
+			Parent = board,
+		})
+		PartKit.MakeDecorative(part)
+	end
+	-- Two slim posts behind the face, from the floor up into it.
+	for _, side in { -1, 1 } do
+		PartKit.Part({
+			Name = "Post",
+			Size = G.PostSize,
+			CFrame = base * CFrame.new(side * G.PostSpread, G.PostSize.Y / 2, size.Z / 2 + G.PostSize.Z / 2 + 0.2),
+			Color = World.StructureLight,
+			Parent = board,
+		})
+	end
+	-- The button row's anchor: just under the bottom edge, in front of it.
+	local anchor = PartKit.Part({
+		Name = "ButtonAnchor",
+		Size = Vector3.new(0.2, 0.2, 0.2),
+		CFrame = base * CFrame.new(0, G.BottomY - G.ButtonAnchorDrop, -0.6),
+		Color = World.Structure,
+		Transparency = 1,
+		CanCollide = false,
+		Parent = board,
+	})
+	PartKit.MakeDecorative(anchor)
+	board.Parent = plot
+	return board
+end
+
 local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule", { Word = "PULL" })
-	local padLabel = BillboardKit.Pad(pad, {
-		Name = "GachaLabel",
-		Title = "GACHA",
-		TitleColor = UITheme.Colors.GoldLabel,
-		Pill = "",
-		PillGradient = UITheme.Gradients.Gold,
-		-- No odds text here any more: the client builds the odds card above
-		-- your own pad (Controllers/GachaCardController) from the same rows.
-		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
-	})
+	-- No billboard label any more: the title, the odds and the price are on
+	-- the display board (buildGachaBoard; GachaBoardController draws it).
+	local gachaBoard = buildGachaBoard(plot, origin)
 	-- E-to-pull, never Touched: walking across the pad must not spend cash.
 	-- The three gacha prompts are drawn by the client as ONE row of round
-	-- buttons under the odds card (GachaCardController): Style = Custom.
+	-- buttons under the display board (GachaBoardController): Style = Custom.
 	local prompt = newPrompt(pad, "PullPrompt", "Pull", "Gacha Pad", PlotLayout.Station.PromptDistance)
 	prompt.Style = Enum.ProximityPromptStyle.Custom
 	-- R / ButtonY: ten pulls at once, offset so it doesn't cover the E prompt.
@@ -601,7 +664,11 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		local pulls = PlayerDataService.GetGachaPulls(player)
 		local cost = TycoonConfig.GetGachaPullCost(pulls)
 		local free = PlayerDataService.GetTutorialFreePulls(player)
-		padLabel.SetPill(if free > 0 then ("FREE · %d left"):format(free) else ("%s / pull"):format(NumberFormat.Money(cost)))
+		-- What another player's client needs to draw THIS owner's board.
+		gachaBoard:SetAttribute("Luck", getLuck(player))
+		gachaBoard:SetAttribute("PullCost", cost)
+		gachaBoard:SetAttribute("MultiCost", TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
+		gachaBoard:SetAttribute("FreePulls", free)
 		prompt.ActionText = if free > 0 then "Pull (FREE)" else ("Pull (%s)"):format(NumberFormat.Money(cost))
 		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
 	end

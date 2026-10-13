@@ -36,28 +36,42 @@ with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
-**Gacha Pad odds card** (`Controllers/GachaCardController`, client): the
-pad's old two text lines are gone. Above YOUR pad (a BillboardGui in
-PlayerGui, `OwnerOnly`, `AlwaysOnTop = false`, `LightInfluence = 0`,
-`DistanceLowerLimit`) a card fades in within ~18-22 studs: "GACHA PAD" + an
-(i) button, a `🍀 Luck ×1.15` pill when luck > ×1, the live event chip when it
-changes the pull odds, a 3 × 2 grid of tiers (orb, big % in the tier colour,
-name; a tier you never found is a dark silhouette with "?" **and still shows
-its %**; Secret shimmers), a strip of mutation chips (event-only ones during
-their event) and the price pill. Numbers come from
-`FusionConfig.GetGachaOddsRows(luck, event)`, built on `GetGachaRates` and
-`MutationConfig.GetChance` (`FormatOdds` is built on the same rows), at
-`TycoonController.GetLuck()`: the server's `LuckBase` from every
-`SyncTycoon` × the live admin-luck value (Workspace attributes). The (i)
-panel (`UIKit.Modal`) lists every orb with its own % (tier % / orbs in the
-tier: `PickRandomOfTier` is uniform), found or not, and says luck and events
-are included. The pad's PullPrompt / Pull10Prompt / HelpPrompt are
-`Style = Custom`, drawn as ONE row of round buttons under the card ([E] Pull +
-price, [R] ×10 + price, [?] help; key / gamepad glyph / words on touch;
-≥ 44 px; `prompt:InputHoldBegin/End`); other players' pads draw nothing.
-Paid-Random-Items compliance: every odds is on the card whenever the buttons
-are, luck and event pills are the live disclosure, a silhouette hides the
-look, never the odds. `TycoonConfig.MultiPullCount` (10) is shared.
+**Gacha display board** (`Controllers/GachaBoardController`, client + the
+board built by `TycoonService.buildGachaBoard`): the odds are a real board in
+the world, not a billboard (a camera-distance billboard only showed when
+zoomed in, and a `CanvasGroup` in a BillboardGui rendered as a black box). On
+the FAR side of every Gacha Pad (`PlotLayout.Gacha`: 10 × 7.5 studs on two
+slim posts at (28, 0, 22), bottom edge 4.5, tilted back 10°, yawed 15° toward
+the gate, SmoothPlastic + thin Neon gold rim bands, footprint in the assertion
+block / `CheckGachaBoard`), so standing on the pad the camera behind you
+looks at it over your head. Its Front face carries a SurfaceGui every client
+builds for EVERY plot (60 px/stud, `MaxDistance` 100, no `CanvasGroup`, no
+fade): violet glass with diagonal stripes in a thick gold rim, a gold header
+ribbon (capsule icon, GACHA PAD, your (i) button), the `🍀 Luck ×N` pill and
+the live event chip, six tier tiles (tier gradient, a spinning 3D orb in a
+`ViewportFrame` built by `PedestalVisuals.BuildCarryOrb`, the % huge — 42 px =
+0.7 studs — white with a tier-coloured stroke, a name ribbon; Secret has an
+animated rainbow stroke and a sparkle; orbs only spin within 60 studs of the
+camera), mutation chips (event-only ones during their event) and a big gold
+price pill (`$285 / pull · ×10 $3.5K`, or `FREE · 2 left`). On YOUR board a
+never-found tier is a black silhouette orb with a "?" and STILL shows its %;
+other players' boards show no silhouettes and draw THAT owner's luck / price
+from attributes the server stamps on the board model (`Luck`, `PullCost`,
+`MultiCost`, `FreePulls`). Numbers: `FusionConfig.GetGachaOddsRows(luck,
+event)` (built on `GetGachaRates` and `MutationConfig.GetChance`;
+`FormatOdds` is built on the same rows), yours at
+`TycoonController.GetLuck()` (the server's `LuckBase` from each `SyncTycoon`
+× the live admin-luck value). The (i) button (SurfaceGui in PlayerGui with an
+`Adornee`, `Active` on your own) opens the per-orb panel (`UIKit.Modal`,
+tier % / orbs in the tier because `PickRandomOfTier` is uniform). The pad's
+PullPrompt / Pull10Prompt / HelpPrompt are `Style = Custom`, drawn as one
+row of round buttons in a pixel-size BillboardGui on the board's invisible
+`ButtonAnchor` under its bottom edge ([E] Pull + price, [R] ×10 + price,
+[?] help; key / gamepad glyph / words on touch; ≥ 44 px;
+`prompt:InputHoldBegin/End`). Paid-Random-Items compliance: every outcome's %
+is on the board before you pull, luck and the event are the live disclosure,
+a silhouette hides the look, never the odds. `TycoonConfig.MultiPullCount`
+(10) is shared.
 
 
 - **Auto-display** (Playtest 7): players never choose. `ItemService.Arrange

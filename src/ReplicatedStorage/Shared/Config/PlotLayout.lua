@@ -92,6 +92,33 @@ PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
+--[[ Gacha display board -------------------------------------------------------------
+	A board on two slim posts on the FAR side of the Gacha Pad from where you
+	walk up (the pad is right of the walkway; you arrive from the left), so
+	standing on the pad the camera behind you looks at it over your head. It
+	carries the odds card (client SurfaceGui, GachaBoardController) and the
+	title / price, and is yawed a little toward the gate so it also reads
+	from the doorway. Plot-local; the footprint is in the assertion block.
+]]
+PlotLayout.Gacha = {
+	BoardPosition = v3(28, 0, 22), -- foot of the board, level with the pad, 8 studs beyond it
+	BoardSize = v3(10, 7.5, 0.4), -- wide (along its face), tall, thick
+	BottomY = 4.5, -- the bottom edge, above the floor
+	TiltBackDegrees = 10, -- the top leans away from the viewer
+	YawTowardGateDegrees = 15, -- the face turns from "straight at the pad" toward the gate (+Z)
+	PostSize = v3(0.5, 5.5, 0.5),
+	PostSpread = 3.8, -- posts at +-this along the board's width
+	RimThickness = 0.3, -- the Neon bands round the face (side-on strips only)
+	RimDepth = 0.5,
+	PixelsPerStud = 60,
+	MaxDistance = 100, -- the SurfaceGui draws this far
+	ButtonAnchorDrop = 0.6, -- the (invisible) anchor of the button row, under the bottom edge
+	ButtonMaxDistance = 60,
+	-- The ground rectangle kept clear for the whole board (posts, rim and the
+	-- yawed, tilted face): centre = BoardPosition.
+	Footprint = v3(4, 0, 10.6),
+}
+
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind
 -- the first, between its pairs) only with the +2 Pedestals pass (ShopConfig:
 -- 4 base, 6 with the pass); without it they're a dim plinth with a locked
@@ -550,6 +577,7 @@ local function collectFootprints(): ({ Footprint }, { Footprint }, Footprint)
 	local footprints: { Footprint } = {
 		circle("ClaimStation", PlotLayout.CLAIM_STATION, stationRadius),
 		circle("GachaStation", PlotLayout.GACHA_STATION, stationRadius),
+		boxFootprint("GachaBoard", PlotLayout.Gacha.BoardPosition, PlotLayout.Gacha.Footprint.X, PlotLayout.Gacha.Footprint.Z),
 		circle("MultiplierStation", PlotLayout.MULTIPLIER_STATION, stationRadius),
 		circle("FusionMachine", PlotLayout.FUSION_MACHINE, PlotLayout.Machine.RimDiameter / 2),
 		circle("OddsBoard", PlotLayout.ODDS_BOARD, PlotLayout.Machine.OddsBoardSize.X / 2),
@@ -684,6 +712,29 @@ function PlotLayout.CheckFloor2(): boolean
 	return true
 end
 
+-- The Gacha board's own check (also run by /selftest): inside the walls and
+-- clear of every other footprint and the walkway. Errors with the reason.
+function PlotLayout.CheckGachaBoard(): boolean
+	local footprints, factory, walkway = collectFootprints()
+	local board: Footprint? = nil
+	for _, footprint in footprints do
+		if footprint.Name == "GachaBoard" then
+			board = footprint
+		end
+	end
+	assert(board, "PlotLayout: the Gacha board has no footprint")
+	local minX, maxX, minZ, maxZ = bounds(board :: Footprint)
+	local inner = PlotLayout.PLOT_HALF - PlotLayout.WALL_THICKNESS
+	assert(minX >= -inner and maxX <= inner and minZ >= -inner and maxZ <= inner, "PlotLayout: the Gacha board sits outside the walls")
+	assert(not overlaps(board :: Footprint, walkway), "PlotLayout: the Gacha board is on the walkway")
+	for _, list in { footprints, factory } do
+		for _, other in list do
+			assert(other.Name == "GachaBoard" or not overlaps(board :: Footprint, other), ("PlotLayout: the Gacha board overlaps %s"):format(other.Name))
+		end
+	end
+	return true
+end
+
 local function checkLayout()
 	local footprints, factory, walkway = collectFootprints()
 	local belt = PlotLayout.FactoryBelt
@@ -764,5 +815,6 @@ local function checkLayout()
 end
 
 checkLayout()
+PlotLayout.CheckGachaBoard()
 
 return PlotLayout
