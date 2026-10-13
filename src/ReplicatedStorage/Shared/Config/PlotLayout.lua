@@ -93,30 +93,33 @@ PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
 --[[ Gacha display board -------------------------------------------------------------
-	A board on two slim posts on the FAR side of the Gacha Pad from where you
-	walk up (the pad is right of the walkway; you arrive from the left), so
-	standing on the pad the camera behind you looks at it over your head. It
-	carries the odds card (client SurfaceGui, GachaBoardController) and the
-	title / price, and is yawed a little toward the gate so it also reads
-	from the doorway. Plot-local; the footprint is in the assertion block.
+	An UPRIGHT board on two slim posts DIRECTLY BEHIND the Gacha Pad (about 4
+	studs past its far edge), facing the walkway (-X in plot space): you read
+	it straight on from the pad and from the walkway you walk up. Its body is
+	a dark SmoothPlastic frame; only a thin gold Neon strip runs along the top
+	and the two sides (the thin-band rule). It carries the odds card (client
+	SurfaceGui, GachaBoardController). Plot-local; the footprint is in the
+	assertion block.
 ]]
 PlotLayout.Gacha = {
-	BoardPosition = v3(28, 0, 22), -- foot of the board, level with the pad, 8 studs beyond it
-	BoardSize = v3(10, 7.5, 0.4), -- wide (along its face), tall, thick
-	BottomY = 4.5, -- the bottom edge, above the floor
-	TiltBackDegrees = 10, -- the top leans away from the viewer
-	YawTowardGateDegrees = 15, -- the face turns from "straight at the pad" toward the gate (+Z)
-	PostSize = v3(0.5, 5.5, 0.5),
+	BoardPosition = v3(28.5, 0, 22), -- foot of the board: pad centre 20 + radius 4.05 + ~4.4
+	BoardSize = v3(11, 7.5, 0.4), -- wide (along its face), tall, thick (the face part)
+	BottomY = 5.5, -- the bottom edge, above a character's head on the pad
+	TiltBackDegrees = 0, -- upright
+	YawTowardGateDegrees = 0, -- 0 = straight at the walkway
+	FrameMargin = 0.25, -- the dark frame body is this much bigger than the face on every side
+	FrameDepth = 0.4,
+	PostSize = v3(0.5, 5.6, 0.5),
 	PostSpread = 3.8, -- posts at +-this along the board's width
-	RimThickness = 0.3, -- the Neon bands round the face (side-on strips only)
-	RimDepth = 0.5,
+	GoldStripThickness = 0.12, -- the thin Neon strip along the top and the two sides
+	GoldStripDepth = 0.3,
 	PixelsPerStud = 60,
 	MaxDistance = 100, -- the SurfaceGui draws this far
 	ButtonAnchorDrop = 0.6, -- the (invisible) anchor of the button row, under the bottom edge
 	ButtonMaxDistance = 60,
-	-- The ground rectangle kept clear for the whole board (posts, rim and the
-	-- yawed, tilted face): centre = BoardPosition.
-	Footprint = v3(4, 0, 10.6),
+	-- The ground rectangle kept clear for the whole board (posts, frame and
+	-- face): centre = BoardPosition.
+	Footprint = v3(3, 0, 11.8),
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind

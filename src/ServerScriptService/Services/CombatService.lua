@@ -636,12 +636,13 @@ local function vector(value: unknown): Vector3?
 	return v
 end
 
--- A swing or shot that landed on a target who can't be hit (immune after a
--- get-up, or spawn-protected) is shown to the ATTACKER only, so a hit that
--- does nothing never looks like a bug.
+-- A swing or shot that landed on a target who can't be hit (a new lab under
+-- Rebirth 1, spawn-protected, or immune after a get-up) is shown to the
+-- ATTACKER only, with the reason, so a hit that does nothing never looks
+-- like a bug.
 local function notifyIgnored(attacker: Player, targetRoot: BasePart, why: string)
-	if why == "Immune" or why == "SpawnProtected" then
-		RemoteEvents.HitFx:FireClient(attacker, { Kind = "Immune", To = targetRoot.Position, Attacker = attacker.UserId })
+	if why == "Immune" or why == "SpawnProtected" or why == "NeedsRebirth" then
+		RemoteEvents.HitFx:FireClient(attacker, { Kind = "Immune", To = targetRoot.Position, Attacker = attacker.UserId, Reason = why })
 	end
 end
 
@@ -654,7 +655,13 @@ local function onRequestHit(attacker: Player, payload: unknown)
 	end
 	local p = payload :: any
 	local weapon = CombatConfig.GetWeapon(p.Weapon)
-	if not weapon or whyCantSwing(attacker, weapon) then
+	if not weapon then
+		return
+	end
+	-- A refused swing says why (to the attacker): no silent refusals.
+	local refused = whyCantSwing(attacker, weapon)
+	if refused then
+		RemoteEvents.HitFx:FireClient(attacker, { Kind = "Refused", Reason = refused, Weapon = weapon.Id, Attacker = attacker.UserId })
 		return
 	end
 	local root = getRoot(attacker) :: BasePart

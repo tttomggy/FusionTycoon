@@ -824,9 +824,9 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		end
 		local body = TutorialExplain.GetBody()
 		table.insert(lines, {
-			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body,
-			Name = ("tutorial %s: its explain card opens first (text >= 22 px)"):format(stepId),
-			Detail = if body then ("%d px"):format(body.TextSize) else "no card",
+			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body and body.AbsoluteSize.X > 0 and body.AbsoluteSize.Y > 0 and body.TextBounds.Y > 0,
+			Name = ("tutorial %s: its explain card opens first (text >= 22 px, drawn)"):format(stepId),
+			Detail = if body then ("%d px, drawn %dx%d, text height %d"):format(body.TextSize, body.AbsoluteSize.X, body.AbsoluteSize.Y, body.TextBounds.Y) else "no card",
 		})
 		-- Read time: OK is off at first (✕ and a tap outside too), on after 1.5 s.
 		task.wait(0.4)
@@ -968,11 +968,12 @@ local function probeBigCard(expect: string, fakeFusion: boolean?): { ProbeLine }
 		task.wait(0.1)
 	end
 	local headline = ResultController.GetBigCardHeadline()
+	local size = ResultController.GetBigCardHeadlineSize()
 	return {
 		{
-			Ok = ResultController.IsBigCardOpen() and headline == expect,
+			Ok = ResultController.IsBigCardOpen() and headline == expect and size.X > 0 and size.Y > 0,
 			Name = if fakeFusion then "a single fusion (Common x2 -> Rare) opens the big card" else "a single pull of a Common opens the big card",
-			Detail = ("headline %s"):format(tostring(headline)),
+			Detail = ("headline %s, drawn %dx%d"):format(tostring(headline), size.X, size.Y),
 		},
 	}
 end
@@ -986,6 +987,67 @@ local function missingRig(character: Model?): boolean
 	return character == nil or character:FindFirstChild("RightHand") == nil or character:FindFirstChild("UpperTorso") == nil
 end
 
+-- What the rig is doing right now, for a FAIL's Detail: the rest and held
+-- hand offsets, every playing track (name, priority, weight, time), the
+-- shoulder's C0 against its stored base, which pose owners are up and
+-- whether the fallback switch is still on. A FAIL pasted from here is
+-- enough to tell "rest sampled mid-fade" from "track at weight 0 / out-
+-- prioritised" from "forceFallback left on".
+local function describeRig(character: Model, rest: Vector3?, held: Vector3?): string
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+	local parts: { string } = {}
+	local function v(vector: Vector3?): string
+		return if vector then ("(%.2f, %.2f, %.2f)"):format(vector.X, vector.Y, vector.Z) else "nil"
+	end
+	table.insert(parts, ("rest %s, held %s"):format(v(rest), v(held)))
+	local animator = character:FindFirstChildWhichIsA("Animator", true)
+	local tracks: { string } = {}
+	if animator then
+		for _, track in animator:GetPlayingAnimationTracks() do
+			table.insert(tracks, ("%s[%s w%.2f/%.2f t%.2f]"):format(track.Name ~= "" and track.Name or tostring(track.Animation and track.Animation.Name), track.Priority.Name, track.WeightCurrent, track.WeightTarget, track.TimePosition))
+		end
+	end
+	table.insert(parts, ("tracks {%s}"):format(table.concat(tracks, ", ")))
+	local shoulder = character:FindFirstChild("RightUpperArm") and (character :: any).RightUpperArm:FindFirstChild("RightShoulder")
+	if shoulder and shoulder:IsA("Motor6D") then
+		local base = shoulder:GetAttribute("BaseC0")
+		table.insert(parts, ("shoulder enabled %s, C0 %s, BaseC0 %s"):format(tostring(shoulder.Enabled), v(shoulder.C0.Position), if typeof(base) == "CFrame" then v(base.Position) else "none"))
+	else
+		table.insert(parts, "shoulder: no Motor6D")
+	end
+	table.insert(parts, ("anim %s, pose %s, forceFallback %s"):format(tostring(WeaponAnimator.GetHeldWeapon(character)), tostring(WeaponPose.GetHeldWeapon(character)), tostring(WeaponAnimator.SelfTestIsForcingFallback())))
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	table.insert(parts, ("humanoid %s, platformStand %s, root anchored %s"):format(humanoid and humanoid:GetState().Name or "none", tostring(humanoid and humanoid.PlatformStand), tostring(root and root:IsA("BasePart") and root.Anchored)))
+	return table.concat(parts, "; ")
+end
+
+-- Nothing held, nothing playing, no base stored, and the hand still for two
+-- samples: only then is it the REST pose (a hold track still fading out, or
+-- a pose not yet released, made rest == held and the hold checks read 0.01).
+local function waitForRest(character: Model): boolean
+	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
+	local WeaponAnimator = require(script.Parent.Parent.Effects.WeaponAnimator) :: any
+	local deadline = os.clock() + 2
+	local previous: Vector3? = nil
+	while os.clock() < deadline do
+		RunService.Heartbeat:Wait()
+		local hand = WeaponPose.GetHandOffset(character)
+		local idle = WeaponPose.GetHeldWeapon(character) == nil
+			and WeaponAnimator.GetHeldWeapon(character) == nil
+			and not WeaponAnimator.AnyPlaying(character)
+			and not WeaponPose.HasBaseStored(character)
+			and character:FindFirstChildOfClass("Tool") == nil
+		if idle and hand and previous and (hand - previous).Magnitude < 0.02 then
+			return true
+		end
+		previous = hand
+		task.wait(0.05)
+	end
+	return false
+end
+
 local function probeSampleRest(): { ProbeLine }
 	local WeaponPose = require(script.Parent.Parent.Effects.WeaponPose) :: any
 	local character = localPlayer.Character
@@ -993,9 +1055,15 @@ local function probeSampleRest(): { ProbeLine }
 		restHand = nil
 		return {}
 	end
+	local char = character :: Model
+	local settled = waitForRest(char)
 	RunService.Heartbeat:Wait()
-	restHand = WeaponPose.GetHandOffset(character)
-	restJoints = WeaponPose.GetJointValues(character)
+	restHand = WeaponPose.GetHandOffset(char)
+	restJoints = WeaponPose.GetJointValues(char)
+	if not settled then
+		-- Say so now: the checks that follow compare against this sample.
+		return { { Ok = false, Name = "combat: the rest pose settles before it is sampled (nothing held, no track playing, hand still)", Detail = describeRig(char, restHand, nil) } }
+	end
 	return {}
 end
 
@@ -1016,7 +1084,7 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 		table.insert(lines, {
 			Ok = holding and math.abs(held.Y - shoulderY) <= 0.8 and held.Z < -0.8,
 			Name = ("combat %s: the hand is raised to about shoulder height while aiming"):format(label),
-			Detail = ("hand y %.2f (shoulder %.2f), z %.2f"):format(held.Y, shoulderY, held.Z),
+			Detail = ("hand y %.2f (shoulder %.2f), z %.2f | %s"):format(held.Y, shoulderY, held.Z, describeRig(character, rest, held)),
 		})
 	else
 		-- The bat sits on the shoulder (no "forward" needed): the hand is drawn
@@ -1027,7 +1095,7 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 		table.insert(lines, {
 			Ok = holding and (held - rest).Magnitude >= 1 and looping,
 			Name = ("combat %s: the hand is drawn at least 1 stud away from its rest pose and the hold track loops"):format(label),
-			Detail = ("moved %.2f studs, hold track looping %s, pose %s"):format((held - rest).Magnitude, tostring(looping), tostring((require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character))),
+			Detail = ("moved %.2f studs, hold track looping %s, pose %s | %s"):format((held - rest).Magnitude, tostring(looping), tostring((require(script.Parent.CombatController) :: any).GetHeldPoseWeapon(character)), describeRig(character, rest, held)),
 		})
 	end
 	return held
@@ -1190,7 +1258,7 @@ local function probeWeaponReleased(): { ProbeLine }
 		{
 			Ok = away <= 0.3 and not stored and joints == nil and not playing,
 			Name = "combat release: after unequip no weapon track plays, the hand is back at rest and no BaseC0 is left",
-			Detail = ("%.2f studs from rest, base stored %s, %s, track playing %s"):format(away, tostring(stored), tostring(joints or "joints at base"), tostring(playing)),
+			Detail = ("%.2f studs from rest, base stored %s, %s, track playing %s | %s"):format(away, tostring(stored), tostring(joints or "joints at base"), tostring(playing), describeRig(char, rest, nil)),
 		},
 	}
 end
@@ -1205,32 +1273,61 @@ local function probeFallback(): { ProbeLine }
 		return { { Ok = true, Name = "combat live fallback: the C0 pose still runs (skipped: not an R15 rig)" } }
 	end
 	local char = character :: Model
-	task.wait(0.3)
+	local settled = waitForRest(char)
 	local rest = WeaponPose.GetHandOffset(char) :: Vector3
 	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
+	-- The switch is always switched back, whatever Hold does.
 	WeaponAnimator.SelfTestForceFallback(true)
-	local usedTrack = WeaponAnimator.Hold(char, bat)
+	local okHold, usedTrack = pcall(WeaponAnimator.Hold, char, bat)
 	WeaponAnimator.SelfTestForceFallback(false)
 	WeaponPose.Hold(char, bat)
 	task.wait(0.4)
 	RunService.Heartbeat:Wait()
-	local moved = ((WeaponPose.GetHandOffset(char) :: Vector3) - rest).Magnitude
+	local heldAt = WeaponPose.GetHandOffset(char) :: Vector3
+	local moved = (heldAt - rest).Magnitude
 	local holding = WeaponPose.GetHeldWeapon(char) == "Bat"
+	local detail = describeRig(char, rest, heldAt)
 	WeaponPose.Release(char, "Bat")
 	task.wait(0.2)
 	local stored = WeaponPose.HasBaseStored(char)
 	return {
 		{
-			Ok = not usedTrack and holding and moved >= 1 and not stored,
-			Name = "combat live fallback: with no id the C0 pose still runs (and restores)",
-			Detail = ("track used %s, pose held %s, hand moved %.2f studs, base left %s"):format(tostring(usedTrack), tostring(holding), moved, tostring(stored)),
+			Ok = settled and okHold and not usedTrack and holding and moved >= 1 and not stored and not WeaponAnimator.SelfTestIsForcingFallback(),
+			Name = "combat live fallback: with no id the C0 pose still runs, moves the hand >= 1 stud (and restores)",
+			Detail = ("rest settled %s, track used %s, pose held %s, hand moved %.2f studs, base left %s | %s"):format(tostring(settled), tostring(usedTrack), tostring(holding), moved, tostring(stored), detail),
 		},
 	}
 end
 
--- The Gacha board against the server's luck: each tier's rendered % is
--- GetGachaRates at that luck, the (i) panel's per-orb % add up to the tier
--- %, an unfound tier is a silhouette that still shows its %.
+-- Why a GuiObject is NOT drawn (nil = drawn): both axes of AbsoluteSize > 0
+-- and Visible all the way up to `root`, which must be enabled. Every UI
+-- check reads the INSTANCE TREE through this, never a table the controller
+-- keeps about itself (that is how unparented tiles passed once).
+local function drawnProblem(object: GuiObject, root: Instance): string?
+	local size = object.AbsoluteSize
+	if size.X <= 0 or size.Y <= 0 then
+		return ("size %dx%d"):format(size.X, size.Y)
+	end
+	local current: Instance? = object
+	while current and current ~= root do
+		if current:IsA("GuiObject") and not current.Visible then
+			return current.Name .. " hidden"
+		end
+		current = current.Parent
+	end
+	if current == nil then
+		return "not under its gui"
+	end
+	if root:IsA("LayerCollector") and not root.Enabled then
+		return "gui disabled"
+	end
+	return nil
+end
+
+-- The Gacha board against the server's luck, read from the instance tree:
+-- each tier's drawn % label is GetGachaRates at that luck, the (i) panel's
+-- per-orb % add up to the tier %, an unfound tier is a silhouette that
+-- still shows its %.
 local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local TycoonController = require(script.Parent.TycoonController) :: any
@@ -1241,32 +1338,55 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	end
 	Board.RefreshNow()
 	RunService.Heartbeat:Wait()
+	task.wait(0.1) -- the layout settles
+	local own = Board.GetOwnBoard()
+	if not own then
+		table.insert(lines, { Ok = false, Name = ("gacha board (%s): your board is drawn"):format(label), Detail = "no own board (not streamed in, or the lab is unclaimed)" })
+		return lines
+	end
+	local gui = own.Gui :: SurfaceGui
 	local rates = FusionConfig.GetGachaRates(serverLuck)
-	local tiles = Board.GetTiles()
 	local bad: { string } = {}
+	local drawnTiles = 0
+	local summary: { string } = {}
 	for _, tier in FusionConfig.TierOrder do
-		local tile = tiles[tier]
+		local tile = gui:FindFirstChild("Tile_" .. tier, true)
+		local percent = tile and tile:FindFirstChild("Percent")
 		local want = FusionConfig.FormatPercent((rates[tier] or 0) * 100) .. "%"
-		if not tile or tile.Text ~= want or math.abs(tile.Value - (rates[tier] or 0) * 100) > 1e-9 then
-			table.insert(bad, ("%s shows %s, wants %s"):format(tier, tile and tile.Text or "nothing", want))
+		if not (tile and tile:IsA("GuiObject")) then
+			table.insert(bad, ("%s: no tile in the tree"):format(tier))
+		elseif not (percent and percent:IsA("TextLabel")) then
+			table.insert(bad, ("%s: no Percent label"):format(tier))
+		else
+			local problem = drawnProblem(percent, gui) or drawnProblem(tile, gui)
+			if problem then
+				table.insert(bad, ("%s: not drawn (%s)"):format(tier, problem))
+			elseif percent.Text ~= want or percent.TextBounds.Y <= 0 then
+				table.insert(bad, ("%s shows %q (text height %d), wants %q"):format(tier, percent.Text, percent.TextBounds.Y, want))
+			else
+				drawnTiles += 1
+			end
+			table.insert(summary, ("%s %dx%d"):format(tier, tile.AbsoluteSize.X, tile.AbsoluteSize.Y))
 		end
 	end
 	table.insert(lines, {
-		Ok = #bad == 0 and next(tiles) ~= nil,
-		Name = ("gacha board (%s): each tier's %% equals GetGachaRates at the server's luck (x%.2f)"):format(label, serverLuck),
-		Detail = table.concat(bad, "; "),
+		Ok = #bad == 0 and drawnTiles == #FusionConfig.TierOrder,
+		Name = ("gacha board (%s): every tier's drawn %% equals GetGachaRates at the server's luck (x%.2f)"):format(label, serverLuck),
+		Detail = ("%d/%d tiles drawn [%s]%s"):format(drawnTiles, #FusionConfig.TierOrder, table.concat(summary, ", "), if #bad > 0 then " | " .. table.concat(bad, "; ") else ""),
 	})
 
 	-- The luck pill is up exactly when luck > x1.
-	local own = Board.GetOwnBoard()
-	local pill = own and own.Gui:FindFirstChild("LuckPill", true)
+	local pill = gui:FindFirstChild("LuckPill", true)
+	local pillRoot = if pill then UIKit.PillRoot(pill :: any) else nil
+	local pillDrawn = pillRoot ~= nil and pillRoot:IsA("GuiObject") and drawnProblem(pillRoot, gui) == nil
 	table.insert(lines, {
-		Ok = (pill ~= nil) == (serverLuck > 1.0001),
-		Name = ("gacha board (%s): the luck pill shows exactly when luck is above x1"):format(label),
-		Detail = ("pill %s, luck %.2f"):format(tostring(pill ~= nil), serverLuck),
+		Ok = pillDrawn == (serverLuck > 1.0001),
+		Name = ("gacha board (%s): the luck pill is drawn exactly when luck is above x1"):format(label),
+		Detail = ("pill drawn %s, luck %.2f"):format(tostring(pillDrawn), serverLuck),
 	})
 
-	-- Silhouettes: an unfound tier is dark and still shows its %.
+	-- Silhouettes: an unfound tier is dark (the orb's ImageColor3 black and a
+	-- "?" mark drawn) and still shows its %.
 	local found: { [string]: boolean } = {}
 	for key in TycoonController.GetIndex() do
 		local def = ItemConfig.GetItemById(key:match("^(.-)|") or "")
@@ -1274,20 +1394,25 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 			found[def.Tier] = true
 		end
 	end
-	local checkedSilhouette, silhouetteBad = 0, {}
+	local silhouetteBad: { string } = {}
+	local checkedSilhouette = 0
 	for _, tier in FusionConfig.TierOrder do
-		local tile = tiles[tier]
-		if tile then
+		local tile = gui:FindFirstChild("Tile_" .. tier, true)
+		local orb = tile and tile:FindFirstChild("Orb")
+		local mark = tile and tile:FindFirstChild("Mark")
+		local percent = tile and tile:FindFirstChild("Percent")
+		if tile and orb and orb:IsA("ViewportFrame") and percent and percent:IsA("TextLabel") then
 			checkedSilhouette += 1
-			if tile.Silhouette == (found[tier] == true) or tile.Text == "" then
-				table.insert(silhouetteBad, ("%s silhouette=%s found=%s text=%q"):format(tier, tostring(tile.Silhouette), tostring(found[tier] == true), tile.Text))
+			local dark = orb.ImageColor3 == UITheme.Colors.Black and mark ~= nil and mark:IsA("GuiObject") and drawnProblem(mark, gui) == nil
+			if dark == (found[tier] == true) or percent.Text == "" then
+				table.insert(silhouetteBad, ("%s dark=%s found=%s text=%q"):format(tier, tostring(dark), tostring(found[tier] == true), percent.Text))
 			end
 		end
 	end
 	table.insert(lines, {
-		Ok = checkedSilhouette > 0 and #silhouetteBad == 0,
+		Ok = checkedSilhouette == #FusionConfig.TierOrder and #silhouetteBad == 0,
 		Name = ("gacha board (%s): an unfound tier is a silhouette and still shows its %%"):format(label),
-		Detail = table.concat(silhouetteBad, "; "),
+		Detail = ("%d tiles checked%s"):format(checkedSilhouette, if #silhouetteBad > 0 then " | " .. table.concat(silhouetteBad, "; ") else ""),
 	})
 
 	-- The (i) panel: per-orb % sum to the tier %.
@@ -1305,14 +1430,14 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		end
 		local want = (rates[tier] or 0) * 100
 		if not entry or #entry.Orbs == 0 or math.abs(total - want) > math.max(1e-9, want * 1e-9) or math.abs(entry.Total - want) > math.max(1e-9, want * 1e-9) then
-			table.insert(sumBad, ("%s orbs sum %.6f, tier %.6f"):format(tier, total, want))
+			table.insert(sumBad, ("%s orbs sum %.6f, tier %.6f, %d orb lines"):format(tier, total, want, if entry then #entry.Orbs else 0))
 		end
 	end
 	Board.ClosePanel()
 	table.insert(lines, {
 		Ok = #sumBad == 0,
 		Name = ("gacha board (%s): the (i) panel's per-orb %% sum to each tier's %%"):format(label),
-		Detail = table.concat(sumBad, "; "),
+		Detail = if #sumBad > 0 then table.concat(sumBad, "; ") else "all tiers add up",
 	})
 	return lines
 end
@@ -1335,47 +1460,59 @@ local function projects(camera: CFrame, point: Vector3, viewport: Vector2, below
 	return ok, ("ndc (%.2f, %.2f), %d px from the bottom"):format(ndcX, ndcY, viewport.Y - screenY)
 end
 
--- The board itself and its button row, at desktop and phone size.
-local function probeGachaButtons(): { ProbeLine }
+-- The board itself and its button row, read from the instance tree, at
+-- desktop and phone size. The server stands the character on the pad first.
+local function probeGachaButtons(onPad: boolean): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local Board = require(script.Parent.GachaBoardController) :: any
-	local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout) :: any
 	local G = PlotLayout.Gacha
 	local own = Board.GetOwnBoard()
 	local boards = Board.GetBoards()
 
-	-- The board's geometry: 6 tiles each with a spinning orb, tall %s, no
-	-- CanvasGroup, MaxDistance, a clear footprint.
-	local tileBad, orbBad = {}, {}
-	for _, view in boards do
-		if view.Tiles ~= 6 then
-			table.insert(tileBad, ("%s has %d tiles"):format(view.Gui.Name, view.Tiles))
-		end
-		if view.Orbs ~= 6 then
-			table.insert(orbBad, ("%s has %d orbs"):format(view.Gui.Name, view.Orbs))
-		end
-	end
-	table.insert(lines, {
-		Ok = #boards > 0 and #tileBad == 0 and #orbBad == 0,
-		Name = "board: 6 tiles, each with a ViewportFrame orb (every plot's board)",
-		Detail = table.concat(tileBad, "; ") .. table.concat(orbBad, "; ") .. (if #boards == 0 then "no boards" else ""),
-	})
+	-- Every board: 6 drawn tiles (size > 0, visible up the chain), each with
+	-- a drawn ViewportFrame holding an orb model, a drawn % label with a text
+	-- height, the mutation chips, no CanvasGroup.
+	local failures: { string } = {}
+	local counts: { string } = {}
 	local tall, canvas, distanceBad = {}, {}, {}
 	local checkedTall = 0
 	for _, view in boards do
-		for _, descendant in view.Gui:GetDescendants() do
-			if descendant:IsA("CanvasGroup") then
-				table.insert(canvas, descendant:GetFullName())
-			end
-			if descendant:IsA("TextLabel") and descendant.Name == "Percent" and descendant.Text ~= "" then
-				checkedTall += 1
-				if descendant.TextBounds.Y / G.PixelsPerStud < 0.5 then
-					table.insert(tall, ("%s %q %.2f studs"):format(view.Gui.Name, descendant.Text, descendant.TextBounds.Y / G.PixelsPerStud))
+		local gui = view.Gui :: SurfaceGui
+		local tiles, orbs, percents, chips = 0, 0, 0, 0
+		for _, tier in FusionConfig.TierOrder do
+			local tile = gui:FindFirstChild("Tile_" .. tier, true)
+			if tile and tile:IsA("GuiObject") and drawnProblem(tile, gui) == nil then
+				tiles += 1
+				local orb = tile:FindFirstChild("Orb")
+				if orb and orb:IsA("ViewportFrame") and drawnProblem(orb, gui) == nil and orb:FindFirstChildWhichIsA("Model") then
+					orbs += 1
+				end
+				local percent = tile:FindFirstChild("Percent")
+				if percent and percent:IsA("TextLabel") and drawnProblem(percent, gui) == nil and percent.TextBounds.Y > 0 then
+					percents += 1
 				end
 			end
 		end
-		if ((view.Gui :: any).MaxDistance or 0) < 80 then
-			table.insert(distanceBad, view.Gui.Name)
+		for _, descendant in gui:GetDescendants() do
+			if descendant:IsA("CanvasGroup") then
+				table.insert(canvas, descendant:GetFullName())
+			end
+			if descendant:IsA("GuiObject") and descendant.Name:sub(1, 5) == "Chip_" and drawnProblem(descendant, gui) == nil then
+				chips += 1
+			end
+			if descendant:IsA("TextLabel") and descendant.Name == "Percent" and descendant.Text ~= "" and descendant.AbsoluteSize.X > 0 then
+				checkedTall += 1
+				if descendant.TextBounds.Y / G.PixelsPerStud < 0.5 then
+					table.insert(tall, ("%s %q %.2f studs"):format(gui.Name, descendant.Text, descendant.TextBounds.Y / G.PixelsPerStud))
+				end
+			end
+		end
+		table.insert(counts, ("%s: %d tiles, %d orbs, %d %% labels, %d chips"):format(gui.Name, tiles, orbs, percents, chips))
+		if tiles ~= #FusionConfig.TierOrder or orbs ~= tiles or percents ~= tiles or chips < 1 then
+			table.insert(failures, counts[#counts])
+		end
+		if ((gui :: any).MaxDistance or 0) < 80 then
+			table.insert(distanceBad, gui.Name)
 		end
 	end
 	local row = Board.GetButtonRow()
@@ -1387,17 +1524,22 @@ local function probeGachaButtons(): { ProbeLine }
 		end
 	end
 	table.insert(lines, {
+		Ok = #boards > 0 and #failures == 0,
+		Name = "board: 6 tiles drawn, each with a drawn ViewportFrame orb and a drawn % label (every plot's board)",
+		Detail = if #boards == 0 then "no boards in PlayerGui" else table.concat(counts, " | "),
+	})
+	table.insert(lines, {
 		Ok = checkedTall > 0 and #tall == 0,
 		Name = "board: the % text is >= 0.5 studs tall",
-		Detail = table.concat(tall, "; "),
+		Detail = if #tall > 0 then table.concat(tall, "; ") else ("%d %% labels measured"):format(checkedTall),
 	})
-	table.insert(lines, { Ok = #canvas == 0, Name = "board: no CanvasGroup under it", Detail = table.concat(canvas, "; ") })
-	table.insert(lines, { Ok = #boards > 0 and #distanceBad == 0, Name = "board: MaxDistance >= 80", Detail = table.concat(distanceBad, "; ") })
+	table.insert(lines, { Ok = #canvas == 0, Name = "board: no CanvasGroup under it", Detail = if #canvas > 0 then table.concat(canvas, "; ") else "none" })
+	table.insert(lines, { Ok = #boards > 0 and #distanceBad == 0, Name = "board: MaxDistance >= 80", Detail = if #distanceBad > 0 then table.concat(distanceBad, "; ") else "ok" })
 	local footprintOk, footprintWhy = pcall(PlotLayout.CheckGachaBoard)
 	table.insert(lines, {
 		Ok = footprintOk,
 		Name = "board: footprint inside the plot and clear (PlotLayout assertions)",
-		Detail = if footprintOk then nil else tostring(footprintWhy),
+		Detail = if footprintOk then "ok" else tostring(footprintWhy),
 	})
 	-- Another plot's board is drawn too, with no silhouettes.
 	local others, silhouettes = 0, 0
@@ -1405,7 +1547,7 @@ local function probeGachaButtons(): { ProbeLine }
 		if not view.Own then
 			others += 1
 			for _, descendant in view.Gui:GetDescendants() do
-				if descendant.Name:sub(1, 5) == "Tile_" and descendant:GetAttribute("Silhouette") == true then
+				if descendant.Name == "Mark" and descendant:IsA("GuiObject") and descendant.Visible then
 					silhouettes += 1
 				end
 			end
@@ -1414,39 +1556,76 @@ local function probeGachaButtons(): { ProbeLine }
 	table.insert(lines, {
 		Ok = silhouettes == 0,
 		Name = "board: other players' boards show no silhouettes",
-		Detail = ("%d other boards, %d silhouettes"):format(others, silhouettes),
+		Detail = ("%d other boards, %d silhouette marks"):format(others, silhouettes),
 	})
 
-	-- The button row: >= 44 px, on screen at the default camera while you
-	-- stand on the pad, at desktop and phone size.
-	local pad = own and own.Face.Parent and own.Face.Parent.Parent and own.Face.Parent.Parent:FindFirstChild("GachaStation")
-	pad = pad and pad:FindFirstChild("Pad")
+	-- The button row, with the character standing on the pad: wait for the
+	-- engine's PromptShown on all three custom prompts, then read each
+	-- button from the BillboardGui's tree.
+	local function describeButtons(): (string, number, number)
+		local parts, drawn, small = {}, 0, 0
+		if row then
+			for _, name in { "PullPrompt", "Pull10Prompt", "HelpPrompt" } do
+				local holder = row:FindFirstChild(name .. "Button", true)
+				local round = holder and holder:FindFirstChild("Round", true)
+				if round and round:IsA("GuiObject") then
+					local problem = drawnProblem(round, row)
+					local size = round.AbsoluteSize
+					table.insert(parts, ("%s %dx%d visible=%s%s"):format(name, size.X, size.Y, tostring(problem == nil), if problem then " (" .. problem .. ")" else ""))
+					if problem == nil then
+						drawn += 1
+						if size.X < 43.5 or size.Y < 43.5 then
+							small += 1
+						end
+					end
+				else
+					table.insert(parts, name .. " missing from the tree")
+				end
+			end
+		else
+			table.insert(parts, "no button row (GachaButtons billboard not built)")
+		end
+		return table.concat(parts, "; "), drawn, small
+	end
+	local shown: { string } = {}
+	if onPad then
+		local deadline = os.clock() + 4
+		repeat
+			shown = Board.GetShownPrompts()
+			if #shown < 3 then
+				task.wait(0.1)
+			end
+		until #shown >= 3 or os.clock() > deadline
+		RunService.Heartbeat:Wait()
+		task.wait(0.2)
+		local text, drawn = describeButtons()
+		table.insert(lines, {
+			Ok = #shown >= 3 and drawn == 3,
+			Name = "button row: standing on the pad, PromptShown fires for E / R / ? and the 3 custom buttons are drawn",
+			Detail = ("PromptShown for [%s]; %s"):format(table.concat(shown, ", "), text),
+		})
+	end
+
 	for _, phone in { false, true } do
 		UIKit.SetForcedPhone(phone)
 		task.wait(0.3)
 		Board.SetForceNear(true)
 		task.wait(0.2)
 		local label = if phone then "phone 844x390" else "desktop 1366x768"
-		local buttons = Board.GetButtons()
-		local bad = {}
-		for _, button in buttons do
-			if not button.Visible or button.Size.X < 43.5 or button.Size.Y < 43.5 then
-				table.insert(bad, ("%s visible=%s %dx%d"):format(button.Name, tostring(button.Visible), button.Size.X, button.Size.Y))
-			end
-		end
+		local text, drawn, small = describeButtons()
 		table.insert(lines, {
-			Ok = #buttons == 3 and #bad == 0,
-			Name = ("button row (%s): the 3 custom buttons are visible, each >= 44 px"):format(label),
-			Detail = table.concat(bad, "; "),
+			Ok = drawn == 3 and small == 0,
+			Name = ("button row (%s): the 3 custom buttons are drawn, each >= 44 px"):format(label),
+			Detail = text,
 		})
 		local unfit, checked = {}, 0
 		for _, root in { own and own.Gui, row } do
 			if root then
-				for _, text in root:GetDescendants() do
-					if (text:IsA("TextLabel") or text:IsA("TextButton")) and text.Text ~= "" and text.Visible and text.AbsoluteSize.X > 0 then
+				for _, text_ in root:GetDescendants() do
+					if (text_:IsA("TextLabel") or text_:IsA("TextButton")) and text_.Text ~= "" and text_.Visible and text_.AbsoluteSize.X > 0 then
 						checked += 1
-						if not text.TextFits then
-							table.insert(unfit, text.Name .. " " .. text.Text:sub(1, 24))
+						if not text_.TextFits then
+							table.insert(unfit, text_.Name .. " " .. text_.Text:sub(1, 24))
 						end
 					end
 				end
@@ -1455,10 +1634,12 @@ local function probeGachaButtons(): { ProbeLine }
 		table.insert(lines, {
 			Ok = checked > 0 and #unfit == 0,
 			Name = ("board: text fits (%s, %d labels)"):format(label, checked),
-			Detail = table.concat(unfit, "; "),
+			Detail = if #unfit > 0 then table.concat(unfit, "; ") else ("%d labels measured"):format(checked),
 		})
 		-- Standing on the pad, the default camera (12.5 studs behind and a
 		-- little above you, looking at you, you facing the board).
+		local pad = own and own.Face.Parent and own.Face.Parent.Parent and own.Face.Parent.Parent:FindFirstChild("GachaStation")
+		pad = pad and pad:FindFirstChild("Pad")
 		if own and own.Anchor and pad then
 			local standing = pad.Position + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
 			local flat = Vector3.new(own.Face.Position.X - standing.X, 0, own.Face.Position.Z - standing.Z).Unit
@@ -1471,6 +1652,8 @@ local function probeGachaButtons(): { ProbeLine }
 				Name = ("button row (%s): on screen at the default camera while standing on the pad"):format(label),
 				Detail = where,
 			})
+		else
+			table.insert(lines, { Ok = false, Name = ("button row (%s): on screen at the default camera"):format(label), Detail = ("own board %s, anchor %s"):format(tostring(own ~= nil), tostring(own and own.Anchor)) })
 		end
 	end
 	UIKit.SetForcedPhone(nil)
@@ -1499,7 +1682,7 @@ local function probeTutorial(payload: any)
 		elseif payload.Kind == "GachaCard" then
 			return probeGachaCard(payload.Luck, tostring(payload.Label))
 		elseif payload.Kind == "GachaButtons" then
-			return probeGachaButtons()
+			return probeGachaButtons(payload.OnPad == true)
 		end
 		return {}
 	end)

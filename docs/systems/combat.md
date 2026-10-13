@@ -158,8 +158,20 @@ never sold, server authority are unchanged.
   0.06 s (hit-stop); camera shake 0.15 s for the attacker, 0.3 s for the
   target; the target flashes white 0.1 s; a bigger `BONK!` / `SLAP!` pop; the
   Bonk sound slot is wired (empty). A hit on an immune / spawn-protected
-  target pops "🛡 IMMUNE" for the attacker only (`HitFx { Kind = "Immune" }`
-  sent with `FireClient`).
+  target pops "🛡 IMMUNE" for the attacker only (`HitFx { Kind = "Immune",
+  Reason }` sent with `FireClient`); a target under Rebirth 1 pops "🛡 NEW
+  LAB" (`Reason = "NeedsRebirth"`), a spawn-protected one "🛡 SPAWN SAFE".
+- **No silent swings:** under Rebirth 1 with a weapon in hand (Studio
+  `/weapons all`, the quest Slap Glove) a click toasts "Fighting unlocks at
+  Rebirth 1" (at most once per 3 s) and sends nothing. `meleeTarget` no
+  longer filters out Rebirth-0 players, so the server can answer the swing.
+  When the server refuses a swing (`whyCantSwing`: NeedsRebirth, NotOwned,
+  NotEquipped, Carrying, Ragdolled) it tells the attacker with `HitFx { Kind
+  = "Refused", Reason }` and the client toasts the reason.
+- **Studio test start:** `DebugConfig.StudioStartRebirths = 3` and
+  `StudioGrantAllWeapons = true`; see studio-commands.md. Before this every
+  Studio Play started both players at Rebirth 0, where the weapon bar is
+  hidden and nobody can be hit, so the Bat / Glove "did nothing".
 - **Slot switch (Swing fix 2):** Roblox fires the new tool's `ChildAdded`
   BEFORE the old tool's `ChildRemoved`, so the old release used to wipe the
   new weapon's pose (Freeze Ray and Slap Glove hung straight down).
@@ -228,3 +240,23 @@ never sold, server authority are unchanged.
   client measures the right arm (angle from hanging ≥ 0.8 rad while held;
   the shoulder moves ≥ 0.6 rad in a swing, 0.4 in the toss, 0.15 in a
   shot).
+
+## Hold-pose selftest regression (Oct 13)
+
+`/selftest combat` reported every melee hold "moved 0.01 studs" (and the C0
+live fallback 0.03) where the previous build measured 2.38 / 2.57. Cause not
+provable without a Studio run, so the probes now say it: every hold / fallback
+/ release Detail carries `describeRig` (rest and held hand offsets, every
+playing track with priority, current / target weight and time, the shoulder's
+C0 against its stored BaseC0, which pose owners are up, whether
+`forceFallback` is still on, Humanoid state / PlatformStand / root Anchored).
+Candidates it distinguishes: (a) rest sampled while the previous hold track
+still fades; (b) the hold track at weight 0 or out-prioritised; (c)
+`forceFallback` left on. Fixes made without changing the approved clips: rest
+is only sampled once nothing is held, no track plays, no BaseC0 is stored, no
+tool is in the character and the hand holds still for two samples
+(`waitForRest`; if it never settles that is its own FAIL with the dump);
+the fallback probe waits for the same, always switches the force flag back
+(pcall around `Hold`) and fails if it is still on; `WeaponPose` is now also
+driven from Heartbeat when `RenderStepped` has not run for 50 ms (a Studio
+test client in a background window stalls rendering, and the C0 pose with it).

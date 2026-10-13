@@ -577,27 +577,38 @@ local function buildGachaBoard(plot: Model, origin: CFrame): Model
 	board.Name = "GachaBoard"
 	local foot = PartKit.At(origin, G.BoardPosition, 0)
 	-- A part's Front face looks along its -Z: aim -Z at the viewer, who stands
-	-- on the pad (-X of the board), turned toward the gate (+Z).
+	-- toward the walkway (-X in plot space), turned a little toward the gate.
 	local yaw = math.rad(G.YawTowardGateDegrees)
 	local toViewer = Vector3.new(-math.cos(yaw), 0, math.sin(yaw))
 	local base = CFrame.lookAt(foot.Position, foot.Position + origin:VectorToWorldSpace(toViewer))
 	local tilt = base * CFrame.new(0, G.BottomY, 0) * CFrame.Angles(math.rad(G.TiltBackDegrees), 0, 0)
 	local size = G.BoardSize
+	local margin = G.FrameMargin
 
+	-- The face (the SurfaceGui's Adornee) sits proud of the dark frame body.
 	PartKit.Part({
 		Name = "Face",
-		Size = size,
+		Size = Vector3.new(size.X, size.Y, size.Z / 2),
 		CFrame = tilt * CFrame.new(0, size.Y / 2, 0),
 		Color = World.Structure,
 		Parent = board,
 	})
-	-- The Neon rim: four thin bands (seen side-on, never a flat Neon disc).
-	local rim = G.RimThickness
+	PartKit.Part({
+		Name = "Frame",
+		Size = Vector3.new(size.X + margin * 2, size.Y + margin * 2, G.FrameDepth),
+		CFrame = tilt * CFrame.new(0, size.Y / 2, size.Z / 4 + G.FrameDepth / 2),
+		Color = World.StructureLight,
+		Parent = board,
+	})
+	-- A THIN gold Neon strip along the top and the two sides (seen side-on).
+	local strip = G.GoldStripThickness
+	local outerX = size.X + margin * 2
+	local outerY = size.Y + margin * 2
+	local stripZ = size.Z / 4 + G.GoldStripDepth / 2 - 0.05
 	local bands = {
-		{ "RimTop", Vector3.new(size.X + rim * 2, rim, G.RimDepth), Vector3.new(0, size.Y + rim / 2, 0) },
-		{ "RimBottom", Vector3.new(size.X + rim * 2, rim, G.RimDepth), Vector3.new(0, -rim / 2, 0) },
-		{ "RimLeft", Vector3.new(rim, size.Y, G.RimDepth), Vector3.new(-(size.X + rim) / 2, size.Y / 2, 0) },
-		{ "RimRight", Vector3.new(rim, size.Y, G.RimDepth), Vector3.new((size.X + rim) / 2, size.Y / 2, 0) },
+		{ "GoldTop", Vector3.new(outerX, strip, G.GoldStripDepth), Vector3.new(0, size.Y / 2 + outerY / 2 - strip / 2, stripZ) },
+		{ "GoldLeft", Vector3.new(strip, outerY, G.GoldStripDepth), Vector3.new(-(outerX / 2 - strip / 2), size.Y / 2, stripZ) },
+		{ "GoldRight", Vector3.new(strip, outerY, G.GoldStripDepth), Vector3.new(outerX / 2 - strip / 2, size.Y / 2, stripZ) },
 	}
 	for _, band in bands do
 		local part = PartKit.Part({
@@ -610,12 +621,12 @@ local function buildGachaBoard(plot: Model, origin: CFrame): Model
 		})
 		PartKit.MakeDecorative(part)
 	end
-	-- Two slim posts behind the face, from the floor up into it.
+	-- Two slim posts behind the frame, from the floor up into it.
 	for _, side in { -1, 1 } do
 		PartKit.Part({
 			Name = "Post",
 			Size = G.PostSize,
-			CFrame = base * CFrame.new(side * G.PostSpread, G.PostSize.Y / 2, size.Z / 2 + G.PostSize.Z / 2 + 0.2),
+			CFrame = base * CFrame.new(side * G.PostSpread, G.PostSize.Y / 2, size.Z / 4 + G.FrameDepth + G.PostSize.Z / 2 - 0.1),
 			Color = World.StructureLight,
 			Parent = board,
 		})

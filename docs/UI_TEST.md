@@ -1812,15 +1812,23 @@ person, R15, 100% camera zoom; check each from the front and the side.
   tutorial is skipped on join; `/tutorial reset` still runs it.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
-- [ ] **Gacha board** (Studio, at normal camera zoom): walking into your lab
-  the board beyond the Gacha Pad is visible from the gate, colourful, the
-  orbs spin and the %s read from across the lab; a never-found tier is a
-  black orb with "?" but keeps its %. Standing on the pad, E / R / ? sit
-  just under the board in the world (not mid-screen); the (i) opens the
+- [ ] **Gacha board** (Studio, at normal camera zoom): an UPRIGHT board
+  directly behind the Gacha Pad (about 4 studs past its far edge), facing the
+  walkway, dark frame with a thin gold strip along the top and sides, bottom
+  edge above your head on the pad. It shows SIX coloured tiles with spinning
+  orbs and huge %s, readable as you walk up the walkway; a never-found tier
+  is a black orb with "?" but keeps its %. Standing on the pad, E / R / ?
+  sit just under the board in the world (not mid-screen); the (i) opens the
   ORBS & ODDS panel. `/rebirths 3`: the 🍀 Luck pill appears and the %s
   change. Another player's board shows THEIR odds with no silhouettes and no
   buttons. Phone emulator: the buttons are tappable (≥ 44 px). The tutorial's
   big green PULL button still works (it uses the prompt directly).
+- [ ] **Studio test start** (Test → 2 players, no commands typed): both
+  players are at Rebirth 3 with the weapon bar. Player1 bats Player2 and
+  Player2 flies; the Glove launches further with a spin. `/rebirths 0` on
+  Player2, then hit them: "🛡 NEW LAB" over them (attacker only). `/rebirths
+  0` on yourself with a weapon in hand: a click toasts "Fighting unlocks at
+  Rebirth 1" at most every 3 s and nothing is sent.
 - [ ] **Knockback** (2 players): bat → Player2 flies about 15-20 studs; glove
   → about 25-30 with a spin; Player2 stands up normally after.
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.

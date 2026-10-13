@@ -84,6 +84,7 @@ local FREEZE_CONE_STUDS = 24
 local POP_SECONDS = 0.9
 local TRAIL_SECONDS = 0.3 -- the swing trail, from the clip's Hit marker
 local HIT_STOP_SECONDS = 0.06
+local LOCKED_TOAST_SECONDS = 3 -- "Fighting unlocks at Rebirth 1" at most this often
 local SHAKE_ATTACKER_SECONDS = 0.15
 local SHAKE_TARGET_SECONDS = 0.3
 local FLASH_SECONDS = 0.1
@@ -136,12 +137,6 @@ end
 
 local function isCarrying(): boolean
 	return localPlayer:GetAttribute("HeistTier") ~= nil
-end
-
-local function rebirthsOf(player: Player): number
-	local stats = player:FindFirstChild("leaderstats")
-	local value = stats and stats:FindFirstChild("Rebirths")
-	return if value and value:IsA("IntValue") then value.Value else 0
 end
 
 local function untilActive(player: Player, attribute: string): boolean
@@ -447,7 +442,7 @@ local function meleeTarget(weapon: CombatConfig.Weapon): Player?
 	local facing = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
 	for _, other in Players:GetPlayers() do
 		local otherRoot = if other ~= localPlayer then getRoot(other) else nil
-		if otherRoot and rebirthsOf(other) >= CombatConfig.MinRebirths then
+		if otherRoot then
 			local offset = otherRoot.Position - root.Position
 			local distance = offset.Magnitude
 			local flat = Vector3.new(offset.X, 0, offset.Z)
@@ -530,7 +525,25 @@ local function performFor(player: Player, weapon: CombatConfig.Weapon)
 	end
 end
 
+local lastLockedToast = 0
+local REFUSED_TEXT: { [string]: string } = {
+	NeedsRebirth = "Fighting unlocks at Rebirth 1",
+	NotOwned = "You don't have that weapon yet",
+	NotEquipped = "Equip it first",
+	Carrying = "Hands full: run it home!",
+	Ragdolled = "Get up first",
+}
+
 local function use(weapon: CombatConfig.Weapon)
+	-- Under Rebirth 1 nobody can hit you and you can't hit anyone: say so
+	-- (at most every 3 s) and send nothing.
+	if TycoonController.GetRebirths() < CombatConfig.MinRebirths then
+		if os.clock() - lastLockedToast >= LOCKED_TOAST_SECONDS then
+			lastLockedToast = os.clock()
+			ToastController.Show(REFUSED_TEXT.NeedsRebirth, "Neutral")
+		end
+		return
+	end
 	if isCarrying() then
 		ToastController.Show("Hands full: run it home!", "Neutral")
 		return
@@ -797,9 +810,17 @@ local function onHitFx(payload: any)
 			flashWhite(victim.Character)
 		end
 	elseif payload.Kind == "Immune" and to then
-		-- Only the attacker is told: a hit on an immune / spawn-protected
-		-- target does nothing, and says so.
-		popText(to, "🛡 IMMUNE", Colors.Muted)
+		-- Only the attacker is told: a hit on a target who can't be hit
+		-- does nothing, and says why.
+		local reason = payload.Reason
+		popText(to, if reason == "NeedsRebirth" then "🛡 NEW LAB" elseif reason == "SpawnProtected" then "🛡 SPAWN SAFE" else "🛡 IMMUNE", Colors.Muted)
+	elseif payload.Kind == "Refused" and attacker == localPlayer then
+		-- The server refused your swing: no silent refusals.
+		local text = REFUSED_TEXT[tostring(payload.Reason)]
+		if text and os.clock() - lastLockedToast >= LOCKED_TOAST_SECONDS then
+			lastLockedToast = os.clock()
+			ToastController.Show(text, "Neutral")
+		end
 	elseif payload.Kind == "Swing" then
 		if theirs and weapon then
 			performFor(attacker :: Player, weapon)

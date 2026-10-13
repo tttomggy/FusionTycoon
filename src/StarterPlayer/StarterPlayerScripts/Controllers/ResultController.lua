@@ -1555,6 +1555,14 @@ function ResultController.GetBigCardHeadline(): string?
 	return if label and label:IsA("TextLabel") then label.Text else nil
 end
 
+-- The headline label's drawn size (zero when no card): the check reads what
+-- is on screen, not just the text.
+function ResultController.GetBigCardHeadlineSize(): Vector2
+	local holder = bigHolder
+	local label = holder and holder:FindFirstChild("TierName", true)
+	return if label and label:IsA("GuiObject") then label.AbsoluteSize else Vector2.zero
+end
+
 function ResultController.CloseCards()
 	closeBigCard()
 end

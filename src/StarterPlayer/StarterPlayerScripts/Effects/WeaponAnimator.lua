@@ -329,4 +329,9 @@ function WeaponAnimator.SelfTestForceFallback(on: boolean)
 	forceFallback = on
 end
 
+-- /selftest diagnostics: is the fallback switch still on?
+function WeaponAnimator.SelfTestIsForcingFallback(): boolean
+	return forceFallback
+end
+
 return WeaponAnimator

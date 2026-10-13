@@ -2,6 +2,14 @@
 
 Moved out of CLAUDE.md (verbatim). Read this file when a task touches this system.
 
+- **Studio test start** (`DebugConfig.StudioStartRebirths = 3`,
+  `StudioGrantAllWeapons = true`): on join, in Studio and ONLY on the Mock
+  store (`DebugService.ShouldApplyStudioStart`), every player gets Rebirths
+  raised to 3 (never lowered) and every weapon, the way `/rebirths 3` and
+  `/weapons all` do it, once per join, next to `SkipTutorialInStudio`: Test →
+  2 players can fight with no commands typed. The Live store, live servers
+  and the `FT_StudioSaves` test store never get it (`/selftest combat` asserts
+  it). `/rebirths 0` still works to test Rebirth-0 flows during a session.
 - Studio chat commands (DebugService): `/cash <amount>`, `/resetmultiplier`,
   `/rebirthready` (sets cash to the next rebirth's price),
   `/rebirths <n>`, `/give <itemId> [mutation]`, `/offline <minutes>`
@@ -49,7 +57,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   FAIL named after it (`combat SlapGlove: no report from the client`); the
   `done: N passed, M failed` line always prints. **`/selftest combat`** runs
   only the combat section (weapon probes, slot-to-slot switch probes,
-  release); **`/selftest gacha`** only the Gacha board
+  release); **`/selftest gacha`** only the Gacha board (claims a lab if needed, stands the character on the pad and waits for `PromptShown` before it measures the buttons; every UI check reads the instance tree, and every FAIL carries its measurements)
   (tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
   event, the luck pill, silhouettes, the (i) panel sums; the board's 6 tiles
   with orbs, % ≥ 0.5 studs tall, no `CanvasGroup`, `MaxDistance` ≥ 80, the

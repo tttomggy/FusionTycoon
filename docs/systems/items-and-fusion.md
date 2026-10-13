@@ -39,12 +39,14 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 **Gacha display board** (`Controllers/GachaBoardController`, client + the
 board built by `TycoonService.buildGachaBoard`): the odds are a real board in
 the world, not a billboard (a camera-distance billboard only showed when
-zoomed in, and a `CanvasGroup` in a BillboardGui rendered as a black box). On
-the FAR side of every Gacha Pad (`PlotLayout.Gacha`: 10 × 7.5 studs on two
-slim posts at (28, 0, 22), bottom edge 4.5, tilted back 10°, yawed 15° toward
-the gate, SmoothPlastic + thin Neon gold rim bands, footprint in the assertion
-block / `CheckGachaBoard`), so standing on the pad the camera behind you
-looks at it over your head. Its Front face carries a SurfaceGui every client
+zoomed in, and a `CanvasGroup` in a BillboardGui rendered as a black box).
+UPRIGHT and DIRECTLY BEHIND every Gacha Pad (`PlotLayout.Gacha`: 11 × 7.5
+studs on two slim posts at (28.5, 0, 22), about 4 studs past the pad's far
+edge, bottom edge 5.5 so it shows above your head on the pad, facing the
+walkway (-X), no tilt and no yaw: you read it straight on from the pad and
+as you walk up). Its body is a dark SmoothPlastic frame 0.4 thick; only a
+THIN (0.12) Neon gold strip runs along the top and the two sides. Footprint
+in the assertion block / `CheckGachaBoard`. Its Front face carries a SurfaceGui every client
 builds for EVERY plot (60 px/stud, `MaxDistance` 100, no `CanvasGroup`, no
 fade): violet glass with diagonal stripes in a thick gold rim, a gold header
 ribbon (capsule icon, GACHA PAD, your (i) button), the `🍀 Luck ×N` pill and
@@ -181,3 +183,10 @@ a silhouette hides the look, never the odds. `TycoonConfig.MultiPullCount`
   `GetMaxAllPlan(levels, cash)`, so labels and server agree. Toast "+9
   levels · Core Engine LV 15" / "+23 levels across 3 generators", one
   bump per changed generator; the panel refreshes at most 4×/s.
+
+*Board bug fixed (Oct 13):* `buildTile` / `buildChip` returned their frames but
+never parented them, so the board drew only its header and price pill. The
+selftest read the controller's own `view.Tiles` table and passed anyway; every
+board / button check now reads the instance tree (`gui:GetDescendants()`,
+`AbsoluteSize` > 0 on both axes, `Visible` up the chain, `TextBounds.Y` > 0)
+and every FAIL carries its measurements in `Detail`.

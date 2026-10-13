@@ -16,6 +16,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local WeaponKit = require(ReplicatedStorage.Shared.Modules.WeaponKit)
 local WeaponAnims = require(ReplicatedStorage.Shared.Anim.WeaponAnims)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local DebugConfig = require(ReplicatedStorage.Shared.Config.DebugConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -81,6 +82,33 @@ local stealableToggles: { [number]: boolean } = {}
 local DebugService = {}
 
 DebugService.Name = "DebugService"
+
+-- The Studio test start (DebugConfig.StudioStartRebirths / StudioGrantAllWeapons):
+-- only in Studio AND only on the Mock store. The Live store, a live server
+-- and the FT_StudioSaves test store never get it.
+function DebugService.ShouldApplyStudioStart(isStudio: boolean, storeKind: string): boolean
+	return isStudio and storeKind == "Mock"
+end
+
+-- Once per join: rebirths raised (never lowered) and every weapon, the way
+-- /rebirths <n> and /weapons all do it. Returns whether it ran.
+function DebugService.ApplyStudioStart(player: Player): boolean
+	if not DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
+		return false
+	end
+	if not PlayerDataService.IsDataLoaded(player) then
+		return false
+	end
+	local rebirths = DebugConfig.StudioStartRebirths
+	if rebirths > PlayerDataService.GetRebirths(player) then
+		PlayerDataService.SetRebirths(player, rebirths)
+	end
+	if DebugConfig.StudioGrantAllWeapons then
+		CombatService.DebugSetAll(player, true)
+	end
+	PlayerDataService.SyncTycoon(player)
+	return true
+end
 
 local RESET_MULTIPLIER_COMMAND = "/resetmultiplier"
 -- "/cash 50000" adds $50,000. Handy for testing late-game balance without
@@ -293,6 +321,17 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 end
 
 local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- The Studio test start (Rebirths 3 + every weapon) never reaches a live
+	-- server, the Live store or the Studio test store.
+	local live = DebugService.ShouldApplyStudioStart(false, "Mock")
+	local liveStore = DebugService.ShouldApplyStudioStart(true, "Live")
+	local testStore = DebugService.ShouldApplyStudioStart(true, "StudioTest")
+	local mock = DebugService.ShouldApplyStudioStart(true, "Mock")
+	result(
+		not live and not liveStore and not testStore and mock,
+		"debug: the Studio start (Rebirths + weapons) runs only in Studio on the Mock store",
+		("live server %s, Live store %s, test store %s, Studio Mock %s"):format(tostring(live), tostring(liveStore), tostring(testStore), tostring(mock))
+	)
 	-- Every weapon is a Handle plus parts welded to it: massless, nothing
 	-- collides, and it fits a 4.5-stud box.
 	for _, weapon in CombatConfig.Weapons do
@@ -707,6 +746,12 @@ end
 -- server's luck now and under an admin-luck event (no persistent state is
 -- touched: Workspace attributes, restored), then its buttons.
 local function runGachaCardSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	-- The board and its buttons only exist for a claimed lab.
+	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
+	if claimState == "Skip" then
+		result(false, "gacha board: a claimed lab to test on", "could not claim a lab for the tester (no free slot or no character)")
+		return
+	end
 	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player) }, result)
 	local oldLuck, oldUntil = Workspace:GetAttribute("AdminLuck"), Workspace:GetAttribute("AdminLuckUntil")
 	Workspace:SetAttribute("AdminLuck", 3)
@@ -717,7 +762,26 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	Workspace:SetAttribute("AdminLuck", oldLuck)
 	Workspace:SetAttribute("AdminLuckUntil", oldUntil)
 	PlayerDataService.SyncTycoon(player)
-	tutorialProbe(player, { Kind = "GachaButtons" }, result)
+
+	-- The buttons are measured with the character STANDING ON THE PAD, so
+	-- the real PromptShown has fired.
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local plot = TycoonService.GetPlotForPlayer(player)
+	local station = plot and plot:FindFirstChild("GachaStation")
+	local pad = station and station:FindFirstChild("Pad")
+	if root and root:IsA("BasePart") and pad and pad:IsA("BasePart") then
+		local home = root.CFrame
+		root.CFrame = pad.CFrame + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
+		task.wait(0.8)
+		tutorialProbe(player, { Kind = "GachaButtons", OnPad = true }, result)
+		root.CFrame = home
+	else
+		result(false, "gacha board: standing on the pad for the button check", ("root %s, pad %s"):format(tostring(root), tostring(pad)))
+	end
+	if releaseClaim then
+		releaseClaim()
+	end
 end
 
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
@@ -1284,6 +1348,23 @@ function DebugService:Start()
 	FusionService = require(script.Parent.FusionService)
 	CombatService = require(script.Parent.CombatService)
 	QuestService = require(script.Parent.QuestService)
+
+	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
+		local applied: { [number]: boolean } = {}
+		local function apply(player: Player)
+			if not applied[player.UserId] and DebugService.ApplyStudioStart(player) then
+				applied[player.UserId] = true
+				print(("DebugService: Studio start for %s: Rebirths >= %d%s"):format(player.Name, DebugConfig.StudioStartRebirths, if DebugConfig.StudioGrantAllWeapons then ", all weapons" else ""))
+			end
+		end
+		PlayerDataService.DataLoaded:Connect(apply)
+		for _, player in Players:GetPlayers() do
+			apply(player)
+		end
+		Players.PlayerRemoving:Connect(function(player: Player)
+			applied[player.UserId] = nil
+		end)
+	end
 end
 
 return DebugService

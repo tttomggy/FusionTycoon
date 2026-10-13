@@ -4,8 +4,8 @@
 	--------------------
 	The Gacha odds as a real BOARD in the world (Pet Simulator 99 / Bubble
 	Gum Simulator egg-card style), not a billboard: PlotLayout.Gacha, built
-	by TycoonService.buildGachaBoard on the far side of every lab's Gacha
-	Pad, tilted back and yawed a little toward the gate. This controller
+	by TycoonService.buildGachaBoard directly behind every lab's Gacha Pad,
+	upright and facing the walkway. This controller
 	draws its face, for EVERY plot's board, and one row of round buttons for
 	YOUR pad.
 
@@ -354,6 +354,7 @@ local function buildTile(view: BoardView, parent: Instance, row: FusionConfig.Ga
 		Size = UDim2.fromScale(1, 1),
 		TextXAlignment = Enum.TextXAlignment.Center,
 	}, 16, 8)
+	tile.Parent = parent
 	return tile
 end
 
@@ -375,6 +376,7 @@ local function buildChip(parent: Instance, mutation: string, text: string, width
 		Size = UDim2.new(1, -12, 1, 0),
 		TextXAlignment = Enum.TextXAlignment.Center,
 	}, 15, 8)
+	chip.Parent = parent
 	return chip
 end
 
@@ -988,6 +990,12 @@ local function addBoard(model: Model)
 	if not face or not face:IsA("BasePart") or boards[model] then
 		return
 	end
+	-- With streaming the Face can arrive before the ButtonAnchor: wait for
+	-- it too, or your button row would never be built.
+	model:WaitForChild("ButtonAnchor", 10)
+	if boards[model] then
+		return
+	end
 	local G = PlotLayout.Gacha
 	local own = ownerOf(model) == localPlayer.UserId
 	local surface = Instance.new("SurfaceGui")
@@ -1202,6 +1210,17 @@ function GachaBoardController.GetButtons(): { { Name: string, Visible: boolean, 
 		end
 	end
 	return result
+end
+
+-- The custom prompts the engine has shown (PromptShown fired, not yet hidden).
+function GachaBoardController.GetShownPrompts(): { string }
+	local names = {}
+	for _, spec in BUTTON_SPECS do
+		if shownPrompts[spec.Name] ~= nil then
+			table.insert(names, spec.Name)
+		end
+	end
+	return names
 end
 
 function GachaBoardController.GetButtonRow(): BillboardGui?

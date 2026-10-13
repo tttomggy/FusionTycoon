@@ -395,6 +395,14 @@ local function ensureRunning()
 	end
 	lastStep = os.clock()
 	table.insert(connections, RunService.RenderStepped:Connect(onRender))
+	-- RenderStepped only fires while the client is rendering (a Studio test
+	-- client in a background window stalls it): Heartbeat keeps the pose
+	-- alive then. While rendering, RenderStepped just ran and this skips.
+	table.insert(connections, RunService.Heartbeat:Connect(function()
+		if os.clock() - lastStep > 0.05 then
+			onRender()
+		end
+	end))
 end
 
 --[[ Public API ------------------------------------------------------------------------ ]]
