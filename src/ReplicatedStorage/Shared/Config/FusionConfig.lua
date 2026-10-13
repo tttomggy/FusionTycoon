@@ -223,13 +223,46 @@ export type OddsEvent = {
 	FusionBonus: number?,
 }
 
+export type GachaTierOdds = { Tier: string, Rate: number, Text: string } -- Text: "77.6%"
+export type GachaMutationOdds = { Mutation: string, Chance: number, Text: string } -- Text: "6.9%"
+export type GachaOddsRows = {
+	Tiers: { GachaTierOdds }, -- TierOrder
+	Mutations: { GachaMutationOdds }, -- MutationConfig.Order with a chance > 0 (event-only ones during their event)
+}
+
+-- The gacha pad's odds as rows: every tier's rate and every pull mutation's
+-- chance at `luck` with the live event's boosts. Built on the very functions
+-- the roll uses (GetGachaRates, MutationConfig.GetChance), and FormatOdds
+-- builds its text from these rows, so the card, the label text and the roll
+-- can't disagree.
+function FusionConfig.GetGachaOddsRows(luck: number, event: OddsEvent?): GachaOddsRows
+	local rates = FusionConfig.GetGachaRates(luck)
+	local tiers: { GachaTierOdds } = {}
+	for _, tier in FusionConfig.TierOrder do
+		local rate = rates[tier] or 0
+		table.insert(tiers, { Tier = tier, Rate = rate, Text = FusionConfig.FormatPercent(rate * 100) .. "%" })
+	end
+	local mutations: { GachaMutationOdds } = {}
+	for _, mutation in MutationConfig.Order do
+		local chance = MutationConfig.GetChance(mutation, "Pull", luck, event and event.PullMultipliers)
+		if chance > 0 then
+			table.insert(mutations, { Mutation = mutation, Chance = chance, Text = FusionConfig.FormatPercent(chance * 100) .. "%" })
+		end
+	end
+	return { Tiers = tiers, Mutations = mutations }
+end
+
 -- Every odds line at `luck` (RebirthConfig.GetLuck), with the live event's
 -- boosts when given: the same functions the rolls use.
 function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
-	local rates = FusionConfig.GetGachaRates(luck)
+	local rows = FusionConfig.GetGachaOddsRows(luck, event)
 	local gacha = {}
-	for _, tier in FusionConfig.TierOrder do
-		table.insert(gacha, ("%s %s"):format(tier, FusionConfig.FormatPercent((rates[tier] or 0) * 100)))
+	for _, row in rows.Tiers do
+		table.insert(gacha, ("%s %s"):format(row.Tier, FusionConfig.FormatPercent(row.Rate * 100)))
+	end
+	local pullMutations = {}
+	for _, row in rows.Mutations do
+		table.insert(pullMutations, ("%s %s"):format(row.Mutation, row.Text))
 	end
 	local fusion: { FusionOddsRow } = {}
 	for _, tier in FusionConfig.TierOrder do
@@ -250,7 +283,7 @@ function FusionConfig.FormatOdds(luck: number, event: OddsEvent?): Odds
 	end
 	return {
 		Gacha = table.concat(gacha, " · ") .. "%",
-		PullMutations = mutationLine("Pull", luck, event and event.PullMultipliers),
+		PullMutations = table.concat(pullMutations, " · "),
 		Fusion = fusion,
 		FusionMutations = mutationLine("Fusion", luck, event and event.FusionMultipliers),
 	}

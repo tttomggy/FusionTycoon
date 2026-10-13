@@ -92,7 +92,7 @@ local explosionEffectTemplate = VFXFolder:FindFirstChild("ExplosionEffect") :: B
 
 --[[ Tuning (not geometry) ---------------------------------------------------- ]]
 
-local MULTI_PULL_COUNT = 10
+local MULTI_PULL_COUNT = TycoonConfig.MultiPullCount
 local PLOT_SIGN_REFRESH_SECONDS = 5
 local STATION_DEBOUNCE_SECONDS = 1
 local BURST_COUNT = 30
@@ -377,14 +377,18 @@ end
 -- cards (TutorialConfig.Help, TutorialController). Offset so it doesn't
 -- cover the station's E / R prompts.
 local HELP_PROMPT_OFFSET_PX = 140
-local function addHelpPrompt(parent: Instance, topic: string, distance: number)
+local function addHelpPrompt(parent: Instance, topic: string, distance: number, custom: boolean?)
 	local prompt = newPrompt(parent, "HelpPrompt", "How it works", "?", distance)
+	if custom then
+		prompt.Style = Enum.ProximityPromptStyle.Custom
+	end
 	prompt.KeyboardKeyCode = Enum.KeyCode.H
 	prompt.GamepadKeyCode = Enum.KeyCode.ButtonL1
 	prompt.UIOffset = Vector2.new(0, HELP_PROMPT_OFFSET_PX)
 	prompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
 	prompt:SetAttribute("HelpTopic", topic)
 	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+	return prompt
 end
 
 --[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
@@ -476,12 +480,6 @@ local function getLuck(player: Player): number
 	return PlayerDataService.GetLuck(player)
 end
 
--- The pad's odds disclosure at the player's luck (FusionConfig.FormatOdds,
--- the same numbers the rolls use): all six tiers, then the pull mutations.
-local function getOddsText(luck: number): string
-	local odds = FusionConfig.FormatOdds(luck, EventState.GetOddsEvent())
-	return odds.Gacha .. "\n" .. odds.PullMutations
-end
 
 -- A Secret or a Rainbow pull is a server-wide moment (SERVER · SECRET /
 -- SERVER · RAINBOW banners on every client).
@@ -575,14 +573,18 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		TitleColor = UITheme.Colors.GoldLabel,
 		Pill = "",
 		PillGradient = UITheme.Gradients.Gold,
-		Detail = getOddsText(getLuck(player)),
+		-- No odds text here any more: the client builds the odds card above
+		-- your own pad (Controllers/GachaCardController) from the same rows.
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
-		TallDetail = true,
 	})
 	-- E-to-pull, never Touched: walking across the pad must not spend cash.
+	-- The three gacha prompts are drawn by the client as ONE row of round
+	-- buttons under the odds card (GachaCardController): Style = Custom.
 	local prompt = newPrompt(pad, "PullPrompt", "Pull", "Gacha Pad", PlotLayout.Station.PromptDistance)
+	prompt.Style = Enum.ProximityPromptStyle.Custom
 	-- R / ButtonY: ten pulls at once, offset so it doesn't cover the E prompt.
 	local multiPrompt = newPrompt(pad, "Pull10Prompt", ("Pull ×%d"):format(MULTI_PULL_COUNT), "", PlotLayout.Station.PromptDistance)
+	multiPrompt.Style = Enum.ProximityPromptStyle.Custom
 	multiPrompt.KeyboardKeyCode = Enum.KeyCode.R
 	multiPrompt.GamepadKeyCode = Enum.KeyCode.ButtonY
 	multiPrompt.UIOffset = Vector2.new(0, PlotLayout.Station.MultiPromptOffsetPx)
@@ -591,7 +593,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	-- so the nearer Pull could hide it. Nothing disables it: an unaffordable
 	-- x10 still shows and the server answers "Need $X for 10 pulls".
 	multiPrompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
-	addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance)
+	addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance, true)
 
 	-- Runs on every sync too (addStationRefresh): price, odds at the
 	-- player's luck (so a rebirth updates them), and the x10 cost.
@@ -600,7 +602,6 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		local cost = TycoonConfig.GetGachaPullCost(pulls)
 		local free = PlayerDataService.GetTutorialFreePulls(player)
 		padLabel.SetPill(if free > 0 then ("FREE · %d left"):format(free) else ("%s / pull"):format(NumberFormat.Money(cost)))
-		padLabel.SetDetail(getOddsText(getLuck(player)))
 		prompt.ActionText = if free > 0 then "Pull (FREE)" else ("Pull (%s)"):format(NumberFormat.Money(cost))
 		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
 	end

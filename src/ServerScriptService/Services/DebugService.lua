@@ -693,11 +693,32 @@ local function runSection(title: string, result: (boolean, string, string?) -> (
 	end
 end
 
+-- The Gacha Pad card (client-built, own pad): its numbers against the
+-- server's luck now and under an admin-luck event (no persistent state is
+-- touched: Workspace attributes, restored), then its buttons.
+local function runGachaCardSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player) }, result)
+	local oldLuck, oldUntil = Workspace:GetAttribute("AdminLuck"), Workspace:GetAttribute("AdminLuckUntil")
+	Workspace:SetAttribute("AdminLuck", 3)
+	Workspace:SetAttribute("AdminLuckUntil", Workspace:GetServerTimeNow() + 120)
+	PlayerDataService.SyncTycoon(player)
+	task.wait(0.6)
+	tutorialProbe(player, { Kind = "GachaCard", Label = "luck x3 event", Luck = PlayerDataService.GetLuck(player) }, result)
+	Workspace:SetAttribute("AdminLuck", oldLuck)
+	Workspace:SetAttribute("AdminLuckUntil", oldUntil)
+	PlayerDataService.SyncTycoon(player)
+	tutorialProbe(player, { Kind = "GachaButtons" }, result)
+end
+
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
 	print(("[SelfTest] running for %s"):format(player.Name))
 	if only == "combat" then
 		print("[SelfTest] == 10. combat ==")
 		runCombatSelfTest(player, result)
+		return
+	elseif only == "gacha" then
+		print("[SelfTest] == 12. gacha card ==")
+		runGachaCardSelfTest(player, result)
 		return
 	elseif only == "cards" then
 		print("[SelfTest] == cards ==")
@@ -868,6 +889,12 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- quest / power-up refusals (the junk fuzz above covered their remotes).
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
+	end)
+
+	-- 12. The Gacha Pad card: odds against the server's luck, silhouettes,
+	-- the (i) panel, the custom buttons.
+	runSection("12. gacha card", result, function()
+		runGachaCardSelfTest(player, result)
 	end)
 end
 

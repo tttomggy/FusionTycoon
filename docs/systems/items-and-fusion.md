@@ -36,6 +36,29 @@ with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
+**Gacha Pad odds card** (`Controllers/GachaCardController`, client): the
+pad's old two text lines are gone. Above YOUR pad (a BillboardGui in
+PlayerGui, `OwnerOnly`, `AlwaysOnTop = false`, `LightInfluence = 0`,
+`DistanceLowerLimit`) a card fades in within ~18-22 studs: "GACHA PAD" + an
+(i) button, a `🍀 Luck ×1.15` pill when luck > ×1, the live event chip when it
+changes the pull odds, a 3 × 2 grid of tiers (orb, big % in the tier colour,
+name; a tier you never found is a dark silhouette with "?" **and still shows
+its %**; Secret shimmers), a strip of mutation chips (event-only ones during
+their event) and the price pill. Numbers come from
+`FusionConfig.GetGachaOddsRows(luck, event)`, built on `GetGachaRates` and
+`MutationConfig.GetChance` (`FormatOdds` is built on the same rows), at
+`TycoonController.GetLuck()`: the server's `LuckBase` from every
+`SyncTycoon` × the live admin-luck value (Workspace attributes). The (i)
+panel (`UIKit.Modal`) lists every orb with its own % (tier % / orbs in the
+tier: `PickRandomOfTier` is uniform), found or not, and says luck and events
+are included. The pad's PullPrompt / Pull10Prompt / HelpPrompt are
+`Style = Custom`, drawn as ONE row of round buttons under the card ([E] Pull +
+price, [R] ×10 + price, [?] help; key / gamepad glyph / words on touch;
+≥ 44 px; `prompt:InputHoldBegin/End`); other players' pads draw nothing.
+Paid-Random-Items compliance: every odds is on the card whenever the buttons
+are, luck and event pills are the live disclosure, a silhouette hides the
+look, never the odds. `TycoonConfig.MultiPullCount` (10) is shared.
+
 
 - **Auto-display** (Playtest 7): players never choose. `ItemService.Arrange
   (player)`, the ONE re-arrange, is a `PlayerDataService.OnSync` hook, so

@@ -1812,6 +1812,17 @@ person, R15, 100% camera zoom; check each from the front and the side.
   tutorial is skipped on join; `/tutorial reset` still runs it.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
+- [ ] **Gacha Pad card** (Studio, your own lab): walk up to the pad: a card
+  fades in above it (tiles with %, a silhouette for tiers you have not found
+  yet but with their % shown, the mutation strip, the price pill), the plain
+  GACHA label goes away while it is up and comes back far away. The three
+  default prompts are gone, replaced by one row of round buttons under the
+  card: E pulls, R pulls ×10, ? opens help; the (i) opens the ORBS & ODDS
+  panel (every orb with its own %). `/rebirths 3`: the 🍀 Luck pill appears
+  and the %s change. Phone emulator: the buttons are tappable (≥ 44 px).
+  Another player's pad shows no card and no buttons. The tutorial's big
+  green PULL button still works (it uses the prompt directly; the hand
+  points at it, not at the small button row).
 - [ ] Equip: the arm comes up in a quick raise (0.15 s), not a pop.
 - [ ] Bat swing: wind back to the right, fast arc across to the left,
   settle; a white trail only while it moves; on a hit a white ring flash +

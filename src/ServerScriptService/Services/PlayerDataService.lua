@@ -189,6 +189,11 @@ export type TycoonSnapshot = {
 	-- which made the client think occupied pedestals were empty.
 	PedestalDisplays: { [string]: string },
 	GachaPulls: number,
+	-- The luck the rolls use (GetLuck) and the same without the admin-luck
+	-- event (the client multiplies it by the live EventState value, which
+	-- replicates by itself): the Gacha Pad card shows these odds.
+	Luck: number,
+	LuckBase: number,
 	GoalIndex: number,
 	GoalProgress: GoalProgress?,
 	Rebirths: number,
@@ -1837,6 +1842,8 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
 		PedestalDisplays = pedestalDisplaysToDisk(PlayerDataService.GetPedestalDisplays(player)),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
+		Luck = PlayerDataService.GetLuck(player),
+		LuckBase = PlayerDataService.GetLuck(player) / math.max(EventState.GetLuckMultiplier(), 1e-9),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),
 		GoalProgress = state.goalProgress[player.UserId],
 		Rebirths = PlayerDataService.GetRebirths(player),

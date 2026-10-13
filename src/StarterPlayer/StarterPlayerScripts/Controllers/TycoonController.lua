@@ -21,6 +21,8 @@ local generatorLevels: { [string]: number } = {}
 local pedestalDisplays: { [number]: string } = {}
 local cashMultiplierLevel = 0
 local gachaPulls = 0
+local luckBase = 1 -- the server's luck without the admin-luck event (snapshot LuckBase)
+local serverLuck = 1 -- the server's whole luck at the last sync (snapshot Luck)
 local goalIndex: number? = nil
 local goalProgress: { Current: number, Target: number }? = nil
 local hasSynced = false
@@ -145,6 +147,19 @@ end
 
 function TycoonController.GetGachaPulls(): number
 	return gachaPulls
+end
+
+-- The luck the server rolls with, as of now: its luck without the event
+-- (every sync) times the live event value (replicated by itself, so an event
+-- starting or ending updates it without waiting for a sync). The Gacha Pad
+-- card shows odds at exactly this.
+function TycoonController.GetLuck(): number
+	return luckBase * EventState.GetLuckMultiplier()
+end
+
+-- The luck as of the last sync (what the server sent).
+function TycoonController.GetServerLuck(): number
+	return serverLuck
 end
 
 -- Index into GoalConfig.Goals of the current goal (nil before the first
@@ -433,6 +448,8 @@ local function onSyncTycoon(snapshot: any)
 	generatorLevels = snapshot.Generators or {}
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
+	serverLuck = if typeof(snapshot.Luck) == "number" then snapshot.Luck else 1
+	luckBase = if typeof(snapshot.LuckBase) == "number" then snapshot.LuckBase else serverLuck
 	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0
 	indexFound = {}
 	if typeof(snapshot.IndexKeys) == "table" then

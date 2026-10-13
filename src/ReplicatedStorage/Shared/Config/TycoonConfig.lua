@@ -43,6 +43,8 @@ function TycoonConfig.GetGachaPullCost(pullsSoFar: number): number
 end
 
 -- Pull xN: the sum of the next `count` single-pull prices (no discount).
+TycoonConfig.MultiPullCount = 10 -- Pull x10
+
 function TycoonConfig.GetGachaMultiPullCost(pullsSoFar: number, count: number): number
 	local total = 0
 	for offset = 0, count - 1 do

@@ -38,6 +38,7 @@ local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PartKit = require(ReplicatedStorage.Shared.Modules.PartKit)
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
@@ -1223,6 +1224,162 @@ local function probeFallback(): { ProbeLine }
 	}
 end
 
+-- The Gacha Pad card against the server's luck: each tier's rendered % is
+-- GetGachaRates at that luck, the (i) panel's per-orb % add up to the tier
+-- %, an unfound tier is a silhouette that still shows its %, the 3 custom
+-- buttons are >= 44 px on a phone, other pads draw nothing, text fits.
+local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local TycoonController = require(script.Parent.TycoonController) :: any
+	local Card = require(script.Parent.GachaCardController) :: any
+	local started = os.clock()
+	while math.abs(TycoonController.GetLuck() - serverLuck) > 1e-6 and os.clock() - started < 3 do
+		task.wait(0.1)
+	end
+	Card.SetForceNear(true)
+	Card.RefreshNow()
+	RunService.Heartbeat:Wait()
+	local rates = FusionConfig.GetGachaRates(serverLuck)
+	local tiles = Card.GetTiles()
+	local bad: { string } = {}
+	for _, tier in FusionConfig.TierOrder do
+		local tile = tiles[tier]
+		local want = FusionConfig.FormatPercent((rates[tier] or 0) * 100) .. "%"
+		if not tile or tile.Text ~= want or math.abs(tile.Value - (rates[tier] or 0) * 100) > 1e-9 then
+			table.insert(bad, ("%s shows %s, wants %s"):format(tier, tile and tile.Text or "nothing", want))
+		end
+	end
+	table.insert(lines, {
+		Ok = #bad == 0 and next(tiles) ~= nil,
+		Name = ("gacha card (%s): each tier's %% equals GetGachaRates at the server's luck (x%.2f)"):format(label, serverLuck),
+		Detail = table.concat(bad, "; "),
+	})
+
+	-- The luck pill is up exactly when luck > x1.
+	local card = Card.GetCard()
+	local pill = card and card:FindFirstChild("LuckPill", true)
+	table.insert(lines, {
+		Ok = (pill ~= nil) == (serverLuck > 1.0001),
+		Name = ("gacha card (%s): the luck pill shows exactly when luck is above x1"):format(label),
+		Detail = ("pill %s, luck %.2f"):format(tostring(pill ~= nil), serverLuck),
+	})
+
+	-- Silhouettes: an unfound tier is dark and still shows its %.
+	local found: { [string]: boolean } = {}
+	for key in TycoonController.GetIndex() do
+		local def = ItemConfig.GetItemById(key:match("^(.-)|") or "")
+		if def then
+			found[def.Tier] = true
+		end
+	end
+	local checkedSilhouette, silhouetteBad = 0, {}
+	for _, tier in FusionConfig.TierOrder do
+		local tile = tiles[tier]
+		if tile then
+			checkedSilhouette += 1
+			if tile.Silhouette == (found[tier] == true) or tile.Text == "" then
+				table.insert(silhouetteBad, ("%s silhouette=%s found=%s text=%q"):format(tier, tostring(tile.Silhouette), tostring(found[tier] == true), tile.Text))
+			end
+		end
+	end
+	table.insert(lines, {
+		Ok = checkedSilhouette > 0 and #silhouetteBad == 0,
+		Name = ("gacha card (%s): an unfound tier is a silhouette and still shows its %%"):format(label),
+		Detail = table.concat(silhouetteBad, "; "),
+	})
+
+	-- The (i) panel: per-orb % sum to the tier %.
+	Card.OpenPanel()
+	task.wait(0.3)
+	local panelLines = Card.GetPanelLines()
+	local sumBad = {}
+	for _, tier in FusionConfig.TierOrder do
+		local entry = panelLines[tier]
+		local total = 0
+		if entry then
+			for _, value in entry.Orbs do
+				total += value
+			end
+		end
+		local want = (rates[tier] or 0) * 100
+		if not entry or #entry.Orbs == 0 or math.abs(total - want) > math.max(1e-9, want * 1e-9) or math.abs(entry.Total - want) > math.max(1e-9, want * 1e-9) then
+			table.insert(sumBad, ("%s orbs sum %.6f, tier %.6f"):format(tier, total, want))
+		end
+	end
+	Card.ClosePanel()
+	table.insert(lines, {
+		Ok = #sumBad == 0,
+		Name = ("gacha card (%s): the (i) panel's per-orb %% sum to each tier's %%"):format(label),
+		Detail = table.concat(sumBad, "; "),
+	})
+	return lines
+end
+
+-- Buttons, other pads and text fit, at desktop and phone size.
+local function probeGachaButtons(): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local Card = require(script.Parent.GachaCardController) :: any
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.3)
+		Card.SetForceNear(true)
+		task.wait(0.2)
+		local label = if phone then "phone" else "desktop"
+		local buttons = Card.GetButtons()
+		local bad = {}
+		for _, button in buttons do
+			local minimum = if phone then 44 else 44
+			if not button.Visible or button.Size.X < minimum - 0.5 or button.Size.Y < minimum - 0.5 then
+				table.insert(bad, ("%s visible=%s %dx%d"):format(button.Name, tostring(button.Visible), button.Size.X, button.Size.Y))
+			end
+		end
+		table.insert(lines, {
+			Ok = #buttons == 3 and #bad == 0,
+			Name = ("gacha buttons (%s): the 3 custom buttons are visible near the pad, each >= 44 px"):format(label),
+			Detail = table.concat(bad, "; "),
+		})
+		local card = Card.GetCard()
+		local unfit = {}
+		local checked = 0
+		if card then
+			for _, text in card:GetDescendants() do
+				if (text:IsA("TextLabel") or text:IsA("TextButton")) and text.Text ~= "" and text.Visible and text.AbsoluteSize.X > 0 then
+					checked += 1
+					if not text.TextFits then
+						table.insert(unfit, text.Name .. " " .. text.Text:sub(1, 24))
+					end
+				end
+			end
+		end
+		table.insert(lines, {
+			Ok = card ~= nil and checked > 0 and #unfit == 0,
+			Name = ("gacha card: text fits (%s, %d labels)"):format(label, checked),
+			Detail = table.concat(unfit, "; "),
+		})
+	end
+	UIKit.SetForcedPhone(nil)
+	task.wait(0.2)
+	-- No card or button row on anyone else's pad: one GachaCard gui, on our plot.
+	local count, ownPlot = 0, false
+	for _, gui in localPlayer:WaitForChild("PlayerGui"):GetChildren() do
+		if gui.Name == "GachaCard" and gui:IsA("BillboardGui") then
+			count += 1
+			local plot = gui.Adornee and gui.Adornee:FindFirstAncestorWhichIsA("Model")
+			while plot and plot:GetAttribute("OwnerUserId") == nil and plot.Parent do
+				plot = plot.Parent :: Model?
+			end
+			ownPlot = plot ~= nil and plot:GetAttribute("OwnerUserId") == localPlayer.UserId
+		end
+	end
+	table.insert(lines, {
+		Ok = count == 1 and ownPlot,
+		Name = "gacha buttons: the card and its button row exist only on your own pad",
+		Detail = ("%d cards, on own plot %s"):format(count, tostring(ownPlot)),
+	})
+	Card.SetForceNear(false)
+	return lines
+end
+
 local function probeTutorial(payload: any)
 	local lines: { ProbeLine } = {}
 	local ok, result = pcall(function()
@@ -1240,6 +1397,10 @@ local function probeTutorial(payload: any)
 			return probeWeaponReleased()
 		elseif payload.Kind == "Fallback" then
 			return probeFallback()
+		elseif payload.Kind == "GachaCard" then
+			return probeGachaCard(payload.Luck, tostring(payload.Label))
+		elseif payload.Kind == "GachaButtons" then
+			return probeGachaButtons()
 		end
 		return {}
 	end)
