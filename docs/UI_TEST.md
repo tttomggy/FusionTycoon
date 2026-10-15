@@ -1813,18 +1813,17 @@ person, R15, 100% camera zoom; check each from the front and the side.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
 - [ ] **Gacha pop-up card** (Studio, any camera): walk toward YOUR Gacha Pad:
-  at about 16 studs a compact card (300 × 204 px + the E / R / T row) pops up
-  ON SCREEN just above the pad, all 6 coloured tiles at once. **Stand on the
-  pad with the camera close behind you (the normal view): the whole card and
-  E / R / T are visible, just above you** (not above the top of the screen).
-  Rotate and zoom in and out: it follows the pad and glides, never leaves the
-  screen, never covers the HUD (the left column, the weapon bar, the bottom
-  buttons, the event bar). Look away from the pad or go top-down: it stays
-  inside the safe area. Zoomed out it does not float far above the lab. On a
+  at about 16 studs a compact card (300 × 204 px + the E / R / T row) slides
+  in from the RIGHT (24 px) and scales up, docked on the right side of the
+  screen, vertically centred, all 6 coloured tiles at once. **It does not move
+  when you turn the camera** (rotate and zoom in and out; stand on the pad
+  with the camera close: the same spot every time). It never covers the HUD
+  (the left column, the weapon bar, the bottom buttons, the event bar). Walk
+  away past 19 studs: it slides out and only the small GACHA + price label
+  shows. On a
   short phone it shrinks a little to fit (never below 70%). Open the (i) panel,
   the Shop or pull something with a reveal card: the card hides and comes back
-  after. It is hidden while you are ragdolled or carrying an orb. Walk away past
-  19 studs: it pops down and only the small GACHA + price label shows. No
+  after. It is hidden while you are ragdolled or carrying an orb. No
   "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK
   console is that console's own). A never-found tier is a black orb with "?" but
   keeps its %. Press E, R and T (X / Y / RB on a controller): E and R pull, T

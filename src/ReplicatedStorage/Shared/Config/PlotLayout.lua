@@ -107,15 +107,15 @@ PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 PlotLayout.Gacha = {
 	CardPx = Vector2.new(300, 204), -- the card, in logical px
 	ButtonRowPx = 72, -- the E / R / T row under it
-	AnchorUpStuds = 3, -- the world anchor: the pad's top centre + this
+	DockRightPx = 24, -- the card's right edge, this far from the screen's right edge (logical px)
+	SlidePx = 24, -- it slides in from / out to the right by this much
 	SafeMargin = 8, -- px kept free of the HUD and the screen edge
 	MinSqueeze = 0.7, -- the smallest the card shrinks to when the safe rect is short
-	FollowRate = 0.001, -- the glide: lerp alpha = 1 - FollowRate ^ dt
 	DisplayOrder = 55, -- over the HUD (40) and weapon bar (41), under every modal / result card
 	PopInStuds = 16, -- the card opens when the character is closer than this to the pad
 	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
-	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
-	PopFromScale = 0.85,
+	PopSeconds = 0.15, -- slide + UIScale 0.9 -> 1 in (Quad Out), reversed out
+	PopFromScale = 0.9,
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind

@@ -59,13 +59,13 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   only the combat section (weapon probes, slot-to-slot switch probes,
   release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed; starts 25 studs away so the card is closed, then the client steps onto the pad and checks the frame after the card opens; reads the card from the instance tree; every FAIL carries its measurements):
   the card opens fully in one frame (all 6 tiles `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
-  with the character on the pad and the camera set to 6 studs behind, default,
-  max zoom-out, top-down and looking away, for the desktop and the phone HUD
-  layout (`UIKit.SetForcedPhone`), the card + button row is inside the safe
-  rect and overlaps no HUD rect (`HudController.GetObstacleRects`, the weapon
-  bar, the TopStack zone); the pure clamp math (`PlanSafeRect` / `PlanCard`) at
-  1366×768 and 844×390 over a grid of anchor points (inside the rect, squeezed
-  only when short, never below 0.7);
+  with the character on the pad and the camera at 4 yaw angles × 2 zoom levels,
+  for the desktop and the phone HUD layout (`UIKit.SetForcedPhone`), the card's
+  `AbsolutePosition` is identical (±1 px) every time, it is inside the safe
+  rect, 24 px from the right edge, and overlaps no HUD rect
+  (`HudController.GetObstacleRects`, the weapon bar, the TopStack zone); the
+  pure dock math (`PlanSafeRect` / `PlanDock`) at 1366×768 and 844×390 (inside
+  the rect, centred, squeezed only when short, never below 0.7);
   tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
   event, the luck pill, black "?" orbs, the (i) panel sums; all 6 tiles drawn
   with a % ≥ 12 px tall; no `ViewportFrame`, no `CanvasGroup`, only

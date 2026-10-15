@@ -3,28 +3,27 @@
 	GachaBoardController
 	--------------------
 	The Gacha odds CARD: a SCREEN-SPACE card (a ScreenGui from UIKit.Screen)
-	that follows YOUR Gacha Pad on screen and can never leave the safe area.
-	The look is the Pet Simulator 99 / Bubble Gum Simulator egg card: a
-	300 x 204 px card plus a 72 px E / R / T row, the same size at any zoom
-	(0.8 on a phone, the gui's MobileScale).
+	DOCKED at one fixed spot on the right of the screen. The look is the Pet
+	Simulator 99 / Bubble Gum Simulator egg card: a 300 x 204 px card plus a
+	72 px E / R / T row, the same size at any zoom (0.8 on a phone, the gui's
+	MobileScale).
 
-	Why not a billboard: you stand ON the pad, so a world-anchored card "above
-	your head" ended up past the top of the screen whenever the camera sat
-	close behind you, and floated far above the lab when zoomed out. Pet Sim 99
-	works because you stand in FRONT of the egg and look at it.
+	History: a world billboard ended up off-screen when you stood on the pad
+	with the camera close; a card that followed the pad's projected point
+	slid around while the camera turned. Now it does NOT track the pad at all.
 
-	  * Follow: each RenderStepped while open, the pad's top centre + 3 studs
-	    goes through camera:WorldToViewportPoint; the card's BOTTOM-CENTRE (the
-	    button row included) goes there. Behind the camera: the last good
-	    position.
-	  * Clamp into the safe rect (logical px): top >= TopStack.GetBottom() + 8,
-	    bottom <= the weapon bar's top (or the HUD's bottom row) - 8, left >= the
-	    HUD left column's right edge + 8 (HudController.GetObstacleRects, the
-	    same rects /selftest checks), right <= viewport - 8.
-	  * Glide: lerp to the clamped target at 1 - 0.001^dt (no jitter when the
-	    camera rotates); snapped on open. When the safe rect is shorter than the
-	    card (small phones) the whole card shrinks to fit, minimum 0.7, about
-	    its bottom-centre: the only time it shrinks.
+	  * Dock: anchor (1, 0.5), DockRightPx (24) from the right edge, centred
+	    vertically in the safe band: top >= TopStack.GetBottom() + 8, bottom <=
+	    the weapon bar's top (or the HUD's bottom row) - 8, right of the HUD
+	    left column (HudController.GetObstacleRects, the rects /selftest
+	    checks). When the band is shorter than the card (small phones) the
+	    whole card shrinks about its dock point, minimum 0.7. Re-placed ONLY
+	    when it opens, the viewport changes, UIKit.LayoutChanged or TopStack
+	    fires: never per frame, never from the camera.
+	  * Pop: the character within PopInStuds (16) of the pad -> the card slides
+	    in from the right (SlidePx 24) and scales 0.9 -> 1 over 0.15 s
+	    (Quad-Out); beyond PopOutStuds (19) it slides back out and hides. No
+	    CanvasGroup.
 	  * DisplayOrder 55: above the HUD, under every UIKit.Modal and result
 	    card. Hidden (with the pop) while any overlay (modal / big card) is open,
 	    during a ragdoll and while carrying, and back after.
@@ -32,10 +31,10 @@
 	    text and colours (the %s, each tier's lock state, luck, the event, the
 	    chips, the price), never rebuilds. 2D orbs (UIKit.TierOrb), no
 	    ViewportFrame, no CanvasGroup, no TextScaled. Two UIScales besides the
-	    gui's MobileScale: PopScale (0.85 -> 1 in 0.12 s Quad-Out, reversed on
-	    close) and FitScale (the squeeze, 1 unless the safe rect is short).
-	  * Visibility follows the CHARACTER, never the camera: inside PopInStuds (16)
-	    it opens, beyond PopOutStuds (19) it closes (the gap stops flicker).
+	    gui's MobileScale: PopScale (0.9 -> 1) and FitScale (the squeeze, 1
+	    unless the safe band is short).
+	  * Visibility follows the CHARACTER, never the camera (the gap between 16
+	    and 19 studs stops flicker).
 
 	The card (design px): a dark violet panel with a 3 px gold stroke, a
 	header (GACHA PAD, the luck pill when luck > x1, the event chip, an (i)),
@@ -178,9 +177,9 @@ type TileView = {
 type CardView = {
 	Gui: ScreenGui,
 	Pad: BasePart,
-	Root: Frame, -- placed each frame (bottom-centre anchored); carries FitScale
+	Root: Frame, -- the dock (anchor (1, 0.5)); carries FitScale
 	Fit: UIScale, -- the squeeze: 1, down to MinSqueeze when the safe rect is short
-	PopRoot: Frame, -- everything; hidden = the card is closed
+	PopRoot: Frame, -- everything (slides + scales in); hidden = the card is closed
 	Pop: UIScale, -- the pop-in / pop-out scale
 	Card: Frame, -- the 300 x 204 card
 	KeyBar: Frame, -- the E / R / T row under the card
@@ -195,10 +194,8 @@ type CardView = {
 	Label: Instance?, -- the small server GachaLabel
 	Near: boolean, -- the character is close (the open side of the distance hysteresis)
 	Open: boolean, -- the card is up (near AND nothing is covering it)
-	Tween: Tween?,
-	Position: Vector2, -- the card's bottom-centre, logical px (the glide's current value)
-	LastGood: Vector2?, -- the last on-screen target
-	Snap: boolean, -- put it on its target at once (just opened)
+	Tweens: { Tween },
+	PlacedKey: string, -- the inputs of the last placement (a changed key re-places)
 }
 
 local card: CardView? = nil
@@ -1036,7 +1033,7 @@ local function buildKeyBar(root: Instance): Frame
 	return row
 end
 
---[[ The card (a screen-space gui that follows the pad) --------------------------------- ]]
+--[[ The card (a screen-space gui docked on the right) --------------------------------- ]]
 
 local function setLabelEnabled(view: CardView, enabled: boolean)
 	local label = view.Label
@@ -1045,46 +1042,56 @@ local function setLabelEnabled(view: CardView, enabled: boolean)
 	end
 end
 
--- Opens: the PopRoot shows and the pop scale runs 0.85 -> 1 (Quad-Out).
-local function popIn(view: CardView)
-	if view.Tween then
-		view.Tween:Cancel()
-		view.Tween = nil
+local SLIDE = UDim2.new(0.5, G.SlidePx, 0.5, 0) -- PopRoot's position while out
+local HOME = UDim2.fromScale(0.5, 0.5)
+
+local function cancelTweens(view: CardView)
+	for _, tween in view.Tweens do
+		tween:Cancel()
 	end
+	table.clear(view.Tweens)
+end
+
+local function playPop(view: CardView, scale: number, position: UDim2, direction: Enum.EasingDirection): Tween
+	local info = TweenInfo.new(G.PopSeconds, Enum.EasingStyle.Quad, direction)
+	local scaleTween = TweenService:Create(view.Pop, info, { Scale = scale })
+	local slideTween = TweenService:Create(view.PopRoot, info, { Position = position })
+	view.Tweens = { scaleTween, slideTween }
+	scaleTween:Play()
+	slideTween:Play()
+	return scaleTween
+end
+
+-- Opens: placed in the dock, then slides in from the right and scales 0.9 -> 1 (Quad-Out).
+local function popIn(view: CardView)
+	cancelTweens(view)
 	view.Open = true
-	view.Snap = true
+	GachaBoardController.PlaceNow()
 	view.PopRoot.Visible = true
 	setLabelEnabled(view, false)
 	bindKeys()
-	if view.Pop.Scale >= 1 then
+	if view.PopRoot.Position == HOME and view.Pop.Scale >= 1 then
 		return
 	end
 	if view.Pop.Scale < G.PopFromScale then
 		view.Pop.Scale = G.PopFromScale
 	end
-	local tween = TweenService:Create(view.Pop, TweenInfo.new(G.PopSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), { Scale = 1 })
-	view.Tween = tween
-	tween:Play()
+	playPop(view, 1, HOME, Enum.EasingDirection.Out)
 end
 
--- Closes: the same in reverse (1 -> 0.85), then hidden. The small label comes
--- back only when the character is far (not while a modal merely covers the card).
+-- Closes: the same in reverse (slides right, 1 -> 0.9), then hidden. The small
+-- label comes back only when the character is far (not while a modal merely covers the card).
 local function popOut(view: CardView)
-	if view.Tween then
-		view.Tween:Cancel()
-		view.Tween = nil
-	end
+	cancelTweens(view)
 	view.Open = false
 	unbindKeys()
-	local tween = TweenService:Create(view.Pop, TweenInfo.new(G.PopSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = G.PopFromScale })
-	view.Tween = tween
-	tween.Completed:Connect(function(state: Enum.PlaybackState)
+	local scaleTween = playPop(view, G.PopFromScale, SLIDE, Enum.EasingDirection.In)
+	scaleTween.Completed:Connect(function(state: Enum.PlaybackState)
 		if state == Enum.PlaybackState.Completed and not view.Open and card == view then
 			view.PopRoot.Visible = false
 			setLabelEnabled(view, not view.Near)
 		end
 	end)
-	tween:Play()
 end
 
 --[[ Placement ----------------------------------------------------------------------- ]]
@@ -1121,9 +1128,11 @@ function GachaBoardController.PlanSafeRect(viewport: Vector2, scale: number, top
 	return { Left = left, Top = top, Right = right, Bottom = bottom }
 end
 
--- Where the card goes: its bottom-centre `point` clamped so the card (scaled
--- `fit`) is inside `safe`; returns (position, fit). Pure.
-function GachaBoardController.PlanCard(point: Vector2, safe: Rect): (Vector2, number)
+-- The dock: the card's RIGHT-CENTRE point (logical px) and its fit scale.
+-- Right edge DockRightPx from the screen edge, centred vertically in the safe
+-- band; squeezed to MinSqueeze when the band is short (then, if still too
+-- tall, the bottom stays in view: the key bar). Pure: /selftest feeds it too.
+function GachaBoardController.PlanDock(safe: Rect): (Vector2, number)
 	local height = FULL_SIZE.Y
 	local available = safe.Bottom - safe.Top
 	local fit = 1
@@ -1131,19 +1140,13 @@ function GachaBoardController.PlanCard(point: Vector2, safe: Rect): (Vector2, nu
 		fit = math.max(G.MinSqueeze, available / height)
 	end
 	local w, h = FULL_SIZE.X * fit, height * fit
-	local x
-	if safe.Right - safe.Left < w then
-		x = (safe.Left + safe.Right) / 2
-	else
-		x = math.clamp(point.X, safe.Left + w / 2, safe.Right - w / 2)
-	end
-	local y
+	local right = safe.Right + G.SafeMargin - G.DockRightPx
+	right = math.min(safe.Right, math.max(right, safe.Left + w)) -- never into the left column
+	local y = (safe.Top + safe.Bottom) / 2
 	if available < h then
-		y = safe.Bottom -- still too tall at the minimum: keep the bottom (the key bar) in view
-	else
-		y = math.clamp(point.Y, safe.Top + h, safe.Bottom)
+		y = safe.Bottom - h / 2
 	end
-	return Vector2.new(x, y), fit
+	return Vector2.new(right, y), fit
 end
 
 local function currentSafeRect(view: CardView): Rect
@@ -1152,34 +1155,23 @@ local function currentSafeRect(view: CardView): Rect
 	return GachaBoardController.PlanSafeRect(viewport, mobileScale(view), TopStack.GetBottom(), HudController.GetObstacleRects(), CombatController.GetBarRect())
 end
 
-local function anchorWorld(view: CardView): Vector3
-	return view.Pad.Position + Vector3.new(0, view.Pad.Size.Y / 2 + G.AnchorUpStuds, 0)
-end
-
--- One frame of the follow: the target from the camera, clamped, then glided.
-local function place(view: CardView, dt: number)
-	local camera = Workspace.CurrentCamera
-	if not camera then
+-- Puts the card in the dock. NOT per frame: it runs when the card opens, on a
+-- viewport change, LayoutChanged and TopStack changes (and /selftest's
+-- PlaceNow). A placement whose inputs did not change is skipped.
+function GachaBoardController.PlaceNow()
+	local view = card
+	if not view then
 		return
 	end
-	local scale = mobileScale(view)
-	local projected = camera:WorldToViewportPoint(anchorWorld(view))
-	if projected.Z > 0 then
-		view.LastGood = Vector2.new(projected.X, projected.Y) / scale
-	end
 	local safe = currentSafeRect(view)
-	local point = view.LastGood or Vector2.new((safe.Left + safe.Right) / 2, safe.Bottom)
-	local target, fit = GachaBoardController.PlanCard(point, safe)
-	if view.Snap then
-		view.Snap = false
-		view.Position = target
-		view.Fit.Scale = fit
-	else
-		local alpha = 1 - G.FollowRate ^ dt
-		view.Position = view.Position:Lerp(target, alpha)
-		view.Fit.Scale += (fit - view.Fit.Scale) * alpha
+	local key = ("%.1f,%.1f,%.1f,%.1f,%.2f"):format(safe.Left, safe.Top, safe.Right, safe.Bottom, mobileScale(view))
+	if key == view.PlacedKey then
+		return
 	end
-	view.Root.Position = UDim2.fromOffset(view.Position.X, view.Position.Y)
+	view.PlacedKey = key
+	local point, fit = GachaBoardController.PlanDock(safe)
+	view.Fit.Scale = fit
+	view.Root.Position = UDim2.fromOffset(point.X, point.Y)
 end
 
 -- Is something covering the card, or is the character not fit to use it?
@@ -1197,11 +1189,11 @@ end
 local function buildCard(pad: BasePart)
 	local gui = UIKit.Screen("GachaCard", G.DisplayOrder)
 
-	-- Bottom-centre anchored, so every scale on it works about the card's bottom line.
+	-- Right-centre anchored (the dock), so the squeeze works about that point.
 	local root = Instance.new("Frame")
 	root.Name = "Root"
 	root.BackgroundTransparency = 1
-	root.AnchorPoint = Vector2.new(0.5, 1)
+	root.AnchorPoint = Vector2.new(1, 0.5)
 	root.Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)
 	root.Parent = gui
 	local fit = Instance.new("UIScale")
@@ -1211,8 +1203,8 @@ local function buildCard(pad: BasePart)
 	local popRoot = Instance.new("Frame")
 	popRoot.Name = "PopRoot"
 	popRoot.BackgroundTransparency = 1
-	popRoot.AnchorPoint = Vector2.new(0.5, 1)
-	popRoot.Position = UDim2.fromScale(0.5, 1)
+	popRoot.AnchorPoint = Vector2.new(0.5, 0.5)
+	popRoot.Position = SLIDE
 	popRoot.Size = UDim2.fromScale(1, 1)
 	popRoot.Visible = false
 	popRoot.Parent = root
@@ -1254,10 +1246,8 @@ local function buildCard(pad: BasePart)
 		Label = pad:FindFirstChild("GachaLabel"),
 		Near = false,
 		Open = false,
-		Tween = nil,
-		Position = Vector2.zero,
-		LastGood = nil,
-		Snap = true,
+		Tweens = {},
+		PlacedKey = "",
 	} :: CardView
 	buildContent(view, cardFrame)
 	updateContent(view)
@@ -1308,8 +1298,8 @@ end
 --[[ Per frame ------------------------------------------------------------------------- ]]
 
 -- Distance hysteresis (Near), then Open = Near and not covered / ragdolled /
--- carrying; and, while up, the follow.
-local function stepFrame(dt: number)
+-- carrying; and, while up, the shimmer. The card never follows anything.
+local function stepFrame()
 	local view = card
 	if not view or not view.Pad.Parent then
 		return
@@ -1334,7 +1324,6 @@ local function stepFrame(dt: number)
 	if not view.PopRoot.Visible then
 		return
 	end
-	place(view, dt)
 	local now = os.clock()
 	local shimmer, sparkle = view.Shimmer, view.Sparkle
 	if shimmer then
@@ -1381,15 +1370,7 @@ end
 function GachaBoardController.RefreshNow()
 	refresh()
 	if card then
-		stepFrame(1 / 60)
-	end
-end
-
--- Puts the card on its target at once (the glide skipped), so a camera test
--- does not wait for it.
-function GachaBoardController.SnapNow()
-	if card then
-		card.Snap = true
+		stepFrame()
 	end
 end
 
@@ -1512,8 +1493,23 @@ function GachaBoardController.Init()
 	TycoonController.TycoonChanged:Connect(function()
 		refresh()
 	end)
-	-- RenderStepped: the follow must use this frame's camera.
 	RunService.RenderStepped:Connect(stepFrame)
+	-- Re-dock only when the inputs change (never per frame).
+	UIKit.LayoutChanged:Connect(GachaBoardController.PlaceNow)
+	TopStack.OnChanged(function()
+		GachaBoardController.PlaceNow()
+	end)
+	local function watchViewport()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(GachaBoardController.PlaceNow)
+		end
+	end
+	watchViewport()
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+		watchViewport()
+		GachaBoardController.PlaceNow()
+	end)
 	task.spawn(function()
 		while true do
 			task.wait(0.5)

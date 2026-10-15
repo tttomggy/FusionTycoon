@@ -39,25 +39,26 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 **Gacha pop-up card** (`Controllers/GachaBoardController`, client only): a
 **screen-space card** (a `ScreenGui` from `UIKit.Screen`, `DisplayOrder` 55:
 over the HUD 40 and weapon bar 41, under every `UIKit.Modal` and the result
-cards) that **follows YOUR Gacha Pad on screen and can never leave the safe
-area**. The look is the Pet Simulator 99 / Bubble Gum Simulator egg card: a
-300 × 204 px card plus a 72 px E / R / T row, 0.8 on a phone (the gui's
-`MobileScale`). History: a world-anchored billboard (studs-sized, then fixed
-pixels "1 stud over the head") could not work: you stand ON the pad, so the card
-ended up past the top of the screen whenever the camera sat close behind you
-and floated far above the lab zoomed out; Pet Sim 99's egg works because you
-stand in FRONT of it.
-- **Follow:** each `RenderStepped` while open, `camera:WorldToViewportPoint` of
-  the pad's top centre + `AnchorUpStuds` (3); the card's BOTTOM-CENTRE (button
-  row included) goes there. Behind the camera: the last good position.
-- **Clamp into the safe rect** (logical px; `PlanSafeRect` / `PlanCard` are
-  pure): top ≥ `TopStack.GetBottom()` + 8, bottom ≤ the weapon bar's top (else
-  the HUD bottom row's) − 8, left ≥ the HUD left column's right edge + 8
-  (`HudController.GetObstacleRects`, the same rects `/selftest` checks), right
-  ≤ viewport − 8. **Glide:** lerp at `1 − 0.001^dt`, snapped on open. **Squeeze:**
-  when the safe rect is shorter than the card (small phones) the whole card
-  scales down about its bottom-centre (`FitScale`, min 0.7); the only time it
-  shrinks.
+cards) **docked at one fixed spot on the right of the screen**. The look is the
+Pet Simulator 99 / Bubble Gum Simulator egg card: a 300 × 204 px card plus a
+72 px E / R / T row, 0.8 on a phone (the gui's `MobileScale`). History: a
+world-anchored billboard could not work (you stand ON the pad, so it ended up
+past the top of the screen with the camera close); a card that followed the
+pad's projected point slid around while the camera turned. It now tracks
+nothing: no `WorldToViewportPoint`, no smoothing, no per-frame placement.
+- **Dock:** `Root` anchor (1, 0.5), `DockRightPx` (24) from the right edge,
+  centred vertically in the safe band (`PlanSafeRect` / `PlanDock` are pure):
+  top ≥ `TopStack.GetBottom()` + 8, bottom ≤ the weapon bar's top (else the HUD
+  bottom row's) − 8, right of the HUD left column
+  (`HudController.GetObstacleRects`, the same rects `/selftest` checks).
+  **Squeeze:** when the band is shorter than the card (small phones) the whole
+  card scales about its dock point (`FitScale`, min 0.7). Re-placed only when it
+  opens, on a viewport change, `UIKit.LayoutChanged` and `TopStack.OnChanged`
+  (`PlaceNow`; unchanged inputs are skipped), never per frame.
+- **Pop:** the character within `PopInStuds` (16) of the pad: the card slides in
+  from the right (`SlidePx` 24) and scales 0.9 → 1 over 0.15 s Quad-Out
+  (`PopRoot` position + `PopScale`); beyond `PopOutStuds` (19) it slides back
+  out and hides. No `CanvasGroup`.
 - **Hidden** (the pop out, keys unbound) while any overlay is open
   (`UIKit.IsOverlayOpen`: a modal, the reveal / big result card, the (i) panel),
   during a ragdoll and while carrying; back after.
@@ -65,7 +66,7 @@ stand in FRONT of it.
   0.5 s) only updates text and colours (`updateContent`), never rebuilds. 2D
   orbs (`UIKit.TierOrb`), no `ViewportFrame`, no `CanvasGroup`, no
   `TextScaled`. The only `UIScale`s besides the gui's `MobileScale`: `PopScale`
-  (0.85 → 1 in 0.12 s Quad-Out, reversed on close) and `FitScale`.
+  (0.9 → 1 in 0.15 s Quad-Out, reversed on close) and `FitScale`.
 - **Visibility follows the character, not the camera:** the distance from your
   `HumanoidRootPart` to the pad; inside 16 studs it opens, beyond 19 it closes
   (the gap stops flicker).
