@@ -1570,8 +1570,8 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	if gui.Adornee ~= anchor or anchor.Name ~= "GachaCardAnchor" or anchor.Parent ~= pad then
 		table.insert(billboardBad, ("Adornee is %s, not the GachaCardAnchor on the pad"):format(tostring(gui.Adornee)))
 	end
-	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= G.CardPx.Y + G.ButtonRowPx then
-		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, G.CardPx.Y + G.ButtonRowPx))
+	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= G.TopPadPx + G.CardPx.Y + G.ButtonRowPx then
+		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, G.TopPadPx + G.CardPx.Y + G.ButtonRowPx))
 	end
 	if gui.SizeOffset ~= Vector2.new(0, 0.5) then
 		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5)"):format(tostring(gui.SizeOffset)))
@@ -1633,8 +1633,9 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		Detail = ("pill drawn %s, luck %.2f"):format(tostring(pillDrawn), serverLuck),
 	})
 
-	-- Silhouettes: an unfound tier shows the black "?" orb (and the real orb is
-	-- hidden) and still shows its %; a found one the reverse.
+	-- Silhouettes: an unfound tier is a SOLID black orb of the same size as the
+	-- real one (no mark) and the real orb is hidden; it still shows its %; a
+	-- found one the reverse.
 	local found: { [string]: boolean } = {}
 	for key in TycoonController.GetIndex() do
 		local def = ItemConfig.GetItemById(key:match("^(.-)|") or "")
@@ -1648,21 +1649,99 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		local tile = gui:FindFirstChild("Tile_" .. tier, true)
 		local orb = tile and tile:FindFirstChild("Orb")
 		local silhouette = tile and tile:FindFirstChild("Silhouette")
-		local mark = silhouette and silhouette:FindFirstChild("Mark")
 		local percent = tile and tile:FindFirstChild("Percent")
-		if tile and orb and orb:IsA("GuiObject") and silhouette and silhouette:IsA("GuiObject") and mark and mark:IsA("GuiObject") and percent and percent:IsA("TextLabel") then
+		if tile and orb and orb:IsA("GuiObject") and silhouette and silhouette:IsA("GuiObject") and percent and percent:IsA("TextLabel") then
 			checkedSilhouette += 1
 			local orbDrawn = drawnProblem(orb, gui) == nil
-			local dark = drawnProblem(silhouette, gui) == nil and drawnProblem(mark, gui) == nil
-			if dark == (found[tier] == true) or orbDrawn ~= (found[tier] == true) or percent.Text == "" then
-				table.insert(silhouetteBad, ("%s dark=%s orb=%s found=%s text=%q"):format(tier, tostring(dark), tostring(orbDrawn), tostring(found[tier] == true), percent.Text))
+			local dark = drawnProblem(silhouette, gui) == nil
+			local solid = silhouette.BackgroundColor3 == UITheme.Colors.Black and silhouette.BackgroundTransparency == 0 and #silhouette:GetChildren() == 1 -- the corner only: no "?" mark
+			local sameSize = math.abs(silhouette.AbsoluteSize.X - orb.AbsoluteSize.X) < 0.5
+			if dark == (found[tier] == true) or orbDrawn ~= (found[tier] == true) or percent.Text == "" or not solid or not sameSize then
+				table.insert(silhouetteBad, ("%s dark=%s orb=%s found=%s text=%q solid=%s sameSize=%s"):format(tier, tostring(dark), tostring(orbDrawn), tostring(found[tier] == true), percent.Text, tostring(solid), tostring(sameSize)))
 			end
 		end
 	end
 	table.insert(lines, {
 		Ok = checkedSilhouette == #FusionConfig.TierOrder and #silhouetteBad == 0,
-		Name = ("gacha card (%s): an unfound tier is a black ? orb and still shows its %%"):format(label),
+		Name = ("gacha card (%s): an unfound tier is a solid black orb (no ?) and still shows its %%"):format(label),
 		Detail = ("%d tiles checked%s"):format(checkedSilhouette, if #silhouetteBad > 0 then " | " .. table.concat(silhouetteBad, "; ") else ""),
+	})
+
+	-- The PS99 face: white paper, the title on the top edge, (i) on the top-right
+	-- corner, 6 orb cells with no tile backgrounds or ribbons, ONE mutation line
+	-- (each value in its colour), the coin + price on the bottom edge, and none
+	-- of the old violet/gold styling.
+	local styleBad: { string } = {}
+	local cardFrame = card.Card :: Frame
+	local paper = cardFrame:FindFirstChildOfClass("UIGradient")
+	local paperStroke = cardFrame:FindFirstChildOfClass("UIStroke")
+	if not paper or paper.Color.Keypoints[1].Value ~= UITheme.Colors.CardPaper or not paperStroke or paperStroke.Color ~= UITheme.Colors.CardPaperStroke then
+		table.insert(styleBad, "the card is not the white paper with the light rim")
+	end
+	local title = cardFrame:FindFirstChild("Title")
+	if not (title and title:IsA("TextLabel") and title.Text == "Gacha Pad" and title.TextSize == 26 and drawnProblem(title, gui) == nil) then
+		table.insert(styleBad, "no 26 px 'Gacha Pad' title")
+	elseif math.abs((title.AbsolutePosition.Y + title.AbsoluteSize.Y / 2) - cardFrame.AbsolutePosition.Y) > 1 then
+		table.insert(styleBad, ("the title is not centred on the card's top edge (%.1f px off)"):format((title.AbsolutePosition.Y + title.AbsoluteSize.Y / 2) - cardFrame.AbsolutePosition.Y))
+	end
+	local info = cardFrame:FindFirstChild("Info")
+	local infoHit = cardFrame:FindFirstChild("InfoHit")
+	if not (info and info:IsA("GuiObject") and infoHit and infoHit:IsA("GuiObject") and drawnProblem(info, gui) == nil) then
+		table.insert(styleBad, "no (i)")
+	elseif math.abs((info.AbsolutePosition.Y + info.AbsoluteSize.Y / 2) - cardFrame.AbsolutePosition.Y) > 1 or infoHit.AbsoluteSize.X < 43.5 then
+		table.insert(styleBad, ("the (i) is off the top edge or its hit area is %.0f px"):format(infoHit.AbsoluteSize.X))
+	end
+	local cells = 0
+	for _, child in (cardFrame:FindFirstChild("Tiles") :: Instance):GetChildren() do
+		if child.Name:sub(1, 5) == "Tile_" then
+			cells += 1
+			if (child :: GuiObject).BackgroundTransparency ~= 1 then
+				table.insert(styleBad, child.Name .. " has a tile background")
+			end
+		end
+	end
+	if cells ~= #FusionConfig.TierOrder then
+		table.insert(styleBad, ("%d orb cells"):format(cells))
+	end
+	if gui:FindFirstChild("Ribbon", true) or gui:FindFirstChild("Header", true) or gui:FindFirstChild("Mutations", true) or gui:FindFirstChild("Sparkle", true) then
+		table.insert(styleBad, "old ribbon / header / chips / sparkle instances are still there")
+	end
+	local line = cardFrame:FindFirstChild("MutationLine")
+	local rows = FusionConfig.GetGachaOddsRows(serverLuck, require(ReplicatedStorage.Shared.Modules.EventState).GetOddsEvent())
+	if not (line and line:IsA("TextLabel") and drawnProblem(line, gui) == nil and line.RichText and line.TextSize <= 12) then
+		table.insert(styleBad, "no mutation line")
+	else
+		for _, row in rows.Mutations do
+			if not line.Text:find(row.Text, 1, true) then
+				table.insert(styleBad, ("the mutation line lacks %s %s"):format(row.Mutation, row.Text))
+			end
+		end
+		if #rows.Mutations == 0 then
+			table.insert(styleBad, "no mutation odds to show")
+		end
+		if line.AbsolutePosition.Y + line.AbsoluteSize.Y > cardFrame.AbsolutePosition.Y + cardFrame.AbsoluteSize.Y + 0.5 then
+			table.insert(styleBad, "the mutation line hangs below the card")
+		end
+	end
+	local price = cardFrame:FindFirstChild("Price", true)
+	local coin = cardFrame:FindFirstChild("Coin", true)
+	if not (price and price:IsA("TextLabel") and coin and coin:IsA("GuiObject") and drawnProblem(price, gui) == nil and drawnProblem(coin, gui) == nil and price.TextSize == 24) then
+		table.insert(styleBad, "no coin + 24 px price")
+	else
+		local free = TycoonController.GetTutorial().FreePulls > 0
+		local wantPrice = if free then "FREE" else require(ReplicatedStorage.Shared.Modules.NumberFormat).Money(require(ReplicatedStorage.Shared.Config.TycoonConfig).GetGachaPullCost(TycoonController.GetGachaPulls()))
+		if price.Text ~= wantPrice then
+			table.insert(styleBad, ("price shows %q, wanted %q"):format(price.Text, wantPrice))
+		end
+		local edge = cardFrame.AbsolutePosition.Y + cardFrame.AbsoluteSize.Y
+		if math.abs((price.AbsolutePosition.Y + price.AbsoluteSize.Y / 2) - edge) > 2 then
+			table.insert(styleBad, ("the price is not centred on the bottom edge (%.1f px off)"):format((price.AbsolutePosition.Y + price.AbsoluteSize.Y / 2) - edge))
+		end
+	end
+	table.insert(lines, {
+		Ok = #styleBad == 0,
+		Name = ("gacha card (%s): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge"):format(label),
+		Detail = if #styleBad > 0 then table.concat(styleBad, "; ") else ("%d cells, price %q, mutation line %q"):format(cells, if price and price:IsA("TextLabel") then price.Text else "?", if line and line:IsA("TextLabel") then line.Text:gsub("<[^>]+>", "") else "?"),
 	})
 
 	-- The (i) panel: per-orb % sum to the tier %.
@@ -1722,7 +1801,20 @@ local function probeGachaButtons(): { ProbeLine }
 	local parts: { string } = {}
 	local drawn, small = 0, 0
 	local expected = { Pull = "E", Multi = "R", Auto = "T" }
+	local captions = { Pull = "Pull", Multi = "×10", Auto = if Board.IsAutoOn() then "Auto ON" else "Auto" }
+	local captionBad: { string } = {}
+	local sides, centre = {}, 0
 	if bar then
+		for _, entry in bar.Buttons do
+			if entry.Caption.Text ~= captions[entry.Id] then
+				table.insert(captionBad, ("%s caption %q, wanted %q"):format(entry.Id, entry.Caption.Text, captions[entry.Id]))
+			end
+			if entry.Id == "Multi" then
+				centre = entry.Button.AbsoluteSize.X
+			else
+				table.insert(sides, entry.Button.AbsoluteSize.X)
+			end
+		end
 		for _, entry in bar.Buttons do
 			local round = entry.Button :: GuiObject
 			local problem = drawnProblem(round, gui)
@@ -1739,9 +1831,9 @@ local function probeGachaButtons(): { ProbeLine }
 		end
 	end
 	table.insert(lines, {
-		Ok = bar ~= nil and drawn == 3 and small == 0,
-		Name = "gacha card: the key bar shows 3 buttons (E Pull, R x10, T Auto), each drawn and >= 44 px",
-		Detail = if bar then table.concat(parts, "; ") else "no key bar",
+		Ok = bar ~= nil and drawn == 3 and small == 0 and #captionBad == 0 and #sides == 2 and centre > sides[1] and centre > sides[2],
+		Name = "gacha card: the key bar shows 3 round buttons (E Pull, R x10 bigger in the centre, T Auto), each drawn and >= 44 px",
+		Detail = if bar then table.concat(parts, "; ") .. (if #captionBad > 0 then " | " .. table.concat(captionBad, "; ") else "") .. (if #sides == 2 then (" | centre %.1f px, sides %.1f / %.1f"):format(centre, sides[1], sides[2]) else "") else "no key bar",
 	})
 	local bound = Board.GetBoundKeys()
 	table.sort(bound)

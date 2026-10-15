@@ -16,7 +16,7 @@
 
 	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
 	    pad is a cylinder turned 90 degrees about Z, so an offset on the pad
-	    itself would be applied in ITS axes, sideways), Size = (300, 276) px,
+	    itself would be applied in ITS axes, sideways), Size = (300, 324) px,
 	    SizeOffset (0, 0.5) so it grows UPWARD from the anchor (its bottom
 	    edge, the key bar's, is on it); StudsOffset and StudsOffsetWorldSpace
 	    stay zero and are never written. The Attachment's WorldCFrame is set
@@ -40,24 +40,33 @@
 	    ViewportFrame, no CanvasGroup, no TextScaled. One UIScale for the pop
 	    (PopScale) plus the phone's PhoneScale (0.8) when UIKit.IsPhone().
 
-	The card (design px): a dark violet panel with a 3 px gold stroke, a
-	header (GACHA PAD, the luck pill when luck > x1, the event chip, an (i)),
-	six tier tiles 3 x 2 (tier gradient, a 2D orb, the % in white with a
-	tier-colour stroke, the tier name; Secret has an animated rainbow
-	stroke), the mutation chips at the bottom left and the gold price pill at
-	the bottom right. A tier you never found is a black orb with "?" and
-	STILL shows its %.
+	The card (design px) copies Pet Sim 99's egg card: a 300 x 196 WHITE card
+	(UITheme CardPaper, a soft diagonal, a 3 px light blue-grey rim, 18 px
+	corners; no dark panel, no gold rim, no header bar). "Gacha Pad" (Display
+	26, white, ink stroke) is centred on its top edge at x 10, the luck pill
+	just right of it, the event chip on its own row above; (i) is a 34 px blue
+	circle with a white rim at the top-right corner (right edge 6 px in), centred
+	on the top edge. Six bare 92 x 82 orb cells, 3 x 2 (no tile, no ribbon): a
+	58 px 2D orb with its % (22 px Display, tier colour, ink stroke over a white
+	outline) overlapping its bottom; a tier you never found is a solid black orb
+	of the same shape (no mark) and STILL shows its %; Secret has a soft rainbow
+	glow behind the orb. ONE line of 12 px mutation odds at the bottom left, each
+	value in its colour. The price (a gold coin + 24 px Display amount, FREE
+	during the tutorial pulls) is centred on the bottom edge at the right.
 
-	THE KEY BAR under the card: [E] Pull . $285, [R] x10 . $3.5K, [T] Auto .
-	OFF / ON, round 56 px buttons (>= 44 px even at the phone's 0.8). It does
+	THE KEY BAR, 10 px under the card: round solid-blue buttons with a white
+	rim and a soft ink shadow, [E] Pull, [R] x10 (bigger, 62 px), [T] Auto
+	(sides 52 px, 56 on a phone so they stay >= 44 px at the 0.8); the key
+	letter inside, a white caption under each (T turns green and reads
+	"Auto ON" while Auto pull runs). It does
 	NOT use ProximityPrompt UI: the pad's prompts are off (this controller also
 	keeps them off on this client). While the card is open E / R / T (X / Y / RB
 	on a controller) are bound with ContextActionService, and unbound when it
 	closes; the keys and the buttons send RequestGachaPull { Count = 1 | 10 }
 	and SetAutoPull { On }; the server runs the one shared pull function.
-	Desktop shows the key caps, a controller its glyphs, touch words. T shows
-	ON in green while Auto pull runs; the server's AutoPullState says when and
-	why it stopped (a toast).
+	Desktop and touch show the key letter (the circles are the tap targets), a
+	controller its glyphs; the server's AutoPullState says when and why Auto
+	pull stopped (a toast).
 
 	Far away (beyond PopOutStuds) the small server "GachaLabel" (name + price)
 	shows instead; this controller hides it while the card is up. Only your own
@@ -85,7 +94,6 @@ local GachaConfig = require(ReplicatedStorage.Shared.Config.GachaConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
-local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
@@ -101,25 +109,31 @@ local GachaBoardController = {}
 
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
+local BLUE = UITheme.Gradients.Blue.Top -- the (i) and the E / R / T circles: solid UITheme blue
 
 local G = PlotLayout.Gacha
-local CARD = G.CardPx -- 300 x 204
+local CARD = G.CardPx -- 300 x 196
+local TOP_PAD = G.TopPadPx -- room above the card for the title, (i) and event chip
 local ROW_HEIGHT = G.ButtonRowPx
-local FULL_SIZE = Vector2.new(CARD.X, CARD.Y + ROW_HEIGHT) -- the card + the key bar
-local MARGIN = 12
-local HEADER_Y = 6
-local HEADER_HEIGHT = 28
-local TILE_SIZE = Vector2.new(88, 58)
-local TILE_GAP = 6
-local TILES_Y = 38
-local ORB_SIZE = 26
-local CHIP_HEIGHT = 16
-local CHIPS_Y = 174
-local CHIPS_WIDTH = 190
-local PRICE_HEIGHT = 28
-local BUTTON_SIZE = 56
-local BUTTON_SPACING = 92
-local KEY_BAR_GAP = 4
+local FULL_SIZE = Vector2.new(CARD.X, TOP_PAD + CARD.Y + ROW_HEIGHT) -- pad + card + the button row
+local CELL_SIZE = Vector2.new(92, 82)
+local CELL_GAP = 4
+local GRID_Y = 10
+local ORB_SIZE = 58
+local PERCENT_SIZE = 22
+local PERCENT_Y = 48 -- the % overlaps the orb's bottom by ~10 px
+local PERCENT_INK = 2
+local PERCENT_OUTLINE = 3
+local TITLE_WIDTH = 150
+local INFO_SIZE = 34
+local INFO_HIT = 56
+local MUTATION_WIDTH = 190
+local COIN_SIZE = 16
+local CENTER_BUTTON = 62
+local SIDE_BUTTON = 52
+local SIDE_BUTTON_PHONE = 56 -- >= 44 px after the phone's 0.8
+local BUTTON_SPACING = 86
+local KEY_BAR_GAP = 10
 local PANEL_DISPLAY_ORDER = 143
 local MUTATION_ICONS: { [string]: string } = {
 	Golden = "✨",
@@ -155,13 +169,13 @@ type KeySpec = {
 	Key: string, -- the key cap
 	KeyCode: Enum.KeyCode,
 	PadCode: Enum.KeyCode, -- the controller button
-	Style: string,
-	Touch: string, -- the word on a touch screen
+	Caption: string,
 	Action: string, -- the ContextActionService name
 }
 
 type ButtonView = {
 	Holder: Frame,
+	Shadow: Frame,
 	Button: TextButton,
 	Circle: TextLabel,
 	Glyph: ImageLabel,
@@ -171,8 +185,9 @@ type ButtonView = {
 type TileView = {
 	Frame: Frame,
 	Orb: Frame, -- the 2D tier orb (hidden for a never-found tier)
-	Silhouette: Frame, -- the black orb (shown for a never-found tier)
+	Silhouette: Frame, -- the solid black orb (shown for a never-found tier)
 	Percent: TextLabel,
+	Outline: TextLabel, -- the white outline copy behind the %
 }
 
 type CardView = {
@@ -181,15 +196,13 @@ type CardView = {
 	Root: Frame, -- bottom-centre anchored; carries the phone's UIScale
 	PopRoot: Frame, -- everything; hidden = the card is closed
 	Pop: UIScale, -- the pop-in / pop-out scale
-	Card: Frame, -- the 300 x 204 card
+	Card: Frame, -- the 300 x 196 white card
 	KeyBar: Frame, -- the E / R / T row under the card
 	Tiles: { [string]: TileView },
-	Chips: { [string]: Frame }, -- one per mutation, shown while it has a pull chance
+	MutationLine: TextLabel, -- one line: each mutation's pull % in its colour
 	LuckPill: TextLabel,
 	EventPill: TextLabel,
 	Price: TextLabel,
-	Shimmer: UIGradient?,
-	Sparkle: TextLabel?,
 	Signature: string,
 	Label: Instance?, -- the small server GachaLabel
 	Near: boolean, -- the character is close (the open side of the distance hysteresis)
@@ -271,7 +284,7 @@ end
 
 local function priceText(inputs: Inputs): string
 	if inputs.Free > 0 then
-		return ("FREE · %d left"):format(inputs.Free)
+		return "FREE"
 	end
 	return NumberFormat.Money(inputs.Cost)
 end
@@ -303,219 +316,212 @@ local function frame(parent: Instance, name: string, position: UDim2, size: UDim
 	return f
 end
 
--- One tier tile (88 x 58): the tier gradient, a 2D orb on top (or the black
--- "?" orb), the % in white with a tier-colour stroke, the name ribbon.
--- Built once; updateTile sets the text and the lock state.
+-- One orb cell (92 x 82), no tile and no ribbon: a big 2D orb (or the solid
+-- black silhouette of a tier you never found) with its % laid over the orb's
+-- bottom, in the tier colour with an ink stroke over a white outline. Secret
+-- has a soft rainbow glow behind the orb. Built once; updateTile sets the text.
 local function buildTile(view: CardView, parent: Instance, tier: string): TileView
 	local accent = FusionConfig.TierAccentColors[tier] or Colors.Text
-	local stops = UITheme.GetTierOrb(tier)
-	local tile = Instance.new("Frame")
-	tile.Name = "Tile_" .. tier
-	tile.BackgroundColor3 = Colors.White
-	tile.BorderSizePixel = 0
-	tile.Size = UDim2.fromOffset(TILE_SIZE.X, TILE_SIZE.Y)
-	tile:SetAttribute("Tier", tier)
-	UIKit.Corner(tile, 10)
-	-- From the tier colour down to dark.
-	UIKit.PairGradient(tile, { Top = stops.Mid, Bottom = stops.Dark })
-	local stroke = UIKit.Stroke(tile, 2, Colors.White)
+	local cell = Instance.new("Frame")
+	cell.Name = "Tile_" .. tier
+	cell.BackgroundTransparency = 1
+	cell.BorderSizePixel = 0
+	cell.Size = UDim2.fromOffset(CELL_SIZE.X, CELL_SIZE.Y)
+	cell:SetAttribute("Tier", tier)
+
 	if tier == "Secret" then
-		-- An animated rainbow stroke (rotated each frame while open) and a sparkle.
+		local glowSize = ORB_SIZE + 16
+		local glow = frame(cell, "RainbowGlow", UDim2.new(0.5, -glowSize / 2, 0, (ORB_SIZE - glowSize) / 2), UDim2.fromOffset(glowSize, glowSize), Colors.White)
+		glow.BackgroundTransparency = 0.5
+		UIKit.Corner(glow, 999)
 		local gradient = Instance.new("UIGradient")
 		gradient.Color = UITheme.GetRainbowSequence()
-		gradient.Parent = stroke
-		view.Shimmer = gradient
-		view.Sparkle = label(tile, {
-			Name = "Sparkle",
-			Text = "✦",
-			Font = Fonts.Display,
-			TextSize = 12,
-			TextColor3 = Colors.White,
-			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -3, 0, 1),
-			Size = UDim2.fromOffset(14, 14),
-			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = 5,
-		})
+		gradient.Rotation = 45
+		gradient.Parent = glow
 	end
 
 	local orb = UIKit.TierOrb(tier, ORB_SIZE)
 	orb.Name = "Orb"
 	orb.AnchorPoint = Vector2.new(0.5, 0)
-	orb.Position = UDim2.new(0.5, 0, 0, 3)
-	orb.Parent = tile
+	orb.Position = UDim2.new(0.5, 0, 0, 0)
+	orb.Parent = cell
 
-	-- The never-found tier: a black orb with "?" (its % still shows).
-	local silhouette = frame(tile, "Silhouette", UDim2.new(0.5, -ORB_SIZE / 2, 0, 3), UDim2.fromOffset(ORB_SIZE, ORB_SIZE), Colors.Black)
+	-- The never-found tier: the same shape as a solid black orb, no mark (PS99).
+	local silhouette = frame(cell, "Silhouette", UDim2.new(0.5, -ORB_SIZE / 2, 0, 0), UDim2.fromOffset(ORB_SIZE, ORB_SIZE), Colors.Black)
 	UIKit.Corner(silhouette, 999)
-	UIKit.Stroke(silhouette, 2, Colors.Faint)
 	silhouette.Visible = false
-	label(silhouette, {
-		Name = "Mark",
-		Text = "?",
-		Font = Fonts.Display,
-		TextSize = 18,
-		TextColor3 = Colors.Muted,
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		ZIndex = 4,
-	})
 
-	local percent = label(tile, {
-		Name = "Percent",
-		Text = "",
-		Font = Fonts.Display,
-		TextSize = 18,
-		TextColor3 = Colors.White,
-		Position = UDim2.fromOffset(2, 30),
-		Size = UDim2.new(1, -4, 0, 18),
-		TextXAlignment = Enum.TextXAlignment.Center,
-	})
-	local percentStroke = UIKit.TextStroke(percent, 3)
-	percentStroke.Color = accent
+	-- The %: a white outline copy behind (ink 2 px + white 3 px outside it), then
+	-- the accent text with its ink stroke.
+	local function percentLabel(name: string, z: number): TextLabel
+		return label(cell, {
+			Name = name,
+			Text = "",
+			Font = Fonts.Display,
+			TextSize = PERCENT_SIZE,
+			TextColor3 = accent,
+			AnchorPoint = Vector2.new(0.5, 0),
+			Position = UDim2.new(0.5, 0, 0, PERCENT_Y),
+			Size = UDim2.new(1, 0, 0, PERCENT_SIZE + 4),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z,
+		})
+	end
+	local outline = percentLabel("PercentOutline", 5)
+	outline.TextColor3 = Colors.White
+	local outlineStroke = UIKit.TextStroke(outline, PERCENT_INK + PERCENT_OUTLINE)
+	outlineStroke.Color = Colors.White
+	local percent = percentLabel("Percent", 6)
+	UIKit.TextStroke(percent, PERCENT_INK)
 
-	-- The tier-name ribbon along the bottom.
-	local ribbon = frame(tile, "Ribbon", UDim2.new(0, 0, 1, -12), UDim2.new(1, 0, 0, 12), Colors.Ink)
-	ribbon.BackgroundTransparency = 0.3
-	UIKit.Corner(ribbon, 6)
-	label(ribbon, {
-		Name = "TierName",
-		Text = tier:upper(),
-		Font = Fonts.BodyHeavy,
-		TextSize = 9,
-		TextColor3 = Colors.White,
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-	})
-	tile.Parent = parent
-	return { Frame = tile, Orb = orb, Silhouette = silhouette, Percent = percent }
-end
-
--- A mutation chip (16 px tall): "✨13.8%" on Ink with a mutation-colour stroke.
-local function buildChip(parent: Instance, mutation: string): Frame
-	local color = UITheme.GetMutationColor(mutation) or Colors.Text
-	local chip = Instance.new("Frame")
-	chip.Name = "Chip_" .. mutation
-	chip.BackgroundColor3 = Colors.Ink
-	chip.BorderSizePixel = 0
-	chip.Size = UDim2.fromOffset(58, CHIP_HEIGHT)
-	chip.Visible = false
-	UIKit.Corner(chip, 999)
-	UIKit.Stroke(chip, 1.5, color)
-	label(chip, {
-		Name = "Text",
-		Text = "",
-		Font = Fonts.BodyHeavy,
-		TextSize = 10,
-		TextColor3 = Colors.White,
-		Size = UDim2.fromScale(1, 1),
-		TextXAlignment = Enum.TextXAlignment.Center,
-	})
-	chip.Parent = parent
-	return chip
+	cell.Parent = parent
+	return { Frame = cell, Orb = orb, Silhouette = silhouette, Percent = percent, Outline = outline }
 end
 
 -- Builds every piece of the card's face ONCE (hidden). updateContent sets
 -- the text and colours; nothing is ever rebuilt.
 local function buildContent(view: CardView, card: Frame)
-	-- Dark violet glass with a 3 px gold stroke.
-	local gold = UIKit.Stroke(card, 3, UITheme.Gradients.Gold.Top)
-	local goldGradient = Instance.new("UIGradient")
-	goldGradient.Color = ColorSequence.new(UITheme.Gradients.Gold.Top, UITheme.Gradients.Gold.Bottom)
-	goldGradient.Rotation = 90
-	goldGradient.Parent = gold
+	-- White paper: a soft diagonal, a light blue-grey 3 px rim (corners set by buildCard).
+	UIKit.Stroke(card, 3, Colors.CardPaperStroke)
+	local paper = Instance.new("UIGradient")
+	paper.Color = ColorSequence.new(Colors.CardPaper, Colors.CardPaperShade)
+	paper.Rotation = 35
+	paper.Parent = card
 
-	-- Header: the title on the left; the event chip, the luck pill and (i) on the right.
-	local header = frame(card, "Header", UDim2.fromOffset(MARGIN, HEADER_Y), UDim2.fromOffset(CARD.X - MARGIN * 2, HEADER_HEIGHT))
-	local title = label(header, {
+	-- Title: half above the card's top edge, left at x 10.
+	label(card, {
 		Name = "Title",
-		Text = "🔮 GACHA PAD",
+		Text = "Gacha Pad",
 		Font = Fonts.Display,
-		TextSize = 16,
+		TextSize = 26,
 		TextColor3 = Colors.White,
-		Size = UDim2.new(0, 112, 1, 0),
 		Stroke = 3,
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromOffset(10, 0),
+		Size = UDim2.fromOffset(TITLE_WIDTH, 34),
+		ZIndex = 8,
 	})
-	title.TextXAlignment = Enum.TextXAlignment.Left
-	local pills = frame(header, "Pills", UDim2.new(0, 112, 0, 0), UDim2.new(1, -112 - 34, 1, 0))
+	-- The luck pill just right of the title; the event chip on its own row above it.
+	local pills = frame(card, "Pills", UDim2.fromOffset(10 + TITLE_WIDTH, 0), UDim2.fromOffset(CARD.X - 10 - TITLE_WIDTH - 38, 20))
+	pills.AnchorPoint = Vector2.new(0, 0.5)
+	pills.ZIndex = 8
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.FillDirection = Enum.FillDirection.Horizontal
 	pillLayout.Padding = UDim.new(0, 4)
-	pillLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
 	pillLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	pillLayout.Parent = pills
-	view.EventPill = UIKit.Pill({ Name = "EventChip", Parent = pills, Text = "", Gradient = UITheme.Gradients.Violet, TextSize = 10, Height = 18, LayoutOrder = 1 })
-	view.LuckPill = UIKit.Pill({ Name = "LuckPill", Parent = pills, Text = "", Gradient = UITheme.Gradients.Green, TextSize = 11, Height = 18, LayoutOrder = 2 })
+	local eventRow = frame(card, "EventRow", UDim2.fromOffset(10, -TOP_PAD + 2), UDim2.fromOffset(CARD.X - 20, 20))
+	eventRow.ZIndex = 8
+	local eventLayout = Instance.new("UIListLayout")
+	eventLayout.FillDirection = Enum.FillDirection.Horizontal
+	eventLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	eventLayout.Parent = eventRow
+	view.EventPill = UIKit.Pill({ Name = "EventChip", Parent = eventRow, Text = "", Gradient = UITheme.Gradients.Violet, TextSize = 11, Height = 20 })
+	view.LuckPill = UIKit.Pill({ Name = "LuckPill", Parent = pills, Text = "", Gradient = UITheme.Gradients.Green, TextSize = 11, Height = 18 })
 	UIKit.SetPillVisible(view.EventPill, false)
 	UIKit.SetPillVisible(view.LuckPill, false)
-	-- The (i): a 26 px button with a 44 px hit area.
-	UIKit.Button({
-		Name = "Info",
-		Parent = header,
-		Style = "Violet",
+
+	-- (i): a blue 34 px circle with a white rim, its right edge 6 px inside the
+	-- card's corner and its centre on the top edge; a 56 px hit area.
+	local infoCentre = UDim2.fromOffset(CARD.X - 6 - INFO_SIZE / 2, 0)
+	local info = Instance.new("Frame")
+	info.Name = "Info"
+	info.AnchorPoint = Vector2.new(0.5, 0.5)
+	info.Position = infoCentre
+	info.Size = UDim2.fromOffset(INFO_SIZE, INFO_SIZE)
+	info.BackgroundColor3 = BLUE
+	info.BorderSizePixel = 0
+	info.ZIndex = 8
+	info.Parent = card
+	UIKit.Corner(info, 999)
+	UIKit.Stroke(info, 3, Colors.White)
+	label(info, {
+		Name = "Mark",
 		Text = "i",
-		TextSize = 16,
-		Radius = 999,
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(1, 0, 0.5, 0),
-		Size = UDim2.fromOffset(26, 26),
+		Font = Fonts.Display,
+		TextSize = 22,
+		TextColor3 = Colors.White,
+		Stroke = UITheme.Stroke.Text,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 9,
 	})
 	local infoHit = Instance.new("TextButton")
 	infoHit.Name = "InfoHit"
-	infoHit.AnchorPoint = Vector2.new(1, 0.5)
-	infoHit.Position = UDim2.new(1, 9, 0.5, 0)
-	infoHit.Size = UDim2.fromOffset(44, 44)
+	infoHit.AnchorPoint = Vector2.new(0.5, 0.5)
+	infoHit.Position = infoCentre
+	infoHit.Size = UDim2.fromOffset(INFO_HIT, INFO_HIT)
 	infoHit.BackgroundTransparency = 1
 	infoHit.Text = ""
 	infoHit.ZIndex = 10
-	infoHit.Parent = header
+	infoHit.Parent = card
 	infoHit.Activated:Connect(function()
 		GachaBoardController.OpenPanel()
 	end)
 
-	-- Six tiles, 3 x 2, centred.
-	local tilesWidth = TILE_SIZE.X * 3 + TILE_GAP * 2
-	local tiles = frame(card, "Tiles", UDim2.new(0.5, -tilesWidth / 2, 0, TILES_Y), UDim2.fromOffset(tilesWidth, TILE_SIZE.Y * 2 + TILE_GAP))
-	local grid = Instance.new("UIGridLayout")
-	grid.CellSize = UDim2.fromOffset(TILE_SIZE.X, TILE_SIZE.Y)
-	grid.CellPadding = UDim2.fromOffset(TILE_GAP, TILE_GAP)
-	grid.SortOrder = Enum.SortOrder.LayoutOrder
-	grid.Parent = tiles
+	-- Six orb cells, 3 x 2, centred.
+	local gridWidth = CELL_SIZE.X * 3 + CELL_GAP * 2
+	local grid = frame(card, "Tiles", UDim2.new(0.5, -gridWidth / 2, 0, GRID_Y), UDim2.fromOffset(gridWidth, CELL_SIZE.Y * 2 + CELL_GAP))
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.fromOffset(CELL_SIZE.X, CELL_SIZE.Y)
+	layout.CellPadding = UDim2.fromOffset(CELL_GAP, CELL_GAP)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = grid
 	for index, tier in FusionConfig.TierOrder do
-		local tile = buildTile(view, tiles, tier)
+		local tile = buildTile(view, grid, tier)
 		tile.Frame.LayoutOrder = index
 		view.Tiles[tier] = tile
 	end
 
-	-- Mutation chips, bottom left (one per mutation; the ones with a pull chance show).
-	local chips = frame(card, "Mutations", UDim2.fromOffset(MARGIN, CHIPS_Y), UDim2.fromOffset(CHIPS_WIDTH, CHIP_HEIGHT))
-	local chipLayout = Instance.new("UIListLayout")
-	chipLayout.FillDirection = Enum.FillDirection.Horizontal
-	chipLayout.Padding = UDim.new(0, 4)
-	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	chipLayout.Parent = chips
-	for index, mutation in MutationConfig.Order do
-		local chip = buildChip(chips, mutation)
-		chip.LayoutOrder = index
-		view.Chips[mutation] = chip
-	end
-
-	-- The gold price pill, bottom right.
-	view.Price = UIKit.Pill({
-		Name = "Price",
-		Parent = card,
+	-- Mutation odds: ONE line of small text, bottom left, each value in its colour.
+	view.MutationLine = label(card, {
+		Name = "MutationLine",
 		Text = "",
-		Gradient = UITheme.Gradients.Gold,
-		Font = Fonts.Display,
-		TextSize = 16,
-		Height = PRICE_HEIGHT,
-		StrokeThickness = 2,
-		TextStroke = 2,
+		Font = Fonts.BodyHeavy,
+		TextSize = 12,
+		RichText = true,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.fromOffset(12, CARD.Y - 4),
+		Size = UDim2.fromOffset(MUTATION_WIDTH, 14),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Stroke = UITheme.Stroke.Text,
 	})
-	local priceRoot = UIKit.PillRoot(view.Price)
-	priceRoot.AnchorPoint = Vector2.new(1, 0.5)
-	priceRoot.Position = UDim2.new(1, -MARGIN, 0, CHIPS_Y + CHIP_HEIGHT / 2)
+
+	-- The price: a gold coin and the amount, centred on the card's bottom edge at the right.
+	local priceRow = frame(card, "PriceRow", UDim2.fromOffset(CARD.X - 10, CARD.Y), UDim2.fromOffset(0, 30))
+	priceRow.AnchorPoint = Vector2.new(1, 0.5)
+	priceRow.AutomaticSize = Enum.AutomaticSize.X
+	priceRow.ZIndex = 8
+	local priceLayout = Instance.new("UIListLayout")
+	priceLayout.FillDirection = Enum.FillDirection.Horizontal
+	priceLayout.Padding = UDim.new(0, 4)
+	priceLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	priceLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	priceLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	priceLayout.Parent = priceRow
+	local coin = frame(priceRow, "Coin", UDim2.new(), UDim2.fromOffset(COIN_SIZE, COIN_SIZE), Colors.White)
+	coin.LayoutOrder = 1
+	coin.ZIndex = 8
+	UIKit.Corner(coin, 999)
+	UIKit.PairGradient(coin, UITheme.Gradients.Gold)
+	UIKit.Stroke(coin, 2, Colors.Ink)
+	local face = frame(coin, "Face", UDim2.new(0.5, -3, 0.5, -3), UDim2.fromOffset(6, 6), UITheme.Gradients.Gold.Bottom)
+	face.ZIndex = 9
+	UIKit.Corner(face, 999)
+	view.Price = label(priceRow, {
+		Name = "Price",
+		Text = "",
+		Font = Fonts.Display,
+		TextSize = 24,
+		TextColor3 = Colors.GoldLabel,
+		Stroke = 3,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 30),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		LayoutOrder = 2,
+		ZIndex = 8,
+	})
 end
 
 -- Sets the text and colours from the odds, luck, event, Index and price.
@@ -527,9 +533,11 @@ local function updateContent(view: CardView)
 	for _, row in rows.Tiers do
 		local tile = view.Tiles[row.Tier]
 		if tile then
-			tile.Percent.Text = row.Text
-			local length = #row.Text
-			tile.Percent.TextSize = if length <= 5 then 18 elseif length == 6 then 16 else 14
+			local size = if #row.Text <= 6 then PERCENT_SIZE else PERCENT_SIZE - 3
+			for _, text in { tile.Percent, tile.Outline } do
+				text.Text = row.Text
+				text.TextSize = size
+			end
 			local isFound = found[row.Tier] == true
 			tile.Orb.Visible = isFound
 			tile.Silhouette.Visible = not isFound
@@ -537,27 +545,15 @@ local function updateContent(view: CardView)
 			tile.Frame:SetAttribute("Silhouette", not isFound)
 		end
 	end
-	-- Mutation chips: the ones with a pull chance, narrower when there are many.
-	local shown = 0
+	-- Mutation odds: one line, each value in its mutation colour (smaller when
+	-- an event adds more of them).
+	local parts: { string } = {}
 	for _, row in rows.Mutations do
-		if view.Chips[row.Mutation] then
-			shown += 1
-		end
+		local color = UITheme.GetMutationColor(row.Mutation) or Colors.Text
+		table.insert(parts, ('<font color="#%s">%s%s</font>'):format(color:ToHex(), MUTATION_ICONS[row.Mutation] or "", row.Text))
 	end
-	local chipWidth = math.min(60, math.floor((CHIPS_WIDTH - 4 * math.max(shown - 1, 0)) / math.max(shown, 1)))
-	local chipByMutation: { [string]: FusionConfig.GachaMutationOdds } = {}
-	for _, row in rows.Mutations do
-		chipByMutation[row.Mutation] = row
-	end
-	for mutation, chip in view.Chips do
-		local row = chipByMutation[mutation]
-		chip.Visible = row ~= nil
-		if row then
-			chip.Size = UDim2.fromOffset(chipWidth, CHIP_HEIGHT)
-			local text = chip:FindFirstChild("Text") :: TextLabel
-			text.Text = ("%s%s"):format(MUTATION_ICONS[mutation] or "", row.Text)
-		end
-	end
+	view.MutationLine.Text = table.concat(parts, "  ")
+	view.MutationLine.TextSize = if #parts > 4 then 10 else 12
 	view.Price.Text = priceText(inputs)
 	view.LuckPill.Text = luckText(inputs.Luck)
 	UIKit.SetPillVisible(view.LuckPill, inputs.Luck > 1.0001)
@@ -834,39 +830,29 @@ end
 --[[ The key bar ---------------------------------------------------------------------- ]]
 
 local KEYS: { KeySpec } = {
-	{ Id = "Pull", Key = "E", KeyCode = Enum.KeyCode.E, PadCode = Enum.KeyCode.ButtonX, Style = "Gold", Touch = "PULL", Action = "GachaPull" },
-	{ Id = "Multi", Key = "R", KeyCode = Enum.KeyCode.R, PadCode = Enum.KeyCode.ButtonY, Style = "Blue", Touch = "×10", Action = "GachaPull10" },
-	{ Id = "Auto", Key = "T", KeyCode = Enum.KeyCode.T, PadCode = Enum.KeyCode.ButtonR1, Style = "Violet", Touch = "AUTO", Action = "GachaAuto" },
+	{ Id = "Pull", Key = "E", KeyCode = Enum.KeyCode.E, PadCode = Enum.KeyCode.ButtonX, Caption = "Pull", Action = "GachaPull" },
+	{ Id = "Multi", Key = "R", KeyCode = Enum.KeyCode.R, PadCode = Enum.KeyCode.ButtonY, Caption = "×10", Action = "GachaPull10" },
+	{ Id = "Auto", Key = "T", KeyCode = Enum.KeyCode.T, PadCode = Enum.KeyCode.ButtonR1, Caption = "Auto", Action = "GachaAuto" },
 }
 
-local function captionFor(id: string): string
-	local pulls = TycoonController.GetGachaPulls()
-	if id == "Pull" then
-		local free = TycoonController.GetTutorial().FreePulls
-		return if free > 0 then "Pull · FREE" else ("Pull · %s"):format(NumberFormat.Money(TycoonConfig.GetGachaPullCost(pulls)))
-	elseif id == "Multi" then
-		return ("×%d · %s"):format(TycoonConfig.MultiPullCount, NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount)))
+local function captionFor(spec: KeySpec): string
+	if spec.Id == "Auto" and autoOn then
+		return "Auto ON"
 	end
-	return if autoOn then "Auto · ON" else "Auto · OFF"
+	return spec.Caption
 end
 
--- Which input the player is using: the key caps (desktop), the controller
--- glyphs, or words on round tap buttons (touch).
-local function inputMode(): string
-	local last = UserInputService:GetLastInputType()
-	if last.Name:find("Gamepad", 1, true) then
-		return "Gamepad"
-	elseif last == Enum.UserInputType.Touch or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled) then
-		return "Touch"
-	end
-	return "Keyboard"
+-- Which input the player is using: the key caps (desktop and touch: the same
+-- circles are the tap targets) or the controller glyphs.
+local function usingGamepad(): boolean
+	return UserInputService:GetLastInputType().Name:find("Gamepad", 1, true) ~= nil
 end
 
 local function showInput(view: ButtonView, spec: KeySpec)
-	local mode = inputMode()
 	view.Glyph.Visible = false
 	view.Circle.Visible = true
-	if mode == "Gamepad" then
+	view.Circle.Text = spec.Key
+	if usingGamepad() then
 		local ok, image = pcall(function()
 			return UserInputService:GetImageForKeyCode(spec.PadCode)
 		end)
@@ -877,10 +863,6 @@ local function showInput(view: ButtonView, spec: KeySpec)
 		else
 			view.Circle.Text = KEY_WORDS[spec.PadCode.Name] or spec.PadCode.Name
 		end
-	elseif mode == "Touch" then
-		view.Circle.Text = spec.Touch
-	else
-		view.Circle.Text = spec.Key
 	end
 end
 
@@ -888,11 +870,11 @@ local function refreshButtons()
 	for _, spec in KEYS do
 		local view = buttons[spec.Id]
 		if view then
-			view.Caption.Text = captionFor(spec.Id)
+			view.Caption.Text = captionFor(spec)
 			showInput(view, spec)
 			if spec.Id == "Auto" then
-				-- ON = the UPGRADES green; OFF = the violet it started as.
-				UIKit.SetButton(view.Button, { Style = if autoOn then "Green" else spec.Style })
+				-- ON = the UPGRADES green; OFF = the same blue as E and R.
+				view.Button.BackgroundColor3 = if autoOn then UITheme.Gradients.Green.Bottom else BLUE
 			end
 		end
 	end
@@ -971,45 +953,64 @@ local function unbindKeys()
 	end
 end
 
+-- The circles' sizes: the centre (R) 62, the sides 52, or 56 on a phone so the
+-- tap target stays >= 44 px after the 0.8 scale.
+local function applyButtonSizes()
+	local side = if UIKit.IsPhone() then SIDE_BUTTON_PHONE else SIDE_BUTTON
+	for _, spec in KEYS do
+		local view = buttons[spec.Id]
+		if view then
+			local px = if spec.Id == "Multi" then CENTER_BUTTON else side
+			view.Button.Size = UDim2.fromOffset(px, px)
+			view.Shadow.Size = UDim2.fromOffset(px, px)
+		end
+	end
+end
+
+-- PS99's buttons: round solid-blue circles with a white rim, the key letter
+-- inside, a caption under each; the centre one is bigger.
 local function buildKeyBar(root: Instance): Frame
 	local row = Instance.new("Frame")
 	row.Name = "KeyBar"
 	row.BackgroundTransparency = 1
-	row.Position = UDim2.fromOffset(0, CARD.Y + KEY_BAR_GAP)
+	row.Position = UDim2.fromOffset(0, TOP_PAD + CARD.Y + KEY_BAR_GAP)
 	row.Size = UDim2.fromOffset(CARD.X, ROW_HEIGHT - KEY_BAR_GAP)
 	row.Parent = root
+	local centreY = CENTER_BUTTON / 2
 	for index, spec in KEYS do
-		local holder = Instance.new("Frame")
-		holder.Name = spec.Id .. "Key"
+		local holder = frame(row, spec.Id .. "Key", UDim2.new(0.5, (index - 2) * BUTTON_SPACING, 0, 0), UDim2.fromOffset(BUTTON_SPACING - 2, ROW_HEIGHT - KEY_BAR_GAP))
 		holder.AnchorPoint = Vector2.new(0.5, 0)
-		holder.BackgroundTransparency = 1
-		holder.Position = UDim2.new(0.5, (index - 2) * BUTTON_SPACING, 0, 0)
-		holder.Size = UDim2.fromOffset(BUTTON_SPACING - 2, ROW_HEIGHT - KEY_BAR_GAP)
-		holder.Parent = row
-		local body = UIKit.Button({
-			Name = "Round",
-			Parent = holder,
-			Style = spec.Style,
-			Text = "",
-			Radius = 999,
-			AnchorPoint = Vector2.new(0.5, 0),
-			Position = UDim2.fromScale(0.5, 0),
-			Size = UDim2.fromOffset(BUTTON_SIZE, BUTTON_SIZE),
-			OnClick = function()
-				UIKit.SelectFeedback(holder)
-				runKey(spec.Id)
-			end,
-		})
+		-- A soft ink shadow a few px below the circle.
+		local shadow = frame(holder, "Shadow", UDim2.new(0.5, 0, 0, centreY + 3), UDim2.fromOffset(SIDE_BUTTON, SIDE_BUTTON), Colors.Ink)
+		shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+		shadow.BackgroundTransparency = 0.6
+		UIKit.Corner(shadow, 999)
+		local body = Instance.new("TextButton")
+		body.Name = "Round"
+		body.AutoButtonColor = false
+		body.Text = ""
+		body.BackgroundColor3 = BLUE
+		body.BorderSizePixel = 0
+		body.AnchorPoint = Vector2.new(0.5, 0.5)
+		body.Position = UDim2.new(0.5, 0, 0, centreY)
+		body.Size = UDim2.fromOffset(SIDE_BUTTON, SIDE_BUTTON)
+		body.Parent = holder
+		UIKit.Corner(body, 999)
+		UIKit.Stroke(body, 4, Colors.White)
+		body.Activated:Connect(function()
+			UIKit.SelectFeedback(holder)
+			runKey(spec.Id)
+		end)
 		local circle = label(body, {
 			Name = "Key",
 			Text = spec.Key,
 			Font = Fonts.Display,
-			TextSize = 24,
+			TextSize = 28,
 			TextColor3 = Colors.White,
 			Stroke = UITheme.Stroke.Text,
 			Size = UDim2.fromScale(1, 1),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = body.ZIndex + 2,
+			ZIndex = 3,
 		})
 		local glyph = Instance.new("ImageLabel")
 		glyph.Name = "Glyph"
@@ -1018,24 +1019,25 @@ local function buildKeyBar(root: Instance): Frame
 		glyph.Position = UDim2.fromScale(0.5, 0.5)
 		glyph.Size = UDim2.fromOffset(34, 34)
 		glyph.Visible = false
-		glyph.ZIndex = body.ZIndex + 2
+		glyph.ZIndex = 3
 		glyph.Parent = body
 		local caption = label(holder, {
 			Name = "Caption",
-			Text = captionFor(spec.Id),
+			Text = captionFor(spec),
 			Font = Fonts.BodyHeavy,
-			TextSize = 11,
+			TextSize = 14,
 			Stroke = UITheme.Stroke.Text,
-			Position = UDim2.fromOffset(0, BUTTON_SIZE + 1),
-			Size = UDim2.new(1, 0, 0, 12),
+			Position = UDim2.fromOffset(0, CENTER_BUTTON + 2),
+			Size = UDim2.new(1, 0, 0, 16),
 			TextXAlignment = Enum.TextXAlignment.Center,
 		})
-		buttons[spec.Id] = { Holder = holder, Button = body, Circle = circle, Glyph = glyph, Caption = caption }
+		buttons[spec.Id] = { Holder = holder, Shadow = shadow, Button = body, Circle = circle, Glyph = glyph, Caption = caption }
 	end
+	applyButtonSizes()
 	return row
 end
 
---[[ The card (a screen-space gui docked on the right) --------------------------------- ]]
+--[[ The card ------------------------------------------------------------------------ ]]
 
 local function setLabelEnabled(view: CardView, enabled: boolean)
 	local label = view.Label
@@ -1123,6 +1125,7 @@ local function applyPhoneScale(view: CardView)
 	elseif existing then
 		existing:Destroy()
 	end
+	applyButtonSizes()
 end
 
 -- The card's anchor: a world point straight above the pad's centre, `up`
@@ -1193,15 +1196,15 @@ local function buildCard(pad: BasePart)
 	pop.Scale = G.PopFromScale
 	pop.Parent = popRoot
 
-	-- The card: fixed pixels, dark violet, 16 px corners.
+	-- The card: fixed pixels, white paper, 18 px corners, below the title/(i) room.
 	local cardFrame = Instance.new("Frame")
 	cardFrame.Name = "Card"
-	cardFrame.BackgroundColor3 = Colors.Panel
+	cardFrame.BackgroundColor3 = Colors.White -- the paper gradient colours it
 	cardFrame.BorderSizePixel = 0
-	cardFrame.Position = UDim2.new()
+	cardFrame.Position = UDim2.fromOffset(0, TOP_PAD)
 	cardFrame.Size = UDim2.fromOffset(CARD.X, CARD.Y)
 	cardFrame.Parent = popRoot
-	UIKit.Corner(cardFrame, 16)
+	UIKit.Corner(cardFrame, 18)
 
 	table.clear(buttons)
 	local keyBar = buildKeyBar(popRoot)
@@ -1216,12 +1219,10 @@ local function buildCard(pad: BasePart)
 		Card = cardFrame,
 		KeyBar = keyBar,
 		Tiles = {},
-		Chips = {},
+		MutationLine = nil :: any,
 		LuckPill = nil :: any,
 		EventPill = nil :: any,
 		Price = nil :: any,
-		Shimmer = nil,
-		Sparkle = nil,
 		Signature = "",
 		Label = pad:FindFirstChild("GachaLabel"),
 		Near = false,
@@ -1307,18 +1308,6 @@ local function stepFrame()
 		popIn(view)
 	elseif not want and view.Open then
 		popOut(view)
-	end
-	if not view.PopRoot.Visible then
-		return
-	end
-	local now = os.clock()
-	local shimmer, sparkle = view.Shimmer, view.Sparkle
-	if shimmer then
-		shimmer.Rotation = (now * 90) % 360
-	end
-	if sparkle then
-		sparkle.Rotation = (now * 120) % 360
-		sparkle.TextTransparency = 0.5 + 0.5 * math.sin(now * 5)
 	end
 end
 

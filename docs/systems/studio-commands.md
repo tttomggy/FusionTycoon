@@ -58,7 +58,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `done: N passed, M failed` line always prints. **`/selftest combat`** runs
   only the combat section (weapon probes, slot-to-slot switch probes,
   release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed; starts 25 studs away so the card is closed, then the client steps onto the pad and checks the frame after the card opens; reads the card from the instance tree; every FAIL carries its measurements):
-  the card opens fully in one frame (all 6 tiles `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
+  the card opens fully in one frame (all 6 orb cells `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
   the billboard is adorned to the `GachaCardAnchor` Attachment (pixel size,
   `SizeOffset` (0, 0.5), both studs offsets zero, `AlwaysOnTop` off, `MaxDistance`
   150) whose flat (XZ) distance to the pad's centre is < 0.1 studs and which sits
@@ -72,11 +72,14 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   closes (each for the desktop and phone HUD layout via `UIKit.SetForcedPhone`;
   the window itself can't be resized from a script);
   tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
-  event, the luck pill, black "?" orbs, the (i) panel sums; all 6 tiles drawn
-  with a % ≥ 12 px tall; no `ViewportFrame`, no `CanvasGroup`, only
+  event, the luck pill, solid black (no "?") orbs, the (i) panel sums; all 6 cells drawn
+  with a % ≥ 12 px tall; the PS99 face (white paper + light rim, the 26 px title
+  and the (i) centred on the top edge, bare cells with no tile background or
+  ribbon, ONE mutation line holding every mutation's %, a coin + price that
+  matches the pull cost or `FREE` centred on the bottom edge); no `ViewportFrame`, no `CanvasGroup`, only
   `PopScale` besides the phone's `PhoneScale`, no `GachaBoard`;
   a modal (the (i) panel) hides the card and it comes back; the key bar's 3
-  buttons (E / R / T) each ≥ 44 px, drawn, and E / R / T bound through
+  round buttons (E / R / T, R bigger, captions `Pull` / `×10` / `Auto`) each ≥ 44 px (sides 56 design px on the phone layout), drawn, and E / R / T bound through
   `ContextActionService` (unbound 25 studs away, bound again back on the pad);
   text fits;
   server side: `RequestGachaPull` from 25 studs is refused (TooFar) and costs

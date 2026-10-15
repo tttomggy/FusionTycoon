@@ -351,8 +351,9 @@ PlotLayout.Station = {
 	price) shows. Defined after Station: the anchor is computed from its numbers.
 ]]
 PlotLayout.Gacha = {
-	CardPx = Vector2.new(300, 204), -- the card, in logical px
-	ButtonRowPx = 72, -- the E / R / T row under it
+	CardPx = Vector2.new(300, 196), -- the white card body, in logical px
+	TopPadPx = 38, -- room above the card: the title and (i) sit half on its top edge, the event chip above the title
+	ButtonRowPx = 90, -- under the card: 10 gap + the 62 px R circle + its caption
 	-- Above the capsule's top at its highest bob (+ 0.7), from the pad top: 5.8.
 	AnchorUpStuds = (PlotLayout.Station.CapsuleY + PlotLayout.Station.CapsuleDiameter / 2 + PlotLayout.Station.CapsuleBob + 0.7) - PlotLayout.Station.PadTopY,
 	MaxDistance = 150,

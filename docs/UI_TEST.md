@@ -1813,9 +1813,14 @@ person, R15, 100% camera zoom; check each from the front and the side.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
 - [ ] **Gacha pop-up card** (Studio, any camera): walk up to YOUR Gacha Pad:
-  at about 16 studs a compact card (300 × 204 px + the E / R / T row) pops up
-  **right on top of the pad, in the world**, all 6 coloured tiles at once, the
-  same pixel size at any zoom. Stop in front of the pad (you don't need to stand
+  at about 16 studs a **white Pet-Sim-99-style card** (300 × 196 px + the round
+  E / R / T buttons) pops up **right on top of the pad, in the world**, all 6
+  orbs at once, the same pixel size at any zoom. Look: "Gacha Pad" sits on the
+  card's top edge, a blue (i) on its top-right corner, big orbs with the % in
+  the tier colour over their bottoms (no tile backgrounds), one line of
+  coloured mutation odds bottom left, a gold coin + price on the bottom edge,
+  and three round blue buttons just over the ball (R in the middle, bigger;
+  captions Pull / ×10 / Auto). Stop in front of the pad (you don't need to stand
   on it) and press E / R / T. Turn the camera: the card stays on the pad and
   doesn't slide, at any angle or zoom. It floats **above the yellow ball** with
   the ball fully visible under it (it never covers the ball or the pad).
@@ -1824,7 +1829,7 @@ person, R15, 100% camera zoom; check each from the front and the side.
   pull something with a reveal card: the card hides and comes back after. It is
   hidden while you are ragdolled or carrying an orb. No
   "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK
-  console is that console's own). A never-found tier is a black orb with "?" but
+  console is that console's own). A never-found tier is a solid black orb (no "?") but
   keeps its %. Press E, R and T (X / Y / RB on a controller): E and R pull, T
   turns green (**Auto ON**) and keeps pulling one orb about every second until
   you press T again, walk away or run out of cash ("Auto pull stopped: need

@@ -46,9 +46,10 @@ a screen-space follower were tried and rejected. Fix: pixel size, anchored to
 the PAD (you pull with E / R / T from `PromptDistance` + 3 studs, so you stand
 in front of it and see the card over it).
 - **Billboard:** `Adornee` = an `Attachment` `GachaCardAnchor` on the pad, `Size`
-  = 300 × 276 px (the 300 × 204 card + the 72 px E / R / T row; 0.8 on a phone
-  through one `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5)
-  so it grows upward from the anchor (the key bar's bottom edge is on it).
+  = 300 × 324 px (38 px of room above for the title / (i) / event chip + the
+  300 × 196 card + the 90 px E / R / T row; 0.8 on a phone through one
+  `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5) so it grows
+  upward from the anchor (the captions' bottom edge is on it).
   `StudsOffset` and `StudsOffsetWorldSpace` stay zero and are never written.
   **Why an Attachment:** the pad is a cylinder turned 90° about Z (StationKit),
   so its local +Y points sideways; an offset on the pad itself (`(0, Size.Y/2 +
@@ -80,17 +81,34 @@ in front of it and see the card over it).
 - **Visibility follows the character, not the camera:** the distance from your
   `HumanoidRootPart` to the pad; inside 16 studs it opens, beyond 19 it closes
   (the gap stops flicker).
-- **The card (design px):** dark violet `Panel`, 3 px gold stroke, 16 px
-  corners. Header (28 px): "🔮 GACHA PAD", the `🍀 Luck ×N` pill only when luck
-  > 1, the live event chip, an (i) (26 px with a 44 px hit area). Six tier
-  tiles 3 × 2 (88 × 58, gap 6): tier gradient, a 26 px 2D orb, the % (18 px,
-  white, tier-colour stroke), the tier name on a 12 px ribbon; Secret has an
-  animated rainbow stroke. A never-found tier is a black orb with "?" and STILL
-  shows its %. Mutation chips (16 px, "✨13.8%") bottom left, the gold price
-  pill bottom right.
-- **The key bar** (56 px round buttons, ≥ 44 px even at the phone's 0.8):
-  `[E] Pull · $285`, `[R] ×10 · $3.5K`, `[T] Auto · OFF / ON`. Desktop shows the
-  key caps, a controller the X / Y / RB glyphs, touch words. It does **not** use
+- **The card (design px) — restyled to match Pet Sim 99's egg card
+  (`GACHA_CARD_PS99_STYLE`):** a 300 × 196 **white** card (`UITheme.Colors.CardPaper`
+  with a soft `CardPaperShade` diagonal as a UIGradient — no pattern asset —
+  and a 3 px `CardPaperStroke` rim, 18 px corners). No dark panel, gold rim or
+  header bar. "Gacha Pad" (Display 26, white, ink stroke) is centred on the
+  card's top edge at x 10; the `🍀 Luck ×N` pill (only when luck > 1) just right
+  of it, the live event chip on its own row above the title. (i): a 34 px
+  `Gradients.Blue.Top` circle, 3 px white rim, right edge 6 px inside the
+  corner, centre on the top edge, a 56 px hit area (opens the per-orb panel).
+  **Orb grid:** 3 × 2 cells of 92 × 82 (gap 4), no tile backgrounds or ribbons:
+  a 58 px 2D `UIKit.TierOrb`, its % (22 px Display, tier accent, 2 px ink stroke
+  over a 3 px white outline — two labels, `Percent` over `PercentOutline`)
+  overlapping the orb's bottom by ~10 px. A never-found tier is a **solid black
+  orb**, same size, no "?", and STILL shows its %. Secret has a soft rainbow
+  glow behind the orb (no animated stroke). **Mutation odds** (Paid Random
+  Items): ONE 12 px rich-text line inside the bottom-left
+  (`✨6.9%  💎1.4%  🌈0.17%`, each value in its mutation colour, ink stroke; 10 px
+  when more than four). **Price:** a 16 px gold coin + the amount (24 px
+  Display, gold, ink stroke; `FREE` during the tutorial pulls) centred on the
+  card's bottom edge at the right.
+- **The key bar** (10 px under the card): round solid-`Gradients.Blue.Top`
+  buttons with a 4 px white rim and a soft ink shadow — E (Pull) and T (Auto)
+  52 px, R (×10) 62 px in the centre; on a phone the sides are 56 px so they are
+  ≥ 44 px after the 0.8. The key letter inside (Display 28, white, ink stroke; a
+  controller shows its glyph; touch uses the same circles as tap targets), a
+  white 14 px caption under each: `Pull`, `×10`, `Auto` (T's circle turns green
+  and reads `Auto ON` while it runs). Prices are on the card, not the buttons
+  (the ×10 price is no longer shown). It does **not** use
   `ProximityPrompt` UI: the pad's Pull / Pull ×10 / Help prompts are disabled
   on the server (still wired to the same function) AND kept off on this client.
   (The "H · How it works" you may still see is the LOCK console's own prompt.)
