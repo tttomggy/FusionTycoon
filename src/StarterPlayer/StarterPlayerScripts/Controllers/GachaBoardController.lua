@@ -17,21 +17,17 @@
 	  * BillboardGui: Adornee = the pad, Size = (300, 276) px, SizeOffset
 	    (0, 0.5) so it grows UPWARD from the anchor (its bottom edge, the key
 	    bar's, is on the anchor), StudsOffsetWorldSpace (0, pad half-height +
-	    UpStuds, 0) with UpStuds = 3 (just above the floating capsule orb), centred on the
-	    pad, no backward shift. AlwaysOnTop false, LightInfluence 0,
+	    UpStuds, 0) with UpStuds = PlotLayout.Gacha.AnchorUpStuds (5.8, computed
+	    from the capsule's numbers: its top at the highest bob + 0.7, so the
+	    card sits ABOVE the ball and never covers it), centred on the pad, no
+	    backward shift. Set once when built; it never changes (no zoom or
+	    top-of-screen logic). AlwaysOnTop false, LightInfluence 0,
 	    MaxDistance 150, ResetOnSpawn false. No CanvasGroup.
 	  * Pop: in at PopInStuds (16) from your character to the pad, out at
 	    PopOutStuds (19); one UIScale 0.85 -> 1 over 0.12 s (Quad).
 	  * While it is open it hides what it would cover: the pad's small GACHA /
 	    price label and your VIP head chip (restored on close). The pad's own
 	    prompts stay off.
-	  * Standing on the pad with a close camera the top could clip. Guard
-	    (FitAnchor): on open, on a viewport / layout change and when the zoom
-	    (camera to character) changes by more than 2 studs (never per frame,
-	    never from a yaw), the card's top is projected; if it would be above
-	    TopStack.GetBottom() + 8 the anchor is LOWERED (never raised above 3
-	    studs) down to a floor of pad top + 0.5. Turning the camera never moves
-	    it.
 	  * Hidden (with the pop) while any overlay (modal / big card) is open,
 	    during a ragdoll and while carrying, and back after.
 	  * Built ONCE, hidden, as soon as your pad exists. A refresh only updates
@@ -74,7 +70,6 @@
 ]]
 local Players = game:GetService("Players")
 local ContextActionService = game:GetService("ContextActionService")
-local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -95,7 +90,6 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TycoonController = require(script.Parent.TycoonController)
-local TopStack = require(script.Parent.Parent.UI.TopStack)
 local ToastController = require(script.Parent.ToastController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 
@@ -197,8 +191,7 @@ type CardView = {
 	Near: boolean, -- the character is close (the open side of the distance hysteresis)
 	Open: boolean, -- the card is up (near AND nothing is covering it)
 	Tween: Tween?,
-	UpStuds: number, -- the anchor above the pad's top (3, lowered only if the top would clip)
-	ZoomAt: number, -- the camera-to-character distance the anchor was last fitted at
+	UpStuds: number, -- the anchor above the pad's top: above the capsule ball, set once
 	VipTag: BillboardGui?, -- your head chip while it is hidden by the card
 }
 
@@ -1072,7 +1065,6 @@ local function popIn(view: CardView)
 		view.Tween = nil
 	end
 	view.Open = true
-	GachaBoardController.FitAnchor()
 	view.PopRoot.Visible = true
 	setLabelEnabled(view, false)
 	hideVipTag(view, true)
@@ -1132,51 +1124,6 @@ local function setUpStuds(view: CardView, up: number)
 	view.UpStuds = up
 	-- World space (StudsOffset is camera-relative and would swing with the view).
 	view.Billboard.StudsOffsetWorldSpace = Vector3.new(0, view.Pad.Size.Y / 2 + up, 0)
-end
-
--- Camera to character: the zoom, which does not change when the camera turns.
-local function zoomDistance(): number?
-	local camera = Workspace.CurrentCamera
-	local character = localPlayer.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if camera and root and root:IsA("BasePart") then
-		return (camera.CFrame.Position - root.Position).Magnitude
-	end
-	return nil
-end
-
--- The top-of-screen guard. The card's bottom is the anchor's screen point and
--- its top is its (pixel) height above that; if the top would be above
--- TopStack's bottom + SafeMargin the anchor is lowered in 0.25-stud steps from
--- AnchorUpStuds (never above it) to the floor AnchorFloorStuds. Runs on open,
--- on a viewport / layout change and when the zoom changed by > 2 studs.
-function GachaBoardController.FitAnchor()
-	local view = card
-	local camera = Workspace.CurrentCamera
-	if not view or not camera then
-		return
-	end
-	applyPhoneScale(view)
-	view.ZoomAt = zoomDistance() or view.ZoomAt
-	local scale = if UIKit.IsPhone() then UITheme.PhoneScale else 1
-	local heightPx = FULL_SIZE.Y * scale
-	local minTop = (TopStack.GetBottom() + G.SafeMargin) * scale + GuiService:GetGuiInset().Y
-	local base = view.Pad.Position + Vector3.new(0, view.Pad.Size.Y / 2, 0)
-	local best = G.AnchorUpStuds
-	local up = G.AnchorUpStuds
-	while true do
-		local projected = camera:WorldToViewportPoint(base + Vector3.new(0, up, 0))
-		if projected.Z <= 0 or projected.Y - heightPx >= minTop then
-			best = up
-			break
-		end
-		if up <= G.AnchorFloorStuds then
-			best = G.AnchorFloorStuds
-			break
-		end
-		up = math.max(G.AnchorFloorStuds, up - 0.25)
-	end
-	setUpStuds(view, best)
 end
 
 -- Is something covering the card, or is the character not fit to use it?
@@ -1261,7 +1208,6 @@ local function buildCard(pad: BasePart)
 		Open = false,
 		Tween = nil,
 		UpStuds = G.AnchorUpStuds,
-		ZoomAt = 0,
 		VipTag = nil,
 	} :: CardView
 	buildContent(view, cardFrame)
@@ -1343,11 +1289,6 @@ local function stepFrame()
 	end
 	if not view.PopRoot.Visible then
 		return
-	end
-	-- The top-of-screen guard re-checks only when the zoom changed (never on a turn).
-	local zoom = zoomDistance()
-	if zoom and math.abs(zoom - view.ZoomAt) > G.ZoomRecheckStuds then
-		GachaBoardController.FitAnchor()
 	end
 	local now = os.clock()
 	local shimmer, sparkle = view.Shimmer, view.Sparkle
@@ -1512,18 +1453,11 @@ function GachaBoardController.Init()
 		refresh()
 	end)
 	RunService.RenderStepped:Connect(stepFrame)
-	-- Re-fit the top-of-screen guard when the layout changes (never per frame).
-	UIKit.LayoutChanged:Connect(GachaBoardController.FitAnchor)
-	local function watchViewport()
-		local camera = Workspace.CurrentCamera
-		if camera then
-			camera:GetPropertyChangedSignal("ViewportSize"):Connect(GachaBoardController.FitAnchor)
+	-- The phone's 0.8 follows the HUD layout; the anchor itself never changes.
+	UIKit.LayoutChanged:Connect(function()
+		if card then
+			applyPhoneScale(card)
 		end
-	end
-	watchViewport()
-	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
-		watchViewport()
-		GachaBoardController.FitAnchor()
 	end)
 	task.spawn(function()
 		while true do

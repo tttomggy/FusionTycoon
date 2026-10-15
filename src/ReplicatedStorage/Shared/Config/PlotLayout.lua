@@ -92,30 +92,6 @@ PlotLayout.LOCK_CONSOLE = v3(10, 0, 27)
 PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
---[[ Gacha pop-up card ---------------------------------------------------------------
-	A pixel-sized BillboardGui adorned to YOUR Gacha Pad (GachaBoardController),
-	floating over it and opening as you walk up (Pet Sim 99's egg card). FINAL
-	placement: not docked, not following the camera. SizeOffset (0, 0.5), so it
-	grows upward from the anchor (pad top + AnchorUpStuds, just above the
-	capsule orb, centred on the pad). Standing on the pad with a close camera it
-	could clip the top of the screen; then (and only then) the anchor is LOWERED
-	toward AnchorFloorStuds until the top is under TopStack. Far away (and on
-	other players' pads) the small server GachaLabel (name + price) shows.
-]]
-PlotLayout.Gacha = {
-	CardPx = Vector2.new(300, 204), -- the card, in logical px
-	ButtonRowPx = 72, -- the E / R / T row under it
-	AnchorUpStuds = 3, -- the anchor: the pad's top + this (never raised above it)
-	AnchorFloorStuds = 0.5, -- the lowest the top-of-screen guard may take it
-	ZoomRecheckStuds = 2, -- the guard re-checks when the zoom changed by more than this
-	SafeMargin = 8, -- px kept under TopStack
-	MaxDistance = 150,
-	PopInStuds = 16, -- the card opens when the character is closer than this to the pad
-	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
-	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
-	PopFromScale = 0.85,
-}
-
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind
 -- the first, between its pairs) only with the +2 Pedestals pass (ShopConfig:
 -- 4 base, 6 with the pass); without it they're a dim plinth with a locked
@@ -363,6 +339,27 @@ PlotLayout.Station = {
 	ArrowBobPeriod = 1.2,
 
 	GhostTransparency = 0.5,
+}
+
+--[[ Gacha pop-up card ---------------------------------------------------------------
+	A pixel-sized BillboardGui adorned to YOUR Gacha Pad (GachaBoardController),
+	floating over it and opening as you walk up (Pet Sim 99's egg card). FINAL
+	placement: not docked, not following the camera. SizeOffset (0, 0.5), so it
+	grows upward from the anchor, which sits ABOVE the capsule ball (the ball's
+	top at its highest bob + 0.7), centred on the pad, and never moves. Far
+	away (and on other players' pads) the small server GachaLabel (name +
+	price) shows. Defined after Station: the anchor is computed from its numbers.
+]]
+PlotLayout.Gacha = {
+	CardPx = Vector2.new(300, 204), -- the card, in logical px
+	ButtonRowPx = 72, -- the E / R / T row under it
+	-- Above the capsule's top at its highest bob (+ 0.7), from the pad top: 5.8.
+	AnchorUpStuds = (PlotLayout.Station.CapsuleY + PlotLayout.Station.CapsuleDiameter / 2 + PlotLayout.Station.CapsuleBob + 0.7) - PlotLayout.Station.PadTopY,
+	MaxDistance = 150,
+	PopInStuds = 16, -- the card opens when the character is closer than this to the pad
+	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
+	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
+	PopFromScale = 0.85,
 }
 
 --[[ Pad faces (stations + machine floor) -------------------------------------

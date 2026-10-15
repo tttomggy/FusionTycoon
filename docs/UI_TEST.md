@@ -1817,11 +1817,10 @@ person, R15, 100% camera zoom; check each from the front and the side.
   **right on top of the pad, in the world**, all 6 coloured tiles at once, the
   same pixel size at any zoom. Stop in front of the pad (you don't need to stand
   on it) and press E / R / T. Turn the camera: the card stays on the pad and
-  doesn't slide. Stand ON the pad with the camera close behind you: the top of
-  the card stays under the top bar (the card sits lower over the pad, never
-  off the top of the screen). While it is up the small GACHA + price label and
-  your VIP chip are hidden; they come back when you walk away (past 19 studs it
-  pops down). On a short phone the card is 0.8. Open the (i) panel, the Shop or
+  doesn't slide, at any angle or zoom. It floats **above the yellow ball** with
+  the ball fully visible under it (it never covers the ball or the pad).
+  While it is up the small GACHA + price label and your VIP chip are hidden;
+  they come back when you walk away (past 19 studs it pops down). On a short phone the card is 0.8. Open the (i) panel, the Shop or
   pull something with a reveal card: the card hides and comes back after. It is
   hidden while you are ragdolled or carrying an orb. No
   "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK

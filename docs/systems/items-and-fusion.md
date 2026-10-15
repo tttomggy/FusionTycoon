@@ -49,8 +49,8 @@ in front of it and see the card over it).
   + the 72 px E / R / T row; 0.8 on a phone through one `PhoneScale` UIScale
   about the bottom line), `SizeOffset` (0, 0.5) so it grows upward from the
   anchor (the key bar's bottom edge is on it), `StudsOffsetWorldSpace` (0, pad
-  half-height + `AnchorUpStuds` 3, 0): pad top + 3 studs, just above the
-  capsule orb, centred, no backward shift (world space on purpose:
+  half-height + `AnchorUpStuds`, 0): pad top + 5.8 studs, above the capsule
+  ball, centred, no backward shift (world space on purpose:
   `StudsOffset` is camera-relative and would swing with the view).
   `AlwaysOnTop` false, `LightInfluence` 0, `MaxDistance` 150, `ResetOnSpawn`
   false, no `CanvasGroup`.
@@ -58,12 +58,13 @@ in front of it and see the card over it).
   `PopOutStuds` (19); one `PopScale` UIScale 0.85 → 1 over 0.12 s (Quad).
 - **Covers:** while open it hides the pad's small `GACHA` / price label and your
   own `VipTag` head chip (restored on close); the pad's prompts stay off.
-- **Top-of-screen guard** (`FitAnchor`): standing on the pad with a close
-  camera the top could clip. On open, on a viewport / `LayoutChanged` and when
-  the zoom (camera to character) changes by more than 2 studs (never per frame,
-  never from a yaw), the card's top is projected; above `TopStack.GetBottom()`
-  + 8 the anchor is LOWERED (never above 3 studs) in 0.25-stud steps to a floor
-  of pad top + 0.5. Turning the camera never moves the card.
+- **Anchor never moves:** set once when the card is built, `AnchorUpStuds` =
+  (`Station.CapsuleY` + `CapsuleDiameter`/2 + `CapsuleBob` + 0.7) −
+  `Station.PadTopY` = 5.8, computed from the Station numbers so it can't drift
+  (`PlotLayout.Gacha` is defined after `Station`). The card sits ABOVE the
+  capsule ball and never covers it. (`84f67fb` used 3 = the middle of the ball,
+  then a top-of-screen guard lowered it further; both are gone: no zoom or
+  camera logic at all.)
 - **Hidden** (the pop out, keys unbound) while any overlay is open
   (`UIKit.IsOverlayOpen`: a modal, the reveal / big result card, the (i) panel),
   during a ragdoll and while carrying; back after.
