@@ -991,7 +991,12 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	flat = if flat.Magnitude > 1 then flat.Unit else Vector3.new(-1, 0, 0)
 	local away = CFrame.new(pad.Position + flat * 25 + Vector3.new(0, pad.Size.Y / 2 + 3, 0))
 
-	-- Next to the pad: wait 0.4 s, then everything is read from the card's tree.
+	-- Start away from the pad (the card closed); the CLIENT then steps onto the
+	-- pad and checks the frame after the card opens (all 6 tiles laid out).
+	root.CFrame = away
+	task.wait(0.8)
+	tutorialProbe(player, { Kind = "GachaOpen" }, result)
+	-- On the pad: wait 0.4 s, then everything is read from the card's tree.
 	root.CFrame = onPad
 	task.wait(0.4)
 	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player) }, result)

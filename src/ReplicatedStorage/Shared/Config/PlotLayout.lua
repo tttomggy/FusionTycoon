@@ -93,36 +93,31 @@ PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
 --[[ Gacha pop-up card ---------------------------------------------------------------
-	No physical board. A BillboardGui card (GachaBoardController) pops up
-	above YOUR Gacha Pad when your CHARACTER walks near it (Pet Simulator 99 /
-	Bubble Gum Simulator style). Sized in STUDS so it scales with zoom like a
-	world object; visibility follows the character's distance to the pad, not
-	the camera's. Far away (and on other players' pads) the small server
-	GachaLabel (name + price) shows instead.
+	No physical board. A FIXED PIXEL-SIZE BillboardGui card (GachaBoardController)
+	pops up just above YOUR character's head on your Gacha Pad when your
+	CHARACTER walks near it, the way Pet Simulator 99 / Bubble Gum Simulator
+	egg cards work: the same size on screen at any zoom (so never off-screen
+	and always readable), anchored in the world at the head. The studs-sized,
+	UIScale-fitted version (11 x 7.5, then 7 x 4.8 studs) fed back on its own
+	on-screen size and drew in pieces; it is gone. Far away (and on other
+	players' pads) the small server GachaLabel (name + price) shows instead.
 ]]
 PlotLayout.Gacha = {
-	CardStuds = Vector2.new(7, 4.8), -- the BillboardGui's size in studs (it covered half the screen at 11 x 7.5)
-	DesignCanvas = Vector2.new(600, 410), -- the layout is built at this size, then scaled (UIScale) to the studs
-	-- Never more than this share of the viewport height: each frame the card's
-	-- on-screen height is computed from the camera distance and a UIScale
-	-- (ClampScale) shrinks it below that, on top of the pop scale.
-	MaxScreenShare = 0.38,
-	-- Studs from the pad top to the card's bottom edge. A character is ~5.4
-	-- studs tall on the pad, so the card sits right at head height; with the
-	-- DEFAULT camera (12.5 studs behind, FOV 70) the top edge is at about 0.83
-	-- of the screen height and the card is ~27% of it. /selftest projects the
-	-- four corners.
-	BottomAbovePad = 5,
+	CardPx = Vector2.new(300, 204), -- the card, in screen pixels
+	ButtonRowPx = 72, -- the E / R / T row under it (same billboard, so it is clickable)
+	PhoneScale = 0.8, -- the one UIScale on a phone (UIKit.IsPhone)
+	-- The card's BOTTOM edge sits this far above the top of the character's
+	-- head (measured from the real character: the monkey avatar is short).
+	HeadClearanceStuds = 1,
+	DefaultHeadStuds = 5, -- the head's height over the pad until a character is there
 	-- Plot-local shift of the card, away from the walkway (x = 0; the pad is
-	-- at +20), through StudsOffsetWorldSpace: it never sits over your character.
-	BackOffset = Vector3.new(2, 0, 0),
+	-- at +20), through StudsOffsetWorldSpace: above and slightly behind you.
+	BackOffset = Vector3.new(2.5, 0, 0),
 	PopInStuds = 16, -- the card pops IN when the character is closer than this to the pad
 	PopOutStuds = 19, -- ... and OUT beyond this (the gap stops flicker)
-	PopInSeconds = 0.2, -- UIScale 0.6 -> 1, Back-Out
-	PopOutSeconds = 0.12, -- UIScale 1 -> 0.6
-	PopFromScale = 0.6,
+	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
+	PopFromScale = 0.85,
 	MaxDistance = 150, -- the camera's zoom never hides it
-	KeyBarGap = 8, -- px between the card's bottom edge and the key bar
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind

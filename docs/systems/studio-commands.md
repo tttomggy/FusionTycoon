@@ -57,14 +57,18 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   FAIL named after it (`combat SlapGlove: no report from the client`); the
   `done: N passed, M failed` line always prints. **`/selftest combat`** runs
   only the combat section (weapon probes, slot-to-slot switch probes,
-  release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed, stands the character next to the pad, waits 0.4 s, reads the card from the instance tree; teleports 25 studs away and back to check the pop-out / pop-in and the small GACHA label; projects the card's four corners at 1366×768 and 844×390 at the default camera; every FAIL carries its measurements)
-  (tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
-  event, the luck pill, silhouettes, the (i) panel sums; the card Enabled at
-  UIScale 1 with all 6 tiles drawn, orbs, % ≥ 12 px tall on screen, no
-  `CanvasGroup`, no `GachaBoard`; the key bar's 3 buttons (E / R / T) each
-  ≥ 44 px, drawn, and E / R / T bound through `ContextActionService` (unbound
-  25 studs away, bound again back on the pad); the card ≤ 38% of the viewport
-  height (live and by the clamp math at 1366×768 and 844×390); text fits;
+  release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed; starts 25 studs away so the card is closed, then the client steps onto the pad and checks the frame after the card opens; reads the card from the instance tree; teleports away and back to check the close / open and the small GACHA label; every FAIL carries its measurements):
+  the card opens fully in one frame (all 6 tiles `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
+  tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
+  event, the luck pill, black "?" orbs, the (i) panel sums; all 6 tiles drawn
+  with a % ≥ 12 px tall; no `ViewportFrame`, no `CanvasGroup`, exactly 1
+  `UIScale` besides the phone's, no `GachaBoard`; the anchor 1 stud over the
+  real head and 2.5 studs back; the key bar's 3 buttons (E / R / T) each
+  ≥ 44 px, drawn, and E / R / T bound through `ContextActionService`
+  (unbound 25 studs away, bound again back on the pad); text fits; the card's
+  on-screen size is the same with the camera 8 and 30 studs away (± 2 px);
+  the whole card + button row on screen at 1366×768 and 844×390 at the default
+  zoom and max zoom-out;
   server side: `RequestGachaPull` from 25 studs is refused (TooFar) and costs
   nothing, Auto pull from 25 studs does not start, and at $0 a pull is refused
   and Auto pull stops at once with the reason and the price; cash is given back);

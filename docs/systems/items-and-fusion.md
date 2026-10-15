@@ -36,62 +36,77 @@ with a max of 18). The **Index** (`IndexConfig`, 119 entries =
 survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
-**Gacha pop-up card** (`Controllers/GachaBoardController`, client only): the
-odds are a BillboardGui card that pops up above YOUR Gacha Pad when your
-CHARACTER walks close (Pet Simulator 99 / Bubble Gum Simulator egg card).
-There is no physical board (the board attempt was dropped; the earlier
-camera-distance billboard failed for three reasons, each fixed here):
-1. **Sized in studs** (`PlotLayout.Gacha.CardStuds` 7 × 4.8, `Size =
-   UDim2.new(7, 0, 4.8, 0)`; it covered half the screen at 11 × 7.5), so it
-   scales with zoom like a world object; the layout is built at a 600 × 410
-   design canvas and scaled by a `UIScale` (`FitScale`) from the billboard's
-   on-screen size. A second `UIScale` (`ClampScale`) keeps it at most
-   `MaxScreenShare` = 38% of the viewport height, computed each frame from
-   the camera distance (`ClampScaleFor`), on top of the pop scale.
-   `BottomAbovePad` = 5 studs puts the bottom edge at head height, and
-   `StudsOffsetWorldSpace` shifts it 2 studs back, away from the walkway
-   (`BackOffset`, plot-local +X), so it never sits over your character.
-   `/selftest gacha` projects the four corners and the key bar at 1366 × 768
-   and 844 × 390 and checks the share live and by the clamp math.
-2. **Visibility follows the character, not the camera:** each frame the
-   distance from your `HumanoidRootPart` to the pad; inside 16 studs it pops
-   in (`Enabled`, `UIScale` 0.6 → 1 in 0.2 s, Back-Out), beyond 19 it pops
-   out (1 → 0.6 in 0.12 s, then `Enabled` off); `MaxDistance` 150.
-3. **No `CanvasGroup`**; the pop is a `UIScale` only.
-Far away, and on other players' pads, the small server `GachaLabel` (name +
-price, no odds lines) shows; the controller hides it while the card is up.
-Content (unchanged from the board): violet glass in a gold rim with diagonal
-stripes, a gold header ribbon (capsule icon, GACHA PAD, your (i) button), the
-`🍀 Luck ×N` pill and the live event chip, six tier tiles (tier gradient, a
-spinning 3D orb in a `ViewportFrame` built by `PedestalVisuals.BuildCarryOrb`,
-the % huge in white with a tier-coloured stroke, a name ribbon; Secret has an
-animated rainbow stroke and a sparkle; orbs spin only while the card is
-open), mutation chips, a gold price pill. A never-found tier is a black
-silhouette orb with "?" and STILL shows its %.
-**The key bar** is inside the same billboard, under the card (pops with it):
-`[E] Pull · $285`, `[R] ×10 · $3.5K`, `[T] Auto · OFF / ON` (round buttons
-≥ 44 px; desktop shows the key caps, a controller X / Y / RB glyphs, touch
-words). It does **not** use `ProximityPrompt` UI (the old buttons waited for
-`PromptShown`, which never fired): the pad's Pull / Pull ×10 / Help prompts
-are disabled (still wired to the same function). While the card is open
-E / R / T (X / Y / RB) are bound with `ContextActionService`, unbound when it
-pops out; out of reach the key is passed on. They send `RequestGachaPull
-{ Count = 1 | 10 }` and `SetAutoPull { On }` (TycoonService validates: data
-loaded, your own pad, root within `PromptDistance + GachaConfig.RangeSlack`
-studs, rate-limited) and run the **one** pull function `createGachaStation`
-also gives the prompts (never a second copy). The tutorial's big PULL button
-sends the same remote. "How it works" is the first section of the (i) panel.
-**Auto pull (T)**, free for everyone (see monetization.md): the server pulls
-one single pull every `GachaConfig.AutoPullSeconds` (1.2 s) until you can't
-afford it, walk more than `PromptDistance + 3` studs away, start carrying,
-die, leave or press T again; `AutoPullState { On, Reason?, Cost? }` turns the
-T button green and toasts why it stopped ("Auto pull stopped: need $285").
-Each auto pull sends `GachaPullResult { Auto = true }`, so it follows the
-**reveal rule** like Auto-Fuse: no big card for every Common, only the small
-skipped line. Numbers: `FusionConfig.GetGachaOddsRows(luck,
-event)` is the single source (see below). Every UI selftest reads the
-instance tree (`AbsoluteSize` > 0 on both axes, `Visible` up the chain,
-`TextBounds.Y` > 0) and every FAIL carries its measurements in `Detail`.
+**Gacha pop-up card** (`Controllers/GachaBoardController`, client only), done
+the Pet Simulator 99 / Bubble Gum Simulator way: a **fixed pixel-size**
+`BillboardGui` (`PlotLayout.Gacha`: a 300 × 204 card + a 72 px key-bar row =
+`UDim2.fromOffset(300, 276)`) that pops up just above YOUR character's head on
+YOUR Gacha Pad when your CHARACTER walks close. It is the same size on screen
+at any zoom, so it is never off-screen and always readable. The earlier
+studs-sized versions (11 × 7.5, then 7 × 4.8 studs with Fit / Clamp / Pop
+UIScales) fed their own on-screen size back into their scale, and six 3D
+`ViewportFrame` orbs rendered lazily: the card drew in pieces and covered the
+top of the screen. Both are gone.
+- **Built once, hidden**, as soon as the pad exists (before the first open). A
+  refresh (every sync and 0.5 s) only updates text and colours (`updateContent`:
+  the %s, each tier's lock state, luck, the event, the chips, the price), never
+  rebuilds. 2D orbs (`UIKit.TierOrb`), no `ViewportFrame`, no `CanvasGroup`, no
+  `TextScaled`. The billboard stays `Enabled` (layout is always computed);
+  closed = its `PopRoot` hidden.
+- **Sizing:** the ONLY sizing `UIScale` is 0.8 on a phone (`UIKit.IsPhone`, set
+  on `LayoutChanged`); the pop is one more (`PopScale`, 0.85 → 1 in 0.12 s
+  Quad-Out, the same reversed on close). Both scale about the card's bottom
+  line, so the card stays on its anchor.
+- **Anchor:** `StudsOffset` puts the card's BOTTOM edge 1 stud above the top
+  of the character's actual head (`headStuds()`: sole to top of the Head, so the
+  short monkey avatar is right; re-anchored when it changes); `SizeOffset` grows
+  the billboard upward from there (the button row hangs below);
+  `StudsOffsetWorldSpace` = `PlotLayout.Gacha.BackOffset` (2.5 studs, plot-local
+  +X, away from the walkway): above and slightly behind you, never over you.
+  `AlwaysOnTop = false`, `LightInfluence = 0`, `MaxDistance = 150`,
+  `ResetOnSpawn = false`, `ClipsDescendants = false`.
+- **Visibility follows the character, not the camera:** the distance from your
+  `HumanoidRootPart` to the pad; inside 16 studs it opens, beyond 19 it closes
+  (the gap stops flicker).
+- **The card (design px):** dark violet `Panel`, 3 px gold stroke, 16 px
+  corners. Header (28 px): "🔮 GACHA PAD", the `🍀 Luck ×N` pill only when luck
+  > 1, the live event chip, an (i) (26 px with a 44 px hit area). Six tier
+  tiles 3 × 2 (88 × 58, gap 6): tier gradient, a 26 px 2D orb, the % (18 px,
+  white, tier-colour stroke), the tier name on a 12 px ribbon; Secret has an
+  animated rainbow stroke. A never-found tier is a black orb with "?" and STILL
+  shows its %. Mutation chips (16 px, "✨13.8%") bottom left, the gold price
+  pill bottom right.
+- **The key bar** (inside the same billboard, so it is clickable; 56 px round
+  buttons, ≥ 44 px even at the phone's 0.8): `[E] Pull · $285`, `[R] ×10 ·
+  $3.5K`, `[T] Auto · OFF / ON`. Desktop shows the key caps, a controller the
+  X / Y / RB glyphs, touch words. It does **not** use `ProximityPrompt` UI: the
+  pad's Pull / Pull ×10 / Help prompts are disabled on the server (still wired
+  to the same function) AND kept off on this client. While the card is open
+  E / R / T (X / Y / RB) are bound with `ContextActionService`, unbound when it
+  closes; out of reach the key is passed on. They send `RequestGachaPull
+  { Count = 1 | 10 }` and `SetAutoPull { On }` (TycoonService validates: data
+  loaded, your own pad, root within `PromptDistance + GachaConfig.RangeSlack`
+  studs, rate-limited) and run the **one** pull function `createGachaStation`
+  also gives the prompts (never a second copy). The tutorial's big PULL button
+  sends the same remote. "How it works" is the first section of the (i) panel.
+- **Auto pull (T)**, free for everyone (see monetization.md): the server pulls
+  one single pull every `GachaConfig.AutoPullSeconds` (1.2 s) until you can't
+  afford it, walk more than `PromptDistance + 3` studs away, start carrying,
+  die, leave or press T again; `AutoPullState { On, Reason?, Cost? }` turns the
+  T button green ("Auto ON") and toasts why it stopped ("Auto pull stopped: need
+  $285"). Each auto pull sends `GachaPullResult { Auto = true }`, so it follows
+  the **reveal rule** like Auto-Fuse: no big card for every Common, only the
+  small skipped line.
+- **Far away** (and on other players' pads) the small server `GachaLabel` (name
+  + price, no odds lines) shows; the controller hides it while the card is up.
+- Every UI selftest reads the instance tree (`AbsoluteSize` > 0 on both axes,
+  `Visible` up the chain, `TextBounds.Y` > 0) and every FAIL carries its
+  measurements in `Detail`. `/selftest gacha` checks: the card opens fully in
+  one frame; the same on-screen size with the camera 8 and 30 studs away
+  (± 2 px); the whole card + button row on screen at 1366 × 768 and 844 × 390,
+  at the default zoom and at max zoom-out; no `ViewportFrame` / `CanvasGroup`,
+  exactly 1 `UIScale` besides the phone's; no gacha prompt draws UI; the anchor
+  1 stud over the real head; odds, silhouettes, luck, the (i) sums, keys and
+  auto pull.
 Odds source: `FusionConfig.GetGachaOddsRows(luck, event)` (built on
 `GetGachaRates` and `MutationConfig.GetChance`; `FormatOdds` is built on the
 same rows), yours at `TycoonController.GetLuck()` (the server's `LuckBase`
