@@ -1822,8 +1822,10 @@ person, R15, 100% camera zoom; check each from the front and the side.
   and three round blue buttons just over the ball (R in the middle, bigger;
   captions Pull / ×10 / Auto). Stop in front of the pad (you don't need to stand
   on it) and press E / R / T. Turn the camera: the card stays on the pad and
-  doesn't slide, at any angle or zoom. It floats **above the yellow ball** with
-  the ball fully visible under it (it never covers the ball or the pad).
+  doesn't slide, at any angle or zoom. It sits **right on the yellow ball**: the
+  buttons where the ball's base is and the card above them, covering the ball
+  (the ball is hidden while the card is open and comes back when it closes);
+  the whole card is below the event bar at the default camera.
   While it is up the small GACHA + price label and your VIP chip are hidden;
   they come back when you walk away (past 19 studs it pops down). On a short phone the card is 0.8. Open the (i) panel, the Shop or
   pull something with a reveal card: the card hides and comes back after. It is

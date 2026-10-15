@@ -60,13 +60,14 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed; starts 25 studs away so the card is closed, then the client steps onto the pad and checks the frame after the card opens; reads the card from the instance tree; every FAIL carries its measurements):
   the card opens fully in one frame (all 6 orb cells `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
   the billboard is adorned to the `GachaCardAnchor` Attachment (pixel size,
-  `SizeOffset` (0, 0.5), both studs offsets zero, `AlwaysOnTop` off, `MaxDistance`
+  `SizeOffset` (0, 0.5), `StudsOffset` (0, 0, 2), `StudsOffsetWorldSpace` zero, `AlwaysOnTop` off, `MaxDistance`
   150) whose flat (XZ) distance to the pad's centre is < 0.1 studs and which sits
-  5.8 studs over the pad top (the old sideways bug showed ~9.8); with the
+  2.2 studs over the pad top, the ball's base (the old sideways bug showed ~9.8); with the
   character 8 studs in front of the pad (default camera) and with the camera
   straight above the pad, the card's horizontal centre is within 30 px of the
-  pad's projected centre, and at the approach view its bottom is above the
-  `CapsuleTop` ball on screen; the anchor never changes over 4 camera yaws or
+  pad's projected centre, and at the approach view the capsule's projected
+  centre is inside the card's rect (it covers the ball); the capsule parts have
+  `LocalTransparencyModifier` 1 while the card is open and 0 once it closes; the anchor never changes over 4 camera yaws or
   zoom 6 / 12.5 / 40; the GACHA label
   and your VIP chip are hidden while it is open and the chip is back when it
   closes (each for the desktop and phone HUD layout via `UIKit.SetForcedPhone`;

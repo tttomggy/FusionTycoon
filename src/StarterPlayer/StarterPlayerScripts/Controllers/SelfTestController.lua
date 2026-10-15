@@ -1576,8 +1576,8 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	if gui.SizeOffset ~= Vector2.new(0, 0.5) then
 		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5)"):format(tostring(gui.SizeOffset)))
 	end
-	if gui.StudsOffset ~= Vector3.zero or gui.StudsOffsetWorldSpace ~= Vector3.zero then
-		table.insert(billboardBad, ("an offset is set: StudsOffset %s, world %s"):format(tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
+	if gui.StudsOffset ~= Vector3.new(0, 0, 2) or gui.StudsOffsetWorldSpace ~= Vector3.zero then
+		table.insert(billboardBad, ("an offset is off: StudsOffset %s (wanted 0, 0, 2), world %s (wanted 0)"):format(tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
 	end
 	if flat >= 0.1 then
 		table.insert(billboardBad, ("the anchor is %.2f studs off the pad's centre (flat)"):format(flat))
@@ -1590,7 +1590,7 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	end
 	table.insert(lines, {
 		Ok = #billboardBad == 0,
-		Name = ("gacha card (%s): a pixel-size BillboardGui adorned to an Attachment straight above the pad, growing up from the anchor (pad top + 5.8 studs, above the capsule ball, no backward shift), AlwaysOnTop off, MaxDistance 150"):format(label),
+		Name = ("gacha card (%s): a pixel-size BillboardGui adorned to an Attachment straight above the pad, growing up from the anchor (pad top + 2.2 studs = the capsule ball's base, StudsOffset (0, 0, 2) toward the camera), AlwaysOnTop off, MaxDistance 150"):format(label),
 		Detail = ("Size %s, SizeOffset %s, anchor %.2f studs off the pad's centre (flat), %.2f over the pad top, MaxDistance %s%s"):format(tostring(gui.Size), tostring(gui.SizeOffset), flat, up, tostring(gui.MaxDistance), if #billboardBad > 0 then " | " .. table.concat(billboardBad, "; ") else ""),
 	})
 
@@ -1891,8 +1891,9 @@ end
 -- (XZ) distance to the pad's centre is < 0.1 studs (the card was adorned to a
 -- cylinder turned 90 degrees, so it sat ~9.8 studs sideways). (2) The card's
 -- horizontal centre on screen is within 30 px of the pad's projected centre.
--- (3) With the ball in view, the card's bottom edge is above the CapsuleTop
--- ball's projected top (smaller Y). A billboard's own AbsolutePosition is
+-- (3) With the ball in view, the capsule's projected centre (the band) is
+-- inside the card's on-screen rect (card body plus button row): the card
+-- covers the ball. A billboard's own AbsolutePosition is
 -- local to the billboard, so the screen box comes from the anchor's projection
 -- and PopRoot's (phone-scaled) size.
 local function positionProblems(card: any, camera: Camera, needBallBelow: boolean): ({ string }, string)
@@ -1918,18 +1919,18 @@ local function positionProblems(card: any, camera: Camera, needBallBelow: boolea
 	local ballText = "n/a"
 	if needBallBelow then
 		local station = pad.Parent
-		local ball = station and station:FindFirstChild("CapsuleTop", true)
+		local ball = station and station:FindFirstChild("CapsuleBand", true)
 		if ball and ball:IsA("BasePart") then
-			local ballTop = camera:WorldToViewportPoint(ball.Position + Vector3.new(0, ball.Size.Y / 2, 0))
-			ballText = ("%.0f"):format(ballTop.Y)
-			if not (box.Bottom < ballTop.Y) then
-				table.insert(problems, ("the card's bottom (y %.0f) is not above the capsule's top (y %.0f)"):format(box.Bottom, ballTop.Y))
+			local centre = camera:WorldToViewportPoint(ball.Position)
+			ballText = ("%.0f,%.0f"):format(centre.X, centre.Y)
+			if not (centre.X >= box.Left and centre.X <= box.Right and centre.Y >= box.Top and centre.Y <= box.Bottom) then
+				table.insert(problems, ("the card does not cover the ball: its centre (%.0f, %.0f) is outside the card (x %.0f-%.0f, y %.0f-%.0f)"):format(centre.X, centre.Y, box.Left, box.Right, box.Top, box.Bottom))
 			end
 		else
-			table.insert(problems, "no CapsuleTop part on the station")
+			table.insert(problems, "no CapsuleBand part on the station")
 		end
 	end
-	return problems, ("flat %.3f studs, card x %.0f-%.0f y %.0f-%.0f, pad centre x %.0f, capsule top y %s"):format(flat, box.Left, box.Right, box.Top, box.Bottom, padCentre.X, ballText)
+	return problems, ("flat %.3f studs, card x %.0f-%.0f y %.0f-%.0f, pad centre x %.0f, capsule centre %s"):format(flat, box.Left, box.Right, box.Top, box.Bottom, padCentre.X, ballText)
 end
 
 -- Approach: the server stands the character 8 studs in front of the pad on
@@ -1968,7 +1969,7 @@ local function probeGachaApproach(phone: boolean): { ProbeLine }
 	return {
 		{
 			Ok = #approachProblems == 0,
-			Name = ("gacha card (%s, %s): 8 studs in front of the pad the card is centred on the pad and its bottom is above the capsule ball"):format(layout, window),
+			Name = ("gacha card (%s, %s): 8 studs in front of the pad the card is centred on the pad and covers the capsule ball"):format(layout, window),
 			Detail = ("%.1f studs from the pad; %s%s"):format(distance, approachDetail, if #approachProblems > 0 then " | " .. table.concat(approachProblems, "; ") else ""),
 		},
 		{
@@ -2002,7 +2003,7 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 	local back = Vector3.new(1, 0, 0)
 	local moved: { string } = {}
 	local function check(what: string)
-		if (anchor.WorldPosition - want).Magnitude > 1e-3 or gui.StudsOffset ~= Vector3.zero or gui.StudsOffsetWorldSpace ~= Vector3.zero then
+		if (anchor.WorldPosition - want).Magnitude > 1e-3 or gui.StudsOffset ~= Vector3.new(0, 0, 2) or gui.StudsOffsetWorldSpace ~= Vector3.zero then
 			table.insert(moved, ("%s: anchor %s, StudsOffset %s, world %s"):format(what, tostring(anchor.WorldPosition), tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
 		end
 	end
@@ -2056,7 +2057,29 @@ local function probeGachaCovers(): { ProbeLine }
 	RunService.Heartbeat:Wait()
 	local label = card.Label
 	local labelOn = label ~= nil and label:IsA("BillboardGui") and label.Enabled
+	local function ballState(): (boolean, boolean, string)
+		local station = (card.Pad :: BasePart).Parent
+		local hidden, shown, parts = true, true, {}
+		for _, name in { "CapsuleTop", "CapsuleBottom", "CapsuleBand" } do
+			local part = station and station:FindFirstChild(name, true)
+			if part and part:IsA("BasePart") then
+				table.insert(parts, ("%s %d"):format(name, part.LocalTransparencyModifier))
+				hidden = hidden and part.LocalTransparencyModifier == 1
+				shown = shown and part.LocalTransparencyModifier == 0
+			else
+				table.insert(parts, name .. " missing")
+				hidden, shown = false, false
+			end
+		end
+		return hidden, shown, table.concat(parts, ", ")
+	end
+	local openHidden, _, openText = ballState()
 	local lines: { ProbeLine } = {
+		{
+			Ok = openHidden,
+			Name = "gacha card: while it is open the capsule ball is hidden (LocalTransparencyModifier 1 on CapsuleTop / CapsuleBottom / CapsuleBand)",
+			Detail = openText,
+		},
 		{
 			Ok = not labelOn and not chip.Enabled,
 			Name = "gacha card: while it is open the pad's GACHA label and your VIP chip are hidden",
@@ -2065,6 +2088,12 @@ local function probeGachaCovers(): { ProbeLine }
 	}
 	Board.OpenPanel()
 	task.wait(0.45)
+	local _, closedShown, closedText = ballState()
+	table.insert(lines, {
+		Ok = closedShown,
+		Name = "gacha card: after it closes (a modal covers it) the ball is shown again (LocalTransparencyModifier 0)",
+		Detail = closedText,
+	})
 	table.insert(lines, {
 		Ok = chip.Enabled,
 		Name = "gacha card: when it closes (a modal covers it) the VIP chip comes back",

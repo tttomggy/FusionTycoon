@@ -345,8 +345,9 @@ PlotLayout.Station = {
 	A pixel-sized BillboardGui adorned to YOUR Gacha Pad (GachaBoardController),
 	floating over it and opening as you walk up (Pet Sim 99's egg card). FINAL
 	placement: not docked, not following the camera. SizeOffset (0, 0.5), so it
-	grows upward from the anchor, which sits ABOVE the capsule ball (the ball's
-	top at its highest bob + 0.7), centred on the pad, and never moves. Far
+	grows upward from the anchor, which sits at the capsule ball's BASE (the
+	card covers the ball, as PS99's card covers the egg), centred on the pad,
+	and never moves. Far
 	away (and on other players' pads) the small server GachaLabel (name +
 	price) shows. Defined after Station: the anchor is computed from its numbers.
 ]]
@@ -354,8 +355,8 @@ PlotLayout.Gacha = {
 	CardPx = Vector2.new(300, 196), -- the white card body, in logical px
 	TopPadPx = 38, -- room above the card: the title and (i) sit half on its top edge, the event chip above the title
 	ButtonRowPx = 90, -- under the card: 10 gap + the 62 px R circle + its caption
-	-- Above the capsule's top at its highest bob (+ 0.7), from the pad top: 5.8.
-	AnchorUpStuds = (PlotLayout.Station.CapsuleY + PlotLayout.Station.CapsuleDiameter / 2 + PlotLayout.Station.CapsuleBob + 0.7) - PlotLayout.Station.PadTopY,
+	-- The card's bottom edge (the E / R / T row) at the capsule ball's base, so the card covers the ball like PS99's egg card.
+	AnchorUpStuds = (PlotLayout.Station.CapsuleY - PlotLayout.Station.CapsuleDiameter / 2) - PlotLayout.Station.PadTopY, -- 2.2
 	MaxDistance = 150,
 	PopInStuds = 16, -- the card opens when the character is closer than this to the pad
 	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)

@@ -18,19 +18,22 @@
 	    pad is a cylinder turned 90 degrees about Z, so an offset on the pad
 	    itself would be applied in ITS axes, sideways), Size = (300, 324) px,
 	    SizeOffset (0, 0.5) so it grows UPWARD from the anchor (its bottom
-	    edge, the key bar's, is on it); StudsOffset and StudsOffsetWorldSpace
-	    stay zero and are never written. The Attachment's WorldCFrame is set
-	    once: straight above the pad's centre, UpStuds over its top (world y),
-	    with UpStuds = PlotLayout.Gacha.AnchorUpStuds (5.8, computed
-	    from the capsule's numbers: its top at the highest bob + 0.7, so the
-	    card sits ABOVE the ball and never covers it), centred on the pad, no
-	    backward shift. Set once when built; it never changes (no zoom or
+	    edge, the key bar's, is on it); StudsOffsetWorldSpace stays zero and
+	    StudsOffset is (0, 0, 2) (camera-relative +Z = toward the camera: in
+	    front of the ball, radius 1.3; it never shifts the card sideways or up).
+	    Both are set once and never written again. The Attachment's WorldCFrame
+	    is set once: straight above the pad's centre, UpStuds over its top
+	    (world y), with UpStuds = PlotLayout.Gacha.AnchorUpStuds (2.2, computed
+	    from the capsule's numbers: the ball's BASE, so the card covers the
+	    ball like PS99's egg card), centred on the pad, no backward shift. Set once when built; it never changes (no zoom or
 	    top-of-screen logic). AlwaysOnTop false, LightInfluence 0,
 	    MaxDistance 150, ResetOnSpawn false. No CanvasGroup.
 	  * Pop: in at PopInStuds (16) from your character to the pad, out at
 	    PopOutStuds (19); one UIScale 0.85 -> 1 over 0.12 s (Quad).
 	  * While it is open it hides what it would cover: the pad's small GACHA /
-	    price label and your VIP head chip (restored on close). The pad's own
+	    price label, your VIP head chip and the capsule ball (CapsuleTop /
+	    CapsuleBottom / CapsuleBand get LocalTransparencyModifier 1, back to 0
+	    on close), so nothing pokes out around the card (restored on close). The pad's own
 	    prompts stay off.
 	  * Hidden (with the pop) while any overlay (modal / big card) is open,
 	    during a ragdoll and while carrying, and back after.
@@ -1046,6 +1049,23 @@ local function setLabelEnabled(view: CardView, enabled: boolean)
 	end
 end
 
+-- The capsule ball is replaced by the card while it is open (client-only
+-- LocalTransparencyModifier 1; 0 restores it).
+local BALL_PARTS = { "CapsuleTop", "CapsuleBottom", "CapsuleBand" }
+
+local function hideBall(view: CardView, hidden: boolean)
+	local station = view.Pad.Parent
+	if not station then
+		return
+	end
+	for _, name in BALL_PARTS do
+		local part = station:FindFirstChild(name, true)
+		if part and part:IsA("BasePart") then
+			part.LocalTransparencyModifier = if hidden then 1 else 0
+		end
+	end
+end
+
 local function hideVipTag(view: CardView, hidden: boolean)
 	if hidden then
 		local character = localPlayer.Character
@@ -1075,6 +1095,7 @@ local function popIn(view: CardView)
 	view.PopRoot.Visible = true
 	setLabelEnabled(view, false)
 	hideVipTag(view, true)
+	hideBall(view, true)
 	bindKeys()
 	if view.Pop.Scale >= 1 then
 		return
@@ -1098,6 +1119,7 @@ local function popOut(view: CardView)
 	view.Open = false
 	unbindKeys()
 	hideVipTag(view, false)
+	hideBall(view, false)
 	local tween = TweenService:Create(view.Pop, TweenInfo.new(G.PopSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.In), { Scale = G.PopFromScale })
 	view.Tween = tween
 	tween.Completed:Connect(function(state: Enum.PlaybackState)
@@ -1162,7 +1184,7 @@ local function buildCard(pad: BasePart)
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "GachaCard"
 	billboard.Adornee = anchor
-	billboard.StudsOffset = Vector3.zero
+	billboard.StudsOffset = Vector3.new(0, 0, 2) -- camera-relative +Z = toward the camera: in front of the ball (radius 1.3)
 	billboard.StudsOffsetWorldSpace = Vector3.zero
 	billboard.Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)
 	billboard.SizeOffset = Vector2.new(0, 0.5) -- grows upward: the bottom edge (the key bar's) is on the anchor
@@ -1241,6 +1263,7 @@ local function buildCard(pad: BasePart)
 	pad.Destroying:Connect(function()
 		if card == view then
 			hideVipTag(view, false)
+			hideBall(view, false)
 			card = nil
 			unbindKeys()
 		end
@@ -1328,6 +1351,9 @@ local function refresh()
 	end
 	if view.Open and not view.VipTag then
 		hideVipTag(view, true) -- a respawn builds a new VIP chip
+	end
+	if view.Open then
+		hideBall(view, true) -- the pad's parts can stream back in
 	end
 	if view.PopRoot.Visible or view.Near then
 		setLabelEnabled(view, false) -- the card is up (or about to be): no small label under it

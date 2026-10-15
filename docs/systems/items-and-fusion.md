@@ -50,26 +50,31 @@ in front of it and see the card over it).
   300 × 196 card + the 90 px E / R / T row; 0.8 on a phone through one
   `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5) so it grows
   upward from the anchor (the captions' bottom edge is on it).
-  `StudsOffset` and `StudsOffsetWorldSpace` stay zero and are never written.
+  `StudsOffsetWorldSpace` stays zero; `StudsOffset` is (0, 0, 2) (camera-relative
+  +Z = toward the camera, so the card draws in front of the 1.3-radius ball with
+  `AlwaysOnTop` off). Neither is written again.
   **Why an Attachment:** the pad is a cylinder turned 90° about Z (StationKit),
   so its local +Y points sideways; an offset on the pad itself (`(0, Size.Y/2 +
   5.8, 0)`) pushed the card ~9.8 studs sideways, never above the ball. The
   Attachment's `WorldCFrame` is set once to straight above the pad's centre,
   `AnchorUpStuds` over its top (world-axis top = centre + the oriented box's
-  half-extent on y): pad top + 5.8 studs, above the capsule ball, centred.
+  half-extent on y): pad top + 2.2 studs = the capsule ball's base, centred.
   `AlwaysOnTop` false, `LightInfluence` 0, `MaxDistance` 150, `ResetOnSpawn`
   false, no `CanvasGroup`.
 - **Pop:** in at `PopInStuds` (16) from your character to the pad, out at
   `PopOutStuds` (19); one `PopScale` UIScale 0.85 → 1 over 0.12 s (Quad).
 - **Covers:** while open it hides the pad's small `GACHA` / price label and your
-  own `VipTag` head chip (restored on close); the pad's prompts stay off.
+  own `VipTag` head chip, and **the capsule ball** (`CapsuleTop` / `CapsuleBottom` /
+  `CapsuleBand` get `LocalTransparencyModifier` 1, back to 0 on close, so the
+  card replaces the ball like PS99's card hides the egg and nothing pokes out);
+  all restored on close. The pad's prompts stay off.
 - **Anchor never moves:** set once when the card is built, `AnchorUpStuds` =
-  (`Station.CapsuleY` + `CapsuleDiameter`/2 + `CapsuleBob` + 0.7) −
-  `Station.PadTopY` = 5.8, computed from the Station numbers so it can't drift
-  (`PlotLayout.Gacha` is defined after `Station`). The card sits ABOVE the
-  capsule ball and never covers it. (`84f67fb` used 3 = the middle of the ball,
-  then a top-of-screen guard lowered it further; both are gone: no zoom or
-  camera logic at all.)
+  (`Station.CapsuleY` − `CapsuleDiameter`/2) − `Station.PadTopY` = 2.2, the
+  ball's base, computed from the Station numbers so it can't drift
+  (`PlotLayout.Gacha` is defined after `Station`). The card (buttons at the
+  ball's base, the card rising above them) covers the ball. (History: 3 = the
+  middle of the ball, then 5.8 above the ball, which floated the card high and
+  put its top under the event bar; no zoom or camera logic at all.)
 - **Hidden** (the pop out, keys unbound) while any overlay is open
   (`UIKit.IsOverlayOpen`: a modal, the reveal / big result card, the (i) panel),
   during a ragdoll and while carrying; back after.
