@@ -23,7 +23,8 @@ src/ReplicatedStorage/Shared/
                  TrailerConfig — the /trailer shots and camera,
                  DealConfig — the rotating deals,
                  TutorialConfig — the tutorial steps and "?" help,
-                 CombatConfig — weapons, ragdoll and hit rules,
+                 CombatConfig — weapons, ragdoll and hit rules, the melee box,
+                 GachaConfig — Auto pull timing and remote-pull reach,
                  QuestConfig — daily quests, the lab chain, power-ups, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and

@@ -59,7 +59,7 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
   no fake discounts or countdowns, no pressure copy, no purchase prompt
   after a loss, no Robux price typed into the UI (live prices only), and
   nothing sold that helps a thief or protects a lab (weapons and power-ups
-  are earned, never sold).
+  are earned, never sold; Auto pull is free for everyone).
 - **Light caps.** Pedestal lights (`RarityVisuals`) stay at Brightness
   0.8–1.6 and Range 8–12, the orb light at `OrbLightBrightness` 1, all with
   `Shadows = false`. Four Mythics at the old 12 / 32 washed the lab floor

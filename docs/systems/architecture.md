@@ -67,7 +67,12 @@ the file under test* — check the path on each reported line.
 
 Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`),
-`TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`), `RequestHit` (C→S),
+`TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`), `RequestHit` (C→S
+`{ Weapon, Origin?, Direction? }`; melee sends only `Weapon`, the server's box
+picks the target), `RequestGachaPull` (C→S `{ Count = 1 | 10 }`: the Gacha
+card's E / R keys, own pad within `PromptDistance + 3` studs), `SetAutoPull`
+(C→S `{ On }`: T, free for everyone), `AutoPullState` (S→C `{ On, Reason?,
+Cost? }`),
 `HitReceived` (S→target), `HitFx` (S→all), `WeaponUnlocked` (S→C),
 `ClaimQuest` (C→S `{ Id }`) / `QuestResult` (S→C), `UsePowerUp` (C→S
 `{ Key }`) / `PowerUpResult` (S→C) (no lock remote: LOCK is the console

@@ -14,12 +14,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   Roblox `Tool`s in the Backpack, given on every spawn; the default Backpack
   bar is replaced by the weapon bar (below). **Rules:** only Rebirth 1+ vs Rebirth 1+; no hits for 5 s after
   spawning; a hit ragdolls 1.5 s with knockback (+ an upward kick), then 3 s
-  immune (a shimmer). **Server authority:** `RequestHit { Weapon,
-  TargetUserId?, Origin, Direction }` (C→S) is re-checked: owned AND
-  equipped, the server cooldown (`TakeCooldown`), both sides' eligibility
-  (`WhyNotHittable`), the attacker not carrying / ragdolled, melee range
-  from the server roots + `RangeSlack` and in front, ranged by a server
-  raycast; `RemoteGuard` numbers and rate limit. The server owns Player
+  immune (a shimmer). **Server authority:** `RequestHit { Weapon, Origin?,
+  Direction? }` (C→S; a melee swing sends only the weapon) is re-checked:
+  owned AND equipped, the server cooldown (`TakeCooldown`), both sides'
+  eligibility (`WhyNotHittable`), the attacker not carrying / ragdolled,
+  melee by the server's hitbox (see "Server hitbox" below), ranged by a
+  server raycast; `RemoteGuard` numbers and rate limit. The server owns Player
   attributes `RagdollUntil` / `ImmuneUntil` / `FrozenUntil` /
   `SpawnProtectUntil` (server time), swaps Motor6Ds for
   BallSocketConstraints (replicated) and restores them; `HitReceived
@@ -159,8 +159,8 @@ never sold, server authority are unchanged.
   LAB" (`Reason = "NeedsRebirth"`), a spawn-protected one "🛡 SPAWN SAFE".
 - **No silent swings:** under Rebirth 1 with a weapon in hand (Studio
   `/weapons all`, the quest Slap Glove) a click toasts "Fighting unlocks at
-  Rebirth 1" (at most once per 3 s) and sends nothing. `meleeTarget` no
-  longer filters out Rebirth-0 players, so the server can answer the swing.
+  Rebirth 1" (at most once per 3 s) and sends nothing. The server answers
+  a swing at a Rebirth-0 player with the 🛡 pop (its box finds them).
   When the server refuses a swing (`whyCantSwing`: NeedsRebirth, NotOwned,
   NotEquipped, Carrying, Ragdolled) it tells the attacker with `HitFx { Kind
   = "Refused", Reason }` and the client toasts the reason.
@@ -256,3 +256,44 @@ the fallback probe waits for the same, always switches the force flag back
 (pcall around `Hold`) and fails if it is still on; `WeaponPose` is now also
 driven from Heartbeat when `RenderStepped` has not run for 50 ms (a Studio
 test client in a background window stalls rendering, and the C0 pose with it).
+
+## Server hitbox (melee), with a verdict line per swing
+
+Why: in 2-player Studio tests the Bat and Glove did nothing in real play while
+`/selftest combat` passed. The client picked the target (`meleeTarget`) and
+sent `TargetUserId` through `RemoteGuard.Int(value, 1, 2^53)`, and **Studio's
+local players have NEGATIVE UserIds** (-1, -2), so every melee hit was dropped
+before `ApplyHit`, silently. The selftest called `ApplyHit` directly and
+never walked the chain. Detection is now the server's, the usual Roblox way.
+
+- **Client:** `RequestHit { Weapon }` and nothing else for melee (no
+  `TargetUserId`, `meleeTarget` is gone). The swing animation, trail and sound
+  still run on the click. `CombatController.Use(weaponId)` is the function
+  `Tool.Activated` calls (and what `/selftest` calls on the attacker's client).
+- **Server:** after the usual checks (cooldown, `whyCantSwing`) the swing's
+  `Swing` HitFx goes out at once, then `CombatConfig.MeleeHitDelay` (0.15 s,
+  about the clip's `Hit` marker) later `resolveMelee` runs
+  `Workspace:GetPartBoundsInBox` on `CombatConfig.MeleeBox` (6 × 6 × 7), its
+  centre `MeleeBoxForward` (3.5) studs in front of the attacker's root along
+  its flat facing, an `OverlapParams` excluding the attacker's character. The
+  distinct characters become players (an accessory or tool part counts), nearest
+  first. The **Bat** hits the nearest one `WhyNotHittable` allows; the **Slap
+  Glove** every valid one (a sweep). Every other player in the box gets the
+  attacker-only 🛡 pop with its reason (`notifyIgnored`: Immune,
+  SpawnProtected, NeedsRebirth). Ranged and the Banana Peel are unchanged.
+- **Log (Studio, `RunService:IsStudio()`, until the combat feel is final):**
+  one line per swing, e.g.
+  `[Combat] Player1 Bat: box found [Player2 3.2 studs] -> HIT Player2`,
+  `... box found [] -> MISS`, `... box found [Player2 3.0 studs] -> Player2 Immune`.
+  `CombatService.GetLastVerdict(player)` keeps the last one (`Seq`, `Found`,
+  `Hit`, `Line`) for the selftest. `/combat box` toggles drawing the box (a red
+  transparent part for 0.2 s per swing, Studio only).
+- **Selftest (`/selftest combat`, 2 players)** now walks the whole chain:
+  Player2 is put 3 studs in front of Player1 (facing each other, immunity
+  cleared), the tool is equipped for real, **Player1's client** clicks it
+  through `CombatController.Use`, the server's verdict must say `HIT Player2`
+  and Player2 must fly (≥ 12 studs Bat, ≥ 20 Glove in 0.6 s, measured on
+  Player2's own client). Then Player2 is put 6 studs to the side, out of the
+  box (3 either side + a 4-wide avatar: at 5 an arm only just touches it): the verdict is `MISS` and Player2 does not move. The held-weapon
+  thresholds (clearance 1.5, swing peak 1.5) scale with the avatar's height
+  (× height / 5, clamped 0.6-1.0) so the small monkey avatar passes.

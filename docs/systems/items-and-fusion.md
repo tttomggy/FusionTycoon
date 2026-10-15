@@ -41,14 +41,18 @@ odds are a BillboardGui card that pops up above YOUR Gacha Pad when your
 CHARACTER walks close (Pet Simulator 99 / Bubble Gum Simulator egg card).
 There is no physical board (the board attempt was dropped; the earlier
 camera-distance billboard failed for three reasons, each fixed here):
-1. **Sized in studs** (`PlotLayout.Gacha.CardStuds` 11 × 7.5, `Size =
-   UDim2.new(11, 0, 7.5, 0)`), so it scales with zoom like a world object and
-   never runs off the screen; the layout is built at a 600 × 410 design canvas
-   and scaled by a `UIScale` (`FitScale`) from the billboard's on-screen size.
-   `BottomAbovePad` = 5 studs puts the bottom edge at head height; any higher
-   and the top edge leaves the screen at the default camera (12.5 studs
-   behind, FOV 70), which `/selftest gacha` checks by projecting the four
-   corners at 1366 × 768 and 844 × 390.
+1. **Sized in studs** (`PlotLayout.Gacha.CardStuds` 7 × 4.8, `Size =
+   UDim2.new(7, 0, 4.8, 0)`; it covered half the screen at 11 × 7.5), so it
+   scales with zoom like a world object; the layout is built at a 600 × 410
+   design canvas and scaled by a `UIScale` (`FitScale`) from the billboard's
+   on-screen size. A second `UIScale` (`ClampScale`) keeps it at most
+   `MaxScreenShare` = 38% of the viewport height, computed each frame from
+   the camera distance (`ClampScaleFor`), on top of the pop scale.
+   `BottomAbovePad` = 5 studs puts the bottom edge at head height, and
+   `StudsOffsetWorldSpace` shifts it 2 studs back, away from the walkway
+   (`BackOffset`, plot-local +X), so it never sits over your character.
+   `/selftest gacha` projects the four corners and the key bar at 1366 × 768
+   and 844 × 390 and checks the share live and by the clamp math.
 2. **Visibility follows the character, not the camera:** each frame the
    distance from your `HumanoidRootPart` to the pad; inside 16 studs it pops
    in (`Enabled`, `UIScale` 0.6 → 1 in 0.2 s, Back-Out), beyond 19 it pops
@@ -63,10 +67,28 @@ spinning 3D orb in a `ViewportFrame` built by `PedestalVisuals.BuildCarryOrb`,
 the % huge in white with a tier-coloured stroke, a name ribbon; Secret has an
 animated rainbow stroke and a sparkle; orbs spin only while the card is
 open), mutation chips, a gold price pill. A never-found tier is a black
-silhouette orb with "?" and STILL shows its %. The E / R / ? row is inside the
-same billboard, under the card (pixel-size, ≥ 44 px, pops with it); the
-three gacha prompts are `Style = Custom`, the buttons run
-`InputHoldBegin` / `End`. Numbers: `FusionConfig.GetGachaOddsRows(luck,
+silhouette orb with "?" and STILL shows its %.
+**The key bar** is inside the same billboard, under the card (pops with it):
+`[E] Pull · $285`, `[R] ×10 · $3.5K`, `[T] Auto · OFF / ON` (round buttons
+≥ 44 px; desktop shows the key caps, a controller X / Y / RB glyphs, touch
+words). It does **not** use `ProximityPrompt` UI (the old buttons waited for
+`PromptShown`, which never fired): the pad's Pull / Pull ×10 / Help prompts
+are disabled (still wired to the same function). While the card is open
+E / R / T (X / Y / RB) are bound with `ContextActionService`, unbound when it
+pops out; out of reach the key is passed on. They send `RequestGachaPull
+{ Count = 1 | 10 }` and `SetAutoPull { On }` (TycoonService validates: data
+loaded, your own pad, root within `PromptDistance + GachaConfig.RangeSlack`
+studs, rate-limited) and run the **one** pull function `createGachaStation`
+also gives the prompts (never a second copy). The tutorial's big PULL button
+sends the same remote. "How it works" is the first section of the (i) panel.
+**Auto pull (T)**, free for everyone (see monetization.md): the server pulls
+one single pull every `GachaConfig.AutoPullSeconds` (1.2 s) until you can't
+afford it, walk more than `PromptDistance + 3` studs away, start carrying,
+die, leave or press T again; `AutoPullState { On, Reason?, Cost? }` turns the
+T button green and toasts why it stopped ("Auto pull stopped: need $285").
+Each auto pull sends `GachaPullResult { Auto = true }`, so it follows the
+**reveal rule** like Auto-Fuse: no big card for every Common, only the small
+skipped line. Numbers: `FusionConfig.GetGachaOddsRows(luck,
 event)` is the single source (see below). Every UI selftest reads the
 instance tree (`AbsoluteSize` > 0 on both axes, `Visible` up the chain,
 `TextBounds.Y` > 0) and every FAIL carries its measurements in `Detail`.

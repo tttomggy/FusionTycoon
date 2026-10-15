@@ -1691,10 +1691,16 @@ local function onGachaPullResult(payload: any)
 		showEventMutationCard(newItem, payload.NewIndex == true, nil, newItem.Mutation ~= nil)
 		return
 	end
-	-- Every single pull gets the big card, at every tier and for every
-	-- player (the reveal rule in ⚙ only covers ×10, Auto-Fuse and fusions):
-	-- "YOU GOT A COMMON ORB!". Common / Rare close by themselves.
 	local tier = newItem.Tier :: string
+	-- An AUTO pull (the card's T key) follows the reveal rule like Auto-Fuse:
+	-- no big card for every Common, only the small skipped line.
+	if payload.Auto == true and not ResultController.ShowsBigCardFor(tier, newItem.Mutation) then
+		showSkippedLine(newItem)
+		return
+	end
+	-- Every manual single pull gets the big card, at every tier and for every
+	-- player (the reveal rule in ⚙ only covers ×10, Auto pull, Auto-Fuse and
+	-- fusions): "YOU GOT A COMMON ORB!". Common / Rare close by themselves.
 	local named = typeof(payload.Caption) == "string"
 	showBigCard({
 		-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").

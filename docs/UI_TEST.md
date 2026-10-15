@@ -1815,13 +1815,20 @@ person, R15, 100% camera zoom; check each from the front and the side.
 - [ ] **Gacha pop-up card** (Studio, any camera zoom): walk toward YOUR
   Gacha Pad: at about 16 studs a card pops up above the pad (a quick
   0.6 → 1 bounce) with six coloured tiles, spinning orbs, huge %s, the gold
-  price pill and the E / R / ? row under it; at the default camera the whole
+  price pill and ONE key bar under it (**[E] Pull · $285, [R] ×10 · $3.5K,
+  [T] Auto · OFF**); the card is small (about a quarter of the screen height,
+  never more than 38%, even with the camera zoomed right in), sits a little
+  to the side and never over your character; at the default camera the whole
   card is on screen, zoomed out it just gets smaller. Walk away past 19
   studs: it pops down and only the small GACHA + price label shows (the label
   is also what other players' pads show). No flicker at the edge. A
-  never-found tier is a black orb with "?" but keeps its %. E / R / ? and the
-  (i) all work (the (i) opens the ORBS & ODDS panel); on the phone emulator
-  the buttons are ≥ 44 px and tappable. `/rebirths 3` then walk up: the 🍀 Luck
+  never-found tier is a black orb with "?" but keeps its %. Press E, R and T
+  (X / Y / RB on a controller): E and R pull, T turns green (ON) and keeps
+  pulling one orb about every second until you press T again, walk away or
+  run out of cash ("Auto pull stopped: need $…"); Commons only leave a small
+  line, no big card. The (i) opens the ORBS & ODDS panel with HOW IT WORKS
+  first. No E / R / T prompt appears on the pad itself. On the phone emulator
+  the round buttons are ≥ 44 px and tappable. `/rebirths 3` then walk up: the 🍀 Luck
   pill appears and the %s change. There is no physical board in the lab.
 - [ ] **Studio test start** (Test → 2 players, no commands typed): both
   players are at Rebirth 3 with the weapon bar. Player1 bats Player2 and
@@ -1829,6 +1836,12 @@ person, R15, 100% camera zoom; check each from the front and the side.
   Player2, then hit them: "🛡 NEW LAB" over them (attacker only). `/rebirths
   0` on yourself with a weapon in hand: a click toasts "Fighting unlocks at
   Rebirth 1" at most every 3 s and nothing is sent.
+- [ ] **Melee hit** (2 players, no commands): Player1 swings the Bat at
+  Player2 point-blank. The Output shows `[Combat] Player1 Bat: box found
+  [Player2 3.2 studs] -> HIT Player2` and Player2 flies. At 5 studs to the
+  side it says `MISS`; against an immune or Rebirth-0 player it names the
+  reason (`Player2 Immune`) and the 🛡 pop shows for the attacker. `/combat
+  box` draws the hitbox in red for each swing.
 - [ ] **Knockback** (2 players): bat → ON PLAYER2'S OWN SCREEN Player2 flies
   about 15-20 studs; glove → about 25-30 with a spin; Player2 stands up and
   walks normally after (check the Explorer: no `KnockbackMover` left under the

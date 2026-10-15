@@ -57,7 +57,14 @@ CombatConfig.LaunchSeconds = 0.2 -- how long the mover is held
 CombatConfig.UpwardKick = 25 -- added to every knockback (a little hop)
 CombatConfig.HitsPerSecond = 4 -- RequestHit rate limit (spam is dropped)
 CombatConfig.HitBurst = 6
-CombatConfig.MeleeMaxAngle = 100 -- degrees off your facing a melee target may be
+-- Melee hit detection is the SERVER's: after MeleeHitDelay (about the clip's
+-- Hit marker) it boxes MeleeBox studs (X wide, Y tall, Z deep) in front of
+-- the attacker's root, its centre MeleeBoxForward studs forward, and takes
+-- the players whose characters overlap it. The Bat hits the nearest one, the
+-- Slap Glove everyone in the box. The client sends only the weapon id.
+CombatConfig.MeleeHitDelay = 0.15
+CombatConfig.MeleeBox = Vector3.new(6, 6, 7)
+CombatConfig.MeleeBoxForward = 3.5
 
 CombatConfig.SpinImpulse = Vector3.new(0, 14, 5) -- per unit of mass: a peel slip / the glove spins you
 

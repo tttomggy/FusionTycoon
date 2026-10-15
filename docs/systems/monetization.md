@@ -8,6 +8,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   pressure copy ("LAST CHANCE"), no purchase prompt after a loss, nothing
   sold that protects a lab from theft or helps a thief (an item's steal
   value is the item itself), and **no Robux price typed into the UI**.
+  **Earned or free, never sold:** weapons and power-ups, and Auto pull (the
+  Gacha card's T key, `GachaConfig.AutoPullSeconds`): a convenience every
+  player gets, not a pass, not a product.
   - **Prices are live:** `ShopPrices.Get(key)` reads
     `MarketplaceService:GetProductInfo` (cached 10 min); every "SAVE %",
     "Worth ~~N~~ R$" and sale "(−38%)" is computed from those live prices

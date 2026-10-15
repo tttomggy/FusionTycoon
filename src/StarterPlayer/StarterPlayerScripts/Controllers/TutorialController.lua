@@ -16,7 +16,9 @@
 	  3. THE BIG BUTTON (UI/TutorialHand): standing at a world target with a
 	     prompt, a green "PULL" / "UPGRADE" / "FUSE" / "BUY" button appears
 	     above the bottom bar; it triggers that ProximityPrompt
-	     (InputHoldBegin / InputHoldEnd) so the real server path runs.
+	     (InputHoldBegin / InputHoldEnd) so the real server path runs; the Gacha
+	     Pad's PULL sends RequestGachaPull instead (the card's E key: the pad's
+	     own prompts are off).
 	  4. THE HAND 👆: one for the whole UI, on the exact button to press: the
 	     big button; in the Fuse panel AUTO-FILL then FUSE; the event chip;
 	     REBIRTH. Never a rectangle.
@@ -168,7 +170,10 @@ end
 local function inReach(prompt: ProximityPrompt): boolean
 	local position = promptPosition(prompt)
 	local here = rootPosition()
-	return position ~= nil and here ~= nil and prompt.Enabled and (position - here).Magnitude <= prompt.MaxActivationDistance
+	-- The Gacha Pad's own prompts are OFF (the card's key bar replaced them):
+	-- its button is still "in reach" by distance alone.
+	local usable = prompt.Enabled or prompt.Name == "PullPrompt"
+	return position ~= nil and here ~= nil and usable and (position - here).Magnitude <= prompt.MaxActivationDistance
 end
 
 -- The big button: the real prompt, triggered from the client.
@@ -181,6 +186,15 @@ local function pressPrompt(step: TutorialConfig.Step)
 		return
 	end
 	pressing = true
+	if prompt.Name == "PullPrompt" then
+		-- The Gacha Pad: the same remote the card's E key sends, so the
+		-- server runs the one shared pull function.
+		RemoteEvents.RequestGachaPull:FireServer({ Count = 1 })
+		task.delay(0.5, function()
+			pressing = false
+		end)
+		return
+	end
 	task.spawn(function()
 		prompt:InputHoldBegin()
 		RunService.Heartbeat:Wait()

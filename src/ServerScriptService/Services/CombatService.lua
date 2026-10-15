@@ -9,14 +9,18 @@
 	    PlayerData.Weapons, and fires WeaponUnlocked for the card); quest
 	    weapons come later (Studio: /weapons all | reset). Each one is a
 	    Roblox Tool in the Backpack, given on every spawn.
-	  * A hit: the client only sends RequestHit { Weapon, TargetUserId?,
-	    Origin, Direction }. Everything is re-checked here: the weapon is
-	    owned AND equipped (the Tool is in the character), its cooldown (here,
-	    per player and weapon), both sides' eligibility (Rebirth 1+, not
-	    protected, not spawn-protected, not ragdolled / immune, the attacker
-	    not carrying), range from the server's own roots plus RangeSlack,
-	    a melee target in front of you, and for ranged weapons a server
-	    raycast with line of sight. Numbers through RemoteGuard; rate-limited.
+	  * A hit: the client only sends RequestHit { Weapon, Origin?, Direction? }
+	    (a melee swing sends the weapon id alone). Everything is decided here:
+	    the weapon is owned AND equipped (the Tool is in the character), its
+	    cooldown (per player and weapon), both sides' eligibility (Rebirth 1+,
+	    not protected, not spawn-protected, not ragdolled / immune, the
+	    attacker not carrying). Melee: MeleeHitDelay after the swing the
+	    server boxes CombatConfig.MeleeBox in front of the attacker's root; the
+	    Bat hits the nearest hittable player in it, the Glove all of them, and
+	    every other player in the box gets the attacker-only shield pop with
+	    its reason. One log line per swing in Studio ("box found [...] ->
+	    HIT / MISS / <name> <reason>"). Ranged weapons: a server raycast with
+	    line of sight. Numbers through RemoteGuard; rate-limited.
 	  * Ragdoll: the server owns the until-times (Player attributes
 	    RagdollUntil / ImmuneUntil / FrozenUntil / SpawnProtectUntil, server
 	    time). It swaps the target's Motor6Ds for BallSocketConstraints
@@ -70,6 +74,9 @@ local FOLDER_NAME = "CombatObjects"
 
 type Joint = { Motor: Motor6D, Constraint: BallSocketConstraint, A0: Attachment, A1: Attachment }
 
+-- What a melee swing found and did, for the Studio log and /selftest.
+export type Verdict = { Seq: number, Weapon: string, Found: { string }, Hit: { string }, Line: string }
+
 local state = {
 	-- userId -> weapon id -> os.clock() of the last accepted swing
 	lastSwing = {} :: { [number]: { [string]: number } },
@@ -78,6 +85,11 @@ local state = {
 	-- userId -> the character launched by a hit (PlatformStand / movers to undo)
 	launches = {} :: { [number]: Launch },
 	logLaunch = false,
+	-- userId -> the verdict of that player's last melee swing (/selftest reads it)
+	verdicts = {} :: { [number]: Verdict },
+	verdictSeq = 0,
+	-- /combat box: draw each swing's hitbox (Studio only)
+	drawBox = false,
 	-- userId -> placed banana peels
 	peels = {} :: { [number]: { Model } },
 	folder = nil :: Folder?,
@@ -680,6 +692,137 @@ local function notifyIgnored(attacker: Player, targetRoot: BasePart, why: string
 	end
 end
 
+-- The player whose character `part` belongs to (an accessory or tool part
+-- counts), or nil.
+local function playerOfPart(part: Instance): Player?
+	local current: Instance? = part
+	while current and current ~= Workspace do
+		if current:IsA("Model") then
+			local owner = Players:GetPlayerFromCharacter(current)
+			if owner then
+				return owner
+			end
+		end
+		current = current.Parent
+	end
+	return nil
+end
+
+-- The box in front of `root`: flat facing (no tilt), its centre
+-- MeleeBoxForward studs forward.
+local function meleeBoxCFrame(root: BasePart): CFrame
+	local look = root.CFrame.LookVector
+	local flat = Vector3.new(look.X, 0, look.Z)
+	local forward = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
+	return CFrame.lookAt(root.Position, root.Position + forward) * CFrame.new(0, 0, -CombatConfig.MeleeBoxForward)
+end
+
+-- /combat box: a red transparent part where the box was, for 0.2 s.
+local function drawMeleeBox(cframe: CFrame)
+	local part = Instance.new("Part")
+	part.Name = "MeleeBoxDebug"
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CastShadow = false
+	part.Material = Enum.Material.SmoothPlastic
+	part.Color = Color3.new(1, 0.1, 0.1)
+	part.Transparency = 0.6
+	part.Size = CombatConfig.MeleeBox
+	part.CFrame = cframe
+	part.Parent = getFolder()
+	task.delay(0.2, function()
+		part:Destroy()
+	end)
+end
+
+local function recordVerdict(attacker: Player, weapon: CombatConfig.Weapon, found: { string }, hit: { string }, line: string)
+	state.verdictSeq += 1
+	state.verdicts[attacker.UserId] = { Seq = state.verdictSeq, Weapon = weapon.Id, Found = found, Hit = hit, Line = line }
+	if RunService:IsStudio() then
+		print(line)
+	end
+end
+
+-- MeleeHitDelay after an accepted swing: the box, the verdict, the hits.
+-- (Everything is read now, from the attacker's root as it is now.)
+local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon)
+	local root = getRoot(attacker)
+	local humanoid = getHumanoid(attacker)
+	local prefix = ("[Combat] %s %s:"):format(attacker.Name, weapon.Id)
+	if not attacker.Parent or not root or not humanoid or humanoid.Health <= 0 then
+		recordVerdict(attacker, weapon, {}, {}, prefix .. " box found [] -> MISS (attacker gone)")
+		return
+	end
+	-- Knocked down during the wind-up: the swing does nothing.
+	if untilActive(attacker, "RagdollUntil") then
+		recordVerdict(attacker, weapon, {}, {}, prefix .. " box found [] -> MISS (attacker ragdolled)")
+		return
+	end
+	local cframe = meleeBoxCFrame(root)
+	if state.drawBox then
+		drawMeleeBox(cframe)
+	end
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = if attacker.Character then { attacker.Character } else {}
+	local parts = Workspace:GetPartBoundsInBox(cframe, CombatConfig.MeleeBox, params)
+	-- The distinct players in the box, nearest first.
+	local seen: { [Player]: number } = {}
+	local candidates: { Player } = {}
+	for _, part in parts do
+		local owner = playerOfPart(part)
+		if owner and owner ~= attacker and not seen[owner] then
+			local ownerRoot = getRoot(owner)
+			seen[owner] = if ownerRoot then (ownerRoot.Position - root.Position).Magnitude else math.huge
+			table.insert(candidates, owner)
+		end
+	end
+	table.sort(candidates, function(a: Player, b: Player)
+		return (seen[a] :: number) < (seen[b] :: number)
+	end)
+	local found: { string } = {}
+	for _, candidate in candidates do
+		table.insert(found, ("%s %.1f studs"):format(candidate.Name, seen[candidate] :: number))
+	end
+
+	local hits: { Player } = {}
+	local refusals: { string } = {}
+	for _, candidate in candidates do
+		local why = CombatService.WhyNotHittable(candidate)
+		if why then
+			table.insert(refusals, ("%s %s"):format(candidate.Name, why))
+			local candidateRoot = getRoot(candidate)
+			if candidateRoot then
+				notifyIgnored(attacker, candidateRoot, why)
+			end
+		elseif weapon.Id == "SlapGlove" or #hits == 0 then
+			table.insert(hits, candidate)
+		end
+	end
+
+	local hitNames: { string } = {}
+	for _, target in hits do
+		table.insert(hitNames, target.Name)
+	end
+	local verdict: string
+	if #hits > 0 then
+		verdict = "HIT " .. table.concat(hitNames, ", ")
+		if #refusals > 0 then
+			verdict ..= "; " .. table.concat(refusals, ", ")
+		end
+	elseif #refusals > 0 then
+		verdict = table.concat(refusals, ", ")
+	else
+		verdict = "MISS"
+	end
+	recordVerdict(attacker, weapon, found, hitNames, ("%s box found [%s] -> %s"):format(prefix, table.concat(found, ", "), verdict))
+	for _, target in hits do
+		CombatService.ApplyHit(attacker, target, weapon, root.Position)
+	end
+end
+
 local function onRequestHit(attacker: Player, payload: unknown)
 	if not RemoteGuard.Allow(attacker, "RequestHit", CombatConfig.HitsPerSecond, CombatConfig.HitBurst) then
 		return
@@ -713,30 +856,10 @@ local function onRequestHit(attacker: Player, payload: unknown)
 			To = root.Position + root.CFrame.LookVector * weapon.Range,
 			Attacker = attacker.UserId,
 		})
-		local targetId = RemoteGuard.Int(p.TargetUserId, 1, 2 ^ 53)
-		local target = targetId and Players:GetPlayerByUserId(targetId)
-		local targetRoot = target and getRoot(target)
-		if not target or target == attacker or not targetRoot then
-			return
-		end
-		local why = CombatService.WhyNotHittable(target)
-		local offset = targetRoot.Position - root.Position
-		if offset.Magnitude > weapon.Range + CombatConfig.RangeSlack then
-			return
-		end
-		local flat = Vector3.new(offset.X, 0, offset.Z)
-		local facing = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
-		if flat.Magnitude > 1 and facing.Magnitude > 0 then
-			local angle = math.deg(math.acos(math.clamp(flat.Unit:Dot(facing.Unit), -1, 1)))
-			if angle > CombatConfig.MeleeMaxAngle then
-				return
-			end
-		end
-		if why then
-			notifyIgnored(attacker, targetRoot, why)
-			return
-		end
-		CombatService.ApplyHit(attacker, target, weapon, root.Position)
+		-- The hit lands where the clip's Hit marker is, not at the click.
+		task.delay(CombatConfig.MeleeHitDelay, function()
+			resolveMelee(attacker, weapon)
+		end)
 	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
 		local direction = vector(p.Direction)
 		if not direction or direction.Magnitude < 0.01 then
@@ -806,6 +929,7 @@ end
 
 local function onPlayerRemoving(player: Player)
 	state.lastSwing[player.UserId] = nil
+	state.verdicts[player.UserId] = nil
 	state.joints[player.UserId] = nil
 	endLaunch(player.UserId, nil)
 	local peels: { Model } = state.peels[player.UserId] or {}
@@ -813,6 +937,18 @@ local function onPlayerRemoving(player: Player)
 		peel:Destroy()
 	end
 	state.peels[player.UserId] = nil
+end
+
+-- The verdict of `player`'s last melee swing (nil before the first). /selftest
+-- compares Seq before and after a real swing.
+function CombatService.GetLastVerdict(player: Player): Verdict?
+	return state.verdicts[player.UserId]
+end
+
+-- /combat box (Studio): draw each swing's hitbox for 0.2 s. Returns the new state.
+function CombatService.ToggleBoxDrawing(): boolean
+	state.drawBox = RunService:IsStudio() and not state.drawBox
+	return state.drawBox
 end
 
 -- /selftest: print the target root's flat speed for 10 Heartbeats per launch.

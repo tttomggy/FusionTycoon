@@ -134,6 +134,9 @@ local TUTORIAL_COMMAND = "/tutorial"
 -- takes them all (rebirth ones come back on the next sync).
 local WEAPONS_COMMAND = "/weapons"
 local ANIM_COMMAND = "/anim"
+-- "/combat box" toggles drawing each melee swing's server hitbox (a red
+-- transparent part for 0.2 s).
+local COMBAT_COMMAND = "/combat"
 -- "/quest complete <id>" latches a daily ("pull20", ...) or "chain" done;
 -- "/quest reset" hands today's dailies out again and restarts the chain.
 local QUEST_COMMAND = "/quest"
@@ -235,6 +238,7 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 end
 
 local runLaunchSelfTest: (Player, (boolean, string, string?) -> ()) -> ()
+local runSwingSelfTest: (Player, (boolean, string, string?) -> ()) -> ()
 
 -- Prints once per run: the physics / authority settings and who owns the
 -- target's root (Studio shows the 2026 names that exist on this build).
@@ -267,6 +271,19 @@ local function askClient(target: Player, payload: { [string]: any }): any?
 		selfTestReports[target.UserId] = nil
 	end
 	return report
+end
+
+-- The root position `target`'s own client sees (nil when it never answers);
+-- a problem it reports becomes a result line.
+local function askRootPos(target: Player, result: (boolean, string, string?) -> ()): Vector3?
+	local report = askClient(target, { Kind = "RootPos" })
+	if report and typeof(report.Lines) == "table" then
+		for _, line in report.Lines do
+			result(line.Ok == true, tostring(line.Name), line.Detail)
+		end
+	end
+	local data = report and report.Data
+	return if typeof(data) == "table" and typeof(data.Pos) == "Vector3" then data.Pos else nil
 end
 
 -- 2 players (Test -> 2 players): the attacker hits the other player through
@@ -305,14 +322,7 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 	printPhysicsSettings(victimRoot)
 	CombatService.SetLaunchLogging(true)
 	local function clientPosition(): Vector3?
-		local report = askClient(victim, { Kind = "RootPos" })
-		if report and typeof(report.Lines) == "table" then
-			for _, line in report.Lines do
-				result(line.Ok == true, tostring(line.Name), line.Detail)
-			end
-		end
-		local data = report and report.Data
-		return if typeof(data) == "table" and typeof(data.Pos) == "Vector3" then data.Pos else nil
+		return askRootPos(victim, result)
 	end
 	for _, spec in { { "Bat", 12 }, { "SlapGlove", 20 } } do
 		local weapon = CombatConfig.GetWeapon(spec[1] :: string) :: CombatConfig.Weapon
@@ -371,6 +381,161 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 		victim:SetAttribute(name, saved[name])
 	end
 	attackerData.Rebirths, victimData.Rebirths = savedRebirths[1], savedRebirths[2]
+end
+
+-- 2 players: the REAL chain, which every other combat check skipped (they call
+-- ApplyHit). Player2 is put 3 studs in front of Player1, face to face; the
+-- Bat is equipped through a real Tool and Player1's CLIENT clicks it
+-- (CombatController.Use, what Tool.Activated calls); the server's box must
+-- log "HIT Player2" and Player2 must fly, measured on Player2's own client.
+-- Then the Glove. Then Player2 6 studs to Player1's side, out of the box (the
+-- box is 3 studs either side and an avatar 4 wide, so at 5 an arm only just
+-- touches it): the
+-- log says MISS and Player2 does not move.
+function runSwingSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local target: Player? = nil
+	for _, candidate in Players:GetPlayers() do
+		if candidate ~= player and PlayerDataService.IsDataLoaded(candidate) and candidate.Character then
+			target = candidate
+		end
+	end
+	if not target then
+		result(true, "combat swing: a real swing hits the player in front (skipped: needs a second player, Test -> 2 players)")
+		return
+	end
+	local victim = target :: Player
+	local attackerData, victimData = PlayerDataService.GetData(player), PlayerDataService.GetData(victim)
+	local attackerCharacter, victimCharacter = player.Character, victim.Character
+	local attackerRoot = attackerCharacter and attackerCharacter:FindFirstChild("HumanoidRootPart")
+	local victimRoot = victimCharacter and victimCharacter:FindFirstChild("HumanoidRootPart")
+	local attackerHumanoid = attackerCharacter and attackerCharacter:FindFirstChildOfClass("Humanoid")
+	if not attackerData or not victimData or not attackerCharacter or not victimCharacter or not attackerRoot or not victimRoot or not attackerHumanoid
+		or not attackerRoot:IsA("BasePart") or not victimRoot:IsA("BasePart") then
+		result(true, "combat swing: a real swing hits the player in front (skipped: no data or character)")
+		return
+	end
+	local savedRebirths = { attackerData.Rebirths, victimData.Rebirths }
+	attackerData.Rebirths = math.max(1, attackerData.Rebirths)
+	victimData.Rebirths = math.max(1, victimData.Rebirths)
+	PlayerDataService.SyncTycoon(player)
+	PlayerDataService.SyncTycoon(victim)
+	local attributes = { "ImmuneUntil", "SpawnProtectUntil", "RagdollUntil", "FrozenUntil" }
+	local savedAttributes: { [string]: any } = {}
+	for _, name in attributes do
+		savedAttributes[name] = victim:GetAttribute(name)
+	end
+	local homeAttacker, homeVictim = attackerRoot.CFrame, victimRoot.CFrame
+	local look = homeAttacker.LookVector
+	local flatLook = Vector3.new(look.X, 0, look.Z)
+	flatLook = if flatLook.Magnitude > 0.01 then flatLook.Unit else Vector3.new(0, 0, -1)
+	local attackerCFrame = CFrame.lookAt(homeAttacker.Position, homeAttacker.Position + flatLook)
+	local function clearState()
+		for _, name in attributes do
+			victim:SetAttribute(name, nil)
+		end
+		player:SetAttribute("RagdollUntil", nil)
+	end
+	-- Both on their feet at their spots, facing each other, at rest.
+	local function place(localOffset: Vector3)
+		clearState()
+		attackerCharacter:PivotTo(attackerCFrame)
+		local at = attackerCFrame:PointToWorldSpace(localOffset)
+		victimCharacter:PivotTo(CFrame.lookAt(at, Vector3.new(attackerCFrame.Position.X, at.Y, attackerCFrame.Position.Z)))
+		attackerRoot.AssemblyLinearVelocity = Vector3.zero
+		victimRoot.AssemblyLinearVelocity = Vector3.zero
+		task.wait(0.5)
+	end
+
+	for _, spec in { { "Bat", 12 }, { "SlapGlove", 20 } } do
+		local weapon = CombatConfig.GetWeapon(spec[1] :: string) :: CombatConfig.Weapon
+		-- The real tool: the one in the Backpack if the player has it, else a
+		-- built one (destroyed afterwards).
+		attackerHumanoid:UnequipTools()
+		-- Owned for the test (the server checks it), taken back afterwards.
+		local owned = PlayerDataService.GetWeapons(player)
+		local ownedBefore = owned[weapon.Id] == true
+		owned[weapon.Id] = true
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		local tool = (backpack and backpack:FindFirstChild(weapon.Id)) or attackerCharacter:FindFirstChild(weapon.Id)
+		local built = false
+		if not tool or not tool:IsA("Tool") then
+			tool = WeaponKit.Build(weapon.Id)
+			built = true
+		end
+		attackerHumanoid:EquipTool(tool :: Tool)
+		task.wait(0.4)
+		local equipped = (tool :: Instance).Parent == attackerCharacter
+		result(equipped, ("combat swing (%s): the tool is equipped on the attacker"):format(weapon.Name), ("tool parent %s"):format(tostring((tool :: Instance).Parent)))
+		if equipped then
+			for _, case in { { "front", Vector3.new(0, 0, -3) }, { "side", Vector3.new(6, 0, 0) } } do
+				local label = ("%s, victim %s"):format(weapon.Name, if case[1] == "front" then "3 studs in front" else "6 studs to the side, out of the box")
+				place(case[2] :: Vector3)
+				CombatService.ResetCooldowns(player)
+				local before = askRootPos(victim, result)
+				local previous = CombatService.GetLastVerdict(player)
+				local seqBefore = if previous then previous.Seq else 0
+				local report = askClient(player, { Kind = "Swing", Weapon = weapon.Id })
+				if report and typeof(report.Lines) == "table" then
+					for _, line in report.Lines do
+						result(line.Ok == true, tostring(line.Name), line.Detail)
+					end
+				else
+					result(false, ("combat swing (%s): a click on the attacker's client swings"):format(weapon.Name), "the attacker's client did not answer")
+				end
+				-- The verdict arrives MeleeHitDelay after the swing.
+				local verdict: any = nil
+				local waited = os.clock()
+				while os.clock() - waited < 2 do
+					local latest = CombatService.GetLastVerdict(player)
+					if latest and latest.Seq > seqBefore then
+						verdict = latest
+						break
+					end
+					task.wait(0.05)
+				end
+				task.wait(0.6)
+				local after = askRootPos(victim, result)
+				local moved = if before and after then (Vector3.new(after.X, 0, after.Z) - Vector3.new(before.X, 0, before.Z)).Magnitude else nil
+				local line = if verdict then verdict.Line else "no verdict within 2 s of the click (the server never resolved a swing)"
+				if case[1] == "front" then
+					result(verdict ~= nil and #verdict.Hit == 1 and verdict.Hit[1] == victim.Name, ("combat swing (%s): the server log says HIT %s"):format(label, victim.Name), line)
+					result(
+						moved ~= nil and moved >= (spec[2] :: number),
+						("combat swing (%s): a real swing launches the target >= %d studs in 0.6 s (measured on the TARGET's client)"):format(label, spec[2] :: number),
+						if moved then ("target client %.1f studs"):format(moved) else "the target client did not answer"
+					)
+				else
+					result(verdict ~= nil and #verdict.Found == 0 and #verdict.Hit == 0 and line:find("MISS", 1, true) ~= nil, ("combat swing (%s): the server log says MISS"):format(label), line)
+					result(moved ~= nil and moved < 1, ("combat swing (%s): the target does not move"):format(label), if moved then ("target client moved %.1f studs"):format(moved) else "the target client did not answer")
+				end
+				-- Let a ragdoll end before the next case.
+				task.wait(CombatConfig.RagdollSeconds + 0.4)
+				clearState()
+				victimCharacter:PivotTo(homeVictim)
+				attackerCharacter:PivotTo(homeAttacker)
+				victimRoot.AssemblyLinearVelocity = Vector3.zero
+				task.wait(0.3)
+			end
+		end
+		attackerHumanoid:UnequipTools()
+		if built then
+			local builtTool = tool :: Instance
+			builtTool:Destroy()
+		end
+		if not ownedBefore then
+			owned[weapon.Id] = nil
+		end
+		task.wait(0.1)
+	end
+	clearState()
+	for _, name in attributes do
+		victim:SetAttribute(name, savedAttributes[name])
+	end
+	attackerCharacter:PivotTo(homeAttacker)
+	victimCharacter:PivotTo(homeVictim)
+	attackerData.Rebirths, victimData.Rebirths = savedRebirths[1], savedRebirths[2]
+	PlayerDataService.SyncTycoon(player)
+	PlayerDataService.SyncTycoon(victim)
 end
 
 local function runCombatSelfTest(player: Player, result: (boolean, string, string?) -> ())
@@ -465,6 +630,7 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 	end
 
 	runLaunchSelfTest(player, result)
+	runSwingSelfTest(player, result)
 
 	local bat = CombatConfig.GetWeapon("Bat") :: CombatConfig.Weapon
 	CombatService.ResetCooldowns(player)
@@ -849,6 +1015,43 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	task.wait(0.5)
 	tutorialProbe(player, { Kind = "GachaBack" }, result)
 
+	-- The server half of the key bar: the remotes' shared function. Cash is
+	-- spent and given back; nothing is pulled.
+	local freePulls = PlayerDataService.GetTutorialFreePulls(player)
+	if freePulls > 0 then
+		result(true, "gacha keys: RequestGachaPull / Auto pull refusals (skipped: the tester still has tutorial free pulls)")
+	else
+		local cash = PlayerDataService.GetCash(player)
+		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		-- 25 studs away: refused, and Auto pull will not start.
+		root.CFrame = away
+		task.wait(0.4)
+		local okFar, reasonFar = TycoonService.RequestGachaPull(player, 1)
+		result(not okFar and reasonFar == "TooFar" and PlayerDataService.GetCash(player) == cash, "gacha keys: RequestGachaPull from 25 studs is refused (TooFar) and costs nothing", ("ok %s, reason %s, cash %s -> %s"):format(tostring(okFar), tostring(reasonFar), tostring(cash), tostring(PlayerDataService.GetCash(player))))
+		TycoonService.SetAutoPull(player, true)
+		local farStop = TycoonService.GetAutoPullStop(player)
+		result(not TycoonService.IsAutoPulling(player) and farStop ~= nil and farStop.Reason == "TooFar", "gacha keys: Auto pull from 25 studs does not start (TooFar)", ("running %s, stop %s"):format(tostring(TycoonService.IsAutoPulling(player)), if farStop then farStop.Reason else "none"))
+		-- On the pad with $0: the pull is refused for cash, Auto stops at once
+		-- and says why (with the price), a bad count is refused.
+		root.CFrame = onPad
+		task.wait(0.4)
+		PlayerDataService.SpendCash(player, cash)
+		local okBroke, reasonBroke, costBroke = TycoonService.RequestGachaPull(player, 1)
+		result(not okBroke and reasonBroke == "InsufficientCash" and costBroke == cost, "gacha keys: RequestGachaPull at $0 is refused (InsufficientCash, with the price)", ("ok %s, reason %s, cost %s (price %s)"):format(tostring(okBroke), tostring(reasonBroke), tostring(costBroke), tostring(cost)))
+		TycoonService.SetAutoPull(player, true)
+		task.wait(0.5)
+		local stop = TycoonService.GetAutoPullStop(player)
+		result(
+			not TycoonService.IsAutoPulling(player) and stop ~= nil and stop.Reason == "InsufficientCash" and stop.Cost == cost,
+			"gacha keys: Auto pull at $0 stops at once with the reason (InsufficientCash, the price)",
+			("running %s, stop %s, cost %s (price %s), cash %s"):format(tostring(TycoonService.IsAutoPulling(player)), if stop then stop.Reason else "none", tostring(if stop then stop.Cost else nil), tostring(cost), tostring(PlayerDataService.GetCash(player)))
+		)
+		local okCount, reasonCount = TycoonService.RequestGachaPull(player, 5)
+		result(not okCount and reasonCount == "BadCount", "gacha keys: RequestGachaPull { Count = 5 } is refused (BadCount)", ("ok %s, reason %s"):format(tostring(okCount), tostring(reasonCount)))
+		PlayerDataService.AddCash(player, cash)
+		PlayerDataService.SyncTycoon(player)
+	end
+
 	root.CFrame = home
 	if releaseClaim then
 		releaseClaim()
@@ -1170,6 +1373,13 @@ local function onPlayerChatted(player: Player, message: string)
 			print(("DebugService: %s's weapons -> %s"):format(player.Name, argument))
 		else
 			warn("DebugService: /weapons all | /weapons reset")
+		end
+	elseif command == COMBAT_COMMAND then
+		if argument == "box" then
+			local on = CombatService.ToggleBoxDrawing()
+			print(("DebugService: melee hitbox drawing %s"):format(if on then "ON" else "OFF"))
+		else
+			warn("DebugService: /combat box")
 		end
 	elseif command == ANIM_COMMAND then
 		if argument == "export" then

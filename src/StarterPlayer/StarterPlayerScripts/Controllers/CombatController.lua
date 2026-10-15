@@ -14,8 +14,9 @@
 	    lock and "R2" / "R3" / "Quest" (a tap says how); the whole bar dims
 	    while you carry a stolen orb (hands full), and it is off at Rebirth 0
 	    and while the tutorial runs.
-	  * Using one (Tool.Activated): melee sends the nearest eligible player
-	    in front of you; ranged and the Freeze Ray send where you aim (the
+	  * Using one (Tool.Activated): melee sends only the weapon id (the SERVER
+	    boxes the space in front of you and picks who it hits); ranged and
+	    the Freeze Ray send where you aim (the
 	    mouse on a computer, the camera's centre on a touch screen); the
 	    Banana Peel goes on the ground in front of you. RequestHit only; the
 	    server re-checks everything.
@@ -431,32 +432,6 @@ end
 
 --[[ Using a weapon --------------------------------------------------------------------- ]]
 
--- The nearest other player a melee swing could reach (the server decides).
-local function meleeTarget(weapon: CombatConfig.Weapon): Player?
-	local root = getRoot(localPlayer)
-	if not root then
-		return nil
-	end
-	local best: Player? = nil
-	local bestDistance = math.huge
-	local facing = Vector3.new(root.CFrame.LookVector.X, 0, root.CFrame.LookVector.Z)
-	for _, other in Players:GetPlayers() do
-		local otherRoot = if other ~= localPlayer then getRoot(other) else nil
-		if otherRoot then
-			local offset = otherRoot.Position - root.Position
-			local distance = offset.Magnitude
-			local flat = Vector3.new(offset.X, 0, offset.Z)
-			local inFront = flat.Magnitude < 1
-				or facing.Magnitude == 0
-				or math.deg(math.acos(math.clamp(flat.Unit:Dot(facing.Unit), -1, 1))) <= CombatConfig.MeleeMaxAngle
-			if distance <= weapon.Range + 1 and inFront and distance < bestDistance then
-				best, bestDistance = other, distance
-			end
-		end
-	end
-	return best
-end
-
 local function aimDirection(): Vector3?
 	local root = getRoot(localPlayer)
 	local camera = Workspace.CurrentCamera
@@ -534,7 +509,10 @@ local REFUSED_TEXT: { [string]: string } = {
 	Ragdolled = "Get up first",
 }
 
-local function use(weapon: CombatConfig.Weapon)
+-- What a click on the weapon does. Returns whether it swung (and sent
+-- RequestHit), else why not. /selftest calls it through CombatController.Use,
+-- the same function Tool.Activated calls.
+local function use(weapon: CombatConfig.Weapon): (boolean, string?)
 	-- Under Rebirth 1 nobody can hit you and you can't hit anyone: say so
 	-- (at most every 3 s) and send nothing.
 	if TycoonController.GetRebirths() < CombatConfig.MinRebirths then
@@ -542,24 +520,24 @@ local function use(weapon: CombatConfig.Weapon)
 			lastLockedToast = os.clock()
 			ToastController.Show(REFUSED_TEXT.NeedsRebirth, "Neutral")
 		end
-		return
+		return false, "NeedsRebirth"
 	end
 	if isCarrying() then
 		ToastController.Show("Hands full: run it home!", "Neutral")
-		return
+		return false, "Carrying"
 	end
 	if ragdolledUntil > serverNow() then
-		return
+		return false, "Ragdolled"
 	end
 	local last = lastLocalSwing[weapon.Id]
 	if last and os.clock() - last < weapon.Cooldown then
-		return
+		return false, "Cooldown"
 	end
 	lastLocalSwing[weapon.Id] = os.clock()
 	performFor(localPlayer, weapon)
 	if weapon.Kind == "Melee" then
-		local target = meleeTarget(weapon)
-		RemoteEvents.RequestHit:FireServer({ Weapon = weapon.Id, TargetUserId = if target then target.UserId else nil })
+		-- No target: the server's box decides who is hit.
+		RemoteEvents.RequestHit:FireServer({ Weapon = weapon.Id })
 	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
 		local direction = aimDirection()
 		if direction then
@@ -571,6 +549,22 @@ local function use(weapon: CombatConfig.Weapon)
 			RemoteEvents.RequestHit:FireServer({ Weapon = weapon.Id, Origin = root.Position + root.CFrame.LookVector * 3 })
 		end
 	end
+	return true, nil
+end
+
+-- /selftest: click the weapon the way a player does (the function a tool's
+-- Activated runs). Returns (swung, why not).
+function CombatController.Use(weaponId: string): (boolean, string?)
+	local weapon = CombatConfig.GetWeapon(weaponId)
+	if not weapon then
+		return false, "UnknownWeapon"
+	end
+	return use(weapon)
+end
+
+-- /selftest: forget the local swing times so the next click is not on cooldown.
+function CombatController.ResetLocalCooldowns()
+	table.clear(lastLocalSwing)
 end
 
 local wiredTools: { [Tool]: boolean } = {}

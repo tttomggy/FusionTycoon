@@ -54,6 +54,7 @@ local ImportedEffects = require(ReplicatedStorage.Shared.VFX.ImportedEffects)
 local PlayerDataService = require(script.Parent.PlayerDataService)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
+local GachaConfig = require(ReplicatedStorage.Shared.Config.GachaConfig)
 
 type FusionMachineServiceModule = typeof(require(script.Parent.FusionMachineService))
 type WorldServiceModule = typeof(require(script.Parent.WorldService))
@@ -78,6 +79,19 @@ end
 -- banners, the reveal card).
 type RewardPuller = (pulls: { PulledItem }, caption: string) -> boolean
 local rewardPullersByUserId: { [number]: RewardPuller } = {}
+
+-- Each claimed plot's Gacha Pad pull path. The pad's E / R prompts (disabled
+-- now, the card's key bar replaced them), RequestGachaPull and Auto pull ALL
+-- run `Pull`: never a second copy of the pull code.
+-- Pull(count, auto) -> (ok, reason?, cost?); reasons: Busy, Carrying,
+-- Tutorial (auto only), MissingRewardItem, InsufficientCash.
+type GachaPad = { Pad: BasePart, Pull: (count: number, auto: boolean) -> (boolean, string?, number?) }
+local gachaPadsByUserId: { [number]: GachaPad } = {}
+
+-- Auto pull (GachaConfig): a token per running loop; the last stop reason.
+local autoPullTokens: { [number]: number } = {}
+local autoPullStops: { [number]: { Reason: string, Cost: number? } } = {}
+local autoPullToken = 0
 
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
@@ -578,9 +592,9 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		PillGradient = UITheme.Gradients.Gold,
 		StudsOffset = Vector3.new(0, PlotLayout.Station.LabelOffsetY, 0),
 	})
-	-- E-to-pull, never Touched: walking across the pad must not spend cash.
-	-- The three gacha prompts are drawn by the client as ONE row of round
-	-- buttons inside the pop-up card (GachaBoardController): Style = Custom.
+	-- Never Touched: walking across the pad must not spend cash. The pad's
+	-- prompts below are OFF (see pull's wiring): the pop-up card's key bar
+	-- (E / R / T) sends RequestGachaPull / SetAutoPull instead.
 	local prompt = newPrompt(pad, "PullPrompt", "Pull", "Gacha Pad", PlotLayout.Station.PromptDistance)
 	prompt.Style = Enum.ProximityPromptStyle.Custom
 	-- R / ButtonY: ten pulls at once, offset so it doesn't cover the E prompt.
@@ -589,12 +603,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	multiPrompt.KeyboardKeyCode = Enum.KeyCode.R
 	multiPrompt.GamepadKeyCode = Enum.KeyCode.ButtonY
 	multiPrompt.UIOffset = Vector2.new(0, PlotLayout.Station.MultiPromptOffsetPx)
-	-- AlwaysShow: it must show whenever Pull does. Under OnePerButton it was
-	-- grouped with the E prompts (touch has one "button" for every prompt),
-	-- so the nearer Pull could hide it. Nothing disables it: an unaffordable
-	-- x10 still shows and the server answers "Need $X for 10 pulls".
 	multiPrompt.Exclusivity = Enum.ProximityPromptExclusivity.AlwaysShow
-	addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance, true)
+	local helpPrompt = addHelpPrompt(pad, "Gacha", PlotLayout.Station.PromptDistance, true)
 
 	-- Runs on every sync too (addStationRefresh): price, odds at the
 	-- player's luck (so a rebirth updates them), and the x10 cost.
@@ -620,59 +630,103 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		playSound(pad)
 	end
 
-	-- Shared by the single pull and Pull x10.
+	-- One pull (count 1) or Pull x10, the ONE function every way of pulling runs
+	-- (see GachaPad). `auto` pulls tell the client with Auto = true (it applies
+	-- the reveal rule) and send no failure message: the Auto pull stop toast
+	-- says why. Returns (ok, reason?, cost?).
 	local debounce = false
+	local function startDebounce()
+		debounce = true
+		task.delay(STATION_DEBOUNCE_SECONDS, function()
+			debounce = false
+		end)
+	end
 
-	prompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if debounce or triggeringPlayer.UserId ~= player.UserId then
-			return
+	local function pull(count: number, auto: boolean): (boolean, string?, number?)
+		if debounce then
+			return false, "Busy", nil
+		end
+		local multi = count > 1
+		local resultRemote = if multi then RemoteEvents.GachaMultiPullResult else RemoteEvents.GachaPullResult
+		local function refuse(reason: string, cost: number?): (boolean, string?, number?)
+			if not auto then
+				resultRemote:FireClient(player, { Success = false, Reason = reason, Cost = cost })
+			end
+			return false, reason, cost
 		end
 		if PlayerDataService.IsCarrying(player) then
-			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
-			return
+			return refuse("Carrying", nil)
 		end
 		-- The tutorial's free pulls: a guaranteed plain Common each, through
 		-- the free path (the pad price doesn't move).
-		if PlayerDataService.GetTutorialFreePulls(player) > 0 then
-			debounce = true
+		if not multi and PlayerDataService.GetTutorialFreePulls(player) > 0 then
+			if auto then
+				return false, "Tutorial", nil
+			end
+			startDebounce()
 			TycoonService.TutorialPull(player)
-			task.wait(STATION_DEBOUNCE_SECONDS)
-			debounce = false
-			return
+			return true, nil, nil
 		end
-		local rolled = rollPulls(1, getLuck(player))
+		-- Roll all of them before charging anything.
+		local rolled = rollPulls(count, getLuck(player))
 		if not rolled then
-			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
-			return
+			return refuse("MissingRewardItem", nil)
 		end
-		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		local pulls = PlayerDataService.GetGachaPulls(player)
+		local cost = if multi then TycoonConfig.GetGachaMultiPullCost(pulls, count) else TycoonConfig.GetGachaPullCost(pulls)
 		if not PlayerDataService.SpendCash(player, cost) then
-			RemoteEvents.GachaPullResult:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
-			return
+			return refuse("InsufficientCash", cost)
 		end
 
-		debounce = true
-		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull")
+		startDebounce()
+		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, if multi then "Pull10" else "Pull")
 		AnalyticsKit.Funnel(player, "FirstPull")
 		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
-		local newEntry = items[1]
-		-- After AddItem, so the snapshot's Index (and income) include it.
+		-- After AddItem, so the snapshot's Index (and income) include it (once, for all ten).
 		syncTycoon(player)
 		refreshLabel()
 		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
-		celebrate(rolled[1].Def.Tier)
-		RemoteEvents.GachaPullResult:FireClient(player, {
-			Success = true,
-			NewItem = newEntry,
-			NewIndex = #newIndexItems > 0,
-			IndexTierComplete = tiersCompleted[1],
-		})
-		announcePull(player, newEntry)
+		celebrate(if multi then bestTier(items) else rolled[1].Def.Tier)
+		if multi then
+			RemoteEvents.GachaMultiPullResult:FireClient(player, {
+				Success = true,
+				Items = items,
+				NewIndexItems = newIndexItems,
+				IndexTiersCompleted = tiersCompleted,
+			})
+		else
+			RemoteEvents.GachaPullResult:FireClient(player, {
+				Success = true,
+				NewItem = items[1],
+				NewIndex = #newIndexItems > 0,
+				IndexTierComplete = tiersCompleted[1],
+				Auto = if auto then true else nil,
+			})
+		end
+		for _, item in items do
+			announcePull(player, item)
+		end
 		runPullHooks(player)
+		return true, nil, nil
+	end
+	gachaPadsByUserId[player.UserId] = { Pad = pad, Pull = pull }
 
-		task.wait(STATION_DEBOUNCE_SECONDS)
-		debounce = false
+	-- The pad's own prompts stay wired to the same function but are OFF: the
+	-- card's key bar (E / R / T through ContextActionService) replaced them,
+	-- and "How it works" is the first section of the card's (i) panel.
+	prompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if triggeringPlayer.UserId == player.UserId then
+			pull(1, false)
+		end
 	end)
+	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
+		if triggeringPlayer.UserId == player.UserId then
+			pull(MULTI_PULL_COUNT, false)
+		end
+	end)
+	prompt.Enabled = false
+	multiPrompt.Enabled = false
+	helpPrompt.Enabled = false
 
 	-- Free pulls / reward items (RewardService): the same result path as a
 	-- paid pull, with the reward's caption on the card.
@@ -713,49 +767,6 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		runPullHooks(player)
 		return true
 	end
-
-	multiPrompt.Triggered:Connect(function(triggeringPlayer: Player)
-		if debounce or triggeringPlayer.UserId ~= player.UserId then
-			return
-		end
-		if PlayerDataService.IsCarrying(player) then
-			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "Carrying" })
-			return
-		end
-		-- Roll all of them before charging anything.
-		local rolled = rollPulls(MULTI_PULL_COUNT, getLuck(player))
-		if not rolled then
-			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "MissingRewardItem" })
-			return
-		end
-		local cost = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), MULTI_PULL_COUNT)
-		if not PlayerDataService.SpendCash(player, cost) then
-			RemoteEvents.GachaMultiPullResult:FireClient(player, { Success = false, Reason = "InsufficientCash", Cost = cost })
-			return
-		end
-
-		debounce = true
-		AnalyticsKit.Sink(player, cost, Enum.AnalyticsEconomyTransactionType.Gameplay.Name, "Pull10")
-		AnalyticsKit.Funnel(player, "FirstPull")
-		local items, newIndexItems, tiersCompleted = grantPulls(player, rolled)
-		syncTycoon(player) -- once, for all ten
-		refreshLabel()
-		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
-		celebrate(bestTier(items))
-		RemoteEvents.GachaMultiPullResult:FireClient(player, {
-			Success = true,
-			Items = items,
-			NewIndexItems = newIndexItems,
-			IndexTiersCompleted = tiersCompleted,
-		})
-		for _, item in items do
-			announcePull(player, item)
-		end
-		runPullHooks(player)
-
-		task.wait(STATION_DEBOUNCE_SECONDS)
-		debounce = false
-	end)
 end
 
 --[[ Multiplier station --------------------------------------------------------------- ]]
@@ -1146,6 +1157,128 @@ function TycoonService.TutorialPull(player: Player): boolean
 	return true
 end
 
+--[[ Remote pulls and Auto pull ------------------------------------------------------- ]]
+
+-- The shared gate for RequestGachaPull and SetAutoPull: data loaded, a lab
+-- with a Gacha Pad (always the caller's OWN), a living character within the
+-- prompt's reach plus GachaConfig.RangeSlack of the pad. Returns the pad or
+-- (nil, reason).
+local function gachaGate(player: Player): (GachaPad?, string?)
+	if not PlayerDataService.IsDataLoaded(player) then
+		return nil, "DataNotLoaded"
+	end
+	local gacha = gachaPadsByUserId[player.UserId]
+	if not gacha or not gacha.Pad.Parent then
+		return nil, "NoPad"
+	end
+	local character = player.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+		return nil, "NoCharacter"
+	end
+	if (root.Position - gacha.Pad.Position).Magnitude > PlotLayout.Station.PromptDistance + GachaConfig.RangeSlack then
+		return nil, "TooFar"
+	end
+	return gacha, nil
+end
+
+-- RequestGachaPull { Count = 1 | 10 } (the card's E / R keys). Returns
+-- (ok, reason?, cost?); a refusal the player should see is also sent to them
+-- by the pull itself (Carrying, InsufficientCash...).
+function TycoonService.RequestGachaPull(player: Player, count: unknown): (boolean, string?, number?)
+	local n = RemoteGuard.Int(count, 1, MULTI_PULL_COUNT)
+	if n ~= 1 and n ~= MULTI_PULL_COUNT then
+		return false, "BadCount", nil
+	end
+	local gacha, why = gachaGate(player)
+	if not gacha then
+		return false, why, nil
+	end
+	return gacha.Pull(n :: number, false)
+end
+
+local function stopAutoPull(player: Player, reason: string, cost: number?)
+	if autoPullTokens[player.UserId] == nil then
+		return
+	end
+	autoPullTokens[player.UserId] = nil
+	autoPullStops[player.UserId] = { Reason = reason, Cost = cost }
+	if player.Parent then
+		RemoteEvents.AutoPullState:FireClient(player, { On = false, Reason = reason, Cost = cost })
+	end
+end
+
+-- Auto pull: while on, one single pull every GachaConfig.AutoPullSeconds
+-- through the same pull function. Stops by itself when the pull is refused
+-- for good (cash, distance, carrying, death, tutorial) or on SetAutoPull
+-- false; a pull that merely collided with the 1 s debounce is retried.
+function TycoonService.SetAutoPull(player: Player, on: boolean)
+	if not on then
+		stopAutoPull(player, "Off", nil)
+		return
+	end
+	if autoPullTokens[player.UserId] ~= nil then
+		return
+	end
+	local _, why = gachaGate(player)
+	autoPullStops[player.UserId] = nil
+	if why then
+		autoPullStops[player.UserId] = { Reason = why }
+		RemoteEvents.AutoPullState:FireClient(player, { On = false, Reason = why })
+		return
+	end
+	autoPullToken += 1
+	local token = autoPullToken
+	autoPullTokens[player.UserId] = token
+	RemoteEvents.AutoPullState:FireClient(player, { On = true })
+	task.spawn(function()
+		while autoPullTokens[player.UserId] == token and player.Parent do
+			local gacha, gateWhy = gachaGate(player)
+			if not gacha then
+				stopAutoPull(player, gateWhy or "NoPad", nil)
+				return
+			end
+			local ok, reason, cost = gacha.Pull(1, true)
+			if not ok and reason ~= "Busy" then
+				stopAutoPull(player, reason or "Unknown", cost)
+				return
+			end
+			task.wait(GachaConfig.AutoPullSeconds)
+		end
+		-- Left the game with it on.
+		if autoPullTokens[player.UserId] == token then
+			autoPullTokens[player.UserId] = nil
+		end
+	end)
+end
+
+function TycoonService.IsAutoPulling(player: Player): boolean
+	return autoPullTokens[player.UserId] ~= nil
+end
+
+-- Why the last Auto pull stopped (/selftest): { Reason, Cost? } or nil.
+function TycoonService.GetAutoPullStop(player: Player): { Reason: string, Cost: number? }?
+	return autoPullStops[player.UserId]
+end
+
+local function onRequestGachaPull(player: Player, payload: unknown)
+	if not RemoteGuard.Allow(player, "RequestGachaPull", 4, 6) or typeof(payload) ~= "table" then
+		return
+	end
+	TycoonService.RequestGachaPull(player, (payload :: any).Count)
+end
+
+local function onSetAutoPull(player: Player, payload: unknown)
+	if not RemoteGuard.Allow(player, "SetAutoPull", 2, 4) or typeof(payload) ~= "table" then
+		return
+	end
+	local on = (payload :: any).On
+	if typeof(on) == "boolean" then
+		TycoonService.SetAutoPull(player, on)
+	end
+end
+
 -- The RequestUpgrade remote's own handler (/selftest drives it).
 function TycoonService.HandleUpgradeRequest(player: Player, generatorId: unknown)
 	onRequestUpgrade(player, generatorId)
@@ -1417,6 +1550,9 @@ local function removePlotForPlayer(player: Player)
 	collectorLabelByUserId[player.UserId] = nil
 	stationRefreshesByUserId[player.UserId] = nil
 	rewardPullersByUserId[player.UserId] = nil
+	gachaPadsByUserId[player.UserId] = nil
+	autoPullTokens[player.UserId] = nil
+	autoPullStops[player.UserId] = nil
 	portalByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
@@ -1483,6 +1619,8 @@ end
 function TycoonService:Init()
 	RemoteEvents.RequestUpgrade.OnServerEvent:Connect(onRequestUpgrade)
 	RemoteEvents.RequestUpgradeMax.OnServerEvent:Connect(onRequestUpgradeMax)
+	RemoteEvents.RequestGachaPull.OnServerEvent:Connect(onRequestGachaPull)
+	RemoteEvents.SetAutoPull.OnServerEvent:Connect(onSetAutoPull)
 
 	Players.PlayerAdded:Connect(createPlotForPlayer)
 	Players.PlayerRemoving:Connect(removePlotForPlayer)

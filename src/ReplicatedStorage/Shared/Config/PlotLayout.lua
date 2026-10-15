@@ -101,21 +101,28 @@ PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 	GachaLabel (name + price) shows instead.
 ]]
 PlotLayout.Gacha = {
-	CardStuds = Vector2.new(11, 7.5), -- the BillboardGui's size in studs
+	CardStuds = Vector2.new(7, 4.8), -- the BillboardGui's size in studs (it covered half the screen at 11 x 7.5)
 	DesignCanvas = Vector2.new(600, 410), -- the layout is built at this size, then scaled (UIScale) to the studs
+	-- Never more than this share of the viewport height: each frame the card's
+	-- on-screen height is computed from the camera distance and a UIScale
+	-- (ClampScale) shrinks it below that, on top of the pop scale.
+	MaxScreenShare = 0.38,
 	-- Studs from the pad top to the card's bottom edge. A character is ~5.4
-	-- studs tall on the pad, so the card sits right at head height; any higher
-	-- and the top edge leaves the screen at the DEFAULT camera (12.5 studs
-	-- behind, FOV 70: the top corner is at 0.98 of the screen height at 5,
-	-- 1.08 at 5.8, 1.38 at 8). /selftest projects the four corners.
+	-- studs tall on the pad, so the card sits right at head height; with the
+	-- DEFAULT camera (12.5 studs behind, FOV 70) the top edge is at about 0.83
+	-- of the screen height and the card is ~27% of it. /selftest projects the
+	-- four corners.
 	BottomAbovePad = 5,
+	-- Plot-local shift of the card, away from the walkway (x = 0; the pad is
+	-- at +20), through StudsOffsetWorldSpace: it never sits over your character.
+	BackOffset = Vector3.new(2, 0, 0),
 	PopInStuds = 16, -- the card pops IN when the character is closer than this to the pad
 	PopOutStuds = 19, -- ... and OUT beyond this (the gap stops flicker)
 	PopInSeconds = 0.2, -- UIScale 0.6 -> 1, Back-Out
 	PopOutSeconds = 0.12, -- UIScale 1 -> 0.6
 	PopFromScale = 0.6,
 	MaxDistance = 150, -- the camera's zoom never hides it
-	ButtonMaxDistance = 150,
+	KeyBarGap = 8, -- px between the card's bottom edge and the key bar
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind

@@ -100,12 +100,16 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ "x" },
 			{ { Weapon = "Nope" } },
 			{ { Weapon = 5 } },
-			{ { Weapon = "Bat", TargetUserId = "x" } },
+			{ { Weapon = "Bat", TargetUserId = "x", Direction = "x" } },
 			{ { Weapon = "LaserGun", Direction = "x" } },
 			{ { Weapon = "LaserGun", Direction = Vector3.new(NAN, 0, 0) } },
 			{ { Weapon = "FreezeRay", Direction = Vector3.new(INF, 0, 0) } },
 			{ { Weapon = "BananaPeel", Origin = Vector3.new(1e9, 0, 0) } },
 		},
+		-- Never a real pull: a bad or missing count (only 1 and 10 are valid), and
+		-- Auto pull with a non-boolean (a true On is not fuzzed: it would start).
+		RequestGachaPull = { {}, { "x" }, { { Count = "1" } }, { { Count = 0 } }, { { Count = 5 } }, { { Count = 11 } }, { { Count = NAN } }, { { Count = 1.5 } }, { { Count = { 1 } } } },
+		SetAutoPull = { {}, { "x" }, { { On = "yes" } }, { { On = 1 } }, { { On = {} } } },
 		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
 		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
 		-- A non-admin tester: the SUSPICIOUS warn and nothing changes (the
@@ -130,7 +134,8 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		table.insert(cases.ClaimQuest, { { Id = n } })
 		table.insert(cases.UsePowerUp, { { Key = n } })
 		table.insert(cases.MarkDealPopup, { { Slot = n } })
-		table.insert(cases.RequestHit, { { Weapon = "Bat", TargetUserId = n } })
+		table.insert(cases.RequestHit, { { Weapon = "Bat", TargetUserId = n, Direction = Vector3.new(n, n, n) } })
+		table.insert(cases.RequestGachaPull, { { Count = n } })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
 	return cases
@@ -1101,6 +1106,20 @@ local function probeHeld(lines: { ProbeLine }, character: Model, weapon: CombatC
 	return held
 end
 
+-- The needs below are for a 5-stud avatar; a smaller one (the monkey) swings
+-- a shorter arc, so they scale with the character's height, clamped to
+-- 0.6-1.0. Height = sole to top of the head (a held tool must not count).
+local function heightScale(character: Model): (number, number)
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	local root = character:FindFirstChild("HumanoidRootPart")
+	local head = character:FindFirstChild("Head")
+	if not humanoid or not root or not root:IsA("BasePart") or not head or not head:IsA("BasePart") then
+		return 1, 5
+	end
+	local height = (head.Position.Y + head.Size.Y / 2) - (root.Position.Y - root.Size.Y / 2 - humanoid.HipHeight)
+	return math.clamp(height / 5, 0.6, 1), height
+end
+
 -- A weapon the server just equipped on this character. Everything is read
 -- from where the RIGHT HAND is DRAWN, never from the joint values we wrote.
 local function probeWeapon(weaponId: string): { ProbeLine }
@@ -1126,10 +1145,11 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 	local tool = char:FindFirstChildOfClass("Tool")
 	if tool and weapon.Kind == "Melee" then
 		local clearance = WeaponPose.GetToolClearance(char, tool) or 0
+		local scale, height = heightScale(char)
 		table.insert(lines, {
-			Ok = clearance >= 1.5,
-			Name = ("combat %s: the held weapon reaches 1.5 studs clear of the torso"):format(weaponId),
-			Detail = ("%.2f studs"):format(clearance),
+			Ok = clearance >= 1.5 * scale,
+			Name = ("combat %s: the held weapon reaches 1.5 studs (x height/5) clear of the torso"):format(weaponId),
+			Detail = ("%.2f studs, needs %.2f (avatar %.1f studs tall, x%.2f)"):format(clearance, 1.5 * scale, height, scale),
 		})
 	end
 
@@ -1182,10 +1202,11 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		})
 	end
 	if weapon.Kind == "Melee" then
+		local scale, height = heightScale(char)
 		table.insert(lines, {
-			Ok = played and peak >= 1.5,
-			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 1.5 studs"):format(weaponId),
-			Detail = ("peak %.2f studs"):format(peak),
+			Ok = played and peak >= 1.5 * scale,
+			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5)"):format(weaponId),
+			Detail = ("peak %.2f studs, needs %.2f (avatar %.1f studs tall, x%.2f)"):format(peak, 1.5 * scale, height, scale),
 		})
 		table.insert(lines, {
 			Ok = played and visible >= 0.4,
@@ -1350,8 +1371,8 @@ end
 
 -- The pop-up card, read from the instance tree (the character already
 -- stands on the pad): it is Enabled at UIScale 1, all 6 tiles are drawn
--- with an orb and a % that has text height, the % labels are >= 0.5 studs
--- tall, nothing is a CanvasGroup, there is no GachaBoard in the workspace;
+-- with an orb and a % that has text height, the % labels are >= 12 px tall
+-- on screen, nothing is a CanvasGroup, there is no GachaBoard in the workspace;
 -- then each tier's drawn % equals GetGachaRates at the server's luck, the
 -- luck pill, the silhouettes and the (i) panel's per-orb sums.
 local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
@@ -1371,18 +1392,16 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		return lines
 	end
 	local gui = card.Billboard :: BillboardGui
-	local PlotLayout_ = PlotLayout.Gacha
 	table.insert(lines, {
 		Ok = gui.Enabled and card.Pop.Scale >= 0.999 and card.Open,
 		Name = ("gacha card (%s): with the character on the pad the card is Enabled at UIScale 1"):format(label),
-		Detail = ("Enabled %s, PopScale %.3f, open %s, size %dx%d, fit %.3f"):format(tostring(gui.Enabled), card.Pop.Scale, tostring(card.Open), gui.AbsoluteSize.X, gui.AbsoluteSize.Y, card.Fit.Scale),
+		Detail = ("Enabled %s, PopScale %.3f, open %s, size %dx%d, fit %.3f, clamp %.3f"):format(tostring(gui.Enabled), card.Pop.Scale, tostring(card.Open), gui.AbsoluteSize.X, gui.AbsoluteSize.Y, card.Fit.Scale, card.Clamp.Scale),
 	})
 
 	-- Six tiles drawn, each with an orb and a % with text height; the % tall.
 	local counts, failures = {}, {}
 	local tiles, orbs, percents, tall = 0, 0, 0, 0
 	local tallBad: { string } = {}
-	local canvasHeight = math.max(card.Canvas.AbsoluteSize.Y, 1)
 	for _, tier in FusionConfig.TierOrder do
 		local tile = gui:FindFirstChild("Tile_" .. tier, true)
 		if tile and tile:IsA("GuiObject") and drawnProblem(tile, gui) == nil then
@@ -1394,21 +1413,21 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 			local percent = tile:FindFirstChild("Percent")
 			if percent and percent:IsA("TextLabel") and drawnProblem(percent, gui) == nil and percent.TextBounds.Y > 0 then
 				percents += 1
-				-- The label box in studs: its share of the canvas height x the card height.
-				local studsTall = percent.AbsoluteSize.Y / canvasHeight * PlotLayout_.CardStuds.Y
-				if studsTall >= 0.5 then
+				-- The label's real on-screen height (the whole UIScale chain is in AbsoluteSize).
+				local pixelsTall = percent.AbsoluteSize.Y
+				if pixelsTall >= 12 then
 					tall += 1
 				else
-					table.insert(tallBad, ("%s %.2f studs"):format(tier, studsTall))
+					table.insert(tallBad, ("%s %.1f px"):format(tier, pixelsTall))
 				end
 			end
 		end
 	end
-	table.insert(counts, ("%d/%d tiles drawn, %d orbs, %d %% labels with text height, %d >= 0.5 studs tall"):format(tiles, #FusionConfig.TierOrder, orbs, percents, tall))
+	table.insert(counts, ("%d/%d tiles drawn, %d orbs, %d %% labels with text height, %d >= 12 px tall"):format(tiles, #FusionConfig.TierOrder, orbs, percents, tall))
 	local total = #FusionConfig.TierOrder
 	table.insert(lines, {
 		Ok = tiles == total and orbs == total and percents == total and tall == total,
-		Name = ("gacha card (%s): all 6 tiles are drawn, each with an orb in its ViewportFrame and a %% >= 0.5 studs tall"):format(label),
+		Name = ("gacha card (%s): all 6 tiles are drawn, each with an orb in its ViewportFrame and a %% >= 12 px tall on screen"):format(label),
 		Detail = table.concat(counts, "; ") .. (if #tallBad > 0 then " | too small: " .. table.concat(tallBad, ", ") else "") .. (if #failures > 0 then " | " .. table.concat(failures, "; ") else ""),
 	})
 
@@ -1535,52 +1554,63 @@ local function ndcOf(camera: CFrame, point: Vector3, viewport: Vector2): Vector2
 	return Vector2.new(relative.X / depth / (tanHalf * viewport.X / viewport.Y), relative.Y / depth / tanHalf)
 end
 
--- The three buttons inside the card (character on the pad: PromptShown has
--- fired for all three, each button >= 44 px, drawn), then the card's whole
--- screen rect at the DEFAULT camera (12.5 studs behind, 3 above, FOV 70) at
--- 1366x768 and 844x390.
+-- The key bar under the card (character on the pad): 3 buttons E / R / T,
+-- each >= 44 px and drawn (read from the tree), E R T bound through
+-- ContextActionService; the card's on-screen height is <= 38% of the viewport
+-- (live, and by the clamp's own math at 1366x768 and 844x390, at the default
+-- and a close camera); the whole card rect on screen at the default camera.
 local function probeGachaButtons(): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local G = PlotLayout.Gacha
 	local card = waitForCard(true, 3)
 	if not card then
-		return { { Ok = false, Name = "gacha card: the buttons", Detail = "no card" } }
+		return { { Ok = false, Name = "gacha card: the key bar", Detail = "no card" } }
 	end
 	local gui = card.Billboard :: BillboardGui
-	local shown: { string } = {}
-	local deadline = os.clock() + 4
-	repeat
-		shown = Board.GetShownPrompts()
-		if #shown < 3 then
-			task.wait(0.1)
-		end
-	until #shown >= 3 or os.clock() > deadline
 	RunService.Heartbeat:Wait()
 	task.wait(0.2)
+	local bar = Board.GetKeyBar()
 	local parts: { string } = {}
 	local drawn, small = 0, 0
-	for _, name in { "PullPrompt", "Pull10Prompt", "HelpPrompt" } do
-		local holder = gui:FindFirstChild(name .. "Button", true)
-		local round = holder and holder:FindFirstChild("Round", true)
-		if round and round:IsA("GuiObject") then
+	local expected = { Pull = "E", Multi = "R", Auto = "T" }
+	if bar then
+		for _, entry in bar.Buttons do
+			local round = entry.Button :: GuiObject
 			local problem = drawnProblem(round, gui)
 			local size = round.AbsoluteSize
-			table.insert(parts, ("%s %dx%d visible=%s%s"):format(name, size.X, size.Y, tostring(problem == nil), if problem then " (" .. problem .. ")" else ""))
+			table.insert(parts, ("%s[%s] %dx%d visible=%s%s"):format(entry.Id, expected[entry.Id] or "?", size.X, size.Y, tostring(problem == nil), if problem then " (" .. problem .. ")" else ""))
 			if problem == nil then
 				drawn += 1
 				if size.X < 43.5 or size.Y < 43.5 then
 					small += 1
 				end
 			end
-		else
-			table.insert(parts, name .. " missing from the tree")
 		end
 	end
 	table.insert(lines, {
-		Ok = #shown >= 3 and drawn == 3 and small == 0,
-		Name = "gacha card: standing on the pad PromptShown fires for E / R / ? and the 3 buttons are drawn, each >= 44 px",
-		Detail = ("PromptShown for [%s]; %s"):format(table.concat(shown, ", "), table.concat(parts, "; ")),
+		Ok = bar ~= nil and drawn == 3 and small == 0,
+		Name = "gacha card: the key bar shows 3 buttons (E Pull, R x10, T Auto), each drawn and >= 44 px",
+		Detail = if bar then table.concat(parts, "; ") else "no key bar",
+	})
+	local bound = Board.GetBoundKeys()
+	table.sort(bound)
+	table.insert(lines, {
+		Ok = table.concat(bound, ",") == "E,R,T",
+		Name = "gacha card: with the card open E, R and T are bound (ContextActionService)",
+		Detail = ("bound [%s]"):format(table.concat(bound, ", ")),
+	})
+	-- No ProximityPrompt UI: nothing the card needs is a prompt.
+	local promptGuis = 0
+	for _, descendant in gui:GetDescendants() do
+		if descendant:IsA("ProximityPrompt") then
+			promptGuis += 1
+		end
+	end
+	table.insert(lines, {
+		Ok = promptGuis == 0,
+		Name = "gacha card: the card does not depend on ProximityPrompt UI",
+		Detail = ("%d ProximityPrompts under the card"):format(promptGuis),
 	})
 
 	-- Text fits (what is drawn).
@@ -1599,21 +1629,49 @@ local function probeGachaButtons(): { ProbeLine }
 		Detail = if #unfit > 0 then table.concat(unfit, "; ") else ("%d labels measured"):format(checked),
 	})
 
+	-- The card's on-screen height share, live and by the clamp math.
+	local camera = Workspace.CurrentCamera
+	local maxShare = G.MaxScreenShare
+	if camera then
+		local liveShare = card.Canvas.AbsoluteSize.Y / math.max(camera.ViewportSize.Y, 1)
+		table.insert(lines, {
+			Ok = liveShare <= maxShare + 0.01,
+			Name = ("gacha card: its on-screen height is at most %d%% of the viewport (live camera)"):format(maxShare * 100),
+			Detail = ("%.0f px of %.0f px = %.1f%% (clamp %.3f, fit %.3f)"):format(card.Canvas.AbsoluteSize.Y, camera.ViewportSize.Y, liveShare * 100, card.Clamp.Scale, card.Fit.Scale),
+		})
+	end
+	for _, viewport in { Vector2.new(1366, 768), Vector2.new(844, 390) } do
+		local worst, worstDepth = 0, 0
+		for _, depth in { 4, 8, 12.5, 25 } do
+			-- The on-screen height in px at this viewport: the card's studs share of
+			-- the view, times the clamp, times the viewport height.
+			local share = G.CardStuds.Y / (2 * math.tan(math.rad(70) / 2) * depth) * Board.ClampScaleFor(depth, 70)
+			if share > worst then
+				worst, worstDepth = share, depth
+			end
+		end
+		table.insert(lines, {
+			Ok = worst <= maxShare + 1e-6,
+			Name = ("gacha card (%dx%d): the clamped card is at most %d%% of the viewport height at any zoom"):format(viewport.X, viewport.Y, maxShare * 100),
+			Detail = ("worst %.1f%% = %.0f px of %d px (at %.1f studs)"):format(worst * 100, worst * viewport.Y, viewport.Y, worstDepth),
+		})
+	end
+
 	-- The whole card on screen at the default camera while standing on the pad.
 	local pad = card.Pad :: BasePart
 	local standing = pad.Position + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
-	local center = pad.Position + Vector3.new(0, pad.Size.Y / 2 + G.BottomAbovePad + G.CardStuds.Y / 2, 0)
+	local center = pad.Position + gui.StudsOffsetWorldSpace + Vector3.new(0, pad.Size.Y / 2 + G.BottomAbovePad + G.CardStuds.Y / 2, 0)
 	for _, viewport in { Vector2.new(1366, 768), Vector2.new(844, 390) } do
 		local label = ("%dx%d"):format(viewport.X, viewport.Y)
 		local flat = Vector3.new(-1, 0, 0)
-		local camera = CFrame.lookAt(standing - flat * 12.5 + Vector3.new(0, 3, 0), standing + Vector3.new(0, 1.5, 0))
+		local cameraCFrame = CFrame.lookAt(standing - flat * 12.5 + Vector3.new(0, 3, 0), standing + Vector3.new(0, 1.5, 0))
 		local worst = 0
 		local behind = false
 		local corners: { string } = {}
 		for _, sx in { -1, 1 } do
 			for _, sy in { -1, 1 } do
-				local corner = center + camera.RightVector * (sx * G.CardStuds.X / 2) + camera.UpVector * (sy * G.CardStuds.Y / 2)
-				local ndc = ndcOf(camera, corner, viewport)
+				local corner = center + cameraCFrame.RightVector * (sx * G.CardStuds.X / 2) + cameraCFrame.UpVector * (sy * G.CardStuds.Y / 2)
+				local ndc = ndcOf(cameraCFrame, corner, viewport)
 				if not ndc then
 					behind = true
 				else
@@ -1622,13 +1680,13 @@ local function probeGachaButtons(): { ProbeLine }
 				end
 			end
 		end
-		-- The button row hangs 6 + 88 px under the card's bottom edge.
-		local bottomNdc = ndcOf(camera, center - camera.UpVector * (G.CardStuds.Y / 2), viewport)
-		local rowBottomPx = if bottomNdc then (1 - bottomNdc.Y) / 2 * viewport.Y + 6 + 88 else math.huge
+		-- The key bar hangs KeyBarGap + 88 px under the card's bottom edge.
+		local bottomNdc = ndcOf(cameraCFrame, center - cameraCFrame.UpVector * (G.CardStuds.Y / 2), viewport)
+		local barBottomPx = if bottomNdc then (1 - bottomNdc.Y) / 2 * viewport.Y + G.KeyBarGap + 88 else math.huge
 		table.insert(lines, {
-			Ok = not behind and worst <= 1 and rowBottomPx <= viewport.Y,
-			Name = ("gacha card (%s): the card's whole rect is on screen at the default camera on the pad"):format(label),
-			Detail = ("corner NDC %s, worst %.3f (must be <= 1), button row bottom %.0f px of %d"):format(table.concat(corners, " "), worst, rowBottomPx, viewport.Y),
+			Ok = not behind and worst <= 1 and barBottomPx <= viewport.Y,
+			Name = ("gacha card (%s): the card's whole rect and the key bar are on screen at the default camera on the pad"):format(label),
+			Detail = ("corner NDC %s, worst %.3f (must be <= 1), key bar bottom %.0f px of %d"):format(table.concat(corners, " "), worst, barBottomPx, viewport.Y),
 		})
 	end
 	return lines
@@ -1648,11 +1706,18 @@ local function probeGachaFar(): { ProbeLine }
 	local labelOn = label ~= nil and label:IsA("BillboardGui") and label.Enabled
 	local titleText = if title and title:IsA("TextLabel") then title.Text else "?"
 	local price = if pillText and pillText:IsA("TextLabel") then pillText.Text else "?"
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local bound = Board.GetBoundKeys()
 	return {
 		{
 			Ok = not card.Billboard.Enabled and labelOn and titleText == "GACHA" and price ~= "" and price ~= "?",
 			Name = "gacha card: 25 studs away the card is not Enabled and the small GACHA label shows",
 			Detail = ("card Enabled %s, PopScale %.2f, label Enabled %s, title %q, price %q"):format(tostring(card.Billboard.Enabled), card.Pop.Scale, tostring(labelOn), titleText, price),
+		},
+		{
+			Ok = #bound == 0,
+			Name = "gacha card: 25 studs away E, R and T are unbound",
+			Detail = ("still bound [%s]"):format(table.concat(bound, ", ")),
 		},
 	}
 end
@@ -1663,11 +1728,19 @@ local function probeGachaBack(): { ProbeLine }
 	if not card then
 		return { { Ok = false, Name = "gacha card: walking back pops it in again", Detail = "no card" } }
 	end
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local bound = Board.GetBoundKeys()
+	table.sort(bound)
 	return {
 		{
 			Ok = card.Billboard.Enabled and card.Pop.Scale >= 0.999,
 			Name = "gacha card: walking back to the pad pops it in again (Enabled, UIScale 1)",
 			Detail = ("Enabled %s, PopScale %.3f, label Enabled %s"):format(tostring(card.Billboard.Enabled), card.Pop.Scale, tostring(card.Label and (card.Label :: any).Enabled)),
+		},
+		{
+			Ok = table.concat(bound, ",") == "E,R,T",
+			Name = "gacha card: walking back to the pad binds E, R and T again",
+			Detail = ("bound [%s]"):format(table.concat(bound, ", ")),
 		},
 	}
 end
@@ -1704,6 +1777,22 @@ local function probeGetUp(): { ProbeLine }
 	}
 end
 
+-- A real click: CombatController.Use is the function a tool's Activated runs.
+-- (The test asks for it on the ATTACKER's client; the server then runs the
+-- whole chain: RequestHit, the box, the verdict, ApplyHit.)
+local function probeSwing(weaponId: string): { ProbeLine }
+	local CombatController = require(script.Parent.CombatController) :: any
+	CombatController.ResetLocalCooldowns()
+	local sent, why = CombatController.Use(weaponId)
+	return {
+		{
+			Ok = sent == true,
+			Name = ("combat swing (%s): a click on the attacker's client swings and sends RequestHit"):format(weaponId),
+			Detail = if sent then "sent" else ("not sent: %s"):format(tostring(why)),
+		},
+	}
+end
+
 local function probeTutorial(payload: any)
 	local lines: { ProbeLine } = {}
 	local reportData: { [string]: any }? = nil
@@ -1714,6 +1803,8 @@ local function probeTutorial(payload: any)
 			return rootLines
 		elseif payload.Kind == "GetUp" then
 			return probeGetUp()
+		elseif payload.Kind == "Swing" then
+			return probeSwing(tostring(payload.Weapon))
 		elseif payload.Kind == "Step" then
 			return probeStep(payload.StepIndex, payload.StepId)
 		elseif payload.Kind == "BigCard" then

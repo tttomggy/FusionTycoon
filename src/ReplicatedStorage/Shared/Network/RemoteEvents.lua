@@ -20,6 +20,9 @@ local REMOTE_EVENT_NAMES = {
 	"RequestSync", -- client -> server: ask for a fresh SyncTycoon after a rejection (rate-limited to 1 per 2 s)
 	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
 	"GachaMultiPullResult", -- server -> client: outcome of a Pull x10; {Success, Items, NewIndexItems, IndexTiersCompleted} or {Success = false, Reason, Cost?}
+	"RequestGachaPull", -- client -> server: { Count = 1 | 10 } a pull from the Gacha card's key bar (E / R); own pad, within PromptDistance + 3 studs, the same function the pad's prompts ran
+	"SetAutoPull", -- client -> server: { On = boolean } Auto pull (T), free for everyone: one single pull every GachaConfig.AutoPullSeconds
+	"AutoPullState", -- server -> client: { On = boolean, Reason?, Cost? } Auto pull started or stopped (why: InsufficientCash, TooFar, Carrying, NoCharacter, Tutorial, Off)
 	"RequestRebirth", -- client -> server: rebirth now (no args); validated by RebirthService
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}
 	"RebirthAnnouncement", -- server -> all clients: a player just rebirthed; {Name, Rebirths}
@@ -28,7 +31,7 @@ local REMOTE_EVENT_NAMES = {
 	"EventNotice", -- server -> client: an event toast for one player; { Text, Big? } ("⚡ Your <item> got CHARGED!", "Too slow!")
 	"EventReward", -- server -> client: an item granted by an event or an admin gift; { Caption, Item, NewIndex? } (shown as a result card)
 	"MarkTipSeen", -- client -> server: a one-time tip/card was shown; { Id } (TipConfig ids only)
-	"RequestHit", -- client -> server: { Weapon, TargetUserId?, Origin, Direction } a weapon swing / shot / peel (all re-checked)
+	"RequestHit", -- client -> server: { Weapon, Origin?, Direction? } a weapon swing / shot / peel (all re-checked; a melee swing sends only the Weapon, the server boxes who is hit)
 	"HitReceived", -- server -> the target: { Impulse, Seconds, Spin?, Freeze? } ragdoll (or freeze) yourself now
 	"HitFx", -- server -> all: { Weapon, Kind, From?, To?, Attacker?, Target? } Kind = Bonk | Swing | Beam | FreezeBeam | Freeze | Slip | Throw (UserIds for Attacker / Target)
 	"WeaponUnlocked", -- server -> client: { Weapon } a weapon was just earned (the unlock card)
