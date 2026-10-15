@@ -10,6 +10,7 @@
 	Nothing is placed in the top-left 170x60 px, which belongs to the Roblox
 	top bar.
 ]]
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -1697,6 +1698,47 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		table.insert(lines, ("PASS hud left column overlap (%s, %d rects)"):format(scaleName, measured))
 	end
 	return lines
+end
+
+-- Screen-px rects (Position, Size; the top-bar inset added back, as /selftest
+-- measures) of what the Gacha pop-up card must stay clear of: the left
+-- column (cash card, SHOP / QUESTS / LOCK rows, goal card, quest tracker,
+-- deal badge / phone status, timed pills) and the bottom button row. Only
+-- what is shown right now.
+type ScreenRect = { Position: Vector2, Size: Vector2 }
+
+local function isShown(gui: GuiObject): boolean
+	local current: Instance? = gui
+	while current and current ~= screenGui do
+		if current:IsA("GuiObject") and not current.Visible then
+			return false
+		end
+		current = current.Parent
+	end
+	return current == screenGui and screenGui.Enabled
+end
+
+function HudController.GetObstacleRects(): { [string]: ScreenRect }
+	local inset = GuiService:GetGuiInset().Y
+	local parts: { [string]: GuiObject } = {
+		CashCard = cashHolder,
+		ShopRow = shopRow,
+		QuestRow = questRow,
+		LockRow = lockRow,
+		Goal = goalHolder,
+		QuestTracker = questTracker,
+		DealBadge = dealHolder,
+		PhoneStatus = phoneStatus,
+		Effects = effectsFrame,
+		BottomRow = buttonRow,
+	}
+	local rects: { [string]: ScreenRect } = {}
+	for name, gui in parts do
+		if isShown(gui) and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
+			rects[name] = { Position = gui.AbsolutePosition + Vector2.new(0, inset), Size = gui.AbsoluteSize }
+		end
+	end
+	return rects
 end
 
 --[[ Init ------------------------------------------------------------------ ]]

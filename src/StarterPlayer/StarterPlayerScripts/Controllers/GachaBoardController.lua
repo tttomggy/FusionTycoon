@@ -2,32 +2,40 @@
 --[[
 	GachaBoardController
 	--------------------
-	The Gacha odds CARD, the Pet Simulator 99 / Bubble Gum Simulator way: a
-	FIXED PIXEL-SIZE BillboardGui (300 x 204 card + a 72 px button row,
-	PlotLayout.Gacha) that pops up just above YOUR character's head on YOUR
-	Gacha Pad when your CHARACTER walks close. The same size on screen at any
-	zoom, so it is never off-screen and always readable. (The studs-sized
-	version scaled itself from its own on-screen size through three nested
-	UIScales, a feedback loop that drew in pieces; the 3D ViewportFrame orbs
-	rendered lazily on top. Both are gone.)
+	The Gacha odds CARD: a SCREEN-SPACE card (a ScreenGui from UIKit.Screen)
+	that follows YOUR Gacha Pad on screen and can never leave the safe area.
+	The look is the Pet Simulator 99 / Bubble Gum Simulator egg card: a
+	300 x 204 px card plus a 72 px E / R / T row, the same size at any zoom
+	(0.8 on a phone, the gui's MobileScale).
 
-	  * Built ONCE, hidden, as soon as your pad exists (before the first
-	    open). A refresh only updates text and colours (the %s, the lock
-	    state of each tier, luck, the event, the chips, the price), never
-	    rebuilds, so nothing ever shows half-built. 2D orbs (UIKit.TierOrb).
-	  * Sizing: fixed offsets. The ONLY sizing UIScale is 0.8 on a phone
-	    (UIKit.IsPhone, set on LayoutChanged). The pop is one more UIScale,
-	    0.85 -> 1 in 0.12 s (Quad-Out); closing is the same in reverse.
-	  * Anchor: StudsOffset puts the card's BOTTOM edge 1 stud above the top of
-	    the character's actual head (measured from the real character: the
-	    monkey avatar is short); SizeOffset makes the billboard grow upward
-	    from that point (the 72 px button row hangs below it);
-	    StudsOffsetWorldSpace shifts it 2.5 studs toward the pad's far side
-	    (away from the walkway): above and slightly behind you, never over you.
-	  * Visibility follows the CHARACTER, never the camera: inside PopInStuds
-	    (16) it opens, beyond PopOutStuds (19) it closes (the gap stops
-	    flicker). The billboard stays Enabled (layout always computed);
-	    closed = its PopRoot is hidden. MaxDistance 150.
+	Why not a billboard: you stand ON the pad, so a world-anchored card "above
+	your head" ended up past the top of the screen whenever the camera sat
+	close behind you, and floated far above the lab when zoomed out. Pet Sim 99
+	works because you stand in FRONT of the egg and look at it.
+
+	  * Follow: each RenderStepped while open, the pad's top centre + 3 studs
+	    goes through camera:WorldToViewportPoint; the card's BOTTOM-CENTRE (the
+	    button row included) goes there. Behind the camera: the last good
+	    position.
+	  * Clamp into the safe rect (logical px): top >= TopStack.GetBottom() + 8,
+	    bottom <= the weapon bar's top (or the HUD's bottom row) - 8, left >= the
+	    HUD left column's right edge + 8 (HudController.GetObstacleRects, the
+	    same rects /selftest checks), right <= viewport - 8.
+	  * Glide: lerp to the clamped target at 1 - 0.001^dt (no jitter when the
+	    camera rotates); snapped on open. When the safe rect is shorter than the
+	    card (small phones) the whole card shrinks to fit, minimum 0.7, about
+	    its bottom-centre: the only time it shrinks.
+	  * DisplayOrder 55: above the HUD, under every UIKit.Modal and result
+	    card. Hidden (with the pop) while any overlay (modal / big card) is open,
+	    during a ragdoll and while carrying, and back after.
+	  * Built ONCE, hidden, as soon as your pad exists. A refresh only updates
+	    text and colours (the %s, each tier's lock state, luck, the event, the
+	    chips, the price), never rebuilds. 2D orbs (UIKit.TierOrb), no
+	    ViewportFrame, no CanvasGroup, no TextScaled. Two UIScales besides the
+	    gui's MobileScale: PopScale (0.85 -> 1 in 0.12 s Quad-Out, reversed on
+	    close) and FitScale (the squeeze, 1 unless the safe rect is short).
+	  * Visibility follows the CHARACTER, never the camera: inside PopInStuds (16)
+	    it opens, beyond PopOutStuds (19) it closes (the gap stops flicker).
 
 	The card (design px): a dark violet panel with a 3 px gold stroke, a
 	header (GACHA PAD, the luck pill when luck > x1, the event chip, an (i)),
@@ -35,19 +43,18 @@
 	tier-colour stroke, the tier name; Secret has an animated rainbow
 	stroke), the mutation chips at the bottom left and the gold price pill at
 	the bottom right. A tier you never found is a black orb with "?" and
-	STILL shows its %. No ViewportFrame, no CanvasGroup, no TextScaled.
+	STILL shows its %.
 
-	THE KEY BAR under the card (same billboard, so it is clickable):
-	[E] Pull . $285, [R] x10 . $3.5K, [T] Auto . OFF / ON, round 56 px
-	buttons (>= 44 px even at the phone's 0.8). It does NOT use ProximityPrompt
-	UI: the pad's prompts are off (this controller also keeps them off on this
-	client). While the card is open E / R / T (X / Y / RB on a controller) are
-	bound with ContextActionService, and unbound when it closes; the keys and
-	the buttons send RequestGachaPull { Count = 1 | 10 } and SetAutoPull
-	{ On }; the server runs the one shared pull function. Desktop shows the key
-	caps, a controller its glyphs, touch words. T shows ON in green while Auto
-	pull runs; the server's AutoPullState says when and why it stopped (a
-	toast).
+	THE KEY BAR under the card: [E] Pull . $285, [R] x10 . $3.5K, [T] Auto .
+	OFF / ON, round 56 px buttons (>= 44 px even at the phone's 0.8). It does
+	NOT use ProximityPrompt UI: the pad's prompts are off (this controller also
+	keeps them off on this client). While the card is open E / R / T (X / Y / RB
+	on a controller) are bound with ContextActionService, and unbound when it
+	closes; the keys and the buttons send RequestGachaPull { Count = 1 | 10 }
+	and SetAutoPull { On }; the server runs the one shared pull function.
+	Desktop shows the key caps, a controller its glyphs, touch words. T shows
+	ON in green while Auto pull runs; the server's AutoPullState says when and
+	why it stopped (a toast).
 
 	Far away (beyond PopOutStuds) the small server "GachaLabel" (name + price)
 	shows instead; this controller hides it while the card is up. Only your own
@@ -84,6 +91,9 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TycoonController = require(script.Parent.TycoonController)
+local HudController = require(script.Parent.HudController)
+local CombatController = require(script.Parent.CombatController)
+local TopStack = require(script.Parent.Parent.UI.TopStack)
 local ToastController = require(script.Parent.ToastController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 
@@ -95,8 +105,7 @@ local Fonts = UITheme.Fonts
 local G = PlotLayout.Gacha
 local CARD = G.CardPx -- 300 x 204
 local ROW_HEIGHT = G.ButtonRowPx
-local BILLBOARD_SIZE = Vector2.new(CARD.X, CARD.Y + ROW_HEIGHT)
-local CARD_BOTTOM_FRACTION = CARD.Y / BILLBOARD_SIZE.Y -- where the card's bottom edge is in the billboard
+local FULL_SIZE = Vector2.new(CARD.X, CARD.Y + ROW_HEIGHT) -- the card + the key bar
 local MARGIN = 12
 local HEADER_Y = 6
 local HEADER_HEIGHT = 28
@@ -167,10 +176,12 @@ type TileView = {
 }
 
 type CardView = {
-	Billboard: BillboardGui,
+	Gui: ScreenGui,
 	Pad: BasePart,
+	Root: Frame, -- placed each frame (bottom-centre anchored); carries FitScale
+	Fit: UIScale, -- the squeeze: 1, down to MinSqueeze when the safe rect is short
 	PopRoot: Frame, -- everything; hidden = the card is closed
-	Pop: UIScale, -- the pop-in / pop-out scale (the one sizing UIScale besides the phone's)
+	Pop: UIScale, -- the pop-in / pop-out scale
 	Card: Frame, -- the 300 x 204 card
 	KeyBar: Frame, -- the E / R / T row under the card
 	Tiles: { [string]: TileView },
@@ -182,9 +193,12 @@ type CardView = {
 	Sparkle: TextLabel?,
 	Signature: string,
 	Label: Instance?, -- the small server GachaLabel
-	Open: boolean, -- the character is close (the open side of the hysteresis)
+	Near: boolean, -- the character is close (the open side of the distance hysteresis)
+	Open: boolean, -- the card is up (near AND nothing is covering it)
 	Tween: Tween?,
-	HeadStuds: number, -- the head's height over the pad the anchor was built for
+	Position: Vector2, -- the card's bottom-centre, logical px (the glide's current value)
+	LastGood: Vector2?, -- the last on-screen target
+	Snap: boolean, -- put it on its target at once (just opened)
 }
 
 local card: CardView? = nil
@@ -1022,7 +1036,7 @@ local function buildKeyBar(root: Instance): Frame
 	return row
 end
 
---[[ The card (one fixed-size BillboardGui above your pad) ------------------------------ ]]
+--[[ The card (a screen-space gui that follows the pad) --------------------------------- ]]
 
 local function setLabelEnabled(view: CardView, enabled: boolean)
 	local label = view.Label
@@ -1038,6 +1052,7 @@ local function popIn(view: CardView)
 		view.Tween = nil
 	end
 	view.Open = true
+	view.Snap = true
 	view.PopRoot.Visible = true
 	setLabelEnabled(view, false)
 	bindKeys()
@@ -1052,7 +1067,8 @@ local function popIn(view: CardView)
 	tween:Play()
 end
 
--- Closes: the same in reverse (1 -> 0.85), then hidden and the small label back.
+-- Closes: the same in reverse (1 -> 0.85), then hidden. The small label comes
+-- back only when the character is far (not while a modal merely covers the card).
 local function popOut(view: CardView)
 	if view.Tween then
 		view.Tween:Cancel()
@@ -1065,83 +1081,141 @@ local function popOut(view: CardView)
 	tween.Completed:Connect(function(state: Enum.PlaybackState)
 		if state == Enum.PlaybackState.Completed and not view.Open and card == view then
 			view.PopRoot.Visible = false
-			setLabelEnabled(view, true)
+			setLabelEnabled(view, not view.Near)
 		end
 	end)
 	tween:Play()
 end
 
--- How far above the pad's top the character's HEAD reaches (studs), from the
--- real character: the monkey avatar is short. Sole to top of the head.
-local function headStuds(): number
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	local head = character and character:FindFirstChild("Head")
-	if not humanoid or not root or not root:IsA("BasePart") or not head or not head:IsA("BasePart") then
-		return G.DefaultHeadStuds
-	end
-	local feet = root.Position.Y - root.Size.Y / 2 - humanoid.HipHeight
-	return math.max(head.Position.Y + head.Size.Y / 2 - feet, 2)
+--[[ Placement ----------------------------------------------------------------------- ]]
+
+type Rect = { Left: number, Top: number, Right: number, Bottom: number }
+
+-- The gui's logical-px scale (the phone's 0.8).
+local function mobileScale(view: CardView): number
+	local scale = view.Gui:FindFirstChild("MobileScale")
+	return if scale and scale:IsA("UIScale") then scale.Scale else 1
 end
 
--- The anchor: the card's bottom edge HeadClearanceStuds above the head.
-local function applyAnchor(view: CardView, head: number)
-	view.HeadStuds = head
-	view.Billboard.StudsOffset = Vector3.new(0, view.Pad.Size.Y / 2 + head + G.HeadClearanceStuds, 0)
-end
-
--- The phone's one sizing UIScale (0.8), set once and on LayoutChanged. Scaled
--- about the card's bottom line, so the anchor does not move.
-local function applyPhoneScale(view: CardView)
-	local root = view.PopRoot.Parent :: Frame
-	local existing = root:FindFirstChild("PhoneScale")
-	if UIKit.IsPhone() then
-		if not existing then
-			local scale = Instance.new("UIScale")
-			scale.Name = "PhoneScale"
-			scale.Scale = G.PhoneScale
-			scale.Parent = root
+-- The safe rect in LOGICAL px, from the viewport (screen px), the mobile scale
+-- and the HUD's live rects (screen px): top under TopStack, bottom above the
+-- weapon bar or the bottom row, left right of the HUD left column, right at
+-- the viewport edge, all with SafeMargin. Pure: /selftest feeds it too.
+function GachaBoardController.PlanSafeRect(viewport: Vector2, scale: number, topStackBottom: number, rects: { [string]: { Position: Vector2, Size: Vector2 } }, weaponBar: { Position: Vector2, Size: Vector2 }?): Rect
+	local margin = G.SafeMargin
+	local top = (topStackBottom + margin)
+	local bottom = viewport.Y / scale - margin
+	local left = margin
+	local right = viewport.X / scale - margin
+	for name, rect in rects do
+		if name == "BottomRow" then
+			bottom = math.min(bottom, rect.Position.Y / scale - margin)
+		else
+			-- The left column: the card stays to the right of it.
+			left = math.max(left, (rect.Position.X + rect.Size.X) / scale + margin)
 		end
-	elseif existing then
-		existing:Destroy()
 	end
+	if weaponBar then
+		bottom = math.min(bottom, weaponBar.Position.Y / scale - margin)
+	end
+	return { Left = left, Top = top, Right = right, Bottom = bottom }
 end
 
--- A frame whose AnchorPoint is the card's bottom line, so a UIScale on it (the
--- phone's, the pop's) scales about that line and the card stays put on its anchor.
-local function anchoredFrame(name: string, parent: Instance): Frame
-	local f = Instance.new("Frame")
-	f.Name = name
-	f.BackgroundTransparency = 1
-	f.AnchorPoint = Vector2.new(0.5, CARD_BOTTOM_FRACTION)
-	f.Position = UDim2.fromScale(0.5, CARD_BOTTOM_FRACTION)
-	f.Size = UDim2.fromScale(1, 1)
-	f.Parent = parent
-	return f
+-- Where the card goes: its bottom-centre `point` clamped so the card (scaled
+-- `fit`) is inside `safe`; returns (position, fit). Pure.
+function GachaBoardController.PlanCard(point: Vector2, safe: Rect): (Vector2, number)
+	local height = FULL_SIZE.Y
+	local available = safe.Bottom - safe.Top
+	local fit = 1
+	if available < height then
+		fit = math.max(G.MinSqueeze, available / height)
+	end
+	local w, h = FULL_SIZE.X * fit, height * fit
+	local x
+	if safe.Right - safe.Left < w then
+		x = (safe.Left + safe.Right) / 2
+	else
+		x = math.clamp(point.X, safe.Left + w / 2, safe.Right - w / 2)
+	end
+	local y
+	if available < h then
+		y = safe.Bottom -- still too tall at the minimum: keep the bottom (the key bar) in view
+	else
+		y = math.clamp(point.Y, safe.Top + h, safe.Bottom)
+	end
+	return Vector2.new(x, y), fit
 end
 
-local function buildCard(pad: BasePart, plotOrigin: CFrame?)
-	local billboard = Instance.new("BillboardGui")
-	billboard.Name = "GachaCard"
-	billboard.Adornee = pad
-	billboard.Size = UDim2.fromOffset(BILLBOARD_SIZE.X, BILLBOARD_SIZE.Y)
-	-- Grows upward from the anchor, with the card's bottom edge ON the anchor
-	-- (the button row hangs below it): shifted up by half the height less the row.
-	billboard.SizeOffset = Vector2.new(0, 0.5 - ROW_HEIGHT / BILLBOARD_SIZE.Y)
-	-- Plot-local, away from the walkway: above and slightly behind you.
-	billboard.StudsOffsetWorldSpace = if plotOrigin then plotOrigin:VectorToWorldSpace(G.BackOffset) else Vector3.zero
-	billboard.MaxDistance = G.MaxDistance
-	billboard.AlwaysOnTop = false
-	billboard.LightInfluence = 0
-	billboard.ResetOnSpawn = false
-	billboard.Active = true
-	billboard.ClipsDescendants = false
-	billboard.Enabled = true -- layout is always computed; closed = PopRoot hidden
+local function currentSafeRect(view: CardView): Rect
+	local camera = Workspace.CurrentCamera
+	local viewport = if camera then camera.ViewportSize else Vector2.new(1280, 720)
+	return GachaBoardController.PlanSafeRect(viewport, mobileScale(view), TopStack.GetBottom(), HudController.GetObstacleRects(), CombatController.GetBarRect())
+end
 
-	local root = anchoredFrame("Root", billboard)
-	local popRoot = anchoredFrame("PopRoot", root)
+local function anchorWorld(view: CardView): Vector3
+	return view.Pad.Position + Vector3.new(0, view.Pad.Size.Y / 2 + G.AnchorUpStuds, 0)
+end
+
+-- One frame of the follow: the target from the camera, clamped, then glided.
+local function place(view: CardView, dt: number)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local scale = mobileScale(view)
+	local projected = camera:WorldToViewportPoint(anchorWorld(view))
+	if projected.Z > 0 then
+		view.LastGood = Vector2.new(projected.X, projected.Y) / scale
+	end
+	local safe = currentSafeRect(view)
+	local point = view.LastGood or Vector2.new((safe.Left + safe.Right) / 2, safe.Bottom)
+	local target, fit = GachaBoardController.PlanCard(point, safe)
+	if view.Snap then
+		view.Snap = false
+		view.Position = target
+		view.Fit.Scale = fit
+	else
+		local alpha = 1 - G.FollowRate ^ dt
+		view.Position = view.Position:Lerp(target, alpha)
+		view.Fit.Scale += (fit - view.Fit.Scale) * alpha
+	end
+	view.Root.Position = UDim2.fromOffset(view.Position.X, view.Position.Y)
+end
+
+-- Is something covering the card, or is the character not fit to use it?
+local function blocked(): boolean
+	if UIKit.IsOverlayOpen() then
+		return true
+	end
+	local ragdolled = localPlayer:GetAttribute("RagdollUntil")
+	if typeof(ragdolled) == "number" and ragdolled > Workspace:GetServerTimeNow() then
+		return true
+	end
+	return localPlayer:GetAttribute("HeistTier") ~= nil -- carrying a stolen orb
+end
+
+local function buildCard(pad: BasePart)
+	local gui = UIKit.Screen("GachaCard", G.DisplayOrder)
+
+	-- Bottom-centre anchored, so every scale on it works about the card's bottom line.
+	local root = Instance.new("Frame")
+	root.Name = "Root"
+	root.BackgroundTransparency = 1
+	root.AnchorPoint = Vector2.new(0.5, 1)
+	root.Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)
+	root.Parent = gui
+	local fit = Instance.new("UIScale")
+	fit.Name = "FitScale"
+	fit.Parent = root
+
+	local popRoot = Instance.new("Frame")
+	popRoot.Name = "PopRoot"
+	popRoot.BackgroundTransparency = 1
+	popRoot.AnchorPoint = Vector2.new(0.5, 1)
+	popRoot.Position = UDim2.fromScale(0.5, 1)
+	popRoot.Size = UDim2.fromScale(1, 1)
 	popRoot.Visible = false
+	popRoot.Parent = root
 	local pop = Instance.new("UIScale")
 	pop.Name = "PopScale"
 	pop.Scale = G.PopFromScale
@@ -1161,8 +1235,10 @@ local function buildCard(pad: BasePart, plotOrigin: CFrame?)
 	local keyBar = buildKeyBar(popRoot)
 
 	local view = {
-		Billboard = billboard,
+		Gui = gui,
 		Pad = pad,
+		Root = root,
+		Fit = fit,
 		PopRoot = popRoot,
 		Pop = pop,
 		Card = cardFrame,
@@ -1176,29 +1252,30 @@ local function buildCard(pad: BasePart, plotOrigin: CFrame?)
 		Sparkle = nil,
 		Signature = "",
 		Label = pad:FindFirstChild("GachaLabel"),
+		Near = false,
 		Open = false,
 		Tween = nil,
-		HeadStuds = G.DefaultHeadStuds,
+		Position = Vector2.zero,
+		LastGood = nil,
+		Snap = true,
 	} :: CardView
 	buildContent(view, cardFrame)
 	updateContent(view)
 	refreshButtons()
-	applyAnchor(view, headStuds())
-	applyPhoneScale(view)
 	card = view
-	billboard.Parent = localPlayer:WaitForChild("PlayerGui")
 	pad.Destroying:Connect(function()
 		if card == view then
 			card = nil
 			unbindKeys()
 		end
-		billboard:Destroy()
+		gui:Destroy()
 	end)
 end
 
 -- Your pad: Workspace.Plots[your plot].GachaStation.Pad (it exists once the lab is claimed).
 -- Also keeps the station's own prompts OFF on this client (the server turns
 -- them off; this makes sure nothing turns them back on and draws a default prompt).
+-- (The H "How it works" next to the LOCK console is the LOCK console's own.)
 local function keepPromptsOff(station: Instance)
 	for _, descendant in station:GetDescendants() do
 		if descendant:IsA("ProximityPrompt") and (descendant.Name == "PullPrompt" or descendant.Name == "Pull10Prompt" or descendant.Name == "HelpPrompt") then
@@ -1216,22 +1293,23 @@ local function keepPromptsOff(station: Instance)
 	end
 end
 
-local function findOwnPad(): (BasePart?, CFrame?)
+local function findOwnPad(): BasePart?
 	local plots = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
 	local plot = plots and plots:FindFirstChild(PlotNaming.GetPlotName(localPlayer.UserId))
 	local station = plot and plot:FindFirstChild("GachaStation")
 	local pad = station and station:FindFirstChild("Pad")
 	if station and pad and pad:IsA("BasePart") then
 		keepPromptsOff(station)
-		local origin = plot and plot:FindFirstChild("PlotOrigin")
-		return pad, if origin and origin:IsA("BasePart") then origin.CFrame else nil
+		return pad
 	end
-	return nil, nil
+	return nil
 end
 
 --[[ Per frame ------------------------------------------------------------------------- ]]
 
-local function stepFrame()
+-- Distance hysteresis (Near), then Open = Near and not covered / ragdolled /
+-- carrying; and, while up, the follow.
+local function stepFrame(dt: number)
 	local view = card
 	if not view or not view.Pad.Parent then
 		return
@@ -1241,15 +1319,22 @@ local function stepFrame()
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if root and root:IsA("BasePart") then
 		local distance = (root.Position - view.Pad.Position).Magnitude
-		if not view.Open and distance < G.PopInStuds then
-			popIn(view)
-		elseif view.Open and distance > G.PopOutStuds then
-			popOut(view)
+		if not view.Near and distance < G.PopInStuds then
+			view.Near = true
+		elseif view.Near and distance > G.PopOutStuds then
+			view.Near = false
 		end
+	end
+	local want = view.Near and not blocked()
+	if want and not view.Open then
+		popIn(view)
+	elseif not want and view.Open then
+		popOut(view)
 	end
 	if not view.PopRoot.Visible then
 		return
 	end
+	place(view, dt)
 	local now = os.clock()
 	local shimmer, sparkle = view.Shimmer, view.Sparkle
 	if shimmer then
@@ -1264,9 +1349,9 @@ end
 local function refresh()
 	local view = card
 	if not view then
-		local pad, origin = findOwnPad()
+		local pad = findOwnPad()
 		if pad then
-			buildCard(pad, origin)
+			buildCard(pad)
 		end
 		return
 	end
@@ -1276,13 +1361,10 @@ local function refresh()
 	if not view.Label or not view.Label.Parent then
 		view.Label = view.Pad:FindFirstChild("GachaLabel")
 	end
-	if view.PopRoot.Visible then
-		setLabelEnabled(view, false) -- the card is up: no small label under it
-	end
-	-- A new character (respawn, another avatar): re-anchor on its head.
-	local head = headStuds()
-	if math.abs(head - view.HeadStuds) > 0.05 then
-		applyAnchor(view, head)
+	if view.PopRoot.Visible or view.Near then
+		setLabelEnabled(view, false) -- the card is up (or about to be): no small label under it
+	else
+		setLabelEnabled(view, true)
 	end
 	if signatureOf() ~= view.Signature then
 		updateContent(view)
@@ -1299,14 +1381,33 @@ end
 function GachaBoardController.RefreshNow()
 	refresh()
 	if card then
-		stepFrame()
+		stepFrame(1 / 60)
 	end
 end
 
--- Your card (nil before your pad exists): the billboard, its pieces, and the
+-- Puts the card on its target at once (the glide skipped), so a camera test
+-- does not wait for it.
+function GachaBoardController.SnapNow()
+	if card then
+		card.Snap = true
+	end
+end
+
+-- The safe rect right now, in screen px (what /selftest compares the card to).
+function GachaBoardController.GetSafeRectScreenPx(): Rect?
+	local view = card
+	if not view then
+		return nil
+	end
+	local safe = currentSafeRect(view)
+	local scale = mobileScale(view)
+	return { Left = safe.Left * scale, Top = safe.Top * scale, Right = safe.Right * scale, Bottom = safe.Bottom * scale }
+end
+
+-- Your card (nil before your pad exists): the gui, its pieces, and the
 -- state the pop logic is in. Every UI check reads the instance tree from
--- Billboard down.
-function GachaBoardController.GetCard(): { Billboard: BillboardGui, Pad: BasePart, PopRoot: Frame, Card: Frame, Pop: UIScale, Open: boolean, Shown: boolean, Label: Instance? }?
+-- Gui down.
+function GachaBoardController.GetCard(): { Gui: ScreenGui, Pad: BasePart, Root: Frame, PopRoot: Frame, Card: Frame, Pop: UIScale, Fit: UIScale, Open: boolean, Shown: boolean, Label: Instance? }?
 	local view = card
 	if not view then
 		return nil
@@ -1315,11 +1416,13 @@ function GachaBoardController.GetCard(): { Billboard: BillboardGui, Pad: BasePar
 		view.Label = view.Pad:FindFirstChild("GachaLabel")
 	end
 	return {
-		Billboard = view.Billboard,
+		Gui = view.Gui,
 		Pad = view.Pad,
+		Root = view.Root,
 		PopRoot = view.PopRoot,
 		Card = view.Card,
 		Pop = view.Pop,
+		Fit = view.Fit,
 		Open = view.Open,
 		Shown = view.PopRoot.Visible,
 		Label = view.Label,
@@ -1406,15 +1509,11 @@ function GachaBoardController.Init()
 	UserInputService.LastInputTypeChanged:Connect(function()
 		refreshButtons()
 	end)
-	UIKit.LayoutChanged:Connect(function()
-		if card then
-			applyPhoneScale(card)
-		end
-	end)
 	TycoonController.TycoonChanged:Connect(function()
 		refresh()
 	end)
-	RunService.Heartbeat:Connect(stepFrame)
+	-- RenderStepped: the follow must use this frame's camera.
+	RunService.RenderStepped:Connect(stepFrame)
 	task.spawn(function()
 		while true do
 			task.wait(0.5)

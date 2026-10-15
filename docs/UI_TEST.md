@@ -1812,25 +1812,28 @@ person, R15, 100% camera zoom; check each from the front and the side.
   tutorial is skipped on join; `/tutorial reset` still runs it.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
-- [ ] **Gacha pop-up card** (Studio, any camera zoom): walk toward YOUR
-  Gacha Pad: at about 16 studs a compact card pops up **just above your head**
-  (a quick 0.85 → 1 grow) with all 6 coloured tiles AT ONCE (2D orbs, the %
-  under each, the tier name), "🔮 GACHA PAD" and an (i) on top, mutation chips
-  bottom left, the gold price bottom right, and ONE row of three round buttons
-  under it: **[E] Pull · $285, [R] ×10 · $3.5K, [T] Auto · OFF**. It does not
-  flicker or build piece by piece. **Zoom in and out: the card stays exactly
-  the same size on screen.** It is small (about 300 × 200 px), above and a bit
-  behind you, never over you; on a short avatar (the monkey) it still sits
-  about 1 stud over the head. Walk away past 19 studs: it pops down and only the
-  small GACHA + price label shows (the label is also what other players' pads
-  show). No "H · How it works" or "Pull" prompt appears next to the pad. A
-  never-found tier is a black orb with "?" but keeps its %. Press E, R and T
-  (X / Y / RB on a controller): E and R pull, T turns green (**Auto ON**) and
-  keeps pulling one orb about every second until you press T again, walk away
-  or run out of cash ("Auto pull stopped: need $…"); Commons only leave a small
-  line, no big card. The (i) opens the ORBS & ODDS panel with HOW IT WORKS
-  first. On the phone emulator the round buttons are ≥ 44 px and tappable.
-  `/rebirths 3` then walk up: the 🍀 Luck pill appears and the %s change.
+- [ ] **Gacha pop-up card** (Studio, any camera): walk toward YOUR Gacha Pad:
+  at about 16 studs a compact card (300 × 204 px + the E / R / T row) pops up
+  ON SCREEN just above the pad, all 6 coloured tiles at once. **Stand on the
+  pad with the camera close behind you (the normal view): the whole card and
+  E / R / T are visible, just above you** (not above the top of the screen).
+  Rotate and zoom in and out: it follows the pad and glides, never leaves the
+  screen, never covers the HUD (the left column, the weapon bar, the bottom
+  buttons, the event bar). Look away from the pad or go top-down: it stays
+  inside the safe area. Zoomed out it does not float far above the lab. On a
+  short phone it shrinks a little to fit (never below 70%). Open the (i) panel,
+  the Shop or pull something with a reveal card: the card hides and comes back
+  after. It is hidden while you are ragdolled or carrying an orb. Walk away past
+  19 studs: it pops down and only the small GACHA + price label shows. No
+  "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK
+  console is that console's own). A never-found tier is a black orb with "?" but
+  keeps its %. Press E, R and T (X / Y / RB on a controller): E and R pull, T
+  turns green (**Auto ON**) and keeps pulling one orb about every second until
+  you press T again, walk away or run out of cash ("Auto pull stopped: need
+  $…"); Commons only leave a small line, no big card. The (i) opens the ORBS &
+  ODDS panel with HOW IT WORKS first. On the phone emulator the round buttons
+  are ≥ 44 px and tappable. `/rebirths 3` then walk up: the 🍀 Luck pill
+  appears and the %s change.
 - [ ] **Studio test start** (Test → 2 players, no commands typed): both
   players are at Rebirth 3 with the weapon bar. Player1 bats Player2 and
   Player2 flies; the Glove launches further with a spin. `/rebirths 0` on

@@ -1010,6 +1010,10 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	Workspace:SetAttribute("AdminLuckUntil", oldUntil)
 	PlayerDataService.SyncTycoon(player)
 	tutorialProbe(player, { Kind = "GachaButtons" }, result)
+	-- The follow + clamp: five camera views, once per HUD layout, then the pure math.
+	tutorialProbe(player, { Kind = "GachaPlace", Phone = false }, result)
+	tutorialProbe(player, { Kind = "GachaPlace", Phone = true }, result)
+	tutorialProbe(player, { Kind = "GachaPlan" }, result)
 
 	-- 25 studs away: the card pops out and the small GACHA label shows.
 	root.CFrame = away

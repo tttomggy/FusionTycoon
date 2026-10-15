@@ -36,6 +36,7 @@
 	  * WeaponUnlocked: the tutorial-style card "You got a Bat!" with the
 	    big turning model (after the tutorial, if it's still running).
 ]]
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -907,6 +908,15 @@ local function poseHold(character: Model, weapon: CombatConfig.Weapon)
 	if not WeaponAnimator.Hold(character, weapon) then
 		WeaponPose.Hold(character, weapon)
 	end
+end
+
+-- Screen-px rect (top-bar inset added back) of the weapon bar while it is
+-- shown, else nil: the Gacha card stays above it.
+function CombatController.GetBarRect(): { Position: Vector2, Size: Vector2 }?
+	if not screenGui or not screenGui.Enabled or not bar or bar.AbsoluteSize.X <= 0 then
+		return nil
+	end
+	return { Position = bar.AbsolutePosition + Vector2.new(0, GuiService:GetGuiInset().Y), Size = bar.AbsoluteSize }
 end
 
 -- The weapon whose pose is up (track or C0), for /selftest and the re-hold.

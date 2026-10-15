@@ -1415,7 +1415,7 @@ local function probeGachaOpen(): { ProbeLine }
 	end
 	watchGachaPrompts()
 	local pad = card.Pad :: BasePart
-	local gui = card.Billboard :: BillboardGui
+	local gui = card.Gui :: ScreenGui
 	root.CFrame = CFrame.new(pad.Position + Vector3.new(0, pad.Size.Y / 2 + 3, 0))
 	local frames = 0
 	local started = os.clock()
@@ -1500,12 +1500,11 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		table.insert(lines, { Ok = false, Name = ("gacha card (%s): your card exists"):format(label), Detail = "no card (the lab is unclaimed, or the pad has not streamed in)" })
 		return lines
 	end
-	local gui = card.Billboard :: BillboardGui
-	local G = PlotLayout.Gacha
+	local gui = card.Gui :: ScreenGui
 	table.insert(lines, {
 		Ok = card.Shown and card.Pop.Scale >= 0.999 and card.Open,
 		Name = ("gacha card (%s): with the character on the pad the card is open at UIScale 1"):format(label),
-		Detail = ("shown %s, PopScale %.3f, open %s, card %dx%d px, billboard %dx%d"):format(tostring(card.Shown), card.Pop.Scale, tostring(card.Open), card.Card.AbsoluteSize.X, card.Card.AbsoluteSize.Y, gui.AbsoluteSize.X, gui.AbsoluteSize.Y),
+		Detail = ("shown %s, PopScale %.3f, open %s, card %dx%d px, fit %.2f"):format(tostring(card.Shown), card.Pop.Scale, tostring(card.Open), card.Card.AbsoluteSize.X, card.Card.AbsoluteSize.Y, card.Fit.Scale),
 	})
 
 	-- Six tiles drawn, each with an orb (or the black one) and a % with text height >= 12 px.
@@ -1540,41 +1539,32 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		Detail = ("%d/%d tiles drawn, %d orbs, %d %% labels with text height, %d >= 12 px tall%s"):format(tiles, total, orbs, percents, tall, if #tallBad > 0 then " | too small: " .. table.concat(tallBad, ", ") else ""),
 	})
 
-	-- No ViewportFrame, no CanvasGroup, exactly one UIScale besides the phone's.
+	-- No ViewportFrame, no CanvasGroup; the only UIScales besides the gui's
+	-- phone scale are the pop and the squeeze.
 	local viewports, canvasGroups, scales = 0, 0, {}
 	for _, descendant in gui:GetDescendants() do
 		if descendant:IsA("ViewportFrame") then
 			viewports += 1
 		elseif descendant:IsA("CanvasGroup") then
 			canvasGroups += 1
-		elseif descendant:IsA("UIScale") and descendant.Name ~= "PhoneScale" and descendant.Name ~= "SelectScale" then
+		elseif descendant:IsA("UIScale") and descendant.Name ~= "MobileScale" and descendant.Name ~= "SelectScale" then
 			table.insert(scales, (descendant:GetFullName():gsub("^.-GachaCard%.", "")))
 		end
 	end
 	local leftover = Workspace:FindFirstChild("GachaBoard", true)
+	table.sort(scales)
 	table.insert(lines, {
-		Ok = viewports == 0 and canvasGroups == 0 and #scales == 1 and leftover == nil,
-		Name = ("gacha card (%s): no ViewportFrame, no CanvasGroup, exactly 1 UIScale besides the phone one, no GachaBoard"):format(label),
+		Ok = viewports == 0 and canvasGroups == 0 and table.concat(scales, ",") == "Root.FitScale,Root.PopRoot.PopScale" and leftover == nil,
+		Name = ("gacha card (%s): no ViewportFrame, no CanvasGroup, only the pop and the squeeze UIScale besides the phone one, no GachaBoard"):format(label),
 		Detail = ("ViewportFrames %d, CanvasGroups %d, UIScales [%s], GachaBoard %s"):format(viewports, canvasGroups, table.concat(scales, ", "), tostring(leftover)),
 	})
 
-	-- The anchor: the card's bottom edge 1 stud over the top of the REAL head.
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	local head = character and character:FindFirstChild("Head")
-	if humanoid and root and root:IsA("BasePart") and head and head:IsA("BasePart") then
-		local pad = card.Pad :: BasePart
-		local feet = root.Position.Y - root.Size.Y / 2 - humanoid.HipHeight
-		local headTop = head.Position.Y + head.Size.Y / 2 - feet
-		local want = pad.Size.Y / 2 + headTop + G.HeadClearanceStuds
-		local backward = gui.StudsOffsetWorldSpace.Magnitude
-		table.insert(lines, {
-			Ok = math.abs(gui.StudsOffset.Y - want) <= 0.15 and math.abs(backward - G.BackOffset.Magnitude) <= 0.01 and gui.SizeOffset.Y > 0 and gui.MaxDistance == G.MaxDistance and not gui.AlwaysOnTop and gui.LightInfluence == 0 and not gui.ResetOnSpawn,
-			Name = ("gacha card (%s): the card's bottom edge is 1 stud above the character's head, shifted 2.5 studs back"):format(label),
-			Detail = ("StudsOffset.Y %.2f (head top %.2f over the feet, wants %.2f), world shift %.2f studs, SizeOffset.Y %.3f, MaxDistance %d"):format(gui.StudsOffset.Y, headTop, want, backward, gui.SizeOffset.Y, gui.MaxDistance),
-		})
-	end
+	-- A screen-space gui under the Gacha display order: over the HUD, under every modal.
+	table.insert(lines, {
+		Ok = gui.DisplayOrder == PlotLayout.Gacha.DisplayOrder and gui.DisplayOrder > 41 and not gui.ResetOnSpawn,
+		Name = ("gacha card (%s): its gui sits above the HUD and the weapon bar, under every modal, and survives respawn"):format(label),
+		Detail = ("DisplayOrder %d, ResetOnSpawn %s"):format(gui.DisplayOrder, tostring(gui.ResetOnSpawn)),
+	})
 
 	-- Each tier's drawn % is GetGachaRates at the server's luck.
 	local rates = FusionConfig.GetGachaRates(serverLuck)
@@ -1649,7 +1639,13 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 
 	-- The (i) panel: per-orb % sum to the tier %.
 	Board.OpenPanel()
-	task.wait(0.3)
+	task.wait(0.45)
+	local coveredCard = Board.GetCard()
+	table.insert(lines, {
+		Ok = coveredCard ~= nil and not coveredCard.Shown and not coveredCard.Open,
+		Name = ("gacha card (%s): while the (i) panel (a modal) is open the card is hidden"):format(label),
+		Detail = ("shown %s, open %s"):format(tostring(coveredCard and coveredCard.Shown), tostring(coveredCard and coveredCard.Open)),
+	})
 	local panelLines = Board.GetPanelLines()
 	local sumBad = {}
 	for _, tier in FusionConfig.TierOrder do
@@ -1666,6 +1662,12 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		end
 	end
 	Board.ClosePanel()
+	local reopened = waitForCard(true, 2)
+	table.insert(lines, {
+		Ok = reopened ~= nil and reopened.Shown and reopened.Pop.Scale >= 0.999,
+		Name = ("gacha card (%s): it comes back after the panel closes"):format(label),
+		Detail = ("shown %s, PopScale %.2f"):format(tostring(reopened and reopened.Shown), if reopened then reopened.Pop.Scale else 0),
+	})
 	table.insert(lines, {
 		Ok = #sumBad == 0,
 		Name = ("gacha card (%s): the (i) panel's per-orb %% sum to each tier's %%"):format(label),
@@ -1674,34 +1676,18 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	return lines
 end
 
--- A world point to normalised device coordinates for a camera (vertical FOV
--- 70): x, y in [-1, 1] are on screen. Pure math, so the "default camera on
--- the pad" check needs no real camera. Returns nil behind the camera.
-local function ndcOf(camera: CFrame, point: Vector3, viewport: Vector2): Vector2?
-	local relative = camera:PointToObjectSpace(point)
-	if relative.Z >= -0.1 then
-		return nil
-	end
-	local depth = -relative.Z
-	local tanHalf = math.tan(math.rad(70) / 2)
-	return Vector2.new(relative.X / depth / (tanHalf * viewport.X / viewport.Y), relative.Y / depth / tanHalf)
-end
-
 -- The key bar under the card (character on the pad): 3 buttons E / R / T,
 -- each >= 44 px even at the phone's 0.8, drawn (read from the tree), E R T
--- bound through ContextActionService, text fits; the card is the SAME size
--- on screen with the camera 8 and 30 studs away (+-2 px); the whole card and
--- button row are on screen at 1366x768 and 844x390, at the default zoom and
--- at the maximum zoom-out.
+-- bound through ContextActionService, text fits. (Placement is
+-- probeGachaPlace / probeGachaPlan.)
 local function probeGachaButtons(): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local Board = require(script.Parent.GachaBoardController) :: any
-	local G = PlotLayout.Gacha
 	local card = waitForCard(true, 3)
 	if not card then
 		return { { Ok = false, Name = "gacha card: the key bar", Detail = "no card" } }
 	end
-	local gui = card.Billboard :: BillboardGui
+	local gui = card.Gui :: ScreenGui
 	RunService.Heartbeat:Wait()
 	task.wait(0.2)
 	local bar = Board.GetKeyBar()
@@ -1753,58 +1739,143 @@ local function probeGachaButtons(): { ProbeLine }
 		Detail = if #unfit > 0 then table.concat(unfit, "; ") else ("%d labels measured"):format(checked),
 	})
 
-	-- The same size on screen with the camera 8 and 30 studs away.
+	return lines
+end
+
+-- Placement: the character stands on the pad and the camera is set to each of
+-- 5 views in turn (close behind 6 studs, default 12.5, max zoom-out, top-down,
+-- looking away from the pad). At each, the card + button row (read from the
+-- instance tree) is fully inside the safe rect and overlaps no HUD rect (the
+-- left column, the bottom row, the weapon bar) or the TopStack zone. Run once
+-- per HUD layout (desktop, phone), live.
+local function probeGachaPlace(phone: boolean): { ProbeLine }
+	local lines: { ProbeLine } = {}
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local Hud = require(script.Parent.HudController) :: any
+	local CombatController = require(script.Parent.CombatController) :: any
+	local TopStack = require(script.Parent.Parent.UI.TopStack) :: any
+	local layout = if phone then "phone layout" else "desktop layout"
+	UIKit.SetForcedPhone(phone)
+	task.wait(0.4)
+	local card = waitForCard(true, 3)
 	local camera = Workspace.CurrentCamera
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not card or not camera or not root or not root:IsA("BasePart") then
+		UIKit.SetForcedPhone(nil)
+		return { { Ok = false, Name = ("gacha card (%s): placement"):format(layout), Detail = "no card, camera or character" } }
+	end
 	local pad = card.Pad :: BasePart
 	local standing = pad.Position + Vector3.new(0, pad.Size.Y / 2 + 3, 0)
-	if camera then
-		local savedType, savedCFrame = camera.CameraType, camera.CFrame
-		camera.CameraType = Enum.CameraType.Scriptable
-		local sizes: { Vector2 } = {}
-		for _, distance in { 8, 30 } do
-			camera.CFrame = CFrame.lookAt(standing + Vector3.new(distance * 0.9, distance * 0.3 + 3, 0), standing + Vector3.new(0, 3, 0))
-			for _ = 1, 4 do
-				RunService.Heartbeat:Wait()
-			end
-			table.insert(sizes, card.Card.AbsoluteSize)
+	root.CFrame = CFrame.new(standing)
+	local savedType, savedCFrame = camera.CameraType, camera.CFrame
+	camera.CameraType = Enum.CameraType.Scriptable
+	local away = Vector3.new(1, 0, 0)
+	local focus = standing + Vector3.new(0, 1.5, 0)
+	local views = {
+		{ Name = "close behind (6 studs)", CFrame = CFrame.lookAt(focus + away * 6 + Vector3.new(0, 2, 0), focus) },
+		{ Name = "default (12.5 studs)", CFrame = CFrame.lookAt(focus + away * 12.5 + Vector3.new(0, 3, 0), focus) },
+		{ Name = "max zoom-out", CFrame = CFrame.lookAt(focus + away * 126 + Vector3.new(0, 15, 0), focus) },
+		{ Name = "top-down", CFrame = CFrame.lookAt(focus + Vector3.new(0, 30, 0), focus, Vector3.new(0, 0, -1)) },
+		{ Name = "looking away from the pad", CFrame = CFrame.lookAt(focus + away * 12.5 + Vector3.new(0, 3, 0), focus + away * 40) },
+	}
+	for _, view in views do
+		camera.CFrame = view.CFrame
+		Board.SnapNow()
+		for _ = 1, 6 do
+			RunService.RenderStepped:Wait()
 		end
-		camera.CameraType = savedType
-		camera.CFrame = savedCFrame
+		local inset = GuiService:GetGuiInset().Y
+		local box = card.PopRoot :: GuiObject
+		local left, top = box.AbsolutePosition.X, box.AbsolutePosition.Y + inset
+		local right, bottom = left + box.AbsoluteSize.X, top + box.AbsoluteSize.Y
+		local safe = Board.GetSafeRectScreenPx()
+		local problems: { string } = {}
+		if not card.Shown then
+			table.insert(problems, "card not shown")
+		end
+		if safe then
+			local tolerance = 1.5
+			if left < safe.Left - tolerance or right > safe.Right + tolerance or top < safe.Top - tolerance or bottom > safe.Bottom + tolerance then
+				table.insert(problems, ("outside the safe rect x %.0f-%.0f y %.0f-%.0f"):format(safe.Left, safe.Right, safe.Top, safe.Bottom))
+			end
+		else
+			table.insert(problems, "no safe rect")
+		end
+		local obstacles = Hud.GetObstacleRects()
+		local bar = CombatController.GetBarRect()
+		if bar then
+			obstacles.WeaponBar = bar
+		end
+		local scale = if phone then UITheme.PhoneScale else 1
+		obstacles.TopStack = { Position = Vector2.zero, Size = Vector2.new(camera.ViewportSize.X, TopStack.GetBottom() * scale) }
+		for name, rect in obstacles do
+			local overlapX = math.min(right, rect.Position.X + rect.Size.X) - math.max(left, rect.Position.X)
+			local overlapY = math.min(bottom, rect.Position.Y + rect.Size.Y) - math.max(top, rect.Position.Y)
+			if overlapX > 1.5 and overlapY > 1.5 then
+				table.insert(problems, ("overlaps %s (%.0f,%.0f %.0fx%.0f)"):format(name, rect.Position.X, rect.Position.Y, rect.Size.X, rect.Size.Y))
+			end
+		end
+		local obstacleCount = 0
+		for _ in obstacles do
+			obstacleCount += 1
+		end
 		table.insert(lines, {
-			Ok = math.abs(sizes[1].X - sizes[2].X) <= 2 and math.abs(sizes[1].Y - sizes[2].Y) <= 2 and sizes[1].X > 0,
-			Name = "gacha card: its on-screen size is the same with the camera 8 and 30 studs away (+-2 px)",
-			Detail = ("8 studs: %dx%d px, 30 studs: %dx%d px"):format(sizes[1].X, sizes[1].Y, sizes[2].X, sizes[2].Y),
+			Ok = #problems == 0,
+			Name = ("gacha card (%s, %s): the card + button row is inside the safe rect and overlaps no HUD rect"):format(layout, view.Name),
+			Detail = ("card x %.0f-%.0f y %.0f-%.0f of %.0fx%.0f, fit %.2f, %d HUD rects%s"):format(left, right, top, bottom, camera.ViewportSize.X, camera.ViewportSize.Y, card.Fit.Scale, obstacleCount, if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
 		})
 	end
+	camera.CameraType = savedType
+	camera.CFrame = savedCFrame
+	UIKit.SetForcedPhone(nil)
+	return lines
+end
 
-	-- The whole card + button row on screen, per viewport and zoom. The
-	-- billboard's anchor is the card's bottom edge: the card goes up CardPx.Y,
-	-- the button row down ButtonRowPx, both scaled by 0.8 on a phone.
-	local anchorBase = pad.Position + gui.StudsOffsetWorldSpace
-	for _, viewport in { Vector2.new(1366, 768), Vector2.new(844, 390) } do
-		local scale = if viewport.Y < UITheme.PhoneHeightThreshold then G.PhoneScale else 1
-		for _, zoom in { { Name = "default zoom", Back = 12.5 }, { Name = "max zoom-out", Back = 128 } } do
-			local flat = Vector3.new(-1, 0, 0)
-			local focus = standing + Vector3.new(0, 1.5, 0)
-			local back = zoom.Back
-			local cameraCFrame = CFrame.lookAt(focus - flat * back + Vector3.new(0, 1.5 + back * 0.12, 0), focus)
-			local anchor = anchorBase + cameraCFrame.UpVector * gui.StudsOffset.Y
-			local ndc = ndcOf(cameraCFrame, anchor, viewport)
-			local ok, detail = false, "anchor behind the camera"
-			if ndc then
-				local x = (ndc.X + 1) / 2 * viewport.X
-				local y = (1 - ndc.Y) / 2 * viewport.Y
-				local left, right = x - G.CardPx.X / 2 * scale, x + G.CardPx.X / 2 * scale
-				local top, bottom = y - G.CardPx.Y * scale, y + G.ButtonRowPx * scale
-				ok = left >= 0 and right <= viewport.X and top >= 0 and bottom <= viewport.Y
-				detail = ("rect x %.0f-%.0f, y %.0f-%.0f of %dx%d (scale %.1f)"):format(left, right, top, bottom, viewport.X, viewport.Y, scale)
+-- The clamp math itself (pure, no live HUD): at 1366x768 and 844x390 (the
+-- phone's 0.8), for a grid of anchor points from far off every edge to the
+-- middle, with a synthetic left column, bottom row, weapon bar and top stack,
+-- the planned card is inside the safe rect, shrinks only when the rect is
+-- shorter than the card (never below 0.7) and is not squeezed otherwise.
+local function probeGachaPlan(): { ProbeLine }
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local G = PlotLayout.Gacha
+	local lines: { ProbeLine } = {}
+	local full = Vector2.new(G.CardPx.X, G.CardPx.Y + G.ButtonRowPx)
+	for _, case in { { Name = "1366x768", Viewport = Vector2.new(1366, 768), Phone = false }, { Name = "844x390", Viewport = Vector2.new(844, 390), Phone = true } } do
+		local scale = if case.Phone then UITheme.PhoneScale else 1
+		local rects = {
+			CashCard = { Position = Vector2.new(12, 70), Size = Vector2.new(if case.Phone then 140 else 220, 60) },
+			BottomRow = { Position = Vector2.new(case.Viewport.X / 2 - 200, case.Viewport.Y - (if case.Phone then 90 else 110)), Size = Vector2.new(400, 70) },
+		}
+		local weaponBar = { Position = Vector2.new(case.Viewport.X / 2 - 150, case.Viewport.Y - (if case.Phone then 150 else 190)), Size = Vector2.new(300, 64) }
+		local safe = Board.PlanSafeRect(case.Viewport, scale, 100, rects, weaponBar)
+		local bad: { string } = {}
+		local worstFit, squeezed = 1, 0
+		local points = 0
+		for _, fx in { -2000, 0, 0.25, 0.5, 0.75, 1, 3000 } do
+			for _, fy in { -2000, 0, 0.25, 0.5, 0.75, 1, 3000 } do
+				local point = Vector2.new(if math.abs(fx) > 1 then fx else fx * case.Viewport.X / scale, if math.abs(fy) > 1 then fy else fy * case.Viewport.Y / scale)
+				local position, fit = Board.PlanCard(point, safe)
+				points += 1
+				worstFit = math.min(worstFit, fit)
+				if fit < 1 then
+					squeezed += 1
+				end
+				local halfW, h = full.X * fit / 2, full.Y * fit
+				local inside = position.X - halfW >= safe.Left - 0.01 and position.X + halfW <= safe.Right + 0.01 and position.Y - h >= safe.Top - 0.01 and position.Y <= safe.Bottom + 0.01
+				if not inside and (safe.Bottom - safe.Top) >= h then
+					table.insert(bad, ("point (%.0f, %.0f) -> (%.0f, %.0f) fit %.2f outside"):format(point.X, point.Y, position.X, position.Y, fit))
+				end
 			end
-			table.insert(lines, {
-				Ok = ok,
-				Name = ("gacha card (%dx%d, %s): the whole card + button row is on screen with the character on the pad"):format(viewport.X, viewport.Y, zoom.Name),
-				Detail = detail,
-			})
 		end
+		local available = safe.Bottom - safe.Top
+		local wantSqueeze = available < full.Y
+		table.insert(lines, {
+			Ok = #bad == 0 and worstFit >= G.MinSqueeze - 1e-6 and ((squeezed > 0) == wantSqueeze),
+			Name = ("gacha card (%s): the clamp keeps the card inside the safe rect; it shrinks (min 0.7) only when the rect is too short"):format(case.Name),
+			Detail = ("safe x %.0f-%.0f y %.0f-%.0f (%.0f tall, card %.0f), %d points, squeezed %d, worst fit %.2f%s"):format(safe.Left, safe.Right, safe.Top, safe.Bottom, available, full.Y, points, squeezed, worstFit, if #bad > 0 then " | " .. table.concat(bad, "; ", 1, math.min(#bad, 3)) else ""),
+		})
 	end
 	return lines
 end
@@ -1942,6 +2013,10 @@ local function probeTutorial(payload: any)
 			return probeGachaCard(payload.Luck, tostring(payload.Label))
 		elseif payload.Kind == "GachaButtons" then
 			return probeGachaButtons()
+		elseif payload.Kind == "GachaPlace" then
+			return probeGachaPlace(payload.Phone == true)
+		elseif payload.Kind == "GachaPlan" then
+			return probeGachaPlan()
 		elseif payload.Kind == "GachaFar" then
 			return probeGachaFar()
 		elseif payload.Kind == "GachaBack" then
