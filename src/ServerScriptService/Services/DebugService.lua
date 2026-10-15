@@ -1010,10 +1010,20 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	Workspace:SetAttribute("AdminLuckUntil", oldUntil)
 	PlayerDataService.SyncTycoon(player)
 	tutorialProbe(player, { Kind = "GachaButtons" }, result)
-	-- The follow + clamp: five camera views, once per HUD layout, then the pure math.
-	tutorialProbe(player, { Kind = "GachaPlace", Phone = false }, result)
-	tutorialProbe(player, { Kind = "GachaPlace", Phone = true }, result)
-	tutorialProbe(player, { Kind = "GachaPlan" }, result)
+	-- What the open card hides (the GACHA label, the VIP chip).
+	tutorialProbe(player, { Kind = "GachaCovers" }, result)
+	-- Standing on the pad: the card fits on screen and a turn never moves it.
+	tutorialProbe(player, { Kind = "GachaOnPad", Phone = false }, result)
+	tutorialProbe(player, { Kind = "GachaOnPad", Phone = true }, result)
+	-- Approach: 8 studs in front of the pad on the walkway side (toward the
+	-- walkway line, plot-local x = 0), the card opens above the pad on screen.
+	local plotOrigin = plot:FindFirstChild("PlotOrigin")
+	local originCFrame = if plotOrigin and plotOrigin:IsA("BasePart") then plotOrigin.CFrame else plot:GetPivot()
+	local towardWalkway = originCFrame:VectorToWorldSpace(Vector3.new(-1, 0, 0))
+	root.CFrame = CFrame.lookAt(pad.Position + towardWalkway * 8 + Vector3.new(0, pad.Size.Y / 2 + 3, 0), pad.Position + Vector3.new(0, pad.Size.Y / 2 + 3, 0))
+	task.wait(0.8)
+	tutorialProbe(player, { Kind = "GachaApproach", Phone = false }, result)
+	tutorialProbe(player, { Kind = "GachaApproach", Phone = true }, result)
 
 	-- 25 studs away: the card pops out and the small GACHA label shows.
 	root.CFrame = away

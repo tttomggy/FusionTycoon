@@ -1812,18 +1812,18 @@ person, R15, 100% camera zoom; check each from the front and the side.
   tutorial is skipped on join; `/tutorial reset` still runs it.
   `/anim export` → Save to Roblox → paste the ids into
   `CombatConfig.AnimationIds` → restart: still works.
-- [ ] **Gacha pop-up card** (Studio, any camera): walk toward YOUR Gacha Pad:
-  at about 16 studs a compact card (300 × 204 px + the E / R / T row) slides
-  in from the RIGHT (24 px) and scales up, docked on the right side of the
-  screen, vertically centred, all 6 coloured tiles at once. **It does not move
-  when you turn the camera** (rotate and zoom in and out; stand on the pad
-  with the camera close: the same spot every time). It never covers the HUD
-  (the left column, the weapon bar, the bottom buttons, the event bar). Walk
-  away past 19 studs: it slides out and only the small GACHA + price label
-  shows. On a
-  short phone it shrinks a little to fit (never below 70%). Open the (i) panel,
-  the Shop or pull something with a reveal card: the card hides and comes back
-  after. It is hidden while you are ragdolled or carrying an orb. No
+- [ ] **Gacha pop-up card** (Studio, any camera): walk up to YOUR Gacha Pad:
+  at about 16 studs a compact card (300 × 204 px + the E / R / T row) pops up
+  **right on top of the pad, in the world**, all 6 coloured tiles at once, the
+  same pixel size at any zoom. Stop in front of the pad (you don't need to stand
+  on it) and press E / R / T. Turn the camera: the card stays on the pad and
+  doesn't slide. Stand ON the pad with the camera close behind you: the top of
+  the card stays under the top bar (the card sits lower over the pad, never
+  off the top of the screen). While it is up the small GACHA + price label and
+  your VIP chip are hidden; they come back when you walk away (past 19 studs it
+  pops down). On a short phone the card is 0.8. Open the (i) panel, the Shop or
+  pull something with a reveal card: the card hides and comes back after. It is
+  hidden while you are ragdolled or carrying an orb. No
   "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK
   console is that console's own). A never-found tier is a black orb with "?" but
   keeps its %. Press E, R and T (X / Y / RB on a controller): E and R pull, T

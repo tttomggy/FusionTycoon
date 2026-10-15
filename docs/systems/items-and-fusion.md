@@ -37,36 +37,41 @@ survives rebirths. Every odds display goes through `FusionConfig.FormatOdds`
 (the same functions the rolls use).
 
 **Gacha pop-up card** (`Controllers/GachaBoardController`, client only): a
-**screen-space card** (a `ScreenGui` from `UIKit.Screen`, `DisplayOrder` 55:
-over the HUD 40 and weapon bar 41, under every `UIKit.Modal` and the result
-cards) **docked at one fixed spot on the right of the screen**. The look is the
-Pet Simulator 99 / Bubble Gum Simulator egg card: a 300 × 204 px card plus a
-72 px E / R / T row, 0.8 on a phone (the gui's `MobileScale`). History: a
-world-anchored billboard could not work (you stand ON the pad, so it ended up
-past the top of the screen with the camera close); a card that followed the
-pad's projected point slid around while the camera turned. It now tracks
-nothing: no `WorldToViewportPoint`, no smoothing, no per-frame placement.
-- **Dock:** `Root` anchor (1, 0.5), `DockRightPx` (24) from the right edge,
-  centred vertically in the safe band (`PlanSafeRect` / `PlanDock` are pure):
-  top ≥ `TopStack.GetBottom()` + 8, bottom ≤ the weapon bar's top (else the HUD
-  bottom row's) − 8, right of the HUD left column
-  (`HudController.GetObstacleRects`, the same rects `/selftest` checks).
-  **Squeeze:** when the band is shorter than the card (small phones) the whole
-  card scales about its dock point (`FitScale`, min 0.7). Re-placed only when it
-  opens, on a viewport change, `UIKit.LayoutChanged` and `TopStack.OnChanged`
-  (`PlaceNow`; unchanged inputs are skipped), never per frame.
-- **Pop:** the character within `PopInStuds` (16) of the pad: the card slides in
-  from the right (`SlidePx` 24) and scales 0.9 → 1 over 0.15 s Quad-Out
-  (`PopRoot` position + `PopScale`); beyond `PopOutStuds` (19) it slides back
-  out and hides. No `CanvasGroup`.
+**pixel-sized `BillboardGui` adorned to YOUR Gacha Pad**, floating right over
+it and opening as you walk up (the Pet Simulator 99 egg card). This is the
+final placement: not docked, not following the camera. History: the first
+in-world tries were sized in studs (huge up close) and sat "above your head"
+while you stand ON the pad (off the top of the screen); a screen-space dock and
+a screen-space follower were tried and rejected. Fix: pixel size, anchored to
+the PAD (you pull with E / R / T from `PromptDistance` + 3 studs, so you stand
+in front of it and see the card over it).
+- **Billboard:** `Adornee` = the pad, `Size` = 300 × 276 px (the 300 × 204 card
+  + the 72 px E / R / T row; 0.8 on a phone through one `PhoneScale` UIScale
+  about the bottom line), `SizeOffset` (0, 0.5) so it grows upward from the
+  anchor (the key bar's bottom edge is on it), `StudsOffsetWorldSpace` (0, pad
+  half-height + `AnchorUpStuds` 3, 0): pad top + 3 studs, just above the
+  capsule orb, centred, no backward shift (world space on purpose:
+  `StudsOffset` is camera-relative and would swing with the view).
+  `AlwaysOnTop` false, `LightInfluence` 0, `MaxDistance` 150, `ResetOnSpawn`
+  false, no `CanvasGroup`.
+- **Pop:** in at `PopInStuds` (16) from your character to the pad, out at
+  `PopOutStuds` (19); one `PopScale` UIScale 0.85 → 1 over 0.12 s (Quad).
+- **Covers:** while open it hides the pad's small `GACHA` / price label and your
+  own `VipTag` head chip (restored on close); the pad's prompts stay off.
+- **Top-of-screen guard** (`FitAnchor`): standing on the pad with a close
+  camera the top could clip. On open, on a viewport / `LayoutChanged` and when
+  the zoom (camera to character) changes by more than 2 studs (never per frame,
+  never from a yaw), the card's top is projected; above `TopStack.GetBottom()`
+  + 8 the anchor is LOWERED (never above 3 studs) in 0.25-stud steps to a floor
+  of pad top + 0.5. Turning the camera never moves the card.
 - **Hidden** (the pop out, keys unbound) while any overlay is open
   (`UIKit.IsOverlayOpen`: a modal, the reveal / big result card, the (i) panel),
   during a ragdoll and while carrying; back after.
 - **Built once, hidden**, as soon as the pad exists. A refresh (every sync and
   0.5 s) only updates text and colours (`updateContent`), never rebuilds. 2D
   orbs (`UIKit.TierOrb`), no `ViewportFrame`, no `CanvasGroup`, no
-  `TextScaled`. The only `UIScale`s besides the gui's `MobileScale`: `PopScale`
-  (0.9 → 1 in 0.15 s Quad-Out, reversed on close) and `FitScale`.
+  `TextScaled`. The only `UIScale`s: `PopScale`
+  (0.85 → 1 in 0.12 s Quad-Out, reversed on close) and the phone's `PhoneScale`.
 - **Visibility follows the character, not the camera:** the distance from your
   `HumanoidRootPart` to the pad; inside 16 studs it opens, beyond 19 it closes
   (the gap stops flicker).
@@ -110,7 +115,7 @@ nothing: no `WorldToViewportPoint`, no smoothing, no per-frame placement.
   + button row is inside the safe rect and overlaps no HUD rect (left column,
   weapon bar, bottom row, TopStack)**; the clamp math at 1366 × 768 and 844 × 390
   (inside the rect, squeezed only when short, min 0.7); a modal hides it and it
-  returns; no `ViewportFrame` / `CanvasGroup`, only `PopScale` + `FitScale`; no
+  returns; no `ViewportFrame` / `CanvasGroup`, only `PopScale` (+ the phone's `PhoneScale`); no
   gacha prompt draws UI; odds, silhouettes, luck, the (i) sums, keys and auto
   pull.
 Odds source: `FusionConfig.GetGachaOddsRows(luck, event)` (built on

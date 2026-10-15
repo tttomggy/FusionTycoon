@@ -59,17 +59,19 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   only the combat section (weapon probes, slot-to-slot switch probes,
   release); **`/selftest gacha`** only the Gacha pop-up card (claims a lab if needed; starts 25 studs away so the card is closed, then the client steps onto the pad and checks the frame after the card opens; reads the card from the instance tree; every FAIL carries its measurements):
   the card opens fully in one frame (all 6 tiles `AbsoluteSize` > 0, their % `TextBounds.Y` > 0); no gacha `ProximityPrompt` draws UI (all off, none shown);
-  with the character on the pad and the camera at 4 yaw angles × 2 zoom levels,
-  for the desktop and the phone HUD layout (`UIKit.SetForcedPhone`), the card's
-  `AbsolutePosition` is identical (±1 px) every time, it is inside the safe
-  rect, 24 px from the right edge, and overlaps no HUD rect
-  (`HudController.GetObstacleRects`, the weapon bar, the TopStack zone); the
-  pure dock math (`PlanSafeRect` / `PlanDock`) at 1366×768 and 844×390 (inside
-  the rect, centred, squeezed only when short, never below 0.7);
+  the billboard is on the pad (pixel size, `SizeOffset` (0, 0.5), anchor pad top
+  + 3 studs, no backward shift, `AlwaysOnTop` off, `MaxDistance` 150); with the
+  character 8 studs in front of the pad on the walkway side at the default
+  camera the card is open, above the pad on screen and fully on screen; on the
+  pad at the default camera, and again at 6 studs, it is fully on screen with its
+  top below TopStack; 4 camera yaws at a fixed zoom never change the billboard's
+  offsets; the GACHA label and your VIP chip are hidden while it is open and the
+  chip is back when it closes (each for the desktop and phone HUD layout via
+  `UIKit.SetForcedPhone`; the window itself can't be resized from a script);
   tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
   event, the luck pill, black "?" orbs, the (i) panel sums; all 6 tiles drawn
   with a % ≥ 12 px tall; no `ViewportFrame`, no `CanvasGroup`, only
-  `PopScale` + `FitScale` besides the gui's `MobileScale`, no `GachaBoard`;
+  `PopScale` besides the phone's `PhoneScale`, no `GachaBoard`;
   a modal (the (i) panel) hides the card and it comes back; the key bar's 3
   buttons (E / R / T) each ≥ 44 px, drawn, and E / R / T bound through
   `ContextActionService` (unbound 25 studs away, bound again back on the pad);

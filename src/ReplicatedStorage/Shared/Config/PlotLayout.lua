@@ -93,29 +93,27 @@ PlotLayout.GACHA_STATION = v3(20, 0, 22)
 PlotLayout.MULTIPLIER_STATION = v3(20, 0, 8)
 
 --[[ Gacha pop-up card ---------------------------------------------------------------
-	No physical board. A SCREEN-SPACE card (GachaBoardController, a ScreenGui
-	from UIKit.Screen) that follows YOUR Gacha Pad on screen but can never
-	leave the safe area. A world-anchored billboard could not work: you stand
-	ON the pad, so a card "above the head" ended up past the top of the screen
-	whenever the camera sat close behind you. The card's bottom-centre (button
-	row included) goes to the screen position of the pad's top centre + 3
-	studs, clamped into the safe rect (below TopStack, right of the HUD's left
-	column, above the weapon bar / bottom row), smoothed, and squeezed to 0.7
-	at the smallest. Far away (and on other players' pads) the small server
-	GachaLabel (name + price) shows instead.
+	A pixel-sized BillboardGui adorned to YOUR Gacha Pad (GachaBoardController),
+	floating over it and opening as you walk up (Pet Sim 99's egg card). FINAL
+	placement: not docked, not following the camera. SizeOffset (0, 0.5), so it
+	grows upward from the anchor (pad top + AnchorUpStuds, just above the
+	capsule orb, centred on the pad). Standing on the pad with a close camera it
+	could clip the top of the screen; then (and only then) the anchor is LOWERED
+	toward AnchorFloorStuds until the top is under TopStack. Far away (and on
+	other players' pads) the small server GachaLabel (name + price) shows.
 ]]
 PlotLayout.Gacha = {
 	CardPx = Vector2.new(300, 204), -- the card, in logical px
 	ButtonRowPx = 72, -- the E / R / T row under it
-	DockRightPx = 24, -- the card's right edge, this far from the screen's right edge (logical px)
-	SlidePx = 24, -- it slides in from / out to the right by this much
-	SafeMargin = 8, -- px kept free of the HUD and the screen edge
-	MinSqueeze = 0.7, -- the smallest the card shrinks to when the safe rect is short
-	DisplayOrder = 55, -- over the HUD (40) and weapon bar (41), under every modal / result card
+	AnchorUpStuds = 3, -- the anchor: the pad's top + this (never raised above it)
+	AnchorFloorStuds = 0.5, -- the lowest the top-of-screen guard may take it
+	ZoomRecheckStuds = 2, -- the guard re-checks when the zoom changed by more than this
+	SafeMargin = 8, -- px kept under TopStack
+	MaxDistance = 150,
 	PopInStuds = 16, -- the card opens when the character is closer than this to the pad
 	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
-	PopSeconds = 0.15, -- slide + UIScale 0.9 -> 1 in (Quad Out), reversed out
-	PopFromScale = 0.9,
+	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
+	PopFromScale = 0.85,
 }
 
 -- Every lab builds all 10. Ground floor: 1-4, then 5-6 (a second row behind
