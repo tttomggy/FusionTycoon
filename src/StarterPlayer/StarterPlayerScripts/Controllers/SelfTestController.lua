@@ -1563,11 +1563,12 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	-- the anchor (pad top + 0.5..3 studs, centred), the flags from the brief.
 	local G = PlotLayout.Gacha
 	local pad = card.Pad :: BasePart
-	local offset = gui.StudsOffsetWorldSpace
-	local up = offset.Y - pad.Size.Y / 2
+	local anchor = card.Anchor :: Attachment
+	local flat = Vector2.new(anchor.WorldPosition.X - pad.Position.X, anchor.WorldPosition.Z - pad.Position.Z).Magnitude
+	local up = anchor.WorldPosition.Y - (pad.Position.Y + PlotLayout.Station.PadHeight / 2)
 	local billboardBad: { string } = {}
-	if gui.Adornee ~= pad then
-		table.insert(billboardBad, "Adornee is not the pad")
+	if gui.Adornee ~= anchor or anchor.Name ~= "GachaCardAnchor" or anchor.Parent ~= pad then
+		table.insert(billboardBad, ("Adornee is %s, not the GachaCardAnchor on the pad"):format(tostring(gui.Adornee)))
 	end
 	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= G.CardPx.Y + G.ButtonRowPx then
 		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, G.CardPx.Y + G.ButtonRowPx))
@@ -1575,10 +1576,13 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	if gui.SizeOffset ~= Vector2.new(0, 0.5) then
 		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5)"):format(tostring(gui.SizeOffset)))
 	end
-	if offset.X ~= 0 or offset.Z ~= 0 or gui.StudsOffset ~= Vector3.zero then
-		table.insert(billboardBad, ("shifted sideways / backward: world offset %s, StudsOffset %s"):format(tostring(offset), tostring(gui.StudsOffset)))
+	if gui.StudsOffset ~= Vector3.zero or gui.StudsOffsetWorldSpace ~= Vector3.zero then
+		table.insert(billboardBad, ("an offset is set: StudsOffset %s, world %s"):format(tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
 	end
-	if math.abs(up - G.AnchorUpStuds) > 1e-3 then
+	if flat >= 0.1 then
+		table.insert(billboardBad, ("the anchor is %.2f studs off the pad's centre (flat)"):format(flat))
+	end
+	if math.abs(up - G.AnchorUpStuds) > 0.05 then
 		table.insert(billboardBad, ("anchor %.2f studs over the pad top, wanted %.2f"):format(up, G.AnchorUpStuds))
 	end
 	if gui.AlwaysOnTop or gui.LightInfluence ~= 0 or gui.MaxDistance ~= G.MaxDistance or gui.ResetOnSpawn then
@@ -1586,8 +1590,8 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	end
 	table.insert(lines, {
 		Ok = #billboardBad == 0,
-		Name = ("gacha card (%s): a pixel-size BillboardGui on the pad, growing up from the anchor (pad top + 5.8 studs, above the capsule ball, no backward shift), AlwaysOnTop off, MaxDistance 150"):format(label),
-		Detail = ("Size %s, SizeOffset %s, world offset %s (%.2f over the pad top), MaxDistance %s%s"):format(tostring(gui.Size), tostring(gui.SizeOffset), tostring(offset), up, tostring(gui.MaxDistance), if #billboardBad > 0 then " | " .. table.concat(billboardBad, "; ") else ""),
+		Name = ("gacha card (%s): a pixel-size BillboardGui adorned to an Attachment straight above the pad, growing up from the anchor (pad top + 5.8 studs, above the capsule ball, no backward shift), AlwaysOnTop off, MaxDistance 150"):format(label),
+		Detail = ("Size %s, SizeOffset %s, anchor %.2f studs off the pad's centre (flat), %.2f over the pad top, MaxDistance %s%s"):format(tostring(gui.Size), tostring(gui.SizeOffset), flat, up, tostring(gui.MaxDistance), if #billboardBad > 0 then " | " .. table.concat(billboardBad, "; ") else ""),
 	})
 
 	-- Each tier's drawn % is GetGachaRates at the server's luck.
@@ -1772,9 +1776,7 @@ end
 type ScreenBox = { Left: number, Top: number, Right: number, Bottom: number, AnchorZ: number }
 
 local function cardScreenBox(card: any, camera: Camera): ScreenBox
-	local gui = card.Billboard :: BillboardGui
-	local pad = card.Pad :: BasePart
-	local anchor = camera:WorldToViewportPoint(pad.Position + gui.StudsOffsetWorldSpace)
+	local anchor = camera:WorldToViewportPoint((card.Anchor :: Attachment).WorldPosition)
 	local size = (card.PopRoot :: GuiObject).AbsoluteSize
 	return { Left = anchor.X - size.X / 2, Top = anchor.Y - size.Y, Right = anchor.X + size.X / 2, Bottom = anchor.Y, AnchorZ = anchor.Z }
 end
@@ -1793,12 +1795,56 @@ local function waitFrames(count: number)
 	end
 end
 
+-- The position checks, for one camera. (1) THE BUG CHECK: the anchor's flat
+-- (XZ) distance to the pad's centre is < 0.1 studs (the card was adorned to a
+-- cylinder turned 90 degrees, so it sat ~9.8 studs sideways). (2) The card's
+-- horizontal centre on screen is within 30 px of the pad's projected centre.
+-- (3) With the ball in view, the card's bottom edge is above the CapsuleTop
+-- ball's projected top (smaller Y). A billboard's own AbsolutePosition is
+-- local to the billboard, so the screen box comes from the anchor's projection
+-- and PopRoot's (phone-scaled) size.
+local function positionProblems(card: any, camera: Camera, needBallBelow: boolean): ({ string }, string)
+	local pad = card.Pad :: BasePart
+	local anchor = card.Anchor :: Attachment
+	local box = cardScreenBox(card, camera)
+	local problems: { string } = {}
+	local flat = Vector2.new(anchor.WorldPosition.X - pad.Position.X, anchor.WorldPosition.Z - pad.Position.Z).Magnitude
+	if flat >= 0.1 then
+		table.insert(problems, ("the anchor is %.2f studs off the pad's centre"):format(flat))
+	end
+	if not (card.Open and card.Shown) then
+		table.insert(problems, "the card is not open")
+	end
+	if box.AnchorZ <= 0 then
+		table.insert(problems, "the anchor is behind the camera")
+	end
+	local padCentre = camera:WorldToViewportPoint(pad.Position)
+	local centreX = (box.Left + box.Right) / 2
+	if math.abs(centreX - padCentre.X) > 30 then
+		table.insert(problems, ("not centred on the pad: card centre x %.0f vs the pad's %.0f"):format(centreX, padCentre.X))
+	end
+	local ballText = "n/a"
+	if needBallBelow then
+		local station = pad.Parent
+		local ball = station and station:FindFirstChild("CapsuleTop", true)
+		if ball and ball:IsA("BasePart") then
+			local ballTop = camera:WorldToViewportPoint(ball.Position + Vector3.new(0, ball.Size.Y / 2, 0))
+			ballText = ("%.0f"):format(ballTop.Y)
+			if not (box.Bottom < ballTop.Y) then
+				table.insert(problems, ("the card's bottom (y %.0f) is not above the capsule's top (y %.0f)"):format(box.Bottom, ballTop.Y))
+			end
+		else
+			table.insert(problems, "no CapsuleTop part on the station")
+		end
+	end
+	return problems, ("flat %.3f studs, card x %.0f-%.0f y %.0f-%.0f, pad centre x %.0f, capsule top y %s"):format(flat, box.Left, box.Right, box.Top, box.Bottom, padCentre.X, ballText)
+end
+
 -- Approach: the server stands the character 8 studs in front of the pad on
 -- the walkway side. At the default camera (12.5 behind, looking along the
--- approach) the card is open and ABOVE THE PAD ON SCREEN (horizontally within
--- 40 px of the pad's projected top, its bottom edge above it) and its bottom
--- edge, the anchor, is ABOVE THE CAPSULE BALL's top on screen (smaller Y), so
--- the ball is fully visible under the card. Run for each HUD layout
+-- approach) and again with the camera straight above the pad (top-down), the
+-- position checks above hold; the ball check at the approach view (the
+-- top-down view hides the height). Run for each HUD layout
 -- (UIKit.SetForcedPhone); the Studio window size is what it is.
 local function probeGachaApproach(phone: boolean): { ProbeLine }
 	local layout = if phone then "phone layout" else "desktop layout"
@@ -1819,49 +1865,31 @@ local function probeGachaApproach(phone: boolean): { ProbeLine }
 	local distance = toPad.Magnitude
 	defaultCamera(camera, root, -toPad.Unit, 12.5, 0)
 	waitFrames(6)
-	local box = cardScreenBox(card, camera)
-	local padTop = camera:WorldToViewportPoint(pad.Position + Vector3.new(0, pad.Size.Y / 2, 0))
-	local problems: { string } = {}
-	if not (card.Open and card.Shown) then
-		table.insert(problems, "the card is not open")
-	end
-	if box.AnchorZ <= 0 then
-		table.insert(problems, "the anchor is behind the camera")
-	end
-	local centreX = (box.Left + box.Right) / 2
-	if math.abs(centreX - padTop.X) > 40 then
-		table.insert(problems, ("not over the pad: centre x %.0f vs the pad's %.0f"):format(centreX, padTop.X))
-	end
-	if box.Bottom > padTop.Y + 1.5 then
-		table.insert(problems, ("not above the pad: bottom %.0f, pad top %.0f"):format(box.Bottom, padTop.Y))
-	end
-	local station = pad.Parent
-	local ball = station and station:FindFirstChild("CapsuleTop", true)
-	local ballTopY = "no CapsuleTop"
-	if ball and ball:IsA("BasePart") then
-		local ballTop = camera:WorldToViewportPoint(ball.Position + Vector3.new(0, ball.Size.Y / 2, 0))
-		ballTopY = ("%.0f"):format(ballTop.Y)
-		if not (box.Bottom < ballTop.Y) then
-			table.insert(problems, ("the card's bottom (y %.0f) is not above the capsule's top (y %.0f)"):format(box.Bottom, ballTop.Y))
-		end
-	else
-		table.insert(problems, "no CapsuleTop part on the station")
-	end
+	local approachProblems, approachDetail = positionProblems(card, camera, true)
+	camera.CFrame = CFrame.lookAt(pad.Position + Vector3.new(0, 40, 0), pad.Position, Vector3.new(0, 0, -1))
+	waitFrames(6)
+	local topProblems, topDetail = positionProblems(card, camera, false)
 	camera.CameraType = savedType
 	camera.CFrame = savedCFrame
 	UIKit.SetForcedPhone(nil)
+	local window = ("%d x %d window"):format(camera.ViewportSize.X, camera.ViewportSize.Y)
 	return {
 		{
-			Ok = #problems == 0,
-			Name = ("gacha card (%s, %d x %d window): 8 studs in front of the pad the card is open above the pad and its bottom is above the capsule ball"):format(layout, camera.ViewportSize.X, camera.ViewportSize.Y),
-			Detail = ("%.1f studs from the pad; card x %.0f-%.0f y %.0f-%.0f, pad top at (%.0f, %.0f), capsule top y %s, anchor %.2f studs up%s"):format(distance, box.Left, box.Right, box.Top, box.Bottom, padTop.X, padTop.Y, ballTopY, card.UpStuds, if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+			Ok = #approachProblems == 0,
+			Name = ("gacha card (%s, %s): 8 studs in front of the pad the card is centred on the pad and its bottom is above the capsule ball"):format(layout, window),
+			Detail = ("%.1f studs from the pad; %s%s"):format(distance, approachDetail, if #approachProblems > 0 then " | " .. table.concat(approachProblems, "; ") else ""),
+		},
+		{
+			Ok = #topProblems == 0,
+			Name = ("gacha card (%s, %s): with the camera straight above the pad the card is centred on it"):format(layout, window),
+			Detail = ("%s%s"):format(topDetail, if #topProblems > 0 then " | " .. table.concat(topProblems, "; ") else ""),
 		},
 	}
 end
 
--- On the pad: the anchor is pad half-height + 5.8 studs and NEVER changes:
--- not over 4 camera yaws at a fixed zoom, not over the zoom range (6, 12.5,
--- 40 studs), not when the HUD layout flips.
+-- On the pad: the anchor (the Attachment's world position) NEVER changes: not
+-- over 4 camera yaws at a fixed zoom, not over the zoom range (6 / 12.5 / 40
+-- studs), and no billboard offset is ever written.
 local function probeGachaOnPad(phone: boolean): { ProbeLine }
 	local layout = if phone then "phone layout" else "desktop layout"
 	UIKit.SetForcedPhone(phone)
@@ -1875,15 +1903,15 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 		return { { Ok = false, Name = ("gacha card (%s): on the pad"):format(layout), Detail = "no card, camera or character" } }
 	end
 	local gui = card.Billboard :: BillboardGui
-	local pad = card.Pad :: BasePart
-	local want = Vector3.new(0, pad.Size.Y / 2 + 5.8, 0)
+	local anchor = card.Anchor :: Attachment
+	local want = anchor.WorldPosition
 	local savedType, savedCFrame = camera.CameraType, camera.CFrame
 	camera.CameraType = Enum.CameraType.Scriptable
 	local back = Vector3.new(1, 0, 0)
 	local moved: { string } = {}
 	local function check(what: string)
-		if (gui.StudsOffsetWorldSpace - want).Magnitude > 1e-3 or gui.StudsOffset ~= Vector3.zero then
-			table.insert(moved, ("%s: world %s, StudsOffset %s"):format(what, tostring(gui.StudsOffsetWorldSpace), tostring(gui.StudsOffset)))
+		if (anchor.WorldPosition - want).Magnitude > 1e-3 or gui.StudsOffset ~= Vector3.zero or gui.StudsOffsetWorldSpace ~= Vector3.zero then
+			table.insert(moved, ("%s: anchor %s, StudsOffset %s, world %s"):format(what, tostring(anchor.WorldPosition), tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
 		end
 	end
 	check("start")
@@ -1903,8 +1931,8 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 	return {
 		{
 			Ok = #moved == 0,
-			Name = ("gacha card (%s): StudsOffsetWorldSpace.Y is pad half-height + 5.8 and never changes while the camera turns (4 yaws) or zooms (6 / 12.5 / 40 studs)"):format(layout),
-			Detail = ("StudsOffsetWorldSpace %s, wanted %s%s"):format(tostring(gui.StudsOffsetWorldSpace), tostring(want), if #moved > 0 then " | changed: " .. table.concat(moved, "; ") else ""),
+			Name = ("gacha card (%s): the anchor never changes while the camera turns (4 yaws) or zooms (6 / 12.5 / 40 studs)"):format(layout),
+			Detail = ("anchor %s%s"):format(tostring(want), if #moved > 0 then " | changed: " .. table.concat(moved, "; ") else ""),
 		},
 	}
 end

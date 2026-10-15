@@ -14,10 +14,14 @@
 	pull with E / R / T from PromptDistance + 3 studs, so you stop in front of
 	the pad and see the card over it.
 
-	  * BillboardGui: Adornee = the pad, Size = (300, 276) px, SizeOffset
-	    (0, 0.5) so it grows UPWARD from the anchor (its bottom edge, the key
-	    bar's, is on the anchor), StudsOffsetWorldSpace (0, pad half-height +
-	    UpStuds, 0) with UpStuds = PlotLayout.Gacha.AnchorUpStuds (5.8, computed
+	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
+	    pad is a cylinder turned 90 degrees about Z, so an offset on the pad
+	    itself would be applied in ITS axes, sideways), Size = (300, 276) px,
+	    SizeOffset (0, 0.5) so it grows UPWARD from the anchor (its bottom
+	    edge, the key bar's, is on it); StudsOffset and StudsOffsetWorldSpace
+	    stay zero and are never written. The Attachment's WorldCFrame is set
+	    once: straight above the pad's centre, UpStuds over its top (world y),
+	    with UpStuds = PlotLayout.Gacha.AnchorUpStuds (5.8, computed
 	    from the capsule's numbers: its top at the highest bob + 0.7, so the
 	    card sits ABOVE the ball and never covers it), centred on the pad, no
 	    backward shift. Set once when built; it never changes (no zoom or
@@ -191,6 +195,7 @@ type CardView = {
 	Near: boolean, -- the character is close (the open side of the distance hysteresis)
 	Open: boolean, -- the card is up (near AND nothing is covering it)
 	Tween: Tween?,
+	Anchor: Attachment, -- the world point the billboard is adorned to (never an offset on the rotated pad)
 	UpStuds: number, -- the anchor above the pad's top: above the capsule ball, set once
 	VipTag: BillboardGui?, -- your head chip while it is hidden by the card
 }
@@ -1120,10 +1125,18 @@ local function applyPhoneScale(view: CardView)
 	end
 end
 
+-- The card's anchor: a world point straight above the pad's centre, `up`
+-- studs over the pad's top. An Attachment (not the rotated cylinder) so no
+-- offset is ever applied in the pad's own axes: the pad is a cylinder turned
+-- 90 degrees about Z, its local +Y points sideways.
 local function setUpStuds(view: CardView, up: number)
 	view.UpStuds = up
-	-- World space (StudsOffset is camera-relative and would swing with the view).
-	view.Billboard.StudsOffsetWorldSpace = Vector3.new(0, view.Pad.Size.Y / 2 + up, 0)
+	local pad = view.Pad
+	-- The pad's top along the WORLD y axis, whatever its rotation: the centre
+	-- plus the half-extent of its oriented box on y.
+	local size, cf = pad.Size, pad.CFrame
+	local halfY = (math.abs(cf.XVector.Y) * size.X + math.abs(cf.YVector.Y) * size.Y + math.abs(cf.ZVector.Y) * size.Z) / 2
+	view.Anchor.WorldCFrame = CFrame.new(pad.Position.X, pad.Position.Y + halfY + up, pad.Position.Z)
 end
 
 -- Is something covering the card, or is the character not fit to use it?
@@ -1139,9 +1152,15 @@ local function blocked(): boolean
 end
 
 local function buildCard(pad: BasePart)
+	local anchor = Instance.new("Attachment")
+	anchor.Name = "GachaCardAnchor"
+	anchor.Parent = pad
+
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = "GachaCard"
-	billboard.Adornee = pad
+	billboard.Adornee = anchor
+	billboard.StudsOffset = Vector3.zero
+	billboard.StudsOffsetWorldSpace = Vector3.zero
 	billboard.Size = UDim2.fromOffset(FULL_SIZE.X, FULL_SIZE.Y)
 	billboard.SizeOffset = Vector2.new(0, 0.5) -- grows upward: the bottom edge (the key bar's) is on the anchor
 	billboard.MaxDistance = G.MaxDistance
@@ -1189,6 +1208,7 @@ local function buildCard(pad: BasePart)
 
 	local view = {
 		Billboard = billboard,
+		Anchor = anchor,
 		Pad = pad,
 		Root = root,
 		PopRoot = popRoot,
@@ -1224,6 +1244,7 @@ local function buildCard(pad: BasePart)
 			unbindKeys()
 		end
 		billboard:Destroy()
+		anchor:Destroy()
 	end)
 end
 
@@ -1346,7 +1367,7 @@ end
 -- Your card (nil before your pad exists): the gui, its pieces, and the
 -- state the pop logic is in. Every UI check reads the instance tree from
 -- Gui down.
-function GachaBoardController.GetCard(): { Billboard: BillboardGui, Pad: BasePart, Root: Frame, PopRoot: Frame, Card: Frame, Pop: UIScale, Open: boolean, Shown: boolean, Label: Instance?, UpStuds: number, VipHidden: boolean }?
+function GachaBoardController.GetCard(): { Billboard: BillboardGui, Anchor: Attachment, Pad: BasePart, Root: Frame, PopRoot: Frame, Card: Frame, Pop: UIScale, Open: boolean, Shown: boolean, Label: Instance?, UpStuds: number, VipHidden: boolean }?
 	local view = card
 	if not view then
 		return nil
@@ -1364,6 +1385,7 @@ function GachaBoardController.GetCard(): { Billboard: BillboardGui, Pad: BasePar
 		Open = view.Open,
 		Shown = view.PopRoot.Visible,
 		Label = view.Label,
+		Anchor = view.Anchor,
 		UpStuds = view.UpStuds,
 		VipHidden = view.VipTag ~= nil,
 	}

@@ -45,13 +45,17 @@ while you stand ON the pad (off the top of the screen); a screen-space dock and
 a screen-space follower were tried and rejected. Fix: pixel size, anchored to
 the PAD (you pull with E / R / T from `PromptDistance` + 3 studs, so you stand
 in front of it and see the card over it).
-- **Billboard:** `Adornee` = the pad, `Size` = 300 × 276 px (the 300 × 204 card
-  + the 72 px E / R / T row; 0.8 on a phone through one `PhoneScale` UIScale
-  about the bottom line), `SizeOffset` (0, 0.5) so it grows upward from the
-  anchor (the key bar's bottom edge is on it), `StudsOffsetWorldSpace` (0, pad
-  half-height + `AnchorUpStuds`, 0): pad top + 5.8 studs, above the capsule
-  ball, centred, no backward shift (world space on purpose:
-  `StudsOffset` is camera-relative and would swing with the view).
+- **Billboard:** `Adornee` = an `Attachment` `GachaCardAnchor` on the pad, `Size`
+  = 300 × 276 px (the 300 × 204 card + the 72 px E / R / T row; 0.8 on a phone
+  through one `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5)
+  so it grows upward from the anchor (the key bar's bottom edge is on it).
+  `StudsOffset` and `StudsOffsetWorldSpace` stay zero and are never written.
+  **Why an Attachment:** the pad is a cylinder turned 90° about Z (StationKit),
+  so its local +Y points sideways; an offset on the pad itself (`(0, Size.Y/2 +
+  5.8, 0)`) pushed the card ~9.8 studs sideways, never above the ball. The
+  Attachment's `WorldCFrame` is set once to straight above the pad's centre,
+  `AnchorUpStuds` over its top (world-axis top = centre + the oriented box's
+  half-extent on y): pad top + 5.8 studs, above the capsule ball, centred.
   `AlwaysOnTop` false, `LightInfluence` 0, `MaxDistance` 150, `ResetOnSpawn`
   false, no `CanvasGroup`.
 - **Pop:** in at `PopInStuds` (16) from your character to the pad, out at
