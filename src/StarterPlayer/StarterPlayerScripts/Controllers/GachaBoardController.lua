@@ -1349,8 +1349,8 @@ local function refresh()
 	if not view.Label or not view.Label.Parent then
 		view.Label = view.Pad:FindFirstChild("GachaLabel")
 	end
-	if view.Open and not view.VipTag then
-		hideVipTag(view, true) -- a respawn builds a new VIP chip
+	if view.Open then
+		hideVipTag(view, true) -- enforce every step: anything that re-enables the chip (or a respawn's new one) is undone
 	end
 	if view.Open then
 		hideBall(view, true) -- the pad's parts can stream back in

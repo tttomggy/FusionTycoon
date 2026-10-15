@@ -1045,8 +1045,20 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		-- 25 studs away: refused, and Auto pull will not start.
 		root.CFrame = away
 		task.wait(0.4)
+		-- "Costs nothing": the pull count and the inventory are unchanged and
+		-- cash did not drop (it may rise: passive income ticks during the wait).
+		local function inventoryCount(): number
+			local inventory = PlayerDataService.GetInventory(player)
+			return if inventory then #inventory else 0
+		end
+		local pullsBefore, itemsBefore, cashBefore = PlayerDataService.GetGachaPulls(player), inventoryCount(), PlayerDataService.GetCash(player)
 		local okFar, reasonFar = TycoonService.RequestGachaPull(player, 1)
-		result(not okFar and reasonFar == "TooFar" and PlayerDataService.GetCash(player) == cash, "gacha keys: RequestGachaPull from 25 studs is refused (TooFar) and costs nothing", ("ok %s, reason %s, cash %s -> %s"):format(tostring(okFar), tostring(reasonFar), tostring(cash), tostring(PlayerDataService.GetCash(player))))
+		local pullsAfter, itemsAfter, cashAfter = PlayerDataService.GetGachaPulls(player), inventoryCount(), PlayerDataService.GetCash(player)
+		result(
+			not okFar and reasonFar == "TooFar" and pullsAfter == pullsBefore and itemsAfter == itemsBefore and cashAfter >= cashBefore,
+			"gacha keys: RequestGachaPull from 25 studs is refused (TooFar) and costs nothing",
+			("ok %s, reason %s, pulls %d -> %d, items %d -> %d, cash %s -> %s"):format(tostring(okFar), tostring(reasonFar), pullsBefore, pullsAfter, itemsBefore, itemsAfter, tostring(cashBefore), tostring(cashAfter))
+		)
 		TycoonService.SetAutoPull(player, true)
 		local farStop = TycoonService.GetAutoPullStop(player)
 		result(not TycoonService.IsAutoPulling(player) and farStop ~= nil and farStop.Reason == "TooFar", "gacha keys: Auto pull from 25 studs does not start (TooFar)", ("running %s, stop %s"):format(tostring(TycoonService.IsAutoPulling(player)), if farStop then farStop.Reason else "none"))

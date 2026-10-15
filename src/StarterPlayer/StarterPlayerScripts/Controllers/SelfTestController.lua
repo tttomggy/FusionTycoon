@@ -2055,6 +2055,7 @@ local function probeGachaCovers(): { ProbeLine }
 	chip.Enabled = true
 	Board.RefreshNow()
 	RunService.Heartbeat:Wait()
+	RunService.Heartbeat:Wait()
 	local label = card.Label
 	local labelOn = label ~= nil and label:IsA("BillboardGui") and label.Enabled
 	local function ballState(): (boolean, boolean, string)
