@@ -26,6 +26,7 @@
 	    brings new PendingOffline; COLLECT fires ClaimOffline and bursts coins.
 
 ]]
+local GuiService = game:GetService("GuiService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
@@ -1402,9 +1403,27 @@ local SKIP_LINE_MAX = 3
 local SKIP_LINE_HEIGHT = 34
 local SKIP_LINE_GAP = 6
 local SKIP_LINE_FADE = { 0, 0.3, 0.55 } -- GroupTransparency, newest first
+local SKIP_STACK_WIDTH = 720
 
 local skipStack: Frame? = nil
 local skipLines: { CanvasGroup } = {} -- oldest first
+
+-- px (design, before the phone UIScale) from the screen bottom to the stack's
+-- bottom edge: the shared bottom baseline, or 8 px above the weapon bar when
+-- that stands higher (Rebirth 1+). The lines never sit on the bar.
+local function skipStackOffset(): number
+	local offset = BOTTOM_CARD_OFFSET
+	local camera = workspace.CurrentCamera
+	local ok, rect = pcall(function()
+		return (require(script.Parent.CombatController) :: any).GetBarRect()
+	end)
+	if camera and ok and rect then
+		local scale = if skipStack then UIKit.EffectiveScale(skipStack) else 1
+		local gap = (camera.ViewportSize.Y - rect.Position.Y) / scale
+		offset = math.max(offset, math.ceil(gap) + 8)
+	end
+	return offset
+end
 
 local function restackSkipLines()
 	local count = #skipLines
@@ -1412,7 +1431,12 @@ local function restackSkipLines()
 		local age = count - index + 1 -- 1 = newest
 		TweenService:Create(line, TweenInfo.new(0.15), { GroupTransparency = SKIP_LINE_FADE[age] or 0.7 }):Play()
 	end
-	skipInset = if count > 0 then count * (SKIP_LINE_HEIGHT + SKIP_LINE_GAP) + 6 else 0
+	local offset = skipStackOffset()
+	if skipStack then
+		skipStack.Position = UDim2.new(0.5, 0, 1, -offset)
+	end
+	-- Toasts clear whichever is taller: this stack or a bottom card.
+	skipInset = if count > 0 then (offset - BOTTOM_CARD_OFFSET) + count * (SKIP_LINE_HEIGHT + SKIP_LINE_GAP) + 6 else 0
 	applyBottomInset()
 end
 
@@ -1440,8 +1464,10 @@ local function ensureSkipStack(): Frame
 	stack.BackgroundTransparency = 1
 	stack.AnchorPoint = Vector2.new(0.5, 1)
 	stack.Position = UDim2.new(0.5, 0, 1, -BOTTOM_CARD_OFFSET)
-	stack.Size = UDim2.fromOffset(0, 0)
-	stack.AutomaticSize = Enum.AutomaticSize.XY
+	-- A fixed box centred on the screen, like the toast stack: the lines
+	-- centre inside it. (It used to be an AutomaticSize frame, which let a
+	-- line drift off-centre over the HUD's left column.)
+	stack.Size = UDim2.fromOffset(SKIP_STACK_WIDTH, SKIP_LINE_MAX * (SKIP_LINE_HEIGHT + SKIP_LINE_GAP))
 	stack.Parent = screenGui
 	local layout = Instance.new("UIListLayout")
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -1512,6 +1538,28 @@ showSkippedLine = function(item: any, extra: string?)
 	table.insert(skipLines, line)
 	restackSkipLines()
 	task.delay(SKIP_LINE_SECONDS, removeSkipLine, line)
+end
+
+-- /selftest: pops `items` as skipped lines at once and returns each line's
+-- screen rect (top-bar inset added back, as the HUD rects are);
+-- ClearSkippedLines removes them.
+function ResultController.ShowSelfTestSkippedLines(items: { any }): { { Position: Vector2, Size: Vector2 } }
+	for _, item in items do
+		showSkippedLine(item)
+	end
+	task.wait(0.4)
+	local inset = GuiService:GetGuiInset().Y
+	local rects = {}
+	for _, line in skipLines do
+		table.insert(rects, { Position = line.AbsolutePosition + Vector2.new(0, inset), Size = line.AbsoluteSize })
+	end
+	return rects
+end
+
+function ResultController.ClearSkippedLines()
+	for _, line in table.clone(skipLines) do
+		removeSkipLine(line)
+	end
 end
 
 --[[ Event routing ------------------------------------------------------------------ ]]

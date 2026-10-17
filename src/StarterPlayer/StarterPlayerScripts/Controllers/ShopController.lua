@@ -361,6 +361,13 @@ local function heistBusy(): boolean
 	return false
 end
 
+-- The HUD deal tile is hidden while a heist has your hands full (you carry,
+-- or something of yours is carried off) and for AfterLossQuietSeconds after
+-- a loss, like the pop-up card: nothing is sold at someone's worst moment.
+function ShopController.IsDealTileQuiet(): boolean
+	return heistBusy() or os.clock() - lastLossAt < ShopConfig.AfterLossQuietSeconds
+end
+
 -- Why the real (unforced) path won't show the card now (nil = it may).
 local function dealBlocked(deal: DealView, ignoreSaved: boolean): string?
 	if heistBusy() then

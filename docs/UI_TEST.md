@@ -1521,9 +1521,21 @@ Heist, the result cards, the celebration):
 - [ ] `/deal slot 6`, `/deal slot 12`, …: the deal changes each slot and
   never repeats back to back; the countdown jumps to match; `/deal slot 0`
   restores.
-- [ ] HUD 🔥 badge under SHOP / GIFTS on its own line (phone too) with
-  the saving and countdown; it pulses once on a new slot; tapping it opens
-  the shop at the deal.
+- [ ] HUD deal tile under SHOP / GIFTS on its own line (phone too, 76 px):
+  the pack picture (the product's Creator Hub icon; the emoji until one is
+  set) with slow rays behind it, a gold −23% ribbon across the top-right
+  corner and the 🔥 countdown pill under it; one white shine sweep every 6 s
+  and nothing else moves (no flashing, no red timer, same look at 0:30);
+  it pulses once and shines at once on a new slot; tapping the tile or the
+  timer opens the shop at the deal. Hidden for a restricted player, during
+  the tutorial, while carrying / being stolen from and for 60 s after a
+  loss. No Robux price on it.
+- [ ] Auto pull with the reveal rule skipping Commons: the little lines
+  (`+ Spark Cell  COMMON  +$19.7/s`) stack centred above the weapon bar,
+  never over the cash card or any HUD button.
+- [ ] `/selftest`: "deal tile", "deal tile no overlap", "deal tile hidden
+  for restricted, tutorial and carrying" and "skipped lines never overlap
+  the HUD" pass at both layouts.
 - [ ] `/deal pop`: the "New deal!" side card (icons, saving, Not now / See
   deal). See deal opens the shop at the deal; Not now hides it until the
   next slot. Not in a first session's first 10 min, not over another card,

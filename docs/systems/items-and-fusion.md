@@ -228,7 +228,7 @@ look, never the odds.
   (`ResultController.FusionBannerShows` is always false; other players still
   see the server-wide banner). A skipped card (BEST OF 10 / Auto-Fuse) pops a **small line** above the bottom bar for 2.5 s (orb
   dot, "+ Golden Plasma Orb" in the mutation colour, the tier, "+$X/s";
-  max 3, older ones fade). The tutorial `fuse` step now waits for this card
+  max 3, older ones fade; a fixed 720 px box centred at the bottom, raised above the weapon bar when that stands higher, `/selftest` "skipped lines never overlap the HUD"). The tutorial `fuse` step now waits for this card
   like the pull's (`screenQuiet`); /selftest probes "RARE ORB!" after it. The client applies a change at once
   (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
   UI: the **⚙** 56 px button after REBIRTH opens `UI/SettingsPanel` (620

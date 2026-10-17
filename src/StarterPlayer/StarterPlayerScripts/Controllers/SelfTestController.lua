@@ -765,6 +765,85 @@ local function testHudLeftColumn(): { string }
 	return lines
 end
 
+-- The deal tile (pack art or emoji fallback, ribbon = the saving, timer =
+-- the seconds left), clear of the left column and the bottom row, and the
+-- hidden gates, at the desktop and phone layouts.
+local function testDealTile(): { string }
+	local hud = require(script.Parent.HudController) :: any
+	local lines: { string } = {}
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local ok, result = pcall(hud.SelfTestDealTile, if phone then "phone" else "desktop")
+		if not ok then
+			table.insert(lines, "FAIL deal tile: " .. tostring(result))
+		else
+			for _, line in result do
+				table.insert(lines, line)
+			end
+		end
+	end
+	UIKit.SetForcedPhone(nil)
+	return lines
+end
+
+-- Three skipped-card lines at once never overlap any HUD rect (the left
+-- column, the bottom row) or the weapon bar, and sit centred.
+local function testSkippedLines(): { string }
+	local result = require(script.Parent.ResultController) :: any
+	local hud = require(script.Parent.HudController) :: any
+	local combat = require(script.Parent.CombatController) :: any
+	local common = ItemConfig.GetItemsByTier("Common")[1]
+	if not common then
+		return { "PASS skipped lines (skipped: no Common item)" }
+	end
+	local lines: { string } = {}
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local label = if phone then "phone" else "desktop"
+		local ok, err = pcall(function()
+			local items = {}
+			for index = 1, 3 do
+				table.insert(items, { Uid = "selftest" .. index, ItemId = common.Id, Tier = "Common" })
+			end
+			local rects = result.ShowSelfTestSkippedLines(items)
+			local obstacles = hud.GetObstacleRects()
+			local bar = combat.GetBarRect()
+			if bar then
+				obstacles.WeaponBar = bar
+			end
+			local screenWidth = workspace.CurrentCamera.ViewportSize.X
+			local bad: { string } = {}
+			for index, rect in rects do
+				local off = rect.Position.X + rect.Size.X / 2 - screenWidth / 2
+				if math.abs(off) > 2 then
+					table.insert(bad, ("line %d off-centre (%d px)"):format(index, math.floor(off)))
+				end
+				for name, other in obstacles do
+					local overlapX = math.min(rect.Position.X + rect.Size.X, other.Position.X + other.Size.X) - math.max(rect.Position.X, other.Position.X)
+					local overlapY = math.min(rect.Position.Y + rect.Size.Y, other.Position.Y + other.Size.Y) - math.max(rect.Position.Y, other.Position.Y)
+					if overlapX > 1 and overlapY > 1 then
+						table.insert(bad, ("line %d over %s"):format(index, name))
+					end
+				end
+			end
+			if #rects ~= 3 then
+				table.insert(bad, ("%d lines up, want 3"):format(#rects))
+			end
+			table.insert(lines, if #bad == 0
+				then ("PASS skipped lines never overlap the HUD (%s, 3 lines, centred)"):format(label)
+				else ("FAIL skipped lines (%s): %s"):format(label, table.concat(bad, ", ")))
+		end)
+		result.ClearSkippedLines()
+		if not ok then
+			table.insert(lines, ("FAIL skipped lines (%s): %s"):format(label, tostring(err)))
+		end
+	end
+	UIKit.SetForcedPhone(nil)
+	return lines
+end
+
 --[[ Tutorial probes ---------------------------------------------------------------------
 	The server drives the tutorial step by step (DebugService) and asks, per
 	step, what this client really shows: the banner (the step's own text, at
@@ -2346,6 +2425,12 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testHudLeftColumn() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testDealTile() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testSkippedLines() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testTopStack() do

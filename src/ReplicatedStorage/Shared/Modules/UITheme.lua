@@ -58,6 +58,7 @@ UITheme.Colors = {
 	RebirthBannerLeft = hex("#7A2A00"), -- server rebirth banner gradient left
 	White = hex("#FFFFFF"),
 	Black = hex("#000000"),
+	DealRay = hex("#FFE3F6"), -- the HUD deal tile's slow rays (pale pink, 0.6 transparent)
 
 	-- The Gacha pop-up card's PS99-style white paper (GachaBoardController).
 	CardPaper = hex("#F6F9FF"), -- near-white, slightly cool

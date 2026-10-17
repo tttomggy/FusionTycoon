@@ -43,6 +43,8 @@ local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
+local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
+local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local SettingsPanel = require(script.Parent.Parent.UI.SettingsPanel)
 local FusePanel = require(script.Parent.Parent.UI.FusePanel)
@@ -1103,34 +1105,240 @@ local giftsBounce: Tween? = nil
 -- than the SHOP row), a stack in the phone status column.
 local effectsLayout: UIListLayout
 
--- The 🔥 deal badge (ShopController.GetDeal): the live saving and the real
--- countdown; it pulses once when a new slot starts; a tap opens the shop at
--- the deal. Under SHOP / GIFTS on its own line, desktop and phone alike (on
--- a phone it heads the status stack, with the timed pills under it).
-local DEAL_BADGE_SIZE = Vector2.new(176, 40)
-local dealButton: TextButton
+-- The deal tile (ShopController.GetDeal): a pack picture on a Deal-pink tile
+-- with slow rays behind it, a gold "−23%" ribbon (the live saving) and the
+-- real countdown in a pill under it. A new slot pulses it once and plays the
+-- shine at once; a tap opens the shop at the deal. Under SHOP / GIFTS on its
+-- own line, desktop and phone alike (on a phone it heads the status stack,
+-- with the timed pills under it). Idle motion is only the rays (360° per
+-- 12 s) and one 0.5 s shine every 6 s: no flashing, and the timer looks the
+-- same at 5:59 and at 0:30 (monetization.md "never" list).
+local DEAL_TILE_SIZE = { Desktop = 92, Phone = 76 }
+local DEAL_HOLDER_WIDTH = 92
+local DEAL_TILE_RADIUS = 16
+local DEAL_ART_SCALE = 0.78 -- the pack picture, of the tile (72 of 92 px)
+local DEAL_TIMER_HEIGHT = 22
+local DEAL_TIMER_GAP = 6
+local DEAL_RAY_SECONDS = 12
+local DEAL_RAY_BARS = 6 -- thin bars through the centre = 12 rays
+local DEAL_RAY_TRANSPARENCY = 0.6
+local DEAL_SHINE_PERIOD = 6
+local DEAL_SHINE_SECONDS = 0.5
 local dealHolder: Frame
+local dealTile: Frame
+local dealRays: Frame
+local dealImage: ImageLabel
+local dealGlyph: TextLabel
+local dealRibbonText: TextLabel
+local dealTimer: TextLabel
+local dealShine: UIGradient
+-- "<deal key>|<icon asset>" of the art on show, so the picture is only
+-- touched when it changes.
+local dealArtKey = ""
+local dealShineStart = 0 -- os.clock() of the sweep in progress / the last one
+local dealMotion: RBXScriptConnection? = nil
 local dealSlot: number? = nil
 local dealShown = false
 local layoutIsPhone = false
 
+local function dealTileSize(isPhone: boolean): number
+	return if isPhone then DEAL_TILE_SIZE.Phone else DEAL_TILE_SIZE.Desktop
+end
+
+-- Tile + gap + timer pill: the height the left column reserves.
+local function dealHolderHeight(isPhone: boolean): number
+	return dealTileSize(isPhone) + DEAL_TIMER_GAP + DEAL_TIMER_HEIGHT
+end
+
+local function sizeDealTile(isPhone: boolean)
+	local size = dealTileSize(isPhone)
+	dealHolder.Size = UDim2.fromOffset(DEAL_HOLDER_WIDTH, dealHolderHeight(isPhone))
+	dealTile.Size = UDim2.fromOffset(size, size)
+	dealGlyph.TextSize = math.floor(size * 0.52) -- 48 px on desktop
+	UIKit.PillRoot(dealTimer).Position = UDim2.fromOffset(0, size + DEAL_TIMER_GAP)
+end
+
+-- Rays turn and the shine sweeps only while the tile is on screen.
+local function setDealMotion(on: boolean)
+	if on and not dealMotion then
+		dealShineStart = os.clock()
+		dealMotion = RunService.RenderStepped:Connect(function(dt: number)
+			dealRays.Rotation = (dealRays.Rotation + 360 / DEAL_RAY_SECONDS * dt) % 360
+			local t = (os.clock() - dealShineStart) % DEAL_SHINE_PERIOD
+			-- Off the tile (-1) between sweeps, across it (-1 -> 1) in 0.5 s.
+			dealShine.Offset = Vector2.new(if t < DEAL_SHINE_SECONDS then -1 + 2 * t / DEAL_SHINE_SECONDS else -1, 0)
+		end)
+	elseif not on and dealMotion then
+		dealMotion:Disconnect()
+		dealMotion = nil
+	end
+end
+
 local function buildDealBadge()
-	local button, holder = UIKit.Button({
-		Name = "DealBadge",
-		Style = "Pink",
-		Text = "🔥 DEAL",
-		TextSize = 16,
-		Size = UDim2.fromOffset(DEAL_BADGE_SIZE.X, DEAL_BADGE_SIZE.Y + 4),
-		ShadowOffset = UITheme.SmallShadowOffset,
-		LayoutOrder = 0,
-		OnClick = function()
-			ShopPanel.Open("Deal")
-		end,
-	})
-	dealButton = button
-	dealHolder = holder
+	local holder = Instance.new("Frame")
+	holder.Name = "DealBadge"
+	holder.BackgroundTransparency = 1
+	holder.LayoutOrder = 0
 	holder.Visible = false
 	holder.Parent = screenGui
+	dealHolder = holder
+
+	local tile = Instance.new("Frame")
+	tile.Name = "Tile"
+	tile.BackgroundColor3 = Colors.White
+	tile.BorderSizePixel = 0
+	tile.ZIndex = 2
+	tile.Parent = holder
+	UIKit.Corner(tile, DEAL_TILE_RADIUS)
+	UIKit.Stroke(tile, 3, Colors.White)
+	UIKit.PairGradient(tile, UITheme.Gradients.Pink)
+	UIKit.Shadow(tile, UITheme.SmallShadowOffset)
+	dealTile = tile
+
+	-- Everything inside is clipped to the rounded tile.
+	local clip = Instance.new("CanvasGroup")
+	clip.Name = "Clip"
+	clip.BackgroundTransparency = 1
+	clip.Size = UDim2.fromScale(1, 1)
+	clip.ZIndex = 2
+	clip.Parent = tile
+	UIKit.Corner(clip, DEAL_TILE_RADIUS)
+
+	local rays = Instance.new("Frame")
+	rays.Name = "Rays"
+	rays.BackgroundTransparency = 1
+	rays.AnchorPoint = Vector2.new(0.5, 0.5)
+	rays.Position = UDim2.fromScale(0.5, 0.5)
+	rays.Size = UDim2.fromScale(1.5, 1.5) -- covers the corners while it turns
+	rays.ZIndex = 2
+	rays.Parent = clip
+	for index = 1, DEAL_RAY_BARS do
+		local bar = Instance.new("Frame")
+		bar.Name = "Ray"
+		bar.BackgroundColor3 = Colors.DealRay
+		bar.BackgroundTransparency = DEAL_RAY_TRANSPARENCY
+		bar.BorderSizePixel = 0
+		bar.AnchorPoint = Vector2.new(0.5, 0.5)
+		bar.Position = UDim2.fromScale(0.5, 0.5)
+		bar.Size = UDim2.new(0, 9, 1, 0)
+		bar.Rotation = (index - 1) * (180 / DEAL_RAY_BARS)
+		bar.ZIndex = 2
+		bar.Parent = rays
+	end
+	dealRays = rays
+
+	local glow = Instance.new("Frame")
+	glow.Name = "Glow"
+	glow.BackgroundColor3 = Colors.DealRay
+	glow.BackgroundTransparency = 0.75
+	glow.BorderSizePixel = 0
+	glow.AnchorPoint = Vector2.new(0.5, 0.5)
+	glow.Position = UDim2.fromScale(0.5, 0.52)
+	glow.Size = UDim2.fromScale(0.74, 0.74)
+	glow.ZIndex = 3
+	glow.Parent = clip
+	UIKit.Corner(glow, 999)
+
+	local image = Instance.new("ImageLabel")
+	image.Name = "Art"
+	image.BackgroundTransparency = 1
+	image.AnchorPoint = Vector2.new(0.5, 0.5)
+	image.Position = UDim2.fromScale(0.5, 0.52)
+	image.Size = UDim2.fromScale(DEAL_ART_SCALE, DEAL_ART_SCALE)
+	image.ScaleType = Enum.ScaleType.Fit
+	image.ZIndex = 4
+	image.Visible = false
+	image.Parent = clip
+	dealImage = image
+
+	-- No icon yet (not set in Creator Hub, or still loading): the deal's
+	-- emoji, so the tile never looks broken.
+	dealGlyph = UIKit.Label({
+		Name = "Glyph",
+		Text = "🔥",
+		TextSize = 48,
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.52),
+		Size = UDim2.fromScale(DEAL_ART_SCALE, DEAL_ART_SCALE),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 4,
+		Parent = clip,
+	})
+
+	-- Diagonal gold ribbon across the top-right corner: white text with the
+	-- ink stroke (the contrast rule).
+	local ribbon = Instance.new("Frame")
+	ribbon.Name = "Ribbon"
+	ribbon.BackgroundColor3 = Colors.White
+	ribbon.BorderSizePixel = 0
+	ribbon.AnchorPoint = Vector2.new(0.5, 0.5)
+	ribbon.Position = UDim2.fromScale(0.77, 0.23)
+	ribbon.Size = UDim2.fromScale(0.95, 0.21)
+	ribbon.Rotation = 45
+	ribbon.ZIndex = 6
+	ribbon.Parent = clip
+	UIKit.PairGradient(ribbon, UITheme.Gradients.Gold)
+	UIKit.Stroke(ribbon, 1.5)
+	dealRibbonText = UIKit.Label({
+		Name = "Text",
+		Text = "DEAL",
+		Font = Fonts.Display,
+		TextColor3 = UITheme.WarmText,
+		Stroke = UITheme.WarmTextStroke,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 7,
+		Parent = ribbon,
+	})
+	UIKit.FitText(dealRibbonText, 14, 8)
+
+	-- The shine: a white diagonal band that sweeps across once per period.
+	local shine = Instance.new("Frame")
+	shine.Name = "Shine"
+	shine.BackgroundColor3 = Colors.White
+	shine.BorderSizePixel = 0
+	shine.Size = UDim2.fromScale(1, 1)
+	shine.ZIndex = 8
+	shine.Parent = clip
+	local sweep = Instance.new("UIGradient")
+	sweep.Rotation = 30
+	sweep.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(0.38, 1),
+		NumberSequenceKeypoint.new(0.5, 0.35),
+		NumberSequenceKeypoint.new(0.62, 1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	sweep.Offset = Vector2.new(-1, 0)
+	sweep.Parent = shine
+	dealShine = sweep
+
+	dealTimer = UIKit.Pill({
+		Name = "Timer",
+		Parent = holder,
+		Text = "🔥",
+		Color = Colors.Panel,
+		Font = Fonts.Display,
+		TextSize = 13,
+		Height = DEAL_TIMER_HEIGHT,
+		ZIndex = 3,
+		TextStroke = 1.5,
+	})
+
+	-- The whole tile and the timer are one tap target (holder >= 44 px).
+	local hit = Instance.new("TextButton")
+	hit.Name = "Hit"
+	hit.BackgroundTransparency = 1
+	hit.Text = ""
+	hit.AutoButtonColor = false
+	hit.Size = UDim2.fromScale(1, 1)
+	hit.ZIndex = 20
+	hit.Parent = holder
+	hit.Activated:Connect(function()
+		UIKit.SelectFeedback(tile)
+		ShopPanel.Open("Deal")
+	end)
+	sizeDealTile(false)
 
 	phoneStatus = Instance.new("Frame")
 	phoneStatus.Name = "PhoneStatus"
@@ -1418,30 +1626,58 @@ end
 -- Once a second: the effect pills' timers and the SALE tag.
 local applyLayout: (isPhone: boolean) -> ()
 
+-- Whether the tile is up: a live deal for this player (GetDeal is nil for
+-- policy-restricted players and without a real saving), not in the
+-- tutorial, not while a heist has your hands full, not just after a loss.
+local function dealTileShouldShow(deal: any?, tutorial: boolean, quiet: boolean): boolean
+	return deal ~= nil and not tutorial and not quiet
+end
+
+-- Art: the product's live store icon, else the deal's emoji. Ribbon: the
+-- live saving, "DEAL" when unknown. Timer: the real seconds left.
+local function applyDealView(item: { Icon: string }, key: string, icon: string?, save: number?, secondsLeft: number)
+	local artKey = key .. "|" .. (icon or "")
+	if artKey ~= dealArtKey then
+		dealArtKey = artKey
+		dealImage.Visible = icon ~= nil
+		dealGlyph.Visible = icon == nil
+		if icon then
+			dealImage.Image = icon
+		end
+		dealGlyph.Text = item.Icon
+	end
+	dealRibbonText.Text = if save then ("−%d%%"):format(save) else "DEAL"
+	dealTimer.Text = "🔥 " .. EventState.FormatTimer(secondsLeft)
+end
+
+local function pulseDeal()
+	local pulse = dealHolder:FindFirstChild("DealPulse") :: UIScale?
+	if not pulse then
+		local created = Instance.new("UIScale")
+		created.Name = "DealPulse"
+		created.Parent = dealHolder
+		pulse = created
+	end
+	local scale = pulse :: UIScale
+	scale.Scale = 1.25
+	TweenService:Create(scale, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+end
+
 local function refreshDealBadge()
 	local deal = ShopController.GetDeal()
-	local shown = deal ~= nil
-	if deal then
-		UIKit.SetButton(dealButton, {
-			Text = ("🔥 %s · %s"):format(if deal.Save then ("−%d%%"):format(deal.Save) else "DEAL", EventState.FormatTimer(deal.SecondsLeft)),
-		})
+	local shown = dealTileShouldShow(deal, TycoonController.IsTutorialActive(), ShopController.IsDealTileQuiet())
+	if deal and shown then
+		applyDealView(deal.Item, deal.Key, ShopPrices.GetIcon(deal.Key), deal.Save, deal.SecondsLeft)
 		if dealSlot and dealSlot ~= deal.SlotStart then
-			local pulse = dealButton:FindFirstChild("DealPulse") :: UIScale?
-			if not pulse then
-				local created = Instance.new("UIScale")
-				created.Name = "DealPulse"
-				created.Parent = dealButton
-				pulse = created
-			end
-			local scale = pulse :: UIScale
-			scale.Scale = 1.25
-			TweenService:Create(scale, TweenInfo.new(0.5, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), { Scale = 1 }):Play()
+			pulseDeal()
+			dealShineStart = os.clock() -- the shine plays at once too
 		end
 		dealSlot = deal.SlotStart
 	end
 	if shown ~= dealShown then
 		dealShown = shown
 		dealHolder.Visible = shown
+		setDealMotion(shown)
 		applyLayout(layoutIsPhone)
 	end
 end
@@ -1539,6 +1775,7 @@ local function placeColumnFor(isPhone: boolean)
 	questRow.Position = questTop
 	local lockTop = questTop + UDim2.fromOffset(0, QUESTS_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	phoneStatus.Visible = isPhone
+	sizeDealTile(isPhone)
 	if isPhone then
 		-- Status stack under SHOP / GIFTS: the deal badge on its own line,
 		-- then "next in" and the timed pills, all stacked down the column.
@@ -1557,7 +1794,7 @@ local function placeColumnFor(isPhone: boolean)
 		dealHolder.Parent = screenGui
 		dealHolder.Position = lockTop
 		if dealShown then
-			lockTop += UDim2.fromOffset(0, DEAL_BADGE_SIZE.Y + 4 + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
+			lockTop += UDim2.fromOffset(0, dealHolderHeight(false) + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
 		end
 	end
 	lockRow.Position = lockTop
@@ -1599,7 +1836,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	selfTestHold = true
 	dealShown = true
 	dealHolder.Visible = true
-	UIKit.SetButton(dealButton, { Text = "🔥 −23% · 5:59:59" })
+	applyDealView({ Icon = "🔥" }, "SelfTest", nil, 23, 5 * 3600 + 59 * 60 + 59)
 	UIKit.SetPillVisible(giftsNextPill, true)
 	giftsNextPill.Text = "next in 59:59"
 	effectPills.Income.Text = "⚡ 2× · 2:59:59"
@@ -1739,6 +1976,81 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 		end
 	end
 	return rects
+end
+
+-- /selftest "deal tile": the art (picture or emoji fallback) is drawn, the
+-- ribbon and the timer show the numbers they were given, the tile overlaps
+-- no other HUD rect (left column, bottom row), and it is hidden for a
+-- restricted player, in the tutorial and while carrying. The caller forces
+-- the layout (phone / desktop) first.
+function HudController.SelfTestDealTile(scaleName: string): { string }
+	selfTestHold = true
+	local save, seconds = 23, 4 * 3600 + 8 * 60 + 48
+	dealShown = true
+	dealHolder.Visible = true
+	applyDealView({ Icon = "🔥" }, "SelfTest", nil, save, seconds)
+	-- The 3 other pills that share the column, as in the left-column check.
+	UIKit.SetPillVisible(giftsNextPill, true)
+	for _, label in { effectPills.Income, effectPills.Luck, effectPills.Server } do
+		UIKit.PillRoot(label).Visible = true
+	end
+	effectsFrame.Visible = true
+	applyLayout(layoutIsPhone)
+	task.wait(0.3)
+
+	local lines: { string } = {}
+	local art: GuiObject = if dealImage.Visible then dealImage else dealGlyph
+	local wantRibbon, wantTimer = ("−%d%%"):format(save), "🔥 " .. EventState.FormatTimer(seconds)
+	local drawn = isShown(art) and art.AbsoluteSize.X > 0 and art.AbsoluteSize.Y > 0
+	if drawn and dealRibbonText.Text == wantRibbon and dealTimer.Text == wantTimer then
+		table.insert(lines, ("PASS deal tile (%s): art drawn %dx%d, ribbon %s, timer %s"):format(
+			scaleName, art.AbsoluteSize.X, art.AbsoluteSize.Y, dealRibbonText.Text, dealTimer.Text))
+	else
+		table.insert(lines, ("FAIL deal tile (%s): art drawn %s (%s), ribbon '%s' (want '%s'), timer '%s' (want '%s')"):format(
+			scaleName, tostring(drawn), tostring(art.AbsoluteSize), dealRibbonText.Text, wantRibbon, dealTimer.Text, wantTimer))
+	end
+
+	local rects = HudController.GetObstacleRects()
+	local mine = rects.DealBadge
+	local overlaps: { string } = {}
+	local compared = 0
+	if not mine then
+		table.insert(overlaps, "tile not on screen")
+	else
+		for name, rect in rects do
+			-- On a phone the tile lives inside the status stack.
+			if name ~= "DealBadge" and name ~= "PhoneStatus" then
+				compared += 1
+				local overlapX = math.min(mine.Position.X + mine.Size.X, rect.Position.X + rect.Size.X) - math.max(mine.Position.X, rect.Position.X)
+				local overlapY = math.min(mine.Position.Y + mine.Size.Y, rect.Position.Y + rect.Size.Y) - math.max(mine.Position.Y, rect.Position.Y)
+				if overlapX > 1 and overlapY > 1 then
+					table.insert(overlaps, name)
+				end
+			end
+		end
+	end
+	table.sort(overlaps)
+	table.insert(lines, if #overlaps == 0
+		then ("PASS deal tile no overlap (%s, vs %d HUD rects)"):format(scaleName, compared)
+		else ("FAIL deal tile overlap (%s): %s"):format(scaleName, table.concat(overlaps, ", ")))
+
+	-- Hidden: the gates the real refresh uses (a live deal, no tutorial, not
+	-- quiet), and a restricted player is never offered a deal product.
+	local key = DealState.GetCurrent()
+	local restrictedOffered = ShopConfig.IsOffered(key, true, false, false)
+	local hidden = not dealTileShouldShow(nil, false, false)
+		and not dealTileShouldShow({}, true, false)
+		and not dealTileShouldShow({}, false, true)
+		and dealTileShouldShow({}, false, false)
+		and not restrictedOffered
+	table.insert(lines, if hidden
+		then ("PASS deal tile hidden for restricted, tutorial and carrying (%s)"):format(scaleName)
+		else ("FAIL deal tile hidden gates (%s): restrictedOffered %s"):format(scaleName, tostring(restrictedOffered)))
+
+	dealArtKey = ""
+	selfTestHold = false
+	refreshShopRow()
+	return lines
 end
 
 --[[ Init ------------------------------------------------------------------ ]]

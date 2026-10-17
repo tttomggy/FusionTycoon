@@ -120,11 +120,25 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     refuses a non-current deal (`DealOver`; a receipt is honoured 10 min
     after a prompt made inside the slot) and grants its parts through
     their own grants. Shop: a 🔥 DEAL banner + chip first ("normally
-    ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: a 🔥 badge under
-    SHOP / GIFTS on its own line, desktop and phone (on a phone it heads
-    the left-column status stack, "next in" and the timed pills under it,
-    never toward the centre; pulses on a new slot, opens the shop at the
-    deal); a "New deal!" side card once per deal under the contextual
+    ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: the **deal tile**
+    (`HudController.buildDealBadge`) under SHOP / GIFTS on its own line,
+    desktop and phone (on a phone it heads the left-column status stack,
+    "next in" and the timed pills under it, never toward the centre). A 92 px
+    (phone 76) Deal-pink square, 16 px corners, 3 px white stroke: the deal
+    product's LIVE icon (`ShopPrices.GetIcon` = the Creator Hub
+    `IconImageAssetId`; none yet → the deal's emoji at 48 px; never uploaded
+    from code), slow rays behind it (6 bars = 12 rays, 360° per 12 s,
+    `UITheme.Colors.DealRay` at 0.6), a gold `−{Save}%` ribbon across the
+    top-right (`DEAL` when the saving is unknown; white text + ink stroke), a
+    white shine sweep (0.5 s every 6 s) and a dark timer pill under it
+    (`🔥 h:mm:ss`, the real `SecondsLeft`). The whole tile + timer is one tap
+    (`ShopPanel.Open("Deal")`, `UIKit.SelectFeedback`); a new slot pulses it
+    once and plays the shine at once. Idle motion is ONLY the rays and the
+    shine: no flashing, no red or urgent timer, no "last chance" copy and no
+    extra effect in the final hour; no Robux price on the tile. Hidden for
+    policy-restricted players (no `GetDeal`), during the tutorial, while a
+    heist has your hands full (`ShopController.IsDealTileQuiet`: you carry, or
+    yours is carried off) and for `AfterLossQuietSeconds` after a loss; a "New deal!" side card once per deal under the contextual
     offer's guards and shared 5-min limit, never while carrying or being
     stolen from. Once per deal is saved: `PlayerData.DealPopupSlot` (the
     slot start, sanitised in `reconcile`, snapshot `Shop.DealPopupSlot`),
