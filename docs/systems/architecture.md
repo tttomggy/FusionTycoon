@@ -71,8 +71,9 @@ Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
 `{ Weapon, Origin?, Direction? }`; melee sends only `Weapon`, the server's box
 picks the target), `RequestGachaPull` (C→S `{ Count = 1 | 10 }`: the Gacha
 card's E / R keys, own pad within `PromptDistance + 3` studs), `SetAutoPull`
-(C→S `{ On }`: T, free for everyone), `AutoPullState` (S→C `{ On, Reason?,
-Cost? }`),
+(C→S `{ On }`: T = Auto ×10, free for everyone), `AutoPullState` (S→C
+`{ On, Reason?, Cost? }`), `AutoPullReady` (C→S, no payload: the Auto pull
+cycle's cards closed, send the next ×10),
 `HitReceived` (S→target), `HitFx` (S→all), `WeaponUnlocked` (S→C),
 `ClaimQuest` (C→S `{ Id }`) / `QuestResult` (S→C), `UsePowerUp` (C→S
 `{ Key }`) / `PowerUpResult` (S→C) (no lock remote: LOCK is the console

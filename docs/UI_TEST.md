@@ -1530,14 +1530,35 @@ Heist, the result cards, the celebration):
   timer opens the shop at the deal. Hidden for a restricted player, during
   the tutorial, while carrying / being stolen from and for 60 s after a
   loss. No Robux price on it.
-- [ ] Auto pull with the reveal rule skipping Commons: the little lines
-  (`+ Spark Cell  COMMON  +$19.7/s`) stack centred above the weapon bar,
-  never over the cash card or any HUD button.
+- [ ] A manual ×10 (R) whose best card the reveal rule skips: the little line
+  (`+ Spark Cell  COMMON  +$19.7/s`) stacks centred above the weapon bar,
+  never over the cash card or any HUD button. (Auto pull no longer uses
+  these lines.)
 - [ ] `/selftest`: "deal tile", "deal tile no overlap", "deal tile hidden
   for restricted, tutorial and carrying" and "skipped lines never overlap
   the HUD" pass at both layouts.
-- [ ] `/deal pop`: the "New deal!" side card (icons, saving, Not now / See
-  deal). See deal opens the shop at the deal; Not now hides it until the
+- [ ] The shop's Deal banner (Polish 10): "🔥 DEAL · ends in h:mm:ss", one
+  72 px tile per distinct part (live icon or emoji, amount on the tile, name
+  under it; the same part twice = one tile with ×3), a "YOU GET:" list with
+  one ✓ plain-words line per part, "Worth R$ N if bought separately" (live
+  prices; absent in Studio until the products exist) and the buy button; on
+  a narrow window the tiles, the list and the button stack. The HUD tile has
+  the parts' glyphs ("⚡ 🧪") in a dark strip along its bottom edge.
+- [ ] `/deal pop`: the "New deal!" side card (a tile + ✓ line per part, the
+  worth line, Not now / See deal; on a phone the YOU GET list drops out if
+  the card would climb into the top bar). The Starter Pack card (session 2)
+  has the same tiles + list.
+- [ ] **Effects tray** (bottom right): `/shop grant LuckPotion`, `/shop grant
+  SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
+  Magnet: round icons with a timer under (m:ss, h:mm:ss past an hour), `×N`
+  badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
+  pop in on gaining and shrink out at the end, nothing flashes in the last
+  minute. Tap or hover one: a tooltip ("Rare orbs 2× more likely · 12:41
+  left"), one at a time; tap elsewhere closes it. 16 px from the right edge,
+  bottom level with the bottom button row; on a narrow window or phone it
+  sits just above the row, never over it; 5+ effects wrap to a second row
+  above. The old pills beside SHOP / GIFTS and in the phone status stack are
+  gone ("next in" stays). A purchase's flying time lands on its icon. See deal opens the shop at the deal; Not now hides it until the
   next slot. Not in a first session's first 10 min, not over another card,
   not within 60 s of a loss, not while carrying or being stolen from, and
   at most one shop pop-up per 5 min (shared with the contextual offer).
@@ -1845,9 +1866,11 @@ person, R15, 100% camera zoom; check each from the front and the side.
   "Pull" prompt appears next to the pad (the "H · How it works" next to the LOCK
   console is that console's own). A never-found tier is a solid black orb (no "?") but
   keeps its %. Press E, R and T (X / Y / RB on a controller): E and R pull, T
-  turns green (**Auto ON**) and keeps pulling one orb about every second until
-  you press T again, walk away or run out of cash ("Auto pull stopped: need
-  $…"); Commons only leave a small line, no big card. The (i) opens the ORBS &
+  turns green (**Auto ×10 ON**) and pulls 10 at a time, each cycle showing
+  the 10-pull card (it closes by itself after 2.5 s; a Secret's big card
+  pauses Auto until you close it), at least 3 s apart, until you press T
+  again, walk away or run out of cash ("Auto stopped: need $… for 10
+  pulls"); no small skipped lines. The (i) opens the ORBS &
   ODDS panel with HOW IT WORKS first. On the phone emulator the round buttons
   are ≥ 44 px and tappable. `/rebirths 3` then walk up: the 🍀 Luck pill
   appears and the %s change.

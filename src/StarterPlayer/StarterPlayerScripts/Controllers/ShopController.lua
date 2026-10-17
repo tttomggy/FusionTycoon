@@ -330,18 +330,19 @@ function ShopController.GetDeal(): DealView?
 	return dealView(true)
 end
 
--- "normally ~~128~~ R$ · now 99 R$ (−23%)", all live (RichText).
-function ShopController.GetDealPriceLine(deal: DealView): string
-	if deal.Price and deal.Normal then
-		return ("normally <s>%s %d</s> · now %s %d%s"):format(
-			ShopController.ROBUX,
-			deal.Normal,
-			ShopController.ROBUX,
-			deal.Price,
-			if deal.Save then (" (−%d%%)"):format(deal.Save) else ""
-		)
+-- "Worth R$ 128 if bought separately": the bundle's parts bought one by one
+-- at their LIVE prices (ShopPrices), never typed. Also returns that total. nil
+-- until every part's price is in, and when the bundle isn't cheaper.
+function ShopController.GetWorthLine(key: string): (string?, number?)
+	local normal = ShopPrices.GetPartsTotal(key)
+	if not normal then
+		return nil, nil
 	end
-	return "Studio test: live prices appear once the product is set up"
+	local price = ShopPrices.Get(key)
+	if price and normal <= price then
+		return nil, nil
+	end
+	return ("Worth %s %d if bought separately"):format(ShopController.ROBUX, normal), normal
 end
 
 -- The slot whose card was shown (or dismissed) this session; the saved
@@ -387,7 +388,8 @@ local function showDealCard(deal: DealView, track: boolean)
 		Name = "DealOffer",
 		Caption = "🔥 New deal!",
 		Title = deal.Item.Name,
-		Detail = ("%s  ·  %s"):format(deal.Icons, ShopController.GetDealPriceLine(deal)),
+		Detail = ShopController.GetWorthLine(deal.Key) or "",
+		Parts = deal.Item.Parts,
 		Footnote = ("New deal in %s"):format(EventState.FormatTimer(deal.SecondsLeft)),
 		-- A Studio Id 0 deal: "TEST" (no price, no saving).
 		BuyText = if deal.Item.Id == 0 then "TEST" else "See deal",
@@ -478,8 +480,9 @@ local function maybeShowStarter()
 		Name = "StarterOffer",
 		Caption = "Welcome back!",
 		Title = "🎁 Starter Pack",
-		Detail = "Neon Pink Lab + 1 hour ×2 Boost + Pocket Cash"
+		Detail = (ShopController.GetWorthLine("StarterPack") or "")
 			.. (if save then ("  ·  %s"):format(UIKit.Colored(("SAVE %d%%"):format(save), UITheme.Colors.GoldLabel)) else ""),
+		Parts = (ShopConfig.GetItem("StarterPack") :: ShopConfig.Item).Parts,
 		Footnote = "One time only. Also in the shop.",
 		BuyText = ShopController.GetPriceText("StarterPack"),
 		DismissText = "No thanks",

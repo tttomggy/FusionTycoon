@@ -32,6 +32,8 @@ local TycoonController = require(script.Parent.TycoonController)
 local InventoryController = require(script.Parent.InventoryController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local HudGate = require(script.Parent.Parent.UI.HudGate)
+local DealParts = require(script.Parent.Parent.UI.DealParts)
+local EffectsTray = require(script.Parent.Parent.UI.EffectsTray)
 local UpgradesPanel = require(script.Parent.Parent.UI.UpgradesPanel)
 local RebirthPanel = require(script.Parent.Parent.UI.RebirthPanel)
 local IndexPanel = require(script.Parent.Parent.UI.IndexPanel)
@@ -42,7 +44,6 @@ local QuestsPanel = require(script.Parent.Parent.UI.QuestsPanel)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopController = require(script.Parent.ShopController)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
-local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -94,7 +95,6 @@ local displayedCash = 0
 
 local cashLabel: TextLabel
 local incomeLabel: TextLabel
-local effectPills: { Income: TextLabel, Luck: TextLabel, Server: TextLabel }
 local multiplierPill: TextLabel
 local breakdownHolder: Frame
 local breakdownLabel: TextLabel
@@ -527,19 +527,22 @@ function HudController.BounceCash()
 	bounce(cashLabel)
 end
 
--- The timed pill for "Income" | "Luck" | "Server" (nil while it's hidden).
-function HudController.GetEffectPill(kind: string): TextLabel?
-	local pill = (effectPills :: any)[kind] :: TextLabel?
-	return pill
+-- Where an effect's icon is (EffectsTray, bottom right) for a purchase flight:
+-- "Income" | "Luck" | "Server", screen px.
+function HudController.GetEffectTarget(kind: string): Vector2
+	return EffectsTray.GetTarget(kind)
 end
 
-function HudController.PopEffectPill(kind: string)
-	local pill = HudController.GetEffectPill(kind)
-	if pill then
-		local fill = UIKit.PillRoot(pill)
-		fill.Visible = true
-		bounce(fill)
+function HudController.PopEffect(kind: string)
+	EffectsTray.Pop(kind)
+end
+
+-- The HUD bottom row's rect (AbsolutePosition space), for the effects tray.
+function HudController.GetBottomRowRect(): { Position: Vector2, Size: Vector2 }?
+	if buttonRow and buttonRow.Visible and buttonRow.AbsoluteSize.X > 0 then
+		return { Position = buttonRow.AbsolutePosition, Size = buttonRow.AbsoluteSize }
 	end
+	return nil
 end
 
 -- The $/s line counts up from `from` to the real income with a green flash.
@@ -1066,11 +1069,11 @@ end
 
 local cashHolder: Frame
 
---[[ SHOP button + timed-effect pills -------------------------------------------------
+--[[ SHOP button ---------------------------------------------------------------------
 	A big gold "🛒 SHOP" on the left edge, above the LOCK chip (>= 56 px
 	tall), wiggling gently every SHOP_WIGGLE_SECONDS; a red SALE tag only
-	while a real sale is live (ShopState); and a pill per active timed
-	effect: "⚡ 2× · 12:41", "🍀 2× luck · 3:10", "⚡ SERVER 2× · 8:02".
+	while a real sale is live. The active effects (boost, luck,
+	Overclock, ...) are round icons in UI/EffectsTray, bottom right.
 	Beside SHOP, the pink "🎁 GIFTS" (GiftsPanel): a green count badge and a
 	bounce while any playtime gift is ready, otherwise a small "next in
 	3:12" pill (hidden once today's gifts are all open).
@@ -1081,7 +1084,7 @@ local SHOP_BUTTON_SIZE = Vector2.new(132, 56)
 local SHOP_ROW_GAP = 14
 local SHOP_WIGGLE_SECONDS = 20
 local SHOP_WIGGLE_DEGREES = 7
-local EFFECT_PILL_HEIGHT = 28
+local GIFTS_NEXT_HEIGHT = 24
 local GIFTS_BUTTON_SIZE = Vector2.new(124, 56)
 local GIFTS_BOUNCE_SCALE = 1.08
 
@@ -1091,32 +1094,28 @@ local saleTag: TextLabel
 local giftsButton: TextButton
 local giftsScale: UIScale
 local giftsNextPill: TextLabel
--- The timed-effect pills' column (in the SHOP row on desktop, in the
--- phone status stack on a phone).
-local effectsFrame: Frame
 -- Phone only: the left-column stack under SHOP / GIFTS that holds the deal
--- badge on its own line, then "next in", then the timed-effect pills, so
--- nothing grows toward the screen centre (applyLayout).
+-- badge on its own line, then "next in", so nothing grows toward the screen
+-- centre (applyLayout).
 local phoneStatus: Frame
 local phoneStatusLayout: UIListLayout
 local PHONE_STATUS_GAP = 4
 local giftsBounce: Tween? = nil
--- The timed pills: a row beside GIFTS on desktop (it must not grow taller
--- than the SHOP row), a stack in the phone status column.
-local effectsLayout: UIListLayout
 
 -- The deal tile (ShopController.GetDeal): a pack picture on a Deal-pink tile
 -- with slow rays behind it, a gold "−23%" ribbon (the live saving) and the
 -- real countdown in a pill under it. A new slot pulses it once and plays the
 -- shine at once; a tap opens the shop at the deal. Under SHOP / GIFTS on its
 -- own line, desktop and phone alike (on a phone it heads the status stack,
--- with the timed pills under it). Idle motion is only the rays (360° per
+-- with "next in" under it). Idle motion is only the rays (360° per
 -- 12 s) and one 0.5 s shine every 6 s: no flashing, and the timer looks the
 -- same at 5:59 and at 0:30 (monetization.md "never" list).
 local DEAL_TILE_SIZE = { Desktop = 92, Phone = 76 }
 local DEAL_HOLDER_WIDTH = 92
 local DEAL_TILE_RADIUS = 16
-local DEAL_ART_SCALE = 0.78 -- the pack picture, of the tile (72 of 92 px)
+local DEAL_ART_SCALE = 0.66 -- the pack picture, of the tile (it leaves the bottom strip free)
+local DEAL_ART_Y = 0.4
+local DEAL_STRIP_HEIGHT = 0.24 -- the part glyphs along the bottom edge, of the tile
 local DEAL_TIMER_HEIGHT = 22
 local DEAL_TIMER_GAP = 6
 local DEAL_RAY_SECONDS = 12
@@ -1130,6 +1129,7 @@ local dealRays: Frame
 local dealImage: ImageLabel
 local dealGlyph: TextLabel
 local dealRibbonText: TextLabel
+local dealParts: TextLabel
 local dealTimer: TextLabel
 local dealShine: UIGradient
 -- "<deal key>|<icon asset>" of the art on show, so the picture is only
@@ -1154,7 +1154,8 @@ local function sizeDealTile(isPhone: boolean)
 	local size = dealTileSize(isPhone)
 	dealHolder.Size = UDim2.fromOffset(DEAL_HOLDER_WIDTH, dealHolderHeight(isPhone))
 	dealTile.Size = UDim2.fromOffset(size, size)
-	dealGlyph.TextSize = math.floor(size * 0.52) -- 48 px on desktop
+	dealGlyph.TextSize = math.floor(size * 0.46) -- 42 px on desktop
+	dealParts.TextSize = math.floor(size * 0.17) -- 15 px on desktop
 	UIKit.PillRoot(dealTimer).Position = UDim2.fromOffset(0, size + DEAL_TIMER_GAP)
 end
 
@@ -1233,8 +1234,8 @@ local function buildDealBadge()
 	glow.BackgroundTransparency = 0.75
 	glow.BorderSizePixel = 0
 	glow.AnchorPoint = Vector2.new(0.5, 0.5)
-	glow.Position = UDim2.fromScale(0.5, 0.52)
-	glow.Size = UDim2.fromScale(0.74, 0.74)
+	glow.Position = UDim2.fromScale(0.5, DEAL_ART_Y)
+	glow.Size = UDim2.fromScale(0.62, 0.62)
 	glow.ZIndex = 3
 	glow.Parent = clip
 	UIKit.Corner(glow, 999)
@@ -1243,7 +1244,7 @@ local function buildDealBadge()
 	image.Name = "Art"
 	image.BackgroundTransparency = 1
 	image.AnchorPoint = Vector2.new(0.5, 0.5)
-	image.Position = UDim2.fromScale(0.5, 0.52)
+	image.Position = UDim2.fromScale(0.5, DEAL_ART_Y)
 	image.Size = UDim2.fromScale(DEAL_ART_SCALE, DEAL_ART_SCALE)
 	image.ScaleType = Enum.ScaleType.Fit
 	image.ZIndex = 4
@@ -1258,11 +1259,32 @@ local function buildDealBadge()
 		Text = "🔥",
 		TextSize = 48,
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.52),
+		Position = UDim2.fromScale(0.5, DEAL_ART_Y),
 		Size = UDim2.fromScale(DEAL_ART_SCALE, DEAL_ART_SCALE),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = 4,
 		Parent = clip,
+	})
+
+	-- The part glyphs along the bottom edge ("⚡ 🧪"): a hint of what's inside.
+	local strip = Instance.new("Frame")
+	strip.Name = "Strip"
+	strip.BackgroundColor3 = Colors.Ink
+	strip.BackgroundTransparency = 0.35
+	strip.BorderSizePixel = 0
+	strip.AnchorPoint = Vector2.new(0, 1)
+	strip.Position = UDim2.fromScale(0, 1)
+	strip.Size = UDim2.fromScale(1, DEAL_STRIP_HEIGHT)
+	strip.ZIndex = 5
+	strip.Parent = clip
+	dealParts = UIKit.Label({
+		Name = "Parts",
+		Text = "",
+		TextSize = 15,
+		Size = UDim2.fromScale(1, 1),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = 6,
+		Parent = strip,
 	})
 
 	-- Diagonal gold ribbon across the top-right corner: white text with the
@@ -1419,46 +1441,11 @@ local function buildShopRow()
 		Color = Colors.Panel2,
 		TextColor3 = Colors.Muted,
 		TextSize = 13,
-		Height = EFFECT_PILL_HEIGHT - 4,
+		Height = GIFTS_NEXT_HEIGHT,
 		LayoutOrder = 3,
 		TextStroke = 1.5,
 	})
 	UIKit.SetPillVisible(giftsNextPill, false)
-
-	local pills = Instance.new("Frame")
-	pills.Name = "Effects"
-	pills.BackgroundTransparency = 1
-	pills.AutomaticSize = Enum.AutomaticSize.XY
-	pills.Size = UDim2.new()
-	pills.LayoutOrder = 4
-	pills.Parent = shopRow
-	effectsFrame = pills
-	local pillLayout = Instance.new("UIListLayout")
-	pillLayout.Padding = UDim.new(0, 4)
-	pillLayout.SortOrder = Enum.SortOrder.LayoutOrder
-	pillLayout.Parent = pills
-	effectsLayout = pillLayout
-	local function pill(name: string, order: number, pair: UITheme.GradientPair): TextLabel
-		local label = UIKit.Pill({
-			Name = name,
-			Parent = pills,
-			Text = "",
-			Gradient = pair,
-			Font = Fonts.BodyHeavy,
-			TextSize = 13,
-			Height = EFFECT_PILL_HEIGHT - 4,
-			LayoutOrder = order,
-			TextStroke = 1.5,
-		})
-		local fill = UIKit.PillRoot(label)
-		fill.Visible = false
-		return label
-	end
-	effectPills = {
-		Income = pill("IncomeBoost", 1, UITheme.Gradients.Violet),
-		Luck = pill("LuckBoost", 2, UITheme.Gradients.Teal),
-		Server = pill("Overclock", 3, UITheme.Gradients.Gold),
-	}
 
 	-- A gentle wiggle every SHOP_WIGGLE_SECONDS.
 	task.spawn(function()
@@ -1635,7 +1622,7 @@ end
 
 -- Art: the product's live store icon, else the deal's emoji. Ribbon: the
 -- live saving, "DEAL" when unknown. Timer: the real seconds left.
-local function applyDealView(item: { Icon: string }, key: string, icon: string?, save: number?, secondsLeft: number)
+local function applyDealView(item: { Icon: string }, key: string, icon: string?, save: number?, secondsLeft: number, parts: { string }?)
 	local artKey = key .. "|" .. (icon or "")
 	if artKey ~= dealArtKey then
 		dealArtKey = artKey
@@ -1646,6 +1633,7 @@ local function applyDealView(item: { Icon: string }, key: string, icon: string?,
 		end
 		dealGlyph.Text = item.Icon
 	end
+	dealParts.Text = if parts then DealParts.Glyphs(parts) else ""
 	dealRibbonText.Text = if save then ("−%d%%"):format(save) else "DEAL"
 	dealTimer.Text = "🔥 " .. EventState.FormatTimer(secondsLeft)
 end
@@ -1667,7 +1655,7 @@ local function refreshDealBadge()
 	local deal = ShopController.GetDeal()
 	local shown = dealTileShouldShow(deal, TycoonController.IsTutorialActive(), ShopController.IsDealTileQuiet())
 	if deal and shown then
-		applyDealView(deal.Item, deal.Key, ShopPrices.GetIcon(deal.Key), deal.Save, deal.SecondsLeft)
+		applyDealView(deal.Item, deal.Key, ShopPrices.GetIcon(deal.Key), deal.Save, deal.SecondsLeft, deal.Item.Parts)
 		if dealSlot and dealSlot ~= deal.SlotStart then
 			pulseDeal()
 			dealShineStart = os.clock() -- the shine plays at once too
@@ -1695,21 +1683,6 @@ local function refreshShopRow()
 		return
 	end
 	refreshDealBadge()
-	local function setPill(label: TextLabel, seconds: number, format: string)
-		local fill = UIKit.PillRoot(label)
-		fill.Visible = seconds > 0
-		if seconds > 0 then
-			label.Text = format:format(EventState.FormatTimer(seconds))
-		end
-	end
-	setPill(effectPills.Income, TycoonController.GetBoostSecondsLeft("Income"), ("⚡ %d× · %%s"):format(ShopConfig.BoostMultiplier))
-	setPill(effectPills.Luck, TycoonController.GetBoostSecondsLeft("Luck"), ("🍀 %d× luck · %%s"):format(ShopConfig.LuckPotionMultiplier))
-	setPill(effectPills.Server, ShopState.GetOverclockSeconds(), ("⚡ SERVER %d× · %%s"):format(ShopConfig.OverclockMultiplier))
-	-- An empty effects column would still take a slot (and a gap) in the
-	-- phone status stack.
-	effectsFrame.Visible = TycoonController.GetBoostSecondsLeft("Income") > 0
-		or TycoonController.GetBoostSecondsLeft("Luck") > 0
-		or ShopState.GetOverclockSeconds() > 0
 	local saleLive = false
 	for _, sale in ShopConfig.Sales do
 		if ShopController.IsAvailable(sale.SaleKey) then
@@ -1748,7 +1721,6 @@ end
 
 local function placeColumnFor(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
-	effectsLayout.FillDirection = if isPhone then Enum.FillDirection.Vertical else Enum.FillDirection.Horizontal
 	-- The left column is one stack. Desktop: NEXT GOAL, the quest tracker,
 	-- then the cash card (never above where the card used to sit), so a
 	-- goal that wraps or a tracker that appears pushes everything down
@@ -1766,7 +1738,7 @@ local function placeColumnFor(isPhone: boolean)
 	end
 	cashHolder.Position = cashPosition
 	-- The left column, desktop and phone alike: cash card, then the SHOP /
-	-- GIFTS / timed-pill row, then the LOCK row (on a phone the goal
+	-- GIFTS row, then the LOCK row (on a phone the goal
 	-- tracker follows them; on desktop it sits above the cash card).
 	local shopTop = cashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
@@ -1778,10 +1750,9 @@ local function placeColumnFor(isPhone: boolean)
 	sizeDealTile(isPhone)
 	if isPhone then
 		-- Status stack under SHOP / GIFTS: the deal badge on its own line,
-		-- then "next in" and the timed pills, all stacked down the column.
+		-- then "next in", stacked down the column.
 		dealHolder.Parent = phoneStatus
 		UIKit.PillRoot(giftsNextPill).Parent = phoneStatus
-		effectsFrame.Parent = phoneStatus
 		phoneStatus.Position = lockTop
 		-- AbsoluteContentSize is in screen px; the offsets are design px.
 		local height = phoneStatusLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneStatus)
@@ -1790,7 +1761,6 @@ local function placeColumnFor(isPhone: boolean)
 		end
 	else
 		UIKit.PillRoot(giftsNextPill).Parent = shopRow
-		effectsFrame.Parent = shopRow
 		dealHolder.Parent = screenGui
 		dealHolder.Position = lockTop
 		if dealShown then
@@ -1829,23 +1799,15 @@ end
 local SELFTEST_PHONE_WIDTH = 844
 local SELFTEST_LEFT_SHARE = 0.4
 
--- Shows the deal badge, "next in" and all three timed pills with long
--- sample texts, then checks every element of the left group ends inside
+-- Shows the deal badge and "next in" with long sample texts, then checks every element of the left group ends inside
 -- the left 40% of the screen. The caller forces the phone layout first.
 function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	selfTestHold = true
 	dealShown = true
 	dealHolder.Visible = true
-	applyDealView({ Icon = "🔥" }, "SelfTest", nil, 23, 5 * 3600 + 59 * 60 + 59)
+	applyDealView({ Icon = "🔥" }, "SelfTest", nil, 23, 5 * 3600 + 59 * 60 + 59, { "Boost", "LuckPotion" })
 	UIKit.SetPillVisible(giftsNextPill, true)
 	giftsNextPill.Text = "next in 59:59"
-	effectPills.Income.Text = "⚡ 2× · 2:59:59"
-	effectPills.Luck.Text = "🍀 2× luck · 2:59:59"
-	effectPills.Server.Text = "⚡ SERVER 2× · 59:59"
-	for _, label in { effectPills.Income, effectPills.Luck, effectPills.Server } do
-		UIKit.PillRoot(label).Visible = true
-	end
-	effectsFrame.Visible = true
 	applyLayout(layoutIsPhone)
 	task.wait(0.3)
 
@@ -1857,9 +1819,6 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		PhoneStatus = phoneStatus,
 		DealBadge = dealHolder,
 		GiftsNext = UIKit.PillRoot(giftsNextPill),
-		IncomePill = UIKit.PillRoot(effectPills.Income),
-		LuckPill = UIKit.PillRoot(effectPills.Luck),
-		ServerPill = UIKit.PillRoot(effectPills.Server),
 		LockRow = lockRow,
 		Goal = goalHolder,
 	}
@@ -1940,7 +1899,7 @@ end
 -- Screen-px rects (Position, Size; the top-bar inset added back, as /selftest
 -- measures) of what the Gacha pop-up card must stay clear of: the left
 -- column (cash card, SHOP / QUESTS / LOCK rows, goal card, quest tracker,
--- deal badge / phone status, timed pills) and the bottom button row. Only
+-- deal badge / phone status) and the bottom button row. Only
 -- what is shown right now.
 type ScreenRect = { Position: Vector2, Size: Vector2 }
 
@@ -1966,7 +1925,6 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 		QuestTracker = questTracker,
 		DealBadge = dealHolder,
 		PhoneStatus = phoneStatus,
-		Effects = effectsFrame,
 		BottomRow = buttonRow,
 	}
 	local rects: { [string]: ScreenRect } = {}
@@ -1988,13 +1946,9 @@ function HudController.SelfTestDealTile(scaleName: string): { string }
 	local save, seconds = 23, 4 * 3600 + 8 * 60 + 48
 	dealShown = true
 	dealHolder.Visible = true
-	applyDealView({ Icon = "🔥" }, "SelfTest", nil, save, seconds)
-	-- The 3 other pills that share the column, as in the left-column check.
+	applyDealView({ Icon = "🔥" }, "SelfTest", nil, save, seconds, { "Boost", "LuckPotion" })
+	-- "next in" shares the column, as in the left-column check.
 	UIKit.SetPillVisible(giftsNextPill, true)
-	for _, label in { effectPills.Income, effectPills.Luck, effectPills.Server } do
-		UIKit.PillRoot(label).Visible = true
-	end
-	effectsFrame.Visible = true
 	applyLayout(layoutIsPhone)
 	task.wait(0.3)
 
@@ -2171,7 +2125,7 @@ local function registerGate()
 			return { shopRow, questRow }
 		end,
 		AlsoHide = function()
-			return { dealHolder, phoneStatus, UIKit.PillRoot(giftsNextPill), effectsFrame }
+			return { dealHolder, phoneStatus, UIKit.PillRoot(giftsNextPill) }
 		end,
 		ForceShow = false,
 		NewSide = "Right",
@@ -2210,8 +2164,8 @@ function HudController.Init()
 		GetCashTarget = HudController.GetCashTarget,
 		HoldCash = HudController.HoldCash,
 		BounceCash = HudController.BounceCash,
-		GetEffectPill = HudController.GetEffectPill,
-		PopEffectPill = HudController.PopEffectPill,
+		GetEffectTarget = HudController.GetEffectTarget,
+		PopEffect = HudController.PopEffect,
 		CountUpIncome = HudController.CountUpIncome,
 		GetIncomePerSecond = HudController.GetIncomePerSecond,
 		GetCash = TycoonController.GetCash,
@@ -2232,6 +2186,7 @@ function HudController.Init()
 	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
+	EffectsTray.Init({ GetBottomRowRect = HudController.GetBottomRowRect })
 	registerGate()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()

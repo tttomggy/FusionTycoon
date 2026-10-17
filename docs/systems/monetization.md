@@ -9,7 +9,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   sold that protects a lab from theft or helps a thief (an item's steal
   value is the item itself), and **no Robux price typed into the UI**.
   **Earned or free, never sold:** weapons and power-ups, and Auto pull (the
-  Gacha card's T key, `GachaConfig.AutoPullSeconds`): a convenience every
+  Gacha card's T key = Auto ×10, `GachaConfig.AutoPull*`): a convenience every
   player gets, not a pass, not a product.
   - **Prices are live:** `ShopPrices.Get(key)` reads
     `MarketplaceService:GetProductInfo` (cached 10 min); every "SAVE %",
@@ -77,8 +77,8 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     Lab** (`LabStyle` pass or the Starter Pack's cosmetic): pink wall/sign
     strips and pink cash balls (plot attribute `LabStyle`). Looks only.
   - **Shop UI:** the HUD's gold "🛒 SHOP" button (left, above the LOCK
-    chip; wiggles every 20 s; red SALE tag only while a real sale is live;
-    timed-effect pills beside it) opens `UI/ShopPanel`: **one scrolling
+    chip; wiggles every 20 s; red SALE tag only while a real sale is live)
+    opens `UI/ShopPanel`: **one scrolling
     page** (Shop 2). Sticky header + a sticky chip bar (sideways-scrolling)
     of `ShopConfig.Sections`: ⭐ Featured (one banner with a shine sweep:
     Starter Pack until bought, then the live sale, then the best value),
@@ -107,7 +107,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     ~60 confetti + RevealMajor, the store icon pops in (260 / 180 px),
     "THANK YOU!" + the name, then each of the server's structured
     `Effects` in turn (Cash: count-up + 15 coins into the HUD counter;
-    Boost / Luck / Overclock: the time flies into its HUD pill, $/s counts
+    Boost / Luck / Overclock: the time flies into its effects-tray icon, $/s counts
     up if it just switched on; Pass: "✓ ACTIVE" stamp + its live change;
     Tokens: shields drop into the count). Skippable after 0.6 s; AWESOME!
     closes. HUD hooks come in through `PurchaseCelebration.SetHud`.
@@ -119,15 +119,27 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     (`ShopController.GetDeal`), never to restricted players. The server
     refuses a non-current deal (`DealOver`; a receipt is honoured 10 min
     after a prompt made inside the slot) and grants its parts through
-    their own grants. Shop: a 🔥 DEAL banner + chip first ("normally
-    ~~128~~ · now 99 (−23%)", "New deal in 3:12:05"); HUD: the **deal tile**
+    their own grants. Shop: a 🔥 DEAL banner + chip first that says
+    **what's inside** (Polish 10, `UI/DealParts`): "🔥 DEAL · ends in 3:49:28",
+    one 72 px tile per DISTINCT part (the part product's live icon, else its
+    emoji; its amount on the tile, `ShopConfig.Tile`; its name under it; a
+    "×3" badge when the same part repeats), a "YOU GET:" list with one ✓
+    line per part from its **`Plain`** text (`ShopConfig` / `QuestConfig.
+    PowerUps`: one line a 7-year-old understands, asserted non-empty by
+    `/selftest`) and "Worth R$ 128 if bought separately"
+    (`ShopController.GetWorthLine`: the parts' LIVE `ShopPrices` sum, hidden
+    until every price is in, never typed). The Starter Pack and "New deal!"
+    side cards (`ShopCards`, `SideCard.Parts`) use the same tiles + YOU GET
+    list; on a phone with no room the YOU GET list drops out and the tiles
+    stay. No urgency words. HUD: the **deal tile**
     (`HudController.buildDealBadge`) under SHOP / GIFTS on its own line,
     desktop and phone (on a phone it heads the left-column status stack,
-    "next in" and the timed pills under it, never toward the centre). A 92 px
+    "next in" under it, never toward the centre). A 92 px
     (phone 76) Deal-pink square, 16 px corners, 3 px white stroke: the deal
     product's LIVE icon (`ShopPrices.GetIcon` = the Creator Hub
-    `IconImageAssetId`; none yet → the deal's emoji at 48 px; never uploaded
-    from code), slow rays behind it (6 bars = 12 rays, 360° per 12 s,
+    `IconImageAssetId`; none yet → the deal's emoji; never uploaded from
+    code; 66% of the tile so a dark strip of the parts' glyphs, "⚡ 🧪", fits
+    along the bottom edge), slow rays behind it (6 bars = 12 rays, 360° per 12 s,
     `UITheme.Colors.DealRay` at 0.6), a gold `−{Save}%` ribbon across the
     top-right (`DEAL` when the saving is unknown; white text + ink stroke), a
     white shine sweep (0.5 s every 6 s) and a dark timer pill under it

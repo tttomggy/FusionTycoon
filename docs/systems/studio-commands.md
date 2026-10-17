@@ -80,12 +80,20 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   matches the pull cost or `FREE` centred on the bottom edge); no `ViewportFrame`, no `CanvasGroup`, only
   `PopScale` besides the phone's `PhoneScale`, no `GachaBoard`;
   a modal (the (i) panel) hides the card and it comes back; the key bar's 3
-  round buttons (E / R / T, R bigger, captions `Pull` / `×10` / `Auto`) each ≥ 44 px (sides 56 design px on the phone layout), drawn, and E / R / T bound through
+  round buttons (E / R / T, R bigger, captions `Pull` / `×10` / `Auto ×10`) each ≥ 44 px (sides 56 design px on the phone layout), drawn, and E / R / T bound through
   `ContextActionService` (unbound 25 studs away, bound again back on the pad);
   text fits;
   server side: `RequestGachaPull` from 25 studs is refused (TooFar) and costs
   nothing, Auto pull from 25 studs does not start, and at $0 a pull is refused
-  and Auto pull stops at once with the reason and the price; cash is given back);
+  and Auto pull stops at once with the reason and the price; with cash for 20
+  pulls Auto pull runs exactly 2 ×10 cycles (≥ 3 s apart, the client showing
+  the 10-pull card each time) and stops for cash — this one really pulls 20
+  items on the Mock store; cash is given back);
+  **13. effects tray**: a Luck Potion and 2 Safe Fusion tokens are granted,
+  the client reports a luck circle with a timer and a Safe Fusion circle with
+  `×2`, ≥ 44 px tap targets, no HUD overlap at both layouts and no old effect
+  pills; client checks also assert every `Plain`, and the deal / Starter
+  cards' tile + YOU GET + worth values;
   `/selftest combat` also walks the real swing chain (a click on the
   attacker's client → the server's box → HIT → the target flies, measured on
   its own client; then out of the box → MISS) and the combat section ends with

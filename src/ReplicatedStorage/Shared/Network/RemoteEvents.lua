@@ -21,7 +21,8 @@ local REMOTE_EVENT_NAMES = {
 	"FuseAllResult", -- server -> client: summary of a Fuse All; {Count, Upgraded, Gained, Consumed, Best} or {Count = 0}
 	"GachaMultiPullResult", -- server -> client: outcome of a Pull x10; {Success, Items, NewIndexItems, IndexTiersCompleted} or {Success = false, Reason, Cost?}
 	"RequestGachaPull", -- client -> server: { Count = 1 | 10 } a pull from the Gacha card's key bar (E / R); own pad, within PromptDistance + 3 studs, the same function the pad's prompts ran
-	"SetAutoPull", -- client -> server: { On = boolean } Auto pull (T), free for everyone: one single pull every GachaConfig.AutoPullSeconds
+	"SetAutoPull", -- client -> server: { On = boolean } Auto pull (T), free for everyone: a x10 pull per cycle (paced by AutoPullReady)
+	"AutoPullReady", -- client -> server: no payload; the Auto pull cycle's cards have closed, start the next x10 (GachaConfig.AutoPullMinSeconds / AutoPullTimeoutSeconds)
 	"AutoPullState", -- server -> client: { On = boolean, Reason?, Cost? } Auto pull started or stopped (why: InsufficientCash, TooFar, Carrying, NoCharacter, Tutorial, Off)
 	"RequestRebirth", -- client -> server: rebirth now (no args); validated by RebirthService
 	"RebirthResult", -- server -> client: outcome of a rebirth request; {Success, Rebirths?, Reason?}

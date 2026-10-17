@@ -15,10 +15,12 @@
 	Every price string comes from the caller (ShopPrices, live).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.UIKit)
+local DealParts = require(script.Parent.DealParts)
 
 local ShopCards = {}
 
@@ -71,7 +73,8 @@ export type SideCard = {
 	Name: string,
 	Caption: string, -- small line at the top
 	Title: string, -- the big line
-	Detail: string, -- what you'd get (RichText)
+	Detail: string, -- what you'd get (RichText); for a bundle the live "Worth ..." line
+	Parts: { string }?, -- a bundle's parts: a tile each + a "YOU GET" line each (DealParts)
 	Footnote: string?, -- the honest "or wait ~4 min" line
 	BuyText: string, -- the price button ("<robux> 49")
 	DismissText: string, -- "Not now"
@@ -117,13 +120,25 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?,
 	end
 	line("Caption", card.Caption, Fonts.BodyHeavy, 13, Colors.Muted, 1)
 	line("Title", card.Title, Fonts.Display, 22, Colors.Text, 2, true)
-	line("Detail", card.Detail, Fonts.Body, 15, Colors.Text, 3)
+	local youGet: Frame? = nil
+	if card.Parts then
+		-- What's inside, in pictures and plain words. Smaller tiles on a phone.
+		local compact = UIKit.IsPhone()
+		local tiles = DealParts.BuildTiles(body, card.Parts, z, if compact then 56 else DealParts.TILE_SIZE)
+		tiles.LayoutOrder = 3
+		local built = DealParts.BuildYouGet(body, card.Parts, z, UDim.new(1, 0), if compact then 13 else 14)
+		built.LayoutOrder = 4
+		youGet = built
+	end
+	if card.Detail ~= "" then
+		line("Detail", card.Detail, Fonts.Body, if card.Parts then 13 else 15, if card.Parts then Colors.Muted else Colors.Text, 5)
+	end
 
 	local buttons = Instance.new("Frame")
 	buttons.Name = "Buttons"
 	buttons.BackgroundTransparency = 1
 	buttons.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize + UITheme.SmallShadowOffset)
-	buttons.LayoutOrder = 4
+	buttons.LayoutOrder = 6
 	buttons.ZIndex = z
 	buttons.Parent = body
 	local buttonLayout = Instance.new("UIListLayout")
@@ -165,7 +180,7 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?,
 		end,
 	})
 	if card.Footnote then
-		line("Footnote", card.Footnote, Fonts.Body, 13, Colors.Faint, 5)
+		line("Footnote", card.Footnote, Fonts.Body, 13, Colors.Faint, 7)
 	end
 	local moreText = card.MoreText
 	if moreText and onMore then
@@ -179,12 +194,23 @@ local function sideCard(card: SideCard, onBuy: () -> (), onDismiss: (() -> ())?,
 		more.TextColor3 = Colors.Muted
 		more.Text = moreText
 		more.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize)
-		more.LayoutOrder = 6
+		more.LayoutOrder = 8
 		more.ZIndex = z
 		more.Parent = body
 		more.Activated:Connect(function()
 			ShopCards.CloseSide()
 			onMore()
+		end)
+	end
+	-- A short screen (phone): if the card would climb past the top limit,
+	-- drop the "YOU GET" list (the tiles and the shop still say it).
+	local list = youGet
+	if list then
+		task.defer(function()
+			RunService.Heartbeat:Wait()
+			if holder.Parent and holder.AbsolutePosition.Y < UIKit.GetCardTop() * UIKit.EffectiveScale(holder) then
+				list.Visible = false
+			end
 		end)
 	end
 	UIKit.PopIn(holder)

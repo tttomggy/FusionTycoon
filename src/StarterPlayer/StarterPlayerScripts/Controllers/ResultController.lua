@@ -32,6 +32,7 @@ local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local GachaConfig = require(ReplicatedStorage.Shared.Config.GachaConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
@@ -566,6 +567,16 @@ local MULTI_GAP = 10
 local MULTI_POP_STAGGER = 0.06
 
 local multiHolder: Frame? = nil
+-- 10-pull cards shown for Auto pull cycles (/selftest counts them).
+local autoCardsShown = 0
+
+function ResultController.ResetAutoCardCount()
+	autoCardsShown = 0
+end
+
+function ResultController.GetAutoCardCount(): number
+	return autoCardsShown
+end
 
 local function closeMultiCard()
 	local holder = multiHolder
@@ -648,7 +659,11 @@ local function buildMiniCard(parent: Instance, item: any, order: number, isBest:
 end
 
 -- `title`: a reward's caption ("🎁 DAY 3 · FREE PULLS") instead of "10 PULLS".
-local function showMultiCard(items: { any }, title: string?)
+-- `auto`: an Auto pull cycle: the card closes itself after
+-- GachaConfig.AutoPullCardSeconds, the small skipped line is never used, and
+-- once every card of the cycle is closed (a big card waits for the player)
+-- the server hears AutoPullReady and starts the next x10.
+local function showMultiCard(items: { any }, title: string?, auto: boolean?)
 	if multiHolder then
 		(multiHolder :: Frame):Destroy()
 		multiHolder = nil
@@ -678,6 +693,9 @@ local function showMultiCard(items: { any }, title: string?)
 		ZIndex = 1, -- under the big card the best pull may also get
 	})
 	multiHolder = holder
+	if auto then
+		autoCardsShown += 1
+	end
 	UIKit.SetOverlay("MultiPull", true)
 	local z = body.ZIndex + 1
 
@@ -732,6 +750,10 @@ local function showMultiCard(items: { any }, title: string?)
 	task.spawn(function()
 		for _, card in cards do
 			if multiHolder ~= holder then
+				-- Closed (NICE) before every card popped: the cycle is over.
+				if auto then
+					RemoteEvents.AutoPullReady:FireServer()
+				end
 				return
 			end
 			card.Visible = true
@@ -746,9 +768,24 @@ local function showMultiCard(items: { any }, title: string?)
 				Item = best,
 				Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(best))),
 			})
-		elseif multiHolder == holder then
+		elseif multiHolder == holder and not auto then
 			showSkippedLine(best)
 		end
+		if not auto then
+			return
+		end
+		task.delay(GachaConfig.AutoPullCardSeconds, function()
+			if multiHolder == holder then
+				closeMultiCard()
+			end
+		end)
+		-- Ready once the 10-pull card and any big card are gone (the server
+		-- gives up waiting after AutoPullTimeoutSeconds anyway).
+		local started = os.clock()
+		while (multiHolder == holder or bigHolder ~= nil) and os.clock() - started < GachaConfig.AutoPullTimeoutSeconds do
+			task.wait(0.1)
+		end
+		RemoteEvents.AutoPullReady:FireServer()
 	end)
 end
 
@@ -764,7 +801,7 @@ local function onGachaMultiPullResult(payload: any)
 		return
 	end
 	if typeof(payload.Items) == "table" and #payload.Items > 0 then
-		showMultiCard(payload.Items, if typeof(payload.Title) == "string" then payload.Title else nil)
+		showMultiCard(payload.Items, if typeof(payload.Title) == "string" then payload.Title else nil, payload.Auto == true)
 	end
 end
 

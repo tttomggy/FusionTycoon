@@ -53,6 +53,7 @@ export type PowerUpDef = {
 	Name: string,
 	Glyph: string,
 	Blurb: string,
+	Plain: string, -- one short line a 7-year-old understands (effect tray tooltips)
 	Seconds: number?, -- timed ones
 	SpeedMultiplier: number?, -- Speed Boots
 	FusionBonus: number?, -- Fusion Spark: added to the next fusion's chance (0.10 = +10 points)
@@ -65,6 +66,7 @@ QuestConfig.PowerUps = {
 		Name = "Cash Burst",
 		Glyph = "💸",
 		Blurb = "×2 income for 5 min (adds to your boost time)",
+		Plain = "Double cash for 5 minutes",
 		Seconds = 5 * 60, -- into the income boost bank (ShopConfig.BoostMultiplier)
 	},
 	LuckyCharm = {
@@ -72,6 +74,7 @@ QuestConfig.PowerUps = {
 		Name = "Lucky Charm",
 		Glyph = "🍀",
 		Blurb = "×2 luck for 10 min",
+		Plain = "Rare orbs 2× more likely for 10 minutes",
 		Seconds = 10 * 60, -- into the luck bank (ShopConfig.LuckPotionMultiplier)
 	},
 	SpeedBoots = {
@@ -79,6 +82,7 @@ QuestConfig.PowerUps = {
 		Name = "Speed Boots",
 		Glyph = "👟",
 		Blurb = "×1.5 walk speed for 2 min",
+		Plain = "Run 1.5× faster for 2 minutes",
 		Seconds = 2 * 60,
 		SpeedMultiplier = 1.5,
 	},
@@ -87,6 +91,7 @@ QuestConfig.PowerUps = {
 		Name = "Fusion Spark",
 		Glyph = "⚗️",
 		Blurb = "Your next fusion gets +10 points",
+		Plain = "Your next fusion is 10% more likely to work",
 		FusionBonus = 0.10,
 	},
 	CoinMagnet = {
@@ -94,6 +99,7 @@ QuestConfig.PowerUps = {
 		Name = "Coin Magnet",
 		Glyph = "🧲",
 		Blurb = "Golden Rain coins within 20 studs come to you, for one rain",
+		Plain = "Golden Rain coins fly to you",
 		Radius = 20,
 	},
 } :: { [string]: PowerUpDef }

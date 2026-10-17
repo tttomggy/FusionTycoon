@@ -405,7 +405,7 @@ TutorialConfig.Help = {
 		{ Icon = "🎰", Title = "Gacha Pad", Body = "Use the Gacha Pad to get orbs. Each pull costs a little more than the last, until you rebirth." },
 		{ Icon = "🍀", Title = "Odds", Body = "The pad shows your odds. Rebirths and luck boosts make rare orbs more likely." },
 		{ Icon = "⌨️", Title = "Keys", Body = "Stand by the pad: E pulls one, R pulls ten. On a controller X and Y, on a phone tap the buttons." },
-		{ Icon = "🔁", Title = "Auto pull", Body = "Press T and the pad keeps pulling one orb every second or so. It stops when you press T again, walk away or can't afford the next pull. It's free for everyone." },
+		{ Icon = "🔁", Title = "Auto pull", Body = "Press T and the pad pulls 10 orbs at a time, again and again, showing each batch. It stops when you press T again, walk away or can't afford 10 pulls. It's free for everyone." },
 	},
 } :: { [string]: { Card } }
 

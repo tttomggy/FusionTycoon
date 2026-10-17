@@ -24,7 +24,7 @@ src/ReplicatedStorage/Shared/
                  DealConfig — the rotating deals,
                  TutorialConfig — the tutorial steps and "?" help,
                  CombatConfig — weapons, ragdoll and hit rules, the melee box,
-                 GachaConfig — Auto pull timing and remote-pull reach,
+                 GachaConfig — Auto ×10 card/pacing timing and remote-pull reach,
                  QuestConfig — daily quests, the lab chain, power-ups, …)
     Modules/     shared runtime modules: UITheme (every UI colour/font token
                  and the World part colours), BillboardKit (world labels and
@@ -91,8 +91,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   AdminPanel (built only on the server's AdminOpen),
                   SettingsPanel (the ⚙ button: reveal-card rules),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
-                  deal side cards), PurchaseCelebration (the reveal after
-                  a purchase),
+                  deal side cards), DealParts (part tiles + YOU GET list),
+                  EffectsTray (active effects as round icons, bottom right),
+                  PurchaseCelebration (the reveal after a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),

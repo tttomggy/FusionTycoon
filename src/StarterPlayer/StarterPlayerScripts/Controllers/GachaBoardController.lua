@@ -58,10 +58,10 @@
 	during the tutorial pulls) is centred on the bottom edge at the right.
 
 	THE KEY BAR, 10 px under the card: round solid-blue buttons with a white
-	rim and a soft ink shadow, [E] Pull, [R] x10 (bigger, 62 px), [T] Auto
+	rim and a soft ink shadow, [E] Pull, [R] x10 (bigger, 62 px), [T] Auto x10
 	(sides 52 px, 56 on a phone so they stay >= 44 px at the 0.8); the key
 	letter inside, a white caption under each (T turns green and reads
-	"Auto ON" while Auto pull runs). It does
+	"Auto x10 ON" while Auto pull runs: a x10 pull per cycle). It does
 	NOT use ProximityPrompt UI: the pad's prompts are off (this controller also
 	keeps them off on this client). While the card is open E / R / T (X / Y / RB
 	on a controller) are bound with ContextActionService, and unbound when it
@@ -835,12 +835,12 @@ end
 local KEYS: { KeySpec } = {
 	{ Id = "Pull", Key = "E", KeyCode = Enum.KeyCode.E, PadCode = Enum.KeyCode.ButtonX, Caption = "Pull", Action = "GachaPull" },
 	{ Id = "Multi", Key = "R", KeyCode = Enum.KeyCode.R, PadCode = Enum.KeyCode.ButtonY, Caption = "×10", Action = "GachaPull10" },
-	{ Id = "Auto", Key = "T", KeyCode = Enum.KeyCode.T, PadCode = Enum.KeyCode.ButtonR1, Caption = "Auto", Action = "GachaAuto" },
+	{ Id = "Auto", Key = "T", KeyCode = Enum.KeyCode.T, PadCode = Enum.KeyCode.ButtonR1, Caption = "Auto ×10", Action = "GachaAuto" },
 }
 
 local function captionFor(spec: KeySpec): string
 	if spec.Id == "Auto" and autoOn then
-		return "Auto ON"
+		return "Auto ×10 ON"
 	end
 	return spec.Caption
 end
@@ -1477,7 +1477,7 @@ function GachaBoardController.Init()
 		if not autoOn and typeof(payload.Reason) == "string" and payload.Reason ~= "Off" then
 			local reason = payload.Reason :: string
 			if reason == "InsufficientCash" and typeof(payload.Cost) == "number" then
-				ToastController.Show(("Auto pull stopped: need %s"):format(NumberFormat.Money(payload.Cost)), "Neutral")
+				ToastController.Show(("Auto stopped: need %s for 10 pulls"):format(NumberFormat.Money(payload.Cost)), "Neutral")
 			else
 				ToastController.Show(AUTO_STOP_TEXT[reason] or "Auto pull stopped", "Neutral")
 			end

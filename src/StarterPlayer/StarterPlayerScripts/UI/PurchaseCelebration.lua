@@ -69,8 +69,8 @@ export type HudHooks = {
 	GetCashTarget: () -> Vector2,
 	HoldCash: (amount: number, seconds: number) -> (),
 	BounceCash: () -> (),
-	GetEffectPill: (kind: string) -> TextLabel?,
-	PopEffectPill: (kind: string) -> (),
+	GetEffectTarget: (kind: string) -> Vector2, -- the effect icon's screen-px centre (EffectsTray)
+	PopEffect: (kind: string) -> (),
 	CountUpIncome: (from: number) -> (),
 	GetIncomePerSecond: () -> number,
 	GetCash: () -> number,
@@ -419,11 +419,10 @@ local function playTimed(context: Context, kind: string, seconds: number)
 		elseif kind == "Overclock" then ShopState.GetOverclockSeconds()
 		else math.huge
 	local switchedOn = bank <= seconds + 2
-	local pill = hooks.GetEffectPill(pillKind)
-	local target = if pill then UIKit.PillRoot(pill).AbsolutePosition + UIKit.PillRoot(pill).AbsoluteSize / 2 else hooks.GetCashTarget()
+	local target = hooks.GetEffectTarget(pillKind)
 	flyTo(context, span(seconds), Colors.Text, target, 0.6)
 	task.delay(0.6, function()
-		hooks.PopEffectPill(pillKind)
+		hooks.PopEffect(pillKind)
 		if switchedOn then
 			hooks.CountUpIncome(before / 2)
 		end

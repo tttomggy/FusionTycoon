@@ -51,6 +51,7 @@ local Controllers = script.Parent.Parent.Controllers
 local TycoonController = require(Controllers.TycoonController)
 local ShopController = require(Controllers.ShopController)
 local UIKit = require(script.Parent.UIKit)
+local DealParts = require(script.Parent.DealParts)
 
 local ShopPanel = {}
 
@@ -99,7 +100,7 @@ local headers: { [string]: Frame } = {}
 local sectionOrder: { string } = {}
 local tiles: { TileRefs } = {}
 local featuredRefs: { Key: string?, Detail: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
-local dealRefs: { Key: string?, Line: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
+local dealRefs: { Key: string?, Worth: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
 local activeSection: string? = nil
 local scrollLockUntil = 0 -- a chip's tween owns the active chip until then
 local builtSignature = ""
@@ -700,15 +701,26 @@ local function buildFeatured(key: string, order: number)
 	featuredRefs.Key = key
 end
 
--- The 🔥 DEAL banner: the current slot's bundle (ShopController.GetDeal),
--- its parts as mini icons, the live "normally ~~128~~ · now 99 (−23%)" and
--- the real countdown to the next slot.
+-- The 🔥 DEAL banner: the current slot's bundle (ShopController.GetDeal) as
+-- what you actually get: one tile per distinct part (live icon, amount, name,
+-- "×3" for repeats), a "YOU GET:" line per part in plain words, the live
+-- "Worth R$ 128 if bought separately" and the real countdown. No urgency words.
+local DEAL_HEIGHT = 264
+local DEAL_TITLE_Y = 38
+local DEAL_TILES_Y = 82
+
 local function buildDeal(deal: ShopController.DealView, order: number)
 	local narrow = pageWidth() < NARROW_WIDTH
+	local parts: { string } = deal.Item.Parts or {}
+	local distinct = #DealParts.Distinct(parts)
+	local tilesWidth = distinct * DealParts.TileWidth() + math.max(0, distinct - 1) * 4
+	-- Narrow: tiles, then the list under them, then Worth and the buy button.
+	local listHeight = 18 + distinct * 36
+	local height = if narrow then DEAL_TILES_Y + DealParts.TileHeight() + 8 + listHeight + 22 + 70 + 14 else DEAL_HEIGHT
 	local holder = Instance.new("Frame")
 	holder.Name = "DealBanner"
 	holder.BackgroundTransparency = 1
-	holder.Size = UDim2.new(1, 0, 0, if narrow then FEATURED_NARROW_HEIGHT else FEATURED_HEIGHT)
+	holder.Size = UDim2.new(1, 0, 0, height)
 	holder.LayoutOrder = order
 	holder.ZIndex = scroller.ZIndex + 1
 	holder.Parent = scroller
@@ -725,34 +737,14 @@ local function buildDeal(deal: ShopController.DealView, order: number)
 	UIKit.Shadow(fill, UITheme.SmallShadowOffset)
 	addShine(fill)
 
-	-- The parts as mini icons (the live store icon, or the glyph).
-	local icons = Instance.new("Frame")
-	icons.Name = "Parts"
-	icons.BackgroundTransparency = 1
-	icons.Position = UDim2.fromOffset(16, if narrow then 16 else 52)
-	icons.Size = UDim2.fromOffset(136, 64)
-	icons.ZIndex = z + 2
-	icons.Parent = fill
-	local seen: { [string]: boolean } = {}
-	local count = 0
-	local parts: { string } = deal.Item.Parts or {}
-	for _, part in parts do
-		if not seen[part] and count < 3 then
-			seen[part] = true
-			count += 1
-			iconView(icons, part, 60, UDim2.fromOffset((count - 1) * 44, 0), Vector2.zero, z + 2 + count)
-		end
-	end
-	local textLeft = if narrow then 16 else 168
 	local textRight = if narrow then 16 else 210
-	local textTop = if narrow then 86 else 16
-	UIKit.Label({
-		Name = "Caption",
+	dealRefs.Timer = UIKit.Label({
+		Name = "NewIn",
 		Text = "🔥 DEAL",
 		Font = Fonts.Display,
 		TextSize = 16,
-		Position = UDim2.fromOffset(textLeft, textTop),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 20),
+		Position = UDim2.fromOffset(16, 14),
+		Size = UDim2.new(1, -(16 + textRight), 0, 20),
 		ZIndex = z + 2,
 		Stroke = UITheme.WarmTextStroke,
 		Parent = fill,
@@ -762,32 +754,28 @@ local function buildDeal(deal: ShopController.DealView, order: number)
 		Text = deal.Item.Name,
 		Font = Fonts.Display,
 		TextSize = if narrow then 24 else 30,
-		Position = UDim2.fromOffset(textLeft, textTop + 20),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 36),
+		Position = UDim2.fromOffset(16, DEAL_TITLE_Y),
+		Size = UDim2.new(1, -(16 + textRight), 0, 36),
 		TextTruncate = Enum.TextTruncate.AtEnd,
 		ZIndex = z + 2,
 		Stroke = 3,
 		Parent = fill,
 	})
-	dealRefs.Line = UIKit.Label({
-		Name = "Price",
-		Text = deal.Item.Effect .. "\n" .. ShopController.GetDealPriceLine(deal),
-		RichText = true,
-		Font = Fonts.Body,
-		TextSize = 15,
-		TextWrapped = true,
-		Position = UDim2.fromOffset(textLeft, textTop + 58),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 40),
-		ZIndex = z + 2,
-		Stroke = UITheme.Stroke.Text,
-		Parent = fill,
-	})
-	dealRefs.Timer = UIKit.Label({
-		Name = "NewIn",
+	local tiles = DealParts.BuildTiles(fill, parts, z + 2)
+	tiles.Position = UDim2.fromOffset(16, DEAL_TILES_Y)
+
+	local listLeft = if narrow then 16 else 16 + tilesWidth + 16
+	local listTop = if narrow then DEAL_TILES_Y + DealParts.TileHeight() + 8 else DEAL_TILES_Y
+	local list = DealParts.BuildYouGet(fill, parts, z + 2, UDim.new(1, -(listLeft + textRight)), 15)
+	list.Position = UDim2.fromOffset(listLeft, listTop)
+	dealRefs.Worth = UIKit.Label({
+		Name = "Worth",
+		Text = ShopController.GetWorthLine(deal.Key) or "",
 		Font = Fonts.BodyHeavy,
-		TextSize = 13,
-		Position = UDim2.fromOffset(textLeft, textTop + 102),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 18),
+		TextSize = 14,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = if narrow then UDim2.new(0, 16, 1, -(70 + 4)) else UDim2.new(0, listLeft, 1, -(UITheme.SmallShadowOffset + 14)),
+		Size = UDim2.new(1, -(listLeft + textRight), 0, 18),
 		ZIndex = z + 2,
 		Stroke = 1.5,
 		Parent = fill,
@@ -1107,7 +1095,15 @@ end
 -- starting, an icon arriving, a layout switch).
 local function signature(): string
 	local deal = ShopController.GetDeal()
-	local parts = { if deal then deal.Key .. ":" .. tostring(deal.SlotStart) else "-", featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
+	local dealIcons = ""
+	if deal then
+		-- The deal's part tiles redraw when a part's icon arrives.
+		local dealPartKeys: { string } = deal.Item.Parts or {}
+		for _, part in dealPartKeys do
+			dealIcons ..= (ShopPrices.GetIcon(part) or "") .. ","
+		end
+	end
+	local parts = { if deal then deal.Key .. ":" .. tostring(deal.SlotStart) .. dealIcons else "-", featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
 	for _, section in ShopConfig.Sections do
 		for _, key in keysFor(section) do
 			table.insert(parts, key .. (if ShopController.IsOwned(key) then "+" else "") .. (ShopPrices.GetIcon(key) or ""))
@@ -1169,11 +1165,11 @@ local function refreshTexts()
 		local deal = ShopController.GetDeal()
 		local timer = dealRefs.Timer
 		if deal and timer then
-			timer.Text = ("New deal in %s"):format(EventState.FormatTimer(deal.SecondsLeft))
+			timer.Text = ("🔥 DEAL · ends in %s"):format(EventState.FormatTimer(deal.SecondsLeft))
 		end
-		local line = dealRefs.Line
-		if deal and line then
-			line.Text = deal.Item.Effect .. "\n" .. ShopController.GetDealPriceLine(deal)
+		local worth = dealRefs.Worth
+		if deal and worth then
+			worth.Text = ShopController.GetWorthLine(dealKey) or ""
 		end
 		local price = dealRefs.Price
 		if price then

@@ -19,6 +19,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local DebugConfig = require(ReplicatedStorage.Shared.Config.DebugConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local GachaConfig = require(ReplicatedStorage.Shared.Config.GachaConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
@@ -1079,6 +1080,32 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		)
 		local okCount, reasonCount = TycoonService.RequestGachaPull(player, 5)
 		result(not okCount and reasonCount == "BadCount", "gacha keys: RequestGachaPull { Count = 5 } is refused (BadCount)", ("ok %s, reason %s"):format(tostring(okCount), tostring(reasonCount)))
+		-- Auto pull is x10 per cycle: cash for exactly 20 pulls (two cycles),
+		-- then it stops for cash. Each cycle shows the 10-pull card on the
+		-- client, and no two cycles start within AutoPullMinSeconds. (Studio
+		-- Mock store only: this really pulls 20 items.)
+		local pulls0 = PlayerDataService.GetGachaPulls(player)
+		local cycle1 = TycoonConfig.GetGachaMultiPullCost(pulls0, TycoonConfig.MultiPullCount)
+		local cycle2 = TycoonConfig.GetGachaMultiPullCost(pulls0 + TycoonConfig.MultiPullCount, TycoonConfig.MultiPullCount)
+		tutorialProbe(player, { Kind = "AutoReset" }, result)
+		PlayerDataService.AddCash(player, cycle1 + cycle2)
+		TycoonService.SetAutoPull(player, true)
+		local autoStarted = os.clock()
+		while TycoonService.IsAutoPulling(player) and os.clock() - autoStarted < 40 do
+			task.wait(0.25)
+		end
+		local autoStop = TycoonService.GetAutoPullStop(player)
+		local autoLog = TycoonService.GetAutoPullLog(player)
+		local gapOk = #autoLog == 2 and autoLog[2] - autoLog[1] >= GachaConfig.AutoPullMinSeconds - 0.05
+		result(
+			#autoLog == 2 and autoStop ~= nil and autoStop.Reason == "InsufficientCash",
+			"gacha keys: Auto pull ran exactly 2 x10 cycles with cash for 20 pulls, then stopped (InsufficientCash)",
+			("%d cycles, stop %s, pulls %d -> %d"):format(#autoLog, if autoStop then autoStop.Reason else "none (still running)", pulls0, PlayerDataService.GetGachaPulls(player))
+		)
+		result(gapOk, ("gacha keys: no Auto pull cycle starts within %ds of the previous one"):format(GachaConfig.AutoPullMinSeconds), ("gap %s"):format(if #autoLog == 2 then ("%.2f s"):format(autoLog[2] - autoLog[1]) else "n/a"))
+		tutorialProbe(player, { Kind = "AutoCards", Expect = 2 }, result)
+		TycoonService.SetAutoPull(player, false)
+		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
 		PlayerDataService.AddCash(player, cash)
 		PlayerDataService.SyncTycoon(player)
 	end
@@ -1087,6 +1114,23 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	if releaseClaim then
 		releaseClaim()
 	end
+end
+
+-- The effects tray (client UI/EffectsTray): a Luck Potion and 2 Safe Fusion
+-- tokens granted through the data layer the shop grant uses, then the client
+-- reports what the tray shows at both layouts. Everything is put back.
+local function runEffectsTraySelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local tokensBefore = PlayerDataService.GetSafeFusionTokens(player)
+	local luckBefore = PlayerDataService.GetBoostSeconds(player, "Luck")
+	PlayerDataService.AddBoostSeconds(player, "Luck", ShopConfig.LuckPotionSeconds)
+	PlayerDataService.AddSafeFusionTokens(player, 2)
+	PlayerDataService.SyncTycoon(player)
+	task.wait(0.8)
+	tutorialProbe(player, { Kind = "EffectsTray", Tokens = tokensBefore + 2 }, result)
+	PlayerDataService.AddSafeFusionTokens(player, -2)
+	local added = PlayerDataService.GetBoostSeconds(player, "Luck") - luckBefore
+	PlayerDataService.AddBoostSeconds(player, "Luck", -added)
+	PlayerDataService.SyncTycoon(player)
 end
 
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
@@ -1274,6 +1318,12 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- the (i) panel, the custom buttons.
 	runSection("12. gacha card", result, function()
 		runGachaCardSelfTest(player, result)
+	end)
+
+	-- 13. The effects tray: a Luck Potion and Safe Fusion tokens show up as
+	-- round icons bottom right.
+	runSection("13. effects tray", result, function()
+		runEffectsTraySelfTest(player, result)
 	end)
 end
 

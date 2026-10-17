@@ -42,6 +42,9 @@ local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
+local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
@@ -841,6 +844,88 @@ local function testSkippedLines(): { string }
 		end
 	end
 	UIKit.SetForcedPhone(nil)
+	return lines
+end
+
+-- Every product and power-up has a plain-words line for a 7-year-old.
+local function testPlain(): { string }
+	local missing: { string } = {}
+	local count = 0
+	for key, item in ShopConfig.Items do
+		count += 1
+		if typeof(item.Plain) ~= "string" or item.Plain:gsub("%s", "") == "" then
+			table.insert(missing, key)
+		end
+	end
+	for key, def in QuestConfig.PowerUps do
+		count += 1
+		if typeof(def.Plain) ~= "string" or def.Plain:gsub("%s", "") == "" then
+			table.insert(missing, key)
+		end
+	end
+	table.sort(missing)
+	return {
+		if #missing == 0
+			then ("PASS plain words: all %d products and power-ups have a Plain line"):format(count)
+			else "FAIL plain words missing: " .. table.concat(missing, ", "),
+	}
+end
+
+-- A bundle card (the 3 deals and the Starter Pack) shows one tile per
+-- DISTINCT part, a YOU GET line per part, and a worth line equal to the live
+-- sum of the parts.
+local function testDealCards(): { string }
+	local DealParts = require(UI.DealParts) :: any
+	local shop = require(script.Parent.ShopController) :: any
+	local lines: { string } = {}
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "SelfTestDealParts"
+	gui.Parent = localPlayer:WaitForChild("PlayerGui")
+	for _, key in { "DealPowerHour", "DealFusionKit", "DealRichLab", "StarterPack" } do
+		local item = ShopConfig.GetItem(key) :: ShopConfig.Item
+		local parts: { string } = item.Parts or {}
+		local seen: { [string]: boolean } = {}
+		local distinct = 0
+		for _, part in parts do
+			if not seen[part] then
+				seen[part] = true
+				distinct += 1
+			end
+		end
+		local frame = Instance.new("Frame")
+		frame.Size = UDim2.fromOffset(600, 400)
+		frame.Parent = gui
+		local tiles = DealParts.BuildTiles(frame, parts, 2)
+		local youGet = DealParts.BuildYouGet(frame, parts, 2, UDim.new(1, 0), 14)
+		local tileCount, lineCount = 0, 0
+		for _, child in tiles:GetChildren() do
+			if child.Name:sub(1, 9) == "PartTile_" then
+				tileCount += 1
+			end
+		end
+		local plainOk = true
+		for _, child in youGet:GetChildren() do
+			if child.Name:sub(1, 7) == "YouGet_" then
+				lineCount += 1
+				local partItem = ShopConfig.GetItem(child.Name:sub(8)) :: ShopConfig.Item?
+				if not partItem or not (child :: TextLabel).Text:find(partItem.Plain, 1, true) then
+					plainOk = false
+				end
+			end
+		end
+		local worthLine, worth = shop.GetWorthLine(key)
+		local live = ShopPrices.GetPartsTotal(key)
+		local price = ShopPrices.Get(key)
+		-- The worth is the live sum (or absent while a price is unknown or the
+		-- bundle isn't cheaper).
+		local expectWorth = if live and not (price and live <= price) then live else nil
+		local worthOk = worth == expectWorth and (worthLine == nil or (worthLine :: string):find(tostring(worth), 1, true) ~= nil)
+		table.insert(lines, if tileCount == distinct and lineCount == distinct and plainOk and worthOk
+			then ("PASS deal card %s: %d tiles, %d YOU GET lines, worth %s"):format(key, tileCount, lineCount, if worth then tostring(worth) else "n/a (prices not live)")
+			else ("FAIL deal card %s: tiles %d / lines %d (want %d), plain %s, worth %s (live sum %s)"):format(key, tileCount, lineCount, distinct, tostring(plainOk), tostring(worth), tostring(live)))
+		frame:Destroy()
+	end
+	gui:Destroy()
 	return lines
 end
 
@@ -1880,7 +1965,7 @@ local function probeGachaButtons(): { ProbeLine }
 	local parts: { string } = {}
 	local drawn, small = 0, 0
 	local expected = { Pull = "E", Multi = "R", Auto = "T" }
-	local captions = { Pull = "Pull", Multi = "×10", Auto = if Board.IsAutoOn() then "Auto ON" else "Auto" }
+	local captions = { Pull = "Pull", Multi = "×10", Auto = if Board.IsAutoOn() then "Auto ×10 ON" else "Auto ×10" }
 	local captionBad: { string } = {}
 	local sides, centre = {}, 0
 	if bar then
@@ -2252,6 +2337,83 @@ local function probeGachaBack(): { ProbeLine }
 	}
 end
 
+-- The effects tray: with a Luck Potion and Safe Fusion tokens granted by the
+-- server, a luck circle with a timer and a Safe Fusion circle with "×N" are
+-- up, tap targets are >= 44 px on screen, nothing overlaps a HUD rect, and
+-- the old effect pills are gone. Measured at both layouts.
+local function probeEffectsTray(tokens: number): { ProbeLine }
+	local EffectsTray = require(UI.EffectsTray) :: any
+	local hud = require(script.Parent.HudController) :: any
+	local lines: { ProbeLine } = {}
+	for _, phone in { false, true } do
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.4)
+		EffectsTray.Refresh()
+		task.wait(0.3)
+		local label = if phone then "phone" else "desktop"
+		local byId: { [string]: any } = {}
+		for _, view in EffectsTray.GetCells() do
+			byId[view.Id] = view
+		end
+		local luck, safe = byId.Luck, byId.SafeFusion
+		local luckOk = luck ~= nil and luck.Timer:match("^%d+:%d%d") ~= nil and luck.Badge == "×2"
+		local safeOk = safe ~= nil and safe.Badge == ("×%d"):format(tokens) and safe.Timer == ""
+		table.insert(lines, {
+			Ok = luckOk and safeOk,
+			Name = ("effects tray (%s): a luck circle with a timer and a Safe Fusion circle with ×%d"):format(label, tokens),
+			Detail = ("luck %s, safe %s"):format(
+				if luck then ("timer '%s' badge '%s'"):format(luck.Timer, tostring(luck.Badge)) else "missing",
+				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
+			),
+		})
+		-- >= 44 screen px tap targets, circle 60 (desktop) / 52 * 0.8 (phone).
+		local smallest = math.huge
+		for _, view in byId do
+			smallest = math.min(smallest, view.HitSize.X, view.HitSize.Y)
+		end
+		table.insert(lines, {
+			Ok = smallest >= UITheme.MinTapSize,
+			Name = ("effects tray (%s): every tap target is at least %d px"):format(label, UITheme.MinTapSize),
+			Detail = ("smallest %d px"):format(math.floor(smallest)),
+		})
+		-- No overlap with any HUD rect or the weapon bar.
+		local obstacles = hud.GetObstacleRects()
+		local overlaps: { string } = {}
+		for id, view in byId do
+			for name, rect in obstacles do
+				local ox = math.min(view.Position.X + view.Size.X, rect.Position.X + rect.Size.X) - math.max(view.Position.X, rect.Position.X)
+				local oy = math.min(view.Position.Y + view.Size.Y, rect.Position.Y + rect.Size.Y) - math.max(view.Position.Y, rect.Position.Y)
+				if ox > 1 and oy > 1 then
+					table.insert(overlaps, id .. "/" .. name)
+				end
+			end
+		end
+		table.sort(overlaps)
+		table.insert(lines, {
+			Ok = #overlaps == 0,
+			Name = ("effects tray (%s): no overlap with any HUD rect"):format(label),
+			Detail = table.concat(overlaps, ", "),
+		})
+	end
+	UIKit.SetForcedPhone(nil)
+	-- The old pills are gone from the SHOP row and the phone status stack.
+	local hudGui = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
+	local leftovers: { string } = {}
+	if hudGui then
+		for _, name in { "IncomeBoost", "LuckBoost", "Overclock", "Effects" } do
+			if hudGui:FindFirstChild(name, true) then
+				table.insert(leftovers, name)
+			end
+		end
+	end
+	table.insert(lines, {
+		Ok = #leftovers == 0,
+		Name = "effects tray: the old effect pills are gone from the HUD",
+		Detail = table.concat(leftovers, ", "),
+	})
+	return lines
+end
+
 -- The knockback checks run on the TARGET's client (the one that simulates
 -- its character): where its own root is, and whether it is standing again.
 local function probeRootPos(): ({ ProbeLine }, { [string]: any })
@@ -2342,6 +2504,20 @@ local function probeTutorial(payload: any)
 			return probeGachaFar()
 		elseif payload.Kind == "GachaBack" then
 			return probeGachaBack()
+		elseif payload.Kind == "EffectsTray" then
+			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
+		elseif payload.Kind == "AutoReset" then
+			(require(script.Parent.ResultController) :: any).ResetAutoCardCount()
+			return {}
+		elseif payload.Kind == "AutoCards" then
+			local shown = (require(script.Parent.ResultController) :: any).GetAutoCardCount()
+			return {
+				{
+					Ok = shown == payload.Expect,
+					Name = "auto pull: each x10 cycle showed the 10-pull card",
+					Detail = ("%d cards shown, %s cycles ran"):format(shown, tostring(payload.Expect)),
+				},
+			}
 		end
 		return {}
 	end)
@@ -2431,6 +2607,12 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testSkippedLines() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testPlain() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testDealCards() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testTopStack() do

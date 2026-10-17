@@ -92,6 +92,10 @@ local gachaPadsByUserId: { [number]: GachaPad } = {}
 local autoPullTokens: { [number]: number } = {}
 local autoPullStops: { [number]: { Reason: string, Cost: number? } } = {}
 local autoPullToken = 0
+-- AutoPullReady: the client's 10-pull card(s) closed, the next cycle may go.
+local autoPullReady: { [number]: boolean } = {}
+-- os.clock() of every x10 the current / last Auto pull ran (/selftest).
+local autoPullLog: { [number]: { number } } = {}
 
 local TycoonService = {}
 TycoonService.Name = "TycoonService"
@@ -659,13 +663,15 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 		end
 		-- The tutorial's free pulls: a guaranteed plain Common each, through
 		-- the free path (the pad price doesn't move).
-		if not multi and PlayerDataService.GetTutorialFreePulls(player) > 0 then
+		if PlayerDataService.GetTutorialFreePulls(player) > 0 then
 			if auto then
 				return false, "Tutorial", nil
 			end
-			startDebounce()
-			TycoonService.TutorialPull(player)
-			return true, nil, nil
+			if not multi then
+				startDebounce()
+				TycoonService.TutorialPull(player)
+				return true, nil, nil
+			end
 		end
 		-- Roll all of them before charging anything.
 		local rolled = rollPulls(count, getLuck(player))
@@ -693,6 +699,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				Items = items,
 				NewIndexItems = newIndexItems,
 				IndexTiersCompleted = tiersCompleted,
+				-- Auto pull: the card closes itself and tells the server when to go on.
+				Auto = if auto then true else nil,
 			})
 		else
 			RemoteEvents.GachaPullResult:FireClient(player, {
@@ -1209,10 +1217,13 @@ local function stopAutoPull(player: Player, reason: string, cost: number?)
 	end
 end
 
--- Auto pull: while on, one single pull every GachaConfig.AutoPullSeconds
--- through the same pull function. Stops by itself when the pull is refused
--- for good (cash, distance, carrying, death, tutorial) or on SetAutoPull
--- false; a pull that merely collided with the 1 s debounce is retried.
+-- Auto pull: while on, a x10 pull per cycle through the same pull function
+-- the R key runs. The next cycle starts when the client says its cards have
+-- closed (AutoPullReady) or after GachaConfig.AutoPullTimeoutSeconds, and
+-- never sooner than AutoPullMinSeconds after the previous one. Stops by
+-- itself when the pull is refused for good (cash, distance, carrying, death,
+-- tutorial) or on SetAutoPull false; a pull that merely collided with the 1 s
+-- debounce is retried.
 function TycoonService.SetAutoPull(player: Player, on: boolean)
 	if not on then
 		stopAutoPull(player, "Off", nil)
@@ -1223,6 +1234,7 @@ function TycoonService.SetAutoPull(player: Player, on: boolean)
 	end
 	local _, why = gachaGate(player)
 	autoPullStops[player.UserId] = nil
+	autoPullLog[player.UserId] = {}
 	if why then
 		autoPullStops[player.UserId] = { Reason = why }
 		RemoteEvents.AutoPullState:FireClient(player, { On = false, Reason = why })
@@ -1239,12 +1251,29 @@ function TycoonService.SetAutoPull(player: Player, on: boolean)
 				stopAutoPull(player, gateWhy or "NoPad", nil)
 				return
 			end
-			local ok, reason, cost = gacha.Pull(1, true)
+			autoPullReady[player.UserId] = false
+			local startedAt = os.clock()
+			local ok, reason, cost = gacha.Pull(MULTI_PULL_COUNT, true)
 			if not ok and reason ~= "Busy" then
 				stopAutoPull(player, reason or "Unknown", cost)
 				return
 			end
-			task.wait(GachaConfig.AutoPullSeconds)
+			if ok then
+				table.insert(autoPullLog[player.UserId] or {}, startedAt)
+				-- The client closes the cards (a Secret's big card waits for the
+				-- player) and answers; a silent client costs at most the timeout.
+				while
+					autoPullTokens[player.UserId] == token
+					and not autoPullReady[player.UserId]
+					and os.clock() - startedAt < GachaConfig.AutoPullTimeoutSeconds
+				do
+					task.wait(0.1)
+				end
+			end
+			local spacing = startedAt + (if ok then GachaConfig.AutoPullMinSeconds else 0.25) - os.clock()
+			if spacing > 0 then
+				task.wait(spacing)
+			end
 		end
 		-- Left the game with it on.
 		if autoPullTokens[player.UserId] == token then
@@ -1267,6 +1296,17 @@ local function onRequestGachaPull(player: Player, payload: unknown)
 		return
 	end
 	TycoonService.RequestGachaPull(player, (payload :: any).Count)
+end
+
+-- When each x10 of the current / last Auto pull started (os.clock), for /selftest.
+function TycoonService.GetAutoPullLog(player: Player): { number }
+	return autoPullLog[player.UserId] or {}
+end
+
+local function onAutoPullReady(player: Player)
+	if RemoteGuard.Allow(player, "AutoPullReady", 2, 4) and autoPullTokens[player.UserId] ~= nil then
+		autoPullReady[player.UserId] = true
+	end
 end
 
 local function onSetAutoPull(player: Player, payload: unknown)
@@ -1553,6 +1593,8 @@ local function removePlotForPlayer(player: Player)
 	gachaPadsByUserId[player.UserId] = nil
 	autoPullTokens[player.UserId] = nil
 	autoPullStops[player.UserId] = nil
+	autoPullReady[player.UserId] = nil
+	autoPullLog[player.UserId] = nil
 	portalByUserId[player.UserId] = nil
 	local slotIndex = slotByUserId[player.UserId]
 	if slotIndex then
@@ -1621,6 +1663,7 @@ function TycoonService:Init()
 	RemoteEvents.RequestUpgradeMax.OnServerEvent:Connect(onRequestUpgradeMax)
 	RemoteEvents.RequestGachaPull.OnServerEvent:Connect(onRequestGachaPull)
 	RemoteEvents.SetAutoPull.OnServerEvent:Connect(onSetAutoPull)
+	RemoteEvents.AutoPullReady.OnServerEvent:Connect(onAutoPullReady)
 
 	Players.PlayerAdded:Connect(createPlotForPlayer)
 	Players.PlayerRemoving:Connect(removePlotForPlayer)

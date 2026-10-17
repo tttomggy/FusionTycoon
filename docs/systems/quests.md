@@ -34,7 +34,10 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   studs through the same path as a touch, then disarms at that rain's
   end). **HUD:** the amber 📜 QUESTS button under SHOP / GIFTS (green ready
   badge + bounce), the power-up row beside it (only what you own, count
-  badges, ✓ armed, Speed Boots seconds), a tracker under NEXT GOAL (the
+  badges, ✓ armed, Speed Boots seconds; each has a `Plain` line), the active
+  ones (Speed Boots timer, Fusion Spark armed, Coin Magnet READY) also show
+  as round icons in `UI/EffectsTray` bottom right with the bank effects, a
+  tracker under NEXT GOAL (the
   nearest unfinished quest; tap opens the panel). Analytics
   `QuestClaimed` (id), `PowerUpUsed` (key). Sim (`--quests`, 3 dailies
   per 2 h session-day at 10 / 20 / 30 min, bursts used at once): free

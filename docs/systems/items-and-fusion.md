@@ -125,14 +125,23 @@ in front of it and see the card over it).
   **one** pull function `createGachaStation` also gives the prompts. The
   tutorial's big PULL button sends the same remote. "How it works" is the first
   section of the (i) panel.
-- **Auto pull (T)**, free for everyone (see monetization.md): the server pulls
-  one single pull every `GachaConfig.AutoPullSeconds` (1.2 s) until you can't
-  afford it, walk more than `PromptDistance + 3` studs away, start carrying,
-  die, leave or press T again; `AutoPullState { On, Reason?, Cost? }` turns the
-  T button green ("Auto ON") and toasts why it stopped ("Auto pull stopped: need
-  $285"). Each auto pull sends `GachaPullResult { Auto = true }`, so it follows
-  the **reveal rule** like Auto-Fuse: no big card for every Common, only the
-  small skipped line.
+- **Auto pull (T = "Auto ×10")**, free for everyone (see monetization.md): each
+  cycle is a **×10 pull at the ×10 price** through the same `pull(10, true)` the
+  R key and `RequestGachaPull { Count = 10 }` run (no second copy), until you
+  can't afford ×10, walk more than `PromptDistance + 3` studs away, start
+  carrying, die, leave or press T again; `AutoPullState { On, Reason?, Cost? }`
+  turns the T button green ("Auto ×10 ON") and toasts why it stopped ("Auto
+  stopped: need $3.06K for 10 pulls"; the reason is `InsufficientCash`). The
+  client shows the same 10-pull card a manual R shows every cycle
+  (`GachaMultiPullResult { Auto = true }`), which **closes itself after
+  `GachaConfig.AutoPullCardSeconds` (2.5 s)**; the BEST OF 10 big card follows
+  the reveal rule exactly as a manual ×10 (Secrets and event mutations always)
+  and waits for the player. Auto pull never uses the small skipped lines.
+  **Pacing:** when the cycle's cards have closed the client fires
+  `AutoPullReady` (C→S, no payload, `RemoteGuard`-limited); the server starts
+  the next ×10 only then, or after `GachaConfig.AutoPullTimeoutSeconds` (8 s),
+  and never sooner than `GachaConfig.AutoPullMinSeconds` (3 s) after the
+  previous one, so a Secret's big card pauses Auto pull until it is closed.
 - **Far away** (and on other players' pads) the small server `GachaLabel` (name
   + price, no odds lines) shows; the controller hides it while the card is up.
 - **Selftests** read the instance tree (`AbsoluteSize` > 0 on both axes,
