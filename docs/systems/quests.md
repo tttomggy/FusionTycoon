@@ -36,7 +36,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   badge + bounce), the power-up row beside it (only what you own, count
   badges, ✓ armed, Speed Boots seconds; each has a `Plain` line), the active
   ones (Speed Boots timer, Fusion Spark armed, Coin Magnet READY) also show
-  as round icons in `UI/EffectsTray` bottom right with the bank effects, a
+  as round icons in `UI/EffectsTray` bottom LEFT (Bubble Gum Simulator style) with the bank effects, a
   tracker under NEXT GOAL (the
   nearest unfinished quest; tap opens the panel). Analytics
   `QuestClaimed` (id), `PowerUpUsed` (key). Sim (`--quests`, 3 dailies

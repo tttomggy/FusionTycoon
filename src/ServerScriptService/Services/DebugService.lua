@@ -1124,9 +1124,13 @@ local function runEffectsTraySelfTest(player: Player, result: (boolean, string, 
 	local luckBefore = PlayerDataService.GetBoostSeconds(player, "Luck")
 	PlayerDataService.AddBoostSeconds(player, "Luck", ShopConfig.LuckPotionSeconds)
 	PlayerDataService.AddSafeFusionTokens(player, 2)
+	-- Speed Boots: the attribute QuestService publishes to the client on a sync.
+	local bootsBefore = player:GetAttribute("SpeedBootsUntil")
+	player:SetAttribute("SpeedBootsUntil", Workspace:GetServerTimeNow() + 120)
 	PlayerDataService.SyncTycoon(player)
 	task.wait(0.8)
 	tutorialProbe(player, { Kind = "EffectsTray", Tokens = tokensBefore + 2 }, result)
+	player:SetAttribute("SpeedBootsUntil", bootsBefore)
 	PlayerDataService.AddSafeFusionTokens(player, -2)
 	local added = PlayerDataService.GetBoostSeconds(player, "Luck") - luckBefore
 	PlayerDataService.AddBoostSeconds(player, "Luck", -added)

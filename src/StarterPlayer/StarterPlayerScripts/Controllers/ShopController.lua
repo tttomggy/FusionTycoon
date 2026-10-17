@@ -60,6 +60,7 @@ local ToastController = require(script.Parent.ToastController)
 local FusionController = require(script.Parent.FusionController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ShopCards = require(script.Parent.Parent.UI.ShopCards)
+local DealParts = require(script.Parent.Parent.UI.DealParts)
 local PurchaseCelebration = require(script.Parent.Parent.UI.PurchaseCelebration)
 
 local ShopController = {}
@@ -149,6 +150,17 @@ function ShopController.IsOwned(key: string): boolean
 	return key == "StarterPack" and TycoonController.GetShop().StarterPackBought
 end
 
+-- A bought one-time product (the Starter Pack) the shop still SHOWS, as a
+-- dimmed "OWNED ✓" card in its place, so the page does not jump: owned, and
+-- otherwise offered to this player (set up, allowed by their policy).
+function ShopController.IsShownOwned(key: string): boolean
+	local item = ShopConfig.GetItem(key)
+	if not item or not item.OneTime or not ShopController.IsOwned(key) then
+		return false
+	end
+	return ShopConfig.IsOffered(key, TycoonController.GetShop().Restricted, RunService:IsStudio(), false)
+end
+
 function ShopController.GetPriceText(key: string): string
 	local item = ShopConfig.GetItem(key)
 	if item and item.Id == 0 then
@@ -169,6 +181,17 @@ end
 function ShopController.GetCashAmount(key: string): number
 	return ShopConfig.GetCashPackAmount(key, ShopController.GetBaseIncome())
 end
+
+-- A bundle's YOU GET line for a cash part says what it pays THIS player
+-- right now ("A pile of cash (+$1.2M)"), the same formula the grant uses.
+DealParts.SetPlainResolver(function(key: string): string?
+	if not ShopConfig.CashPacks[key] then
+		return nil
+	end
+	local plain = (ShopConfig.GetItem(key) :: ShopConfig.Item).Plain
+	local lead = plain:match("^([^:]+):") or plain
+	return ("%s (+%s)"):format(lead, NumberFormat.Money(ShopController.GetCashAmount(key)))
+end)
 
 function ShopController.Buy(key: string)
 	RemoteEvents.RequestShopPurchase:FireServer({ Key = key })

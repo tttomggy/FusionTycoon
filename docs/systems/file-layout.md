@@ -92,7 +92,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   SettingsPanel (the ⚙ button: reveal-card rules),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
                   deal side cards), DealParts (part tiles + YOU GET list),
-                  EffectsTray (active effects as round icons, bottom right),
+                  EffectsTray (active effects as round icons, bottom left),
                   PurchaseCelebration (the reveal after a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),

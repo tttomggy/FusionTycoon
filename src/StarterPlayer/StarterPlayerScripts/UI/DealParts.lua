@@ -17,6 +17,12 @@
 	                            part, from its ShopConfig `Plain`. Lines are
 	                            named "YouGet_<Key>".
 
+	  PlainLine(key)            a part's YOU GET text. The shop's text (Plain),
+	                            unless ShopController installs a resolver
+	                            (SetPlainResolver): a cash part says what it
+	                            pays THIS player right now, "A pile of cash
+	                            (+$1.2M)".
+
 	No price is typed here: the "Worth ... if bought separately" line comes
 	from ShopController.GetWorthLine (live ShopPrices).
 ]]
@@ -38,6 +44,20 @@ local NAME_HEIGHT = 30
 local ICON_FRACTION = 0.62 -- of the tile
 
 export type Part = { Key: string, Count: number }
+
+local plainResolver: ((key: string) -> string?)? = nil
+
+-- ShopController installs the live resolver (it knows the player's income).
+function DealParts.SetPlainResolver(resolver: (key: string) -> string?)
+	plainResolver = resolver
+end
+
+-- One part's YOU GET text (plain words).
+function DealParts.PlainLine(key: string): string
+	local resolver = plainResolver
+	local line = if resolver then resolver(key) else nil
+	return line or (ShopConfig.GetItem(key) :: ShopConfig.Item).Plain
+end
 
 -- The distinct parts in first-seen order with how many times each appears.
 function DealParts.Distinct(parts: { string }): { Part }
@@ -140,7 +160,7 @@ local function buildTile(parent: Instance, part: Part, tileSize: number, z: numb
 		Name = "Name",
 		Text = item.Name,
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
+		TextSize = 13,
 		TextWrapped = true,
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, tileSize + 6),
@@ -175,10 +195,31 @@ function DealParts.BuildTiles(parent: Instance, parts: { string }, z: number, ti
 	return row
 end
 
+local function lineText(part: Part): string
+	return ("%s %s%s"):format(
+		UIKit.Colored("✓", Colors.Cash),
+		UIKit.EscapeRichText(DealParts.PlainLine(part.Key)),
+		if part.Count > 1 then UIKit.Colored(("  ×%d"):format(part.Count), Colors.GoldLabel) else ""
+	)
+end
+
+-- Re-reads every line's text (a cash part's amount follows your income).
+function DealParts.UpdateYouGet(list: Frame, parts: { string })
+	for _, part in DealParts.Distinct(parts) do
+		local label = list:FindFirstChild("YouGet_" .. part.Key)
+		if label and label:IsA("TextLabel") then
+			local text = lineText(part)
+			if label.Text ~= text then
+				label.Text = text
+			end
+		end
+	end
+end
+
 -- "YOU GET:" and a check line per distinct part. Returns the list
 -- (AutomaticSize Y, `width` wide).
 function DealParts.BuildYouGet(parent: Instance, parts: { string }, z: number, width: UDim, textSize: number?): Frame
-	local size = textSize or 15
+	local size = textSize or 16
 	local list = Instance.new("Frame")
 	list.Name = "YouGet"
 	list.BackgroundTransparency = 1
@@ -203,23 +244,18 @@ function DealParts.BuildYouGet(parent: Instance, parts: { string }, z: number, w
 		Parent = list,
 	})
 	for order, part in DealParts.Distinct(parts) do
-		local item = ShopConfig.GetItem(part.Key) :: ShopConfig.Item
 		UIKit.Label({
 			Name = "YouGet_" .. part.Key,
-			Text = ("%s %s%s"):format(
-				UIKit.Colored("✓", Colors.Cash),
-				UIKit.EscapeRichText(item.Plain),
-				if part.Count > 1 then UIKit.Colored(("  ×%d"):format(part.Count), Colors.GoldLabel) else ""
-			),
+			Text = lineText(part),
 			RichText = true,
-			Font = Fonts.Body,
+			Font = Fonts.BodyHeavy,
 			TextSize = size,
 			TextWrapped = true,
 			AutomaticSize = Enum.AutomaticSize.Y,
 			Size = UDim2.new(1, 0, 0, size + 2),
 			LayoutOrder = order,
 			ZIndex = z,
-			Stroke = UITheme.Stroke.Text,
+			Stroke = 1.5,
 			Parent = list,
 		})
 	end

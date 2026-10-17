@@ -2,9 +2,9 @@
 --[[
 	EffectsTray
 	-----------
-	The active effects as round icons with a timer under each, bottom right
-	(like Bubble Gum Simulator's effect row, mirrored: our left column is
-	full). One row of up to 4, growing right to left, a second row above.
+	The active effects as round icons with a timer under each, bottom LEFT
+	where Bubble Gum Simulator keeps its potion icons. Icons fill left to
+	right, 4 to a row; more rows stack upward.
 
 	  Income boost   ⚡ timer            (Boost / Quick Boost / Cash Burst bank)
 	  Luck           🍀 timer + "×2"     (Luck Potion / Lucky Charm bank)
@@ -22,9 +22,11 @@
 	(0.85 -> 1, 0.15 s) when gained and shrink out when they end. Nothing
 	flashes, the last minute included.
 
-	Placement: 16 px from the right edge, its bottom on the HUD bottom row's
-	bottom edge; if that would overlap the bottom row (narrow screens,
-	phones) it moves up so its bottom sits 8 px above the row's top.
+	Placement: 16 px from the left edge, its bottom level with the HUD bottom
+	row's bottom edge. If it would touch the HUD's left column or the bottom
+	row, the icons drop from 64 to 48 px, then to 3 per row; if it still
+	touches (a phone with a tall left column) the tray sits to the right of
+	the left column, still bottom-aligned.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -46,18 +48,19 @@ local EffectsTray = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local CIRCLE_SIZE = { Desktop = 60, Phone = 52 }
-local GLYPH_SIZE = { Desktop = 30, Phone = 26 }
+-- Placement tries these in order (icon px, icons per row).
+local FITS = { { 64, 4 }, { 48, 4 }, { 48, 3 } }
 local ICON_FRACTION = 0.74 -- of the circle
+local GLYPH_FRACTION = 0.5 -- of the circle
+local TIMER_SIZE = 15
 local TIMER_HEIGHT = 18
 local TIMER_GAP = 4
 local CELL_SIDE_GAP = 8
 local ROW_GAP = 6
-local MAX_PER_ROW = 4
-local RIGHT_MARGIN = 16
+local LEFT_MARGIN = 16
 -- HudController: BOTTOM_MARGIN 22 + ShadowOffset: where the bottom row ends.
 local BOTTOM_BASE = 22 + UITheme.ShadowOffset
-local ABOVE_ROW_GAP = 8
+local BESIDE_GAP = 8
 local SHRINK_SECONDS = 0.15
 local TICK_SECONDS = 0.25
 local TOOLTIP_GAP = 6
@@ -83,14 +86,19 @@ type Cell = {
 	Glyph: TextLabel,
 	Timer: TextLabel,
 	Hit: TextButton,
-	Phone: boolean,
+	Fit: number, -- the circle size (px) this cell is laid out for
 	Leaving: boolean,
 	State: EffectState,
 }
 
+export type Rect = { Position: Vector2, Size: Vector2 }
+
 export type Hooks = {
+	-- Every HUD rect the tray must stay clear of (left column, bottom row),
+	-- screen px with the top-bar inset added back (HudController.GetObstacleRects).
+	GetObstacles: () -> { [string]: Rect },
 	-- Screen-px rect (AbsolutePosition space) of the HUD bottom row, or nil.
-	GetBottomRowRect: () -> { Position: Vector2, Size: Vector2 }?,
+	GetBottomRowRect: () -> Rect?,
 }
 
 local hooks: Hooks? = nil
@@ -102,6 +110,8 @@ local tooltipLabel: TextLabel
 local cells: { [string]: Cell } = {}
 local shownId: string? = nil
 local pinned = false
+-- What the last placement settled on (icon px, icons per row, x shift).
+local fitSize, fitPerRow = FITS[1][1], FITS[1][2]
 
 --[[ What is active right now ------------------------------------------------------ ]]
 
@@ -207,26 +217,21 @@ end
 
 --[[ Cells ---------------------------------------------------------------------------- ]]
 
-local function circleSize(phone: boolean): number
-	return if phone then CIRCLE_SIZE.Phone else CIRCLE_SIZE.Desktop
+local function cellWidth(circle: number): number
+	return circle + CELL_SIDE_GAP
 end
 
-local function cellWidth(phone: boolean): number
-	return circleSize(phone) + CELL_SIDE_GAP
+local function cellHeight(circle: number): number
+	return circle + TIMER_GAP + TIMER_HEIGHT
 end
 
-local function cellHeight(phone: boolean): number
-	return circleSize(phone) + TIMER_GAP + TIMER_HEIGHT
-end
-
-local function sizeCell(cell: Cell, phone: boolean)
-	cell.Phone = phone
-	local circle = circleSize(phone)
-	cell.Frame.Size = UDim2.fromOffset(cellWidth(phone), cellHeight(phone))
+local function sizeCell(cell: Cell, circle: number)
+	cell.Fit = circle
+	cell.Frame.Size = UDim2.fromOffset(cellWidth(circle), cellHeight(circle))
 	cell.Circle.Size = UDim2.fromOffset(circle, circle)
 	local icon = math.floor(circle * ICON_FRACTION)
 	cell.Image.Size = UDim2.fromOffset(icon, icon)
-	cell.Glyph.TextSize = if phone then GLYPH_SIZE.Phone else GLYPH_SIZE.Desktop
+	cell.Glyph.TextSize = math.floor(circle * GLYPH_FRACTION)
 	cell.Timer.Position = UDim2.fromOffset(0, circle + TIMER_GAP)
 end
 
@@ -245,9 +250,9 @@ local function placeTooltip()
 	end
 	local scale = UIKit.EffectiveScale(tray)
 	tooltipLabel.Text = ("%s · %s"):format(cell.State.Tip, cell.State.Tail)
-	-- Right-aligned to the icon's cell, above it (the tray hugs the right edge).
-	local rightEdge = (cell.Frame.AbsolutePosition.X + cell.Frame.AbsoluteSize.X) / scale
-	tooltip.Position = UDim2.fromOffset(rightEdge, cell.Frame.AbsolutePosition.Y / scale - TOOLTIP_GAP)
+	-- Left-aligned to the icon's cell, above it (the tray hugs the left edge).
+	local leftEdge = cell.Frame.AbsolutePosition.X / scale
+	tooltip.Position = UDim2.fromOffset(leftEdge, cell.Frame.AbsolutePosition.Y / scale - TOOLTIP_GAP)
 	tooltip.Visible = true
 end
 
@@ -258,7 +263,6 @@ local function openTooltip(id: string, pin: boolean)
 end
 
 local function buildCell(state: EffectState): Cell
-	local phone = UIKit.IsPhone()
 	local frame = Instance.new("Frame")
 	frame.Name = state.Id
 	frame.BackgroundTransparency = 1
@@ -275,7 +279,7 @@ local function buildCell(state: EffectState): Cell
 	circle.ZIndex = 3
 	circle.Parent = frame
 	UIKit.Corner(circle, 999)
-	UIKit.Stroke(circle, 3, Colors.White)
+	UIKit.Stroke(circle, 2, Colors.White)
 	UIKit.PairGradient(circle, state.Gradient)
 	UIKit.Shadow(circle, UITheme.SmallShadowOffset)
 
@@ -291,7 +295,7 @@ local function buildCell(state: EffectState): Cell
 	local glyph = UIKit.Label({
 		Name = "Glyph",
 		Text = state.Glyph,
-		TextSize = GLYPH_SIZE.Desktop,
+		TextSize = 30,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		Size = UDim2.fromScale(1, 1),
@@ -303,7 +307,7 @@ local function buildCell(state: EffectState): Cell
 		Name = "Timer",
 		Text = "",
 		Font = Fonts.Display,
-		TextSize = 16,
+		TextSize = TIMER_SIZE,
 		Size = UDim2.new(1, 0, 0, TIMER_HEIGHT),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = 3,
@@ -328,11 +332,11 @@ local function buildCell(state: EffectState): Cell
 		Glyph = glyph,
 		Timer = timer,
 		Hit = hit,
-		Phone = phone,
+		Fit = fitSize,
 		Leaving = false,
 		State = state,
 	}
-	sizeCell(cell, phone)
+	sizeCell(cell, fitSize)
 
 	local id = state.Id
 	hit.MouseEnter:Connect(function()
@@ -410,40 +414,80 @@ local function viewportSize(): Vector2
 	return if camera then camera.ViewportSize else Vector2.new(1920, 1080)
 end
 
--- Sizes the tray to its cells and puts it 16 px from the right with its
--- bottom on the bottom row's bottom edge, or above the row if they'd touch.
+local function overlaps(a: Rect, b: Rect): boolean
+	local ox = math.min(a.Position.X + a.Size.X, b.Position.X + b.Size.X) - math.max(a.Position.X, b.Position.X)
+	local oy = math.min(a.Position.Y + a.Size.Y, b.Position.Y + b.Size.Y) - math.max(a.Position.Y, b.Position.Y)
+	return ox > 1 and oy > 1
+end
+
+-- Sizes the tray to its cells and puts it 16 px from the left with its
+-- bottom level with the bottom row's bottom edge (see the header for what
+-- it does when it would touch the left column or the bottom row).
 local function place()
 	local count = 0
-	local phone = UIKit.IsPhone()
 	for _, cell in cells do
 		if not cell.Leaving then
 			count += 1
 		end
 	end
-	local rows = math.max(1, math.ceil(count / MAX_PER_ROW))
-	local width = MAX_PER_ROW * cellWidth(phone)
-	local height = rows * cellHeight(phone) + (rows - 1) * ROW_GAP
-	gridLayout.CellSize = UDim2.fromOffset(cellWidth(phone), cellHeight(phone))
-	gridLayout.CellPadding = UDim2.fromOffset(0, ROW_GAP)
-	tray.Size = UDim2.fromOffset(width, height)
+	local scale = UIKit.EffectiveScale(tray)
+	local view = viewportSize()
+	local inset = GuiService:GetGuiInset().Y
+	local obstacles: { [string]: Rect } = if hooks and count > 0 then hooks.GetObstacles() else {}
 
-	local bottom = BOTTOM_BASE
-	local rowRect = if hooks then hooks.GetBottomRowRect() else nil
-	if rowRect and count > 0 then
-		local scale = UIKit.EffectiveScale(tray)
-		local view = viewportSize()
-		local widthPx = math.min(count, MAX_PER_ROW) * cellWidth(phone) * scale
-		local left = view.X - RIGHT_MARGIN * scale - widthPx
-		local right = view.X - RIGHT_MARGIN * scale
-		local top = view.Y - (BOTTOM_BASE + height) * scale
-		local rowRight = rowRect.Position.X + rowRect.Size.X
-		local overlapsX = math.min(right, rowRight) - math.max(left, rowRect.Position.X) > 0
-		local overlapsY = view.Y - BOTTOM_BASE * scale > rowRect.Position.Y and top < rowRect.Position.Y + rowRect.Size.Y
-		if overlapsX and overlapsY then
-			bottom = (view.Y - rowRect.Position.Y) / scale + ABOVE_ROW_GAP
+	-- The screen rect (raw AbsolutePosition space) of a fit at `shift` px (logical) from the left margin.
+	local function rectFor(circle: number, perRow: number, shift: number): Rect
+		local rows = math.max(1, math.ceil(count / perRow))
+		local width = math.min(count, perRow) * cellWidth(circle)
+		local height = rows * cellHeight(circle) + (rows - 1) * ROW_GAP
+		return {
+			Position = Vector2.new((LEFT_MARGIN + shift) * scale, view.Y - (BOTTOM_BASE + height) * scale),
+			Size = Vector2.new(width * scale, height * scale),
+		}
+	end
+	local function touches(rect: Rect): { string }
+		local hit: { string } = {}
+		for name, other in obstacles do
+			-- Obstacle rects carry the top-bar inset, the tray's don't.
+			if overlaps(rect, { Position = other.Position - Vector2.new(0, inset), Size = other.Size }) then
+				table.insert(hit, name)
+			end
+		end
+		return hit
+	end
+
+	local circle, perRow, shift = FITS[1][1], FITS[1][2], 0
+	local found = false
+	for _, fit in FITS do
+		circle, perRow = fit[1], fit[2]
+		if #touches(rectFor(circle, perRow, 0)) == 0 then
+			found = true
+			break
 		end
 	end
-	tray.Position = UDim2.new(1, -RIGHT_MARGIN, 1, -bottom)
+	if not found then
+		-- Still touching: sit to the right of whatever the smallest fit hits.
+		local hit = touches(rectFor(circle, perRow, 0))
+		local right = 0
+		for _, name in hit do
+			local other = obstacles[name]
+			right = math.max(right, (other.Position.X + other.Size.X) / scale)
+		end
+		shift = math.max(0, right + BESIDE_GAP - LEFT_MARGIN)
+	end
+
+	fitSize, fitPerRow = circle, perRow
+	for _, cell in cells do
+		if cell.Fit ~= circle then
+			sizeCell(cell, circle)
+		end
+	end
+	local rows = math.max(1, math.ceil(count / perRow))
+	gridLayout.FillDirectionMaxCells = perRow
+	gridLayout.CellSize = UDim2.fromOffset(cellWidth(circle), cellHeight(circle))
+	gridLayout.CellPadding = UDim2.fromOffset(0, ROW_GAP)
+	tray.Size = UDim2.fromOffset(perRow * cellWidth(circle), rows * cellHeight(circle) + (rows - 1) * ROW_GAP)
+	tray.Position = UDim2.new(0, LEFT_MARGIN + shift, 1, -BOTTOM_BASE)
 end
 
 --[[ Refresh -------------------------------------------------------------------------- ]]
@@ -462,13 +506,9 @@ local function refresh()
 			removeCell(cell)
 		end
 	end
-	local phone = UIKit.IsPhone()
 	for id, state in states do
 		local cell = cells[id]
 		if cell then
-			if cell.Phone ~= phone then
-				sizeCell(cell, phone)
-			end
 			updateCell(cell, state)
 		else
 			local built = buildCell(state)
@@ -487,7 +527,7 @@ end
 --[[ Public ---------------------------------------------------------------------------- ]]
 
 -- Screen-px centre of an effect's icon ("Income" | "Luck" | "Server" | ...),
--- or the tray's corner slot when it isn't up yet (the purchase flight lands
+-- or the tray's first slot when it isn't up yet (the purchase flight lands
 -- where the icon is about to appear).
 function EffectsTray.GetTarget(id: string): Vector2
 	local cell = cells[id]
@@ -496,10 +536,9 @@ function EffectsTray.GetTarget(id: string): Vector2
 		return circle.AbsolutePosition + circle.AbsoluteSize / 2
 	end
 	local scale = UIKit.EffectiveScale(tray)
-	local phone = UIKit.IsPhone()
 	local view = viewportSize()
-	local size = circleSize(phone) * scale
-	return Vector2.new(view.X - (RIGHT_MARGIN + CELL_SIDE_GAP / 2) * scale - size / 2, view.Y - (BOTTOM_BASE + cellHeight(phone) - circleSize(phone) / 2) * scale)
+	local circle = fitSize
+	return Vector2.new((LEFT_MARGIN + CELL_SIDE_GAP / 2 + circle / 2) * scale, view.Y - (BOTTOM_BASE + cellHeight(circle) - circle / 2) * scale)
 end
 
 -- A little bounce on the icon (the purchase flight just landed on it).
@@ -553,14 +592,14 @@ function EffectsTray.Init(hudHooks: Hooks)
 	tray = Instance.new("Frame")
 	tray.Name = "Tray"
 	tray.BackgroundTransparency = 1
-	tray.AnchorPoint = Vector2.new(1, 1)
-	tray.Size = UDim2.fromOffset(MAX_PER_ROW * cellWidth(false), cellHeight(false))
+	tray.AnchorPoint = Vector2.new(0, 1)
+	tray.Size = UDim2.fromOffset(fitPerRow * cellWidth(fitSize), cellHeight(fitSize))
 	tray.Parent = screenGui
 	gridLayout = Instance.new("UIGridLayout")
 	gridLayout.FillDirection = Enum.FillDirection.Horizontal
-	gridLayout.FillDirectionMaxCells = MAX_PER_ROW
-	gridLayout.StartCorner = Enum.StartCorner.BottomRight
-	gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+	gridLayout.FillDirectionMaxCells = fitPerRow
+	gridLayout.StartCorner = Enum.StartCorner.BottomLeft
+	gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
 	gridLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
 	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	gridLayout.Parent = tray

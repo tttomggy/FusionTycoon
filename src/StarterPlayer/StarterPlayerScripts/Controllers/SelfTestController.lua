@@ -45,6 +45,7 @@ local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
@@ -908,7 +909,7 @@ local function testDealCards(): { string }
 			if child.Name:sub(1, 7) == "YouGet_" then
 				lineCount += 1
 				local partItem = ShopConfig.GetItem(child.Name:sub(8)) :: ShopConfig.Item?
-				if not partItem or not (child :: TextLabel).Text:find(partItem.Plain, 1, true) then
+				if not partItem or not (child :: TextLabel).Text:find(UIKit.EscapeRichText(DealParts.PlainLine(child.Name:sub(8))), 1, true) then
 					plainOk = false
 				end
 			end
@@ -926,6 +927,157 @@ local function testDealCards(): { string }
 		frame:Destroy()
 	end
 	gui:Destroy()
+	return lines
+end
+
+-- Counts the DealParts pieces under `root`.
+local function countBundleParts(root: Instance): (number, number)
+	local tiles, lines = 0, 0
+	for _, descendant in root:GetDescendants() do
+		if descendant.Name:sub(1, 9) == "PartTile_" then
+			tiles += 1
+		elseif descendant.Name:sub(1, 7) == "YouGet_" then
+			lines += 1
+		end
+	end
+	return tiles, lines
+end
+
+local function distinctCount(parts: { string }): number
+	local seen: { [string]: boolean } = {}
+	local count = 0
+	for _, part in parts do
+		if not seen[part] then
+			seen[part] = true
+			count += 1
+		end
+	end
+	return count
+end
+
+-- Every item with `Parts`, in every place it is drawn (the shop's Deal and
+-- Featured banners and its grid tiles, the Starter / deal side cards), shows
+-- one tile per distinct part and one YOU GET line per part: read from the
+-- instance tree. The Pocket Cash line carries the real amount. Also: every
+-- text in the shop is at least 13 px (a scaled text by its minimum).
+local function testBundleContents(): { string }
+	local DealParts = require(UI.DealParts) :: any
+	local ShopCards = require(UI.ShopCards) :: any
+	local shop = require(UI.ShopPanel) :: any
+	local shopController = require(script.Parent.ShopController) :: any
+	local lines: { string } = {}
+	local playerGui = localPlayer:WaitForChild("PlayerGui")
+
+	for _, phone in { false, true } do
+		local label = if phone then "phone" else "desktop"
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.2)
+		local ok, err = pcall(function()
+			shop.Open()
+			task.wait(0.6)
+			local gui = playerGui:FindFirstChild("ShopPanel")
+			if not gui then
+				table.insert(lines, ("FAIL shop bundles (%s): no ShopPanel gui"):format(label))
+				return true
+			end
+			-- Containers: the banners (ShopKey) and the grid tiles (named by key).
+			local checked, bad = 0, {}
+			for _, container in gui:GetDescendants() do
+				local key = container:GetAttribute("ShopKey")
+				if typeof(key) ~= "string" then
+					key = container.Name
+				end
+				local entry = ShopConfig.GetItem(key :: string) :: ShopConfig.Item?
+				local isBanner = container.Name == "FeaturedBanner" or container.Name == "DealBanner"
+				if entry and entry.Parts and (isBanner or container.Name == key) and container:IsA("Frame") then
+					checked += 1
+					local want = distinctCount(entry.Parts)
+					local tileCount, lineCount = countBundleParts(container)
+					if tileCount ~= want or lineCount ~= want then
+						table.insert(bad, ("%s %s: %d tiles / %d lines, want %d"):format(container.Name, key :: string, tileCount, lineCount, want))
+					end
+				end
+			end
+			table.insert(lines, if #bad == 0 and checked > 0
+				then ("PASS shop bundles (%s): %d places show one tile and one YOU GET line per part"):format(label, checked)
+				else ("FAIL shop bundles (%s): %d checked; %s"):format(label, checked, table.concat(bad, "; ")))
+
+			-- The Starter Pack banner says "Worth ... if bought separately", never "one by one".
+			local oneByOne = false
+			for _, descendant in gui:GetDescendants() do
+				if descendant:IsA("TextLabel") and descendant.Text:lower():find("one by one", 1, true) then
+					oneByOne = true
+				end
+			end
+			table.insert(lines, if oneByOne then ("FAIL shop (%s): still says 'one by one'"):format(label) else ("PASS shop (%s): no 'one by one' text"):format(label))
+
+			-- Pocket Cash's line shows the amount it grants right now.
+			local cashLine = DealParts.PlainLine("PocketCash")
+			local amount = "+" .. NumberFormat.Money(shopController.GetCashAmount("PocketCash"))
+			table.insert(lines, if cashLine:find(amount, 1, true)
+				then ("PASS Pocket Cash line carries the real amount (%s)"):format(cashLine)
+				else ("FAIL Pocket Cash line '%s' lacks %s"):format(cashLine, amount))
+
+			-- Nothing in the shop is under 13 px.
+			local small: { string } = {}
+			local texts = 0
+			for _, descendant in gui:GetDescendants() do
+				if (descendant:IsA("TextLabel") or descendant:IsA("TextButton")) and descendant.Text ~= "" then
+					texts += 1
+					local size = descendant.TextSize
+					local constraint = descendant:FindFirstChildOfClass("UITextSizeConstraint")
+					if descendant.TextScaled then
+						size = if constraint then constraint.MinTextSize else 0
+					end
+					if size < 13 then
+						table.insert(small, ("%s %d"):format(descendant:GetFullName():match("[^%.]+%.[^%.]+$") or descendant.Name, size))
+					end
+				end
+			end
+			table.insert(lines, if #small == 0
+				then ("PASS shop text (%s): all %d texts are >= 13 px"):format(label, texts)
+				else ("FAIL shop text (%s): under 13 px: %s"):format(label, table.concat(small, ", ", 1, math.min(#small, 8))))
+			shop.Toggle()
+			task.wait(0.4)
+			return true
+		end)
+		if not ok then
+			table.insert(lines, ("FAIL shop bundles (%s): %s"):format(label, tostring(err)))
+		end
+	end
+	UIKit.SetForcedPhone(nil)
+
+	-- The side cards (Starter Pack, the three deals).
+	local sideBad, sideChecked = {}, 0
+	for _, key in { "StarterPack", "DealPowerHour", "DealFusionKit", "DealRichLab" } do
+		local entry = ShopConfig.GetItem(key) :: ShopConfig.Item
+		ShopCards.ShowStarter({
+			Name = "SelfTestSideCard",
+			Caption = "self-test",
+			Title = entry.Name,
+			Detail = "",
+			Parts = entry.Parts,
+			BuyText = "TEST",
+			DismissText = "No",
+		}, function() end, function() end)
+		task.wait(0.3)
+		local card = playerGui:FindFirstChild("ShopCards") and (playerGui.ShopCards :: Instance):FindFirstChild("SelfTestSideCard")
+		if card then
+			sideChecked += 1
+			local want = distinctCount(entry.Parts or {})
+			local tileCount, lineCount = countBundleParts(card)
+			if tileCount ~= want or lineCount ~= want then
+				table.insert(sideBad, ("%s: %d tiles / %d lines, want %d"):format(key, tileCount, lineCount, want))
+			end
+		else
+			table.insert(sideBad, key .. ": no card")
+		end
+		ShopCards.CloseSide()
+		task.wait(0.3)
+	end
+	table.insert(lines, if #sideBad == 0
+		then ("PASS side cards: %d bundles show one tile and one YOU GET line per part"):format(sideChecked)
+		else "FAIL side cards: " .. table.concat(sideBad, "; "))
 	return lines
 end
 
@@ -2337,13 +2489,33 @@ local function probeGachaBack(): { ProbeLine }
 	}
 end
 
--- The effects tray: with a Luck Potion and Safe Fusion tokens granted by the
--- server, a luck circle with a timer and a Safe Fusion circle with "×N" are
--- up, tap targets are >= 44 px on screen, nothing overlaps a HUD rect, and
--- the old effect pills are gone. Measured at both layouts.
+-- "14:55" / "1:02:03" -> seconds (nil when it is not a timer).
+local function timerSeconds(text: string): number?
+	local parts = string.split(text, ":")
+	if #parts < 2 or #parts > 3 then
+		return nil
+	end
+	local total = 0
+	for _, part in parts do
+		local value = tonumber(part)
+		if not value then
+			return nil
+		end
+		total = total * 60 + value
+	end
+	return total
+end
+
+-- The effects tray: with a Luck Potion, Speed Boots and Safe Fusion tokens
+-- granted by the server, a luck circle with a timer, a Speed Boots circle
+-- with a timer and a Safe Fusion circle with "×N" are up in the BOTTOM-LEFT
+-- quarter of the screen, their timers read the live seconds, tap targets are
+-- >= 44 px on screen, nothing overlaps a HUD rect, and the old effect pills
+-- are gone. Measured at both layouts.
 local function probeEffectsTray(tokens: number): { ProbeLine }
 	local EffectsTray = require(UI.EffectsTray) :: any
 	local hud = require(script.Parent.HudController) :: any
+	local tycoon = require(script.Parent.TycoonController) :: any
 	local lines: { ProbeLine } = {}
 	for _, phone in { false, true } do
 		UIKit.SetForcedPhone(phone)
@@ -2355,7 +2527,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		for _, view in EffectsTray.GetCells() do
 			byId[view.Id] = view
 		end
-		local luck, safe = byId.Luck, byId.SafeFusion
+		local luck, safe, boots = byId.Luck, byId.SafeFusion, byId.SpeedBoots
 		local luckOk = luck ~= nil and luck.Timer:match("^%d+:%d%d") ~= nil and luck.Badge == "×2"
 		local safeOk = safe ~= nil and safe.Badge == ("×%d"):format(tokens) and safe.Timer == ""
 		table.insert(lines, {
@@ -2366,7 +2538,42 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
 			),
 		})
-		-- >= 44 screen px tap targets, circle 60 (desktop) / 52 * 0.8 (phone).
+		-- Bottom-left quarter of the window, and timers that read the live seconds.
+		local camera = workspace.CurrentCamera
+		local window = if camera then camera.ViewportSize else Vector2.new(1366, 768)
+		local inset = GuiService:GetGuiInset().Y
+		local outside: { string } = {}
+		for id, entry in byId do
+			local centre = entry.Position + entry.Size / 2 - Vector2.new(0, inset)
+			if centre.X >= window.X / 2 or centre.Y <= window.Y / 2 then
+				table.insert(outside, ("%s at %d,%d"):format(id, centre.X, centre.Y))
+			end
+		end
+		table.sort(outside)
+		table.insert(lines, {
+			Ok = next(byId) ~= nil and #outside == 0,
+			Name = ("effects tray (%s, window %d × %d): in the bottom-left quarter"):format(label, window.X, window.Y),
+			Detail = table.concat(outside, ", "),
+		})
+		local liveOk = true
+		local liveDetail: { string } = {}
+		local checks: { { Id: string, Want: number } } = {
+			{ Id = "Luck", Want = tycoon.GetBoostSecondsLeft("Luck") },
+			{ Id = "SpeedBoots", Want = math.max(0, ((tycoon.GetQuests() or {}).SpeedBootsUntil or 0) - workspace:GetServerTimeNow()) },
+		}
+		for _, check in checks do
+			local entry = byId[check.Id]
+			local shown = if entry then timerSeconds(entry.Timer) else nil
+			local good = shown ~= nil and check.Want > 0 and math.abs((shown :: number) - check.Want) <= 3
+			liveOk = liveOk and good
+			table.insert(liveDetail, ("%s shows %s, live %ds"):format(check.Id, if entry then entry.Timer else "missing", check.Want))
+		end
+		table.insert(lines, {
+			Ok = liveOk and boots ~= nil,
+			Name = ("effects tray (%s): the Luck and Speed Boots timers read the live seconds"):format(label),
+			Detail = table.concat(liveDetail, "; "),
+		})
+		-- >= 44 screen px tap targets (the cell, 48-64 px icons, x 0.8 on a phone).
 		local smallest = math.huge
 		for _, view in byId do
 			smallest = math.min(smallest, view.HitSize.X, view.HitSize.Y)
@@ -2610,6 +2817,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testPlain() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testBundleContents() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testDealCards() do

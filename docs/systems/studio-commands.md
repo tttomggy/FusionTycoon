@@ -89,11 +89,16 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   pulls Auto pull runs exactly 2 ×10 cycles (≥ 3 s apart, the client showing
   the 10-pull card each time) and stops for cash — this one really pulls 20
   items on the Mock store; cash is given back);
-  **13. effects tray**: a Luck Potion and 2 Safe Fusion tokens are granted,
-  the client reports a luck circle with a timer and a Safe Fusion circle with
-  `×2`, ≥ 44 px tap targets, no HUD overlap at both layouts and no old effect
-  pills; client checks also assert every `Plain`, and the deal / Starter
-  cards' tile + YOU GET + worth values;
+  **13. effects tray**: a Luck Potion, Speed Boots and 2 Safe Fusion tokens
+  are granted, the client reports a luck circle with a timer, a Speed Boots
+  circle and a Safe Fusion circle with `×2`, all in the bottom-left quarter of
+  the window, the Luck and Speed Boots timers reading the live seconds, ≥ 44 px
+  tap targets, no HUD overlap at both layouts and no old effect pills; client
+  checks also assert every `Plain`, the deal / Starter cards' tile + YOU GET +
+  worth values, "shop bundles" (every item with `Parts`, in the Deal and
+  Featured banners, grid tiles and side cards, shows one tile and one YOU GET
+  line per distinct part; Pocket Cash's line carries the real amount; no
+  "one by one"; every shop text ≥ 13 px);
   `/selftest combat` also walks the real swing chain (a click on the
   attacker's client → the server's box → HIT → the target flies, measured on
   its own client; then out of the box → MISS) and the combat section ends with

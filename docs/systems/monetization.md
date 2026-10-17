@@ -80,8 +80,10 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     chip; wiggles every 20 s; red SALE tag only while a real sale is live)
     opens `UI/ShopPanel`: **one scrolling
     page** (Shop 2). Sticky header + a sticky chip bar (sideways-scrolling)
-    of `ShopConfig.Sections`: ⭐ Featured (one banner with a shine sweep:
-    Starter Pack until bought, then the live sale, then the best value),
+    of `ShopConfig.Sections`: ⭐ Featured (one banner: the Starter Pack
+    until bought (then it stays in place, dimmed, a grey "OWNED ✓", so the
+    page does not jump), a live sale in between, else the best value; only
+    its buy button gets a gentle shine sweep, every 5 s),
     🎟 Passes (big cards; an owned pass is a grey "OWNED ✓" and sorts
     last), ⚡ Boosts (BoostSale replaces Boost while live; "+1 h · you have
     0:42" from the real bank), 💰 Cash (what you'd get right now; "BEST
@@ -102,6 +104,36 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     glow stroke, a coloured pill behind each section icon, a header shine;
     "NEW!" only within `ShopConfig.NewForDays` (7) of an item's
     `AddedUtcDay`. No server-wide "X bought Y" messages.
+  - **Shop 4 / Polish 11 "premium" pass** (`UI/ShopPanel`, tokens
+    `Colors.ShopHighlight / ShopRay / ShopArtWell / ShopScrollbar`): every
+    card has a lighter-top vertical gradient, a 1 px highlight line along
+    its top edge, a 3 px ink outline and a 6 px drop shadow (no flat
+    fills). Every item sits in an **art box** (120 px on banners, 96 on
+    tiles and pass cards): the live product icon (emoji fallback) over a
+    three-disc radial glow in the card's colour; slowly turning rays
+    behind the art on the Featured and Deal banners only. **Three text
+    sizes per card**: the name 30 (Display, 3 px ink stroke; a long one
+    shrinks to fit), lines 16 (BodyHeavy, 1.5 px stroke) and small labels
+    13 (pills: ONE TIME ONLY, the deal timer, NEW!, BEST VALUE). Nothing
+    smaller than 13 (`/selftest` reads every shop text from the tree).
+    Buy button 160 × 64, the live price at 28 px, a 0.12 s press-in. A
+    bought pass or one-time item turns its button into grey "OWNED ✓" and
+    the whole card dims to 70% in place. Section headers: coloured icon
+    chip + name + a 2 px rule with 24 px above; a thin scrollbar and 12 px
+    padding all round. Never-list unchanged: live prices only, real timers
+    only, no urgency words, no flashing; `PolicyRestricted` items stay
+    hidden from restricted players.
+  - **Every bundle shows its contents** (any item with `Parts`: the Starter
+    Pack, every deal, Safe Fusion x5): the ⭐ Featured banner, the 🔥 Deal
+    banner, a grid tile and the Starter / "New deal!" side cards all draw
+    one `DealParts` tile per DISTINCT part and one ✓ YOU GET line per part
+    (`Plain` text) plus "Worth R$ N if bought separately" (live
+    `ShopPrices`; the old "if bought one by one" is gone) and the live
+    SAVE %. A cash part's line carries the amount it pays THIS player right
+    now ("A pile of cash (+$1.2M)": `ShopController` installs
+    `DealParts.SetPlainResolver`; the same formula the grant uses, and the
+    banner re-reads it every second). `/selftest` walks the shop tree and
+    the side cards and counts tiles and lines per container.
   - **Purchase celebration** (`UI/PurchaseCelebration`, replaces the THANK
     YOU card): on `ShopPurchased` Granted, client-side: dim + rays + glow +
     ~60 confetti + RevealMajor, the store icon pops in (260 / 180 px),
@@ -121,7 +153,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     after a prompt made inside the slot) and grants its parts through
     their own grants. Shop: a 🔥 DEAL banner + chip first that says
     **what's inside** (Polish 10, `UI/DealParts`): "🔥 DEAL · ends in 3:49:28",
-    one 72 px tile per DISTINCT part (the part product's live icon, else its
+    one tile per DISTINCT part (72 px on side cards, 64 on banners; the part product's live icon, else its
     emoji; its amount on the tile, `ShopConfig.Tile`; its name under it; a
     "×3" badge when the same part repeats), a "YOU GET:" list with one ✓
     line per part from its **`Plain`** text (`ShopConfig` / `QuestConfig.

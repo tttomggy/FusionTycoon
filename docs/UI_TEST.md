@@ -1538,7 +1538,7 @@ Heist, the result cards, the celebration):
   for restricted, tutorial and carrying" and "skipped lines never overlap
   the HUD" pass at both layouts.
 - [ ] The shop's Deal banner (Polish 10): "🔥 DEAL · ends in h:mm:ss", one
-  72 px tile per distinct part (live icon or emoji, amount on the tile, name
+  64 px tile per distinct part (live icon or emoji, amount on the tile, name
   under it; the same part twice = one tile with ×3), a "YOU GET:" list with
   one ✓ plain-words line per part, "Worth R$ N if bought separately" (live
   prices; absent in Studio until the products exist) and the buy button; on
@@ -1548,16 +1548,18 @@ Heist, the result cards, the celebration):
   worth line, Not now / See deal; on a phone the YOU GET list drops out if
   the card would climb into the top bar). The Starter Pack card (session 2)
   has the same tiles + list.
-- [ ] **Effects tray** (bottom right): `/shop grant LuckPotion`, `/shop grant
+- [ ] **Effects tray** (bottom LEFT, Polish 11): `/shop grant LuckPotion`, `/shop grant
   SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
   Magnet: round icons with a timer under (m:ss, h:mm:ss past an hour), `×N`
   badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
   pop in on gaining and shrink out at the end, nothing flashes in the last
   minute. Tap or hover one: a tooltip ("Rare orbs 2× more likely · 12:41
-  left"), one at a time; tap elsewhere closes it. 16 px from the right edge,
-  bottom level with the bottom button row; on a narrow window or phone it
-  sits just above the row, never over it; 5+ effects wrap to a second row
-  above. The old pills beside SHOP / GIFTS and in the phone status stack are
+  left"), one at a time; tap elsewhere closes it. 16 px from the left edge,
+  bottom level with the bottom button row, 64 px icons, 4 to a row, more
+  rows stack upward. If it would touch the left column or the bottom row
+  the icons drop to 48 px, then 3 per row; if it still touches (a phone with
+  a tall left column) it sits to the right of the left column, still
+  bottom-aligned. The old pills beside SHOP / GIFTS and in the phone status stack are
   gone ("next in" stays). A purchase's flying time lands on its icon. See deal opens the shop at the deal; Not now hides it until the
   next slot. Not in a first session's first 10 min, not over another card,
   not within 60 s of a loss, not while carrying or being stolen from, and
@@ -2063,3 +2065,23 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
 - [ ] `/selftest`: "top stack slots in order", "top stack queue", "hud left
   column overlap" pass.
 
+**Polish 11: bundles, tray bottom-left, premium shop.**
+
+- [ ] Shop → ⭐ Featured (Starter Pack): the art box with turning rays, "🎁
+  ONE TIME ONLY", a tile each for the 3 parts (Pink Lab "Pink look", Boost "1 h",
+  Pocket Cash "20 min cash"), a ✓ YOU GET list (the Pocket Cash line says
+  "(+$N)", your real amount, and follows your income), "Worth R$ N if bought
+  separately" + the gold SAVE % (live; absent in Studio until prices load),
+  and the 160 × 64 buy button with a gentle shine every 5 s. No "one by
+  one". After buying: the banner stays, dimmed to 70%, a grey "OWNED ✓".
+- [ ] Shop → 🔥 Deal and Safe Fusion x5: the same tiles + YOU GET list.
+- [ ] Looks: every card has a lighter top, a thin highlight line, a dark
+  outline and a soft 6 px shadow; art boxes 120 (banners) / 96 (tiles) with a
+  glow; names 30 px, lines 16 px, small pills 13 px; nothing tiny; section
+  headers have an icon chip, a thin rule and clear space above; the
+  scrollbar is thin and violet; owned passes dim in place.
+- [ ] `/shop grant LuckPotion`: its round icon and timer appear in the
+  bottom-LEFT corner, 16 px from the left, bottom level with the bottom row;
+  4 per row, more rows upward; on the phone it never covers the left column.
+- [ ] `/selftest`: "shop bundles", "shop text", "side cards", "Pocket Cash
+  line", the effects-tray lines (bottom-left quarter, live timers) pass.

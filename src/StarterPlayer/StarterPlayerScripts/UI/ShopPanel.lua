@@ -13,8 +13,12 @@
 	    on screen turns green (UIKit.SetSelected). The bar scrolls sideways
 	    when it doesn't fit.
 	  * Sections, each with a big header row (icon, title, thin divider):
-	      Featured  one wide banner: the Starter Pack until bought, then a
-	                live sale, then the best value; shine sweep.
+	      Featured  one wide banner: the Starter Pack until bought (then
+	                dimmed in place, "OWNED ✓"), a live sale, else the best
+	                value. A bundle (Parts) lists its contents: DealParts
+	                tiles + a ✓ YOU GET line per part + the live worth.
+	                Polish 11 look: art box + glow (rays on Featured / Deal),
+	                30 / 16 / 13 px text only, 160 x 64 buy button.
 	      Passes    big cards (icon, name, benefit, buy); an owned pass
 	                shows a grey "OWNED ✓" and sorts to the end.
 	      Boosts    QuickBoost, Boost (BoostSale while its window is live),
@@ -65,23 +69,55 @@ local CHIP_GAP = 8
 local CHIP_BAR_HEIGHT = CHIP_HEIGHT + UITheme.SmallShadowOffset + 4
 local SECTION_GAP = 10
 local HEADER_HEIGHT = 44
-local FEATURED_HEIGHT = 170
-local FEATURED_NARROW_HEIGHT = 262
-local PASS_HEIGHT = 140
-local TILE_HEIGHT = 288 -- the icon is ~42% of it (120 px); Main gets two lines
+local HEADER_SPACE = 14 -- + SECTION_GAP = 24 px above each section
+-- Banners: the art 120 px on the left; a bundle also lists what is inside.
+local BANNER_ART = 120
+local BANNER_TILE = 64 -- DealParts tile size on a banner / a bundle tile
+local PLAIN_HEIGHT = 176 -- a sale or best-value banner (no parts)
+local PARTS_HEIGHT = 244 -- a bundle banner (Starter Pack, a deal), wide
+local BANNER_PARTS_NARROW = 700 -- page width under which a bundle banner stacks
+-- Tiles: the art 96 px; a pass card is 172, a tile 304 (340 with a bundle's list).
+local TILE_ART = 96
+local PASS_HEIGHT = 172
+local TILE_HEIGHT = 304
+local TILE_PARTS_HEIGHT = 340
 local GRID_GAP = 12
 local NARROW_WIDTH = 560 -- logical px of page width under which tiles go 2-up
 local REFRESH_SECONDS = 1
 local SHINE_SECONDS = 0.9
 local SHINE_EVERY_SECONDS = 3
+local BUY_SHINE_SECONDS = 5 -- the Featured buy button's gentle sweep
 local BOB_PIXELS = 5
 local BOB_SECONDS = 1.1
+local RAY_BARS = 6 -- thin bars through the centre = 12 rays
+local RAY_SECONDS = 24
+-- Depth: a 6 px drop shadow under every card.
+local SHOP_SHADOW = 6
+-- The type scale: the name 30, lines 16, small labels 13. Nothing smaller.
+local NAME_TEXT = 30
+local LINE_TEXT = 16
+local SMALL_TEXT = 13
+-- The buy button: 160 x 64 with the price at 28 px.
+local BUY_WIDTH = 160
+local BUY_HEIGHT = 64
+local BUY_TEXT = 28
+local OWNED_OPACITY = 0.7
 local SCROLL_TWEEN = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local HOVER_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local PRESS_INFO = TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local PRESS_INFO = TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local HOVER_SCALE = 1.04
 local PRESS_SCALE = 0.96
 local ACTIVE_LINE = 60 -- px below the page top where a header counts as "on screen"
+
+type BannerRefs = {
+	Key: string?,
+	Detail: TextLabel?, -- a sale / best-value banner's money line
+	Worth: TextLabel?, -- a bundle's "Worth R$ N if bought separately"
+	YouGet: Frame?, -- a bundle's YOU GET list (cash lines follow your income)
+	Parts: { string }?,
+	Price: TextButton?,
+	Timer: TextLabel?,
+}
 
 type TileRefs = {
 	Key: string,
@@ -99,8 +135,8 @@ local chipButtons: { [string]: TextButton } = {}
 local headers: { [string]: Frame } = {}
 local sectionOrder: { string } = {}
 local tiles: { TileRefs } = {}
-local featuredRefs: { Key: string?, Detail: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
-local dealRefs: { Key: string?, Worth: TextLabel?, Price: TextButton?, Timer: TextLabel? } = {}
+local featuredRefs: BannerRefs = {}
+local dealRefs: BannerRefs = {}
 local activeSection: string? = nil
 local scrollLockUntil = 0 -- a chip's tween owns the active chip until then
 local builtSignature = ""
@@ -135,6 +171,11 @@ end
 
 local function isNarrow(): boolean
 	return UIKit.IsPhone() or pageWidth() < NARROW_WIDTH
+end
+
+-- A bundle banner (it lists its parts) needs more room before it stacks.
+local function bannerNarrow(hasParts: boolean): boolean
+	return pageWidth() < (if hasParts then BANNER_PARTS_NARROW else NARROW_WIDTH)
 end
 
 local function tileColumns(): number
@@ -183,7 +224,8 @@ local function bestValueKey(): string?
 	return ShopConfig.GetBestValueKey(cash, ShopController.GetCashAmount, ShopPrices.Get)
 end
 
--- Starter Pack until bought, then the live sale, then the best value.
+-- Starter Pack until bought, then the live sale, then the (dimmed) bought
+-- Starter Pack, then the best value.
 local function featuredKey(): string?
 	if ShopController.IsAvailable("StarterPack") then
 		return "StarterPack"
@@ -192,6 +234,10 @@ local function featuredKey(): string?
 		if ShopController.IsAvailable(sale.SaleKey) then
 			return sale.SaleKey
 		end
+	end
+	-- Bought: it stays here, dimmed "OWNED ✓", so the page does not jump.
+	if ShopController.IsShownOwned("StarterPack") then
+		return "StarterPack"
 	end
 	return bestValueKey()
 end
@@ -262,8 +308,8 @@ end
 
 --[[ Building blocks --------------------------------------------------------------- ]]
 
--- A diagonal white shine sweeping across `frame` every few seconds.
-local function addShine(frame: GuiObject)
+-- A diagonal white shine sweeping across `frame` every `every` seconds.
+local function addShine(frame: GuiObject, every: number)
 	frame.ClipsDescendants = true
 	local shine = Instance.new("Frame")
 	shine.Name = "Shine"
@@ -285,63 +331,115 @@ local function addShine(frame: GuiObject)
 	gradient.Parent = shine
 	TweenService:Create(
 		shine,
-		TweenInfo.new(SHINE_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, -1, false, SHINE_EVERY_SECONDS),
+		TweenInfo.new(SHINE_SECONDS, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut, -1, false, every),
 		{ Position = UDim2.fromScale(1.4, 0.5) }
 	):Play()
 end
 
--- The item's icon: the live store icon (what Harris uploaded with the
--- pass / product), else the emoji in a light circle. Bobs gently.
-local function iconView(parent: Instance, key: string, size: number, position: UDim2, anchor: Vector2, z: number): Frame
-	local holder = Instance.new("Frame")
-	holder.Name = "Icon"
-	holder.BackgroundTransparency = 1
-	holder.AnchorPoint = anchor
-	holder.Position = position
-	holder.Size = UDim2.fromOffset(size, size)
-	holder.ZIndex = z
-	holder.Parent = parent
-	local disc = Instance.new("Frame")
-	disc.Name = "Disc"
-	disc.Size = UDim2.fromScale(1, 1)
-	disc.BackgroundColor3 = Colors.White
-	disc.BackgroundTransparency = 0.75
-	disc.ZIndex = z
-	disc.Parent = holder
-	UIKit.Corner(disc, 999)
-	UIKit.Stroke(disc, 3)
-	local image = ShopPrices.GetIcon(key)
-	if image then
-		disc.BackgroundTransparency = 1
-		local stroke = disc:FindFirstChildOfClass("UIStroke")
-		if stroke then
-			stroke.Enabled = false
+-- The 1 px light line along a card's top edge (the depth highlight).
+local function highlightLine(body: GuiObject, z: number)
+	local line = Instance.new("Frame")
+	line.Name = "Highlight"
+	line.BackgroundColor3 = Colors.ShopHighlight
+	line.BackgroundTransparency = 0.45
+	line.BorderSizePixel = 0
+	line.Position = UDim2.fromOffset(14, 8)
+	line.Size = UDim2.new(1, -28, 0, 1)
+	line.ZIndex = z
+	line.Parent = body
+end
+
+-- The art box every product sits in (120 px on banners, 96 on tiles): the
+-- live store icon (what Harris uploaded with the pass / product), else the
+-- emoji, over a radial glow in the card's colour. `rays` (Featured and Deal
+-- only) turn slowly behind it. The picture bobs gently.
+local function artBox(parent: Instance, key: string, size: number, position: UDim2, anchor: Vector2, z: number, pair: UITheme.GradientPair, rays: boolean): Frame
+	local box = Instance.new("Frame")
+	box.Name = "Art"
+	box.AnchorPoint = anchor
+	box.Position = position
+	box.Size = UDim2.fromOffset(size, size)
+	box.BackgroundColor3 = Colors.ShopArtWell
+	box.BackgroundTransparency = 0.3
+	box.BorderSizePixel = 0
+	box.ClipsDescendants = true
+	box.ZIndex = z
+	box.Parent = parent
+	UIKit.Corner(box, 18)
+	local rim = UIKit.Stroke(box, 2, Colors.White)
+	rim.Transparency = 0.55
+	if rays then
+		local turning = Instance.new("Frame")
+		turning.Name = "Rays"
+		turning.BackgroundTransparency = 1
+		turning.AnchorPoint = Vector2.new(0.5, 0.5)
+		turning.Position = UDim2.fromScale(0.5, 0.5)
+		turning.Size = UDim2.fromScale(1.5, 1.5) -- covers the corners while it turns
+		turning.ZIndex = z + 1
+		turning.Parent = box
+		for index = 1, RAY_BARS do
+			local bar = Instance.new("Frame")
+			bar.Name = "Ray"
+			bar.BackgroundColor3 = Colors.ShopRay
+			bar.BackgroundTransparency = 0.82
+			bar.BorderSizePixel = 0
+			bar.AnchorPoint = Vector2.new(0.5, 0.5)
+			bar.Position = UDim2.fromScale(0.5, 0.5)
+			bar.Size = UDim2.new(0, 9, 1, 0)
+			bar.Rotation = (index - 1) * (180 / RAY_BARS)
+			bar.ZIndex = z + 1
+			bar.Parent = turning
 		end
+		TweenService:Create(turning, TweenInfo.new(RAY_SECONDS, Enum.EasingStyle.Linear, Enum.EasingDirection.Out, -1), { Rotation = 360 }):Play()
+	end
+	-- The radial glow: three soft discs in the card's colour.
+	for index, fraction in { 0.96, 0.7, 0.44 } do
+		local disc = Instance.new("Frame")
+		disc.Name = "Glow" .. index
+		disc.AnchorPoint = Vector2.new(0.5, 0.5)
+		disc.Position = UDim2.fromScale(0.5, 0.5)
+		disc.Size = UDim2.fromScale(fraction, fraction)
+		disc.BackgroundColor3 = pair.Top
+		disc.BackgroundTransparency = 0.82 - 0.14 * (index - 1)
+		disc.BorderSizePixel = 0
+		disc.ZIndex = z + 1
+		disc.Parent = box
+		UIKit.Corner(disc, 999)
+	end
+	local pictureSize = math.floor(size * 0.74)
+	local image = ShopPrices.GetIcon(key)
+	local piece: GuiObject
+	if image then
 		local picture = Instance.new("ImageLabel")
 		picture.Name = "Image"
 		picture.BackgroundTransparency = 1
-		picture.Size = UDim2.fromScale(1, 1)
+		picture.AnchorPoint = Vector2.new(0.5, 0.5)
+		picture.Position = UDim2.fromScale(0.5, 0.5)
+		picture.Size = UDim2.fromOffset(pictureSize, pictureSize)
 		picture.Image = image
 		picture.ScaleType = Enum.ScaleType.Fit
-		picture.ZIndex = z + 1
-		picture.Parent = disc
+		picture.ZIndex = z + 3
+		picture.Parent = box
+		piece = picture
 	else
-		UIKit.Label({
+		piece = UIKit.Label({
 			Name = "Glyph",
 			Text = item(key).Icon,
 			TextSize = math.floor(size * 0.55),
-			Size = UDim2.fromScale(1, 1),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromScale(0.5, 0.5),
+			Size = UDim2.fromOffset(pictureSize, pictureSize),
 			TextXAlignment = Enum.TextXAlignment.Center,
-			ZIndex = z + 1,
-			Parent = disc,
+			ZIndex = z + 3,
+			Parent = box,
 		})
 	end
 	TweenService:Create(
-		disc,
+		piece,
 		TweenInfo.new(BOB_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-		{ Position = UDim2.fromOffset(0, -BOB_PIXELS) }
+		{ Position = UDim2.new(0.5, 0, 0.5, -BOB_PIXELS) }
 	):Play()
-	return holder
+	return box
 end
 
 -- A gold corner tag ("BEST VALUE", "SAVE 56%"): white + ink by the
@@ -353,10 +451,10 @@ local function cornerTag(parent: Instance, text: string, z: number): TextLabel
 		Text = text,
 		Gradient = UITheme.Gradients.Gold,
 		Font = Fonts.Display,
-		TextSize = 12,
+		TextSize = SMALL_TEXT,
 		Height = 22,
 		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.new(1, -8, 0, 8),
+		Position = UDim2.new(1, -8, 0, 12),
 		ZIndex = z,
 	})
 end
@@ -374,17 +472,18 @@ local function newTag(parent: Frame, entry: ShopConfig.Item)
 		Text = "NEW!",
 		Gradient = UITheme.Gradients.Red,
 		Font = Fonts.Display,
-		TextSize = 12,
+		TextSize = SMALL_TEXT,
 		Height = 22,
 		TextStroke = 1.5,
-		Position = UDim2.fromOffset(8, 10),
+		Position = UDim2.fromOffset(8, 12),
 		ZIndex = parent.ZIndex + 5,
 	})
 end
 
--- The chunky rounded panel every tile / card sits on: a light gradient in
--- the section colour, a coloured outline, a gloss, the ink shadow. The
--- holder hovers to 1.03 and bounces on press.
+-- The chunky rounded panel every tile / card sits on: a lighter-on-top
+-- gradient in the section colour, a darker 3 px outline, a 1 px highlight
+-- line along the top, a gloss and a 6 px drop shadow. The holder hovers to
+-- 1.04 and bounces on press.
 local function tilePanel(parent: Instance, name: string, order: number, pair: UITheme.GradientPair): (Frame, Frame, UIScale)
 	local holder = Instance.new("Frame")
 	holder.Name = name
@@ -400,11 +499,11 @@ local function tilePanel(parent: Instance, name: string, order: number, pair: UI
 	local body = UIKit.Panel({
 		Name = "Fill",
 		Parent = holder,
-		Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset),
+		Size = UDim2.new(1, 0, 1, -SHOP_SHADOW),
 		Gradient = stops,
 		Radius = 18,
 		StrokeThickness = 3,
-		ShadowOffset = UITheme.SmallShadowOffset,
+		ShadowOffset = SHOP_SHADOW,
 		ZIndex = holder.ZIndex,
 	})
 	-- Gloss: a soft white wash over the top half.
@@ -427,6 +526,7 @@ local function tilePanel(parent: Instance, name: string, order: number, pair: UI
 	band.Parent = body
 	UIKit.Corner(band, 3)
 	UIKit.PairGradient(band, pair, 0)
+	highlightLine(body, body.ZIndex + 1)
 	-- Hover: 1.04 and a white glow stroke.
 	local stroke = body:FindFirstChildOfClass("UIStroke")
 	body.MouseEnter:Connect(function()
@@ -446,34 +546,42 @@ local function tilePanel(parent: Instance, name: string, order: number, pair: UI
 	return body, holder, scale
 end
 
--- The green buy button (owned pass: grey "OWNED ✓"); pressing it bounces
--- the tile.
-local function buyButton(parent: Frame, key: string, scale: UIScale, props: { [string]: any }): TextButton
-	local owned = item(key).Kind == "Pass" and ShopController.IsOwned(key)
-	local button = UIKit.Button({
+-- The green buy button, 160 x 64 with the live price at 28 px (a bought
+-- pass / one-time product: grey "OWNED ✓"). It presses in over 0.12 s and
+-- the tile bounces with it. `props.Fill` lets it stretch up to its 160 px cap.
+local function buyButton(parent: Frame, key: string, scale: UIScale?, props: { [string]: any }): TextButton
+	local owned = ShopController.IsOwned(key)
+	local button, holder = UIKit.Button({
 		Name = "Buy",
 		Parent = parent,
 		Style = if owned then "Disabled" else "Green",
 		Text = if owned then "OWNED ✓" else ShopController.GetPriceText(key),
 		TextColor3 = if owned then Colors.Muted else Colors.Text,
-		TextSize = props.TextSize or 20,
+		TextSize = BUY_TEXT,
 		AnchorPoint = props.AnchorPoint,
 		Position = props.Position,
-		Size = props.Size,
+		Size = props.Size or UDim2.fromOffset(BUY_WIDTH, BUY_HEIGHT),
 		ShadowOffset = UITheme.SmallShadowOffset,
 		ZIndex = parent.ZIndex + 3,
 		OnClick = function()
-			if not (item(key).Kind == "Pass" and ShopController.IsOwned(key)) then
+			if not ShopController.IsOwned(key) then
 				ShopController.Buy(key)
 			end
 		end,
 	})
-	button.MouseButton1Down:Connect(function()
-		TweenService:Create(scale, PRESS_INFO, { Scale = PRESS_SCALE }):Play()
-	end)
-	button.MouseButton1Up:Connect(function()
-		TweenService:Create(scale, HOVER_INFO, { Scale = HOVER_SCALE }):Play()
-	end)
+	if props.Fill then
+		local cap = Instance.new("UISizeConstraint")
+		cap.MaxSize = Vector2.new(BUY_WIDTH, BUY_HEIGHT)
+		cap.Parent = holder
+	end
+	if scale then
+		button.MouseButton1Down:Connect(function()
+			TweenService:Create(scale, PRESS_INFO, { Scale = PRESS_SCALE }):Play()
+		end)
+		button.MouseButton1Up:Connect(function()
+			TweenService:Create(scale, PRESS_INFO, { Scale = HOVER_SCALE }):Play()
+		end)
+	end
 	return button
 end
 
@@ -484,23 +592,30 @@ local function textLabel(parent: Frame, name: string, props: { [string]: any }):
 	return UIKit.Label(props)
 end
 
+-- Dims a bought card to 70%, in place.
+local function dimOwned(root: Instance)
+	UIKit.SetOpacity(root, OWNED_OPACITY)
+end
+
 --[[ Sections -------------------------------------------------------------------------- ]]
 
 local function sectionHeader(section: ShopConfig.Section, order: number)
 	local row = Instance.new("Frame")
 	row.Name = section.Id .. "Header"
 	row.BackgroundTransparency = 1
-	row.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT)
+	row.Size = UDim2.new(1, 0, 0, HEADER_HEIGHT + HEADER_SPACE)
 	row.LayoutOrder = order
 	row.ZIndex = scroller.ZIndex + 1
 	row.Parent = scroller
+	-- The extra space above the section (SECTION_GAP + HEADER_SPACE = 24 px).
+	UIKit.Padding(row, HEADER_SPACE, 0, 0, 0)
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
 	layout.VerticalAlignment = Enum.VerticalAlignment.Center
 	layout.Padding = UDim.new(0, 12)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = row
-	-- The icon on a pill in the section's colour.
+	-- The coloured icon chip.
 	local iconPill = Instance.new("Frame")
 	iconPill.Name = "IconPill"
 	iconPill.Size = UDim2.fromOffset(52, 36)
@@ -532,16 +647,17 @@ local function sectionHeader(section: ShopConfig.Section, order: number)
 		Stroke = UITheme.Stroke.Text,
 		Parent = row,
 	})
+	-- The 2 px rule to the right.
 	local divider = Instance.new("Frame")
 	divider.Name = "Divider"
 	divider.BackgroundColor3 = sectionPair(section).Top
-	divider.BackgroundTransparency = 0.35
+	divider.BackgroundTransparency = 0.25
 	divider.BorderSizePixel = 0
-	divider.Size = UDim2.fromOffset(0, 3)
+	divider.Size = UDim2.fromOffset(0, 2)
 	divider.LayoutOrder = 2
 	divider.ZIndex = row.ZIndex
 	divider.Parent = row
-	UIKit.Corner(divider, 2)
+	UIKit.Corner(divider, 1)
 	local flex = Instance.new("UIFlexItem")
 	flex.FlexMode = Enum.UIFlexMode.Fill
 	flex.Parent = divider
@@ -567,158 +683,57 @@ local function grid(name: string, order: number, columns: number, cellHeight: nu
 	return frame
 end
 
--- The banner's money line, all from live prices.
+-- The banner's money line (a sale or a plain product), all from live prices.
 local function featuredDetail(key: string): string
 	local entry = item(key)
 	if entry.SaleOf then
 		return saleText(key)
 	end
-	if entry.Parts then
-		local worth = ShopPrices.GetPartsTotal(key)
-		if worth then
-			return ("Worth <s>%s</s> if bought one by one"):format(robux(worth))
-		end
-		return entry.Effect
-	end
 	local main, sub = tileLines(key)
-	return ("%s · %s"):format(main, sub)
+	return if sub ~= "" then ("%s · %s"):format(main, sub) else main
 end
 
-local function buildFeatured(key: string, order: number)
+-- The ONE banner builder: the ⭐ Featured banner (the Starter Pack until
+-- bought and then dimmed in place, a live sale, the best value) and the 🔥 DEAL banner.
+-- Any item with `Parts` (Starter Pack, every deal) shows what is inside:
+-- one DealParts tile per distinct part, then a ✓ YOU GET line per part in
+-- plain words, then "Worth R$ N if bought separately" (live prices) and
+-- the live SAVE %. Everything is 30 / 16 / 13 px. Rays turn behind the art;
+-- only the Featured buy button gets a shine sweep.
+local function buildBanner(kind: string, key: string, order: number, refs: BannerRefs)
 	local entry = item(key)
-	local narrow = pageWidth() < NARROW_WIDTH
-	local holder = Instance.new("Frame")
-	holder.Name = "FeaturedBanner"
-	holder.BackgroundTransparency = 1
-	holder.Size = UDim2.new(1, 0, 0, if narrow then FEATURED_NARROW_HEIGHT else FEATURED_HEIGHT)
-	holder.LayoutOrder = order
-	holder.ZIndex = scroller.ZIndex + 1
-	holder.Parent = scroller
-	local z = holder.ZIndex + 1
-	local fill = Instance.new("Frame")
-	fill.Name = "Fill"
-	fill.Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset)
-	fill.BackgroundColor3 = Colors.White
-	fill.ZIndex = z
-	fill.Parent = holder
-	UIKit.Corner(fill, 20)
-	UIKit.Stroke(fill, 3)
-	UIKit.PairGradient(fill, UITheme.Gradients.ShopFeatured, 20)
-	UIKit.Shadow(fill, UITheme.SmallShadowOffset)
-	addShine(fill)
-
-	local iconSize = if narrow then 72 else 110
-	iconView(
-		fill,
-		key,
-		iconSize,
-		if narrow then UDim2.fromOffset(16, 16) else UDim2.new(0, 24, 0.5, 0),
-		if narrow then Vector2.zero else Vector2.new(0, 0.5),
-		z + 2
-	)
-	local textLeft = if narrow then 100 else 152
-	local textRight = if narrow then 16 else 210
-	local caption = if entry.SaleOf then "🔥 ADMIN ABUSE SALE" elseif key == "StarterPack" then "🎁 ONE TIME ONLY" else "⭐ BEST VALUE"
-	UIKit.Label({
-		Name = "Caption",
-		Text = caption,
-		Font = Fonts.BodyHeavy,
-		TextSize = 14,
-		Position = UDim2.fromOffset(textLeft, 18),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 18),
-		ZIndex = z + 2,
-		Stroke = UITheme.WarmTextStroke,
-		Parent = fill,
-	})
-	UIKit.Label({
-		Name = "Title",
-		Text = if entry.SaleOf then item(entry.SaleOf).Name else entry.Name,
-		Font = Fonts.Display,
-		TextSize = if narrow then 24 else 30,
-		Position = UDim2.fromOffset(textLeft, 38),
-		Size = UDim2.new(1, -(textLeft + textRight), 0, 36),
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		ZIndex = z + 2,
-		Stroke = 3,
-		Parent = fill,
-	})
-	local detailLeft = if narrow then 16 else textLeft
-	featuredRefs.Detail = UIKit.Label({
-		Name = "Detail",
-		Text = featuredDetail(key),
-		RichText = true,
-		Font = Fonts.Body,
-		TextSize = 16,
-		TextWrapped = true,
-		Position = UDim2.fromOffset(detailLeft, if narrow then 100 else 78),
-		Size = UDim2.new(1, -(detailLeft + textRight), 0, 40),
-		ZIndex = z + 2,
-		Stroke = UITheme.Stroke.Text,
-		Parent = fill,
-	})
-	-- "SAVE 56%" from live prices (bundles and sales only).
-	local tag = tagText(key, nil)
-	local tagY = if narrow then 144 else 124
-	if tag then
-		UIKit.Pill({
-			Name = "Save",
-			Parent = fill,
-			Text = tag,
-			Gradient = UITheme.Gradients.Gold,
-			Font = Fonts.Display,
-			TextSize = 16,
-			Height = 28,
-			Position = UDim2.fromOffset(detailLeft, tagY),
-			ZIndex = z + 2,
-		})
-	end
-	if entry.SaleOf then
-		featuredRefs.Timer = UIKit.Label({
-			Name = "Ends",
-			Font = Fonts.BodyHeavy,
-			TextSize = 13,
-			Position = UDim2.fromOffset(detailLeft + (if tag then 110 else 0), tagY + 4),
-			Size = UDim2.fromOffset(300, 20),
-			ZIndex = z + 2,
-			Stroke = 1.5,
-			Parent = fill,
-		})
-	end
-	featuredRefs.Price = UIKit.Button({
-		Name = "Buy",
-		Parent = fill,
-		Style = "Green",
-		Text = ShopController.GetPriceText(key),
-		TextSize = 28,
-		AnchorPoint = if narrow then Vector2.new(0.5, 1) else Vector2.new(1, 0.5),
-		Position = if narrow then UDim2.new(0.5, 0, 1, -14) else UDim2.new(1, -20, 0.5, -2),
-		Size = if narrow then UDim2.new(1, -32, 0, 56) else UDim2.fromOffset(170, 64),
-		ZIndex = z + 2,
-		OnClick = function()
-			ShopController.Buy(key)
-		end,
-	})
-	featuredRefs.Key = key
-end
-
--- The 🔥 DEAL banner: the current slot's bundle (ShopController.GetDeal) as
--- what you actually get: one tile per distinct part (live icon, amount, name,
--- "×3" for repeats), a "YOU GET:" line per part in plain words, the live
--- "Worth R$ 128 if bought separately" and the real countdown. No urgency words.
-local DEAL_HEIGHT = 264
-local DEAL_TITLE_Y = 38
-local DEAL_TILES_Y = 82
-
-local function buildDeal(deal: ShopController.DealView, order: number)
-	local narrow = pageWidth() < NARROW_WIDTH
-	local parts: { string } = deal.Item.Parts or {}
+	local isDeal = kind == "Deal"
+	local owned = ShopController.IsOwned(key)
+	local parts: { string } = entry.Parts or {}
+	local hasParts = #parts > 0
+	local narrow = bannerNarrow(hasParts)
+	local pair = if isDeal then UITheme.Gradients.Pink else UITheme.Gradients.ShopFeatured
 	local distinct = #DealParts.Distinct(parts)
-	local tilesWidth = distinct * DealParts.TileWidth() + math.max(0, distinct - 1) * 4
-	-- Narrow: tiles, then the list under them, then Worth and the buy button.
-	local listHeight = 18 + distinct * 36
-	local height = if narrow then DEAL_TILES_Y + DealParts.TileHeight() + 8 + listHeight + 22 + 70 + 14 else DEAL_HEIGHT
+	local tilesWidth = distinct * DealParts.TileWidth(BANNER_TILE) + math.max(0, distinct - 1) * 4
+	local tileHeight = DealParts.TileHeight(BANNER_TILE)
+	local artSize = if narrow then 96 else BANNER_ART
+	local x0 = if narrow then 16 + artSize + 12 else 16 + artSize + 16 -- the text column
+	local rightReserve = if narrow then 16 else 20 + BUY_WIDTH + 16 -- the buy button's column
+	local tag = tagText(key, nil)
+
+	-- Heights (the holder includes the 6 px shadow).
+	local listHeight = 26 + distinct * 40
+	local height: number
+	if hasParts then
+		if narrow then
+			height = 16 + artSize + 10 + tileHeight + 8 + listHeight + 6 + 28 + 10 + BUY_HEIGHT + 14 + SHOP_SHADOW
+		else
+			height = PARTS_HEIGHT
+		end
+	elseif narrow then
+		height = 16 + artSize + 8 + 46 + 8 + 28 + 10 + BUY_HEIGHT + 14 + SHOP_SHADOW
+	else
+		height = PLAIN_HEIGHT
+	end
+
 	local holder = Instance.new("Frame")
-	holder.Name = "DealBanner"
+	holder.Name = if isDeal then "DealBanner" else "FeaturedBanner"
+	holder:SetAttribute("ShopKey", key) -- /selftest: which item this banner sells
 	holder.BackgroundTransparency = 1
 	holder.Size = UDim2.new(1, 0, 0, height)
 	holder.LayoutOrder = order
@@ -727,153 +742,284 @@ local function buildDeal(deal: ShopController.DealView, order: number)
 	local z = holder.ZIndex + 1
 	local fill = Instance.new("Frame")
 	fill.Name = "Fill"
-	fill.Size = UDim2.new(1, 0, 1, -UITheme.SmallShadowOffset)
+	fill.Size = UDim2.new(1, 0, 1, -SHOP_SHADOW)
 	fill.BackgroundColor3 = Colors.White
 	fill.ZIndex = z
 	fill.Parent = holder
 	UIKit.Corner(fill, 20)
 	UIKit.Stroke(fill, 3)
-	UIKit.PairGradient(fill, UITheme.Gradients.Pink, 20)
-	UIKit.Shadow(fill, UITheme.SmallShadowOffset)
-	addShine(fill)
+	UIKit.PairGradient(fill, pair)
+	UIKit.Shadow(fill, SHOP_SHADOW)
+	highlightLine(fill, z + 1)
 
-	local textRight = if narrow then 16 else 210
-	dealRefs.Timer = UIKit.Label({
-		Name = "NewIn",
-		Text = "🔥 DEAL",
-		Font = Fonts.Display,
-		TextSize = 16,
-		Position = UDim2.fromOffset(16, 14),
-		Size = UDim2.new(1, -(16 + textRight), 0, 20),
-		ZIndex = z + 2,
-		Stroke = UITheme.WarmTextStroke,
+	artBox(fill, key, artSize, if narrow then UDim2.fromOffset(16, 16) else UDim2.new(0, 16, 0.5, 0), if narrow then Vector2.zero else Vector2.new(0, 0.5), z + 2, pair, true)
+
+	-- The small label: what this is (or, on the deal, how long it lasts).
+	local caption = if isDeal
+		then "🔥 DEAL"
+		elseif entry.SaleOf then "🔥 ADMIN ABUSE SALE"
+		elseif key == "StarterPack" then "🎁 ONE TIME ONLY"
+		else "⭐ BEST VALUE"
+	local captionPill = UIKit.Pill({
+		Name = "Caption",
 		Parent = fill,
+		Text = caption,
+		Gradient = if isDeal then UITheme.Gradients.Violet else UITheme.Gradients.Gold,
+		Font = Fonts.BodyHeavy,
+		TextSize = SMALL_TEXT,
+		Height = 22,
+		Position = UDim2.fromOffset(x0, 14),
+		ZIndex = z + 2,
 	})
-	UIKit.Label({
+	if isDeal then
+		refs.Timer = captionPill
+	end
+
+	-- Where the YOU GET list starts (wide parts banner: beside the tiles).
+	local listX = x0 + math.max(tilesWidth, 232) + 16
+	local titleRight = if hasParts and not narrow then 0 else rightReserve
+	local title = UIKit.Label({
 		Name = "Title",
-		Text = deal.Item.Name,
+		Text = if entry.SaleOf then item(entry.SaleOf).Name else entry.Name,
 		Font = Fonts.Display,
-		TextSize = if narrow then 24 else 30,
-		Position = UDim2.fromOffset(16, DEAL_TITLE_Y),
-		Size = UDim2.new(1, -(16 + textRight), 0, 36),
-		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextSize = NAME_TEXT,
+		Position = UDim2.fromOffset(x0, 42),
+		Size = if hasParts and not narrow
+			then UDim2.fromOffset(listX - x0 - 8, 36)
+			else UDim2.new(1, -(x0 + titleRight), 0, 36),
 		ZIndex = z + 2,
 		Stroke = 3,
 		Parent = fill,
 	})
-	local tiles = DealParts.BuildTiles(fill, parts, z + 2)
-	tiles.Position = UDim2.fromOffset(16, DEAL_TILES_Y)
+	UIKit.FitText(title, NAME_TEXT, 20)
 
-	local listLeft = if narrow then 16 else 16 + tilesWidth + 16
-	local listTop = if narrow then DEAL_TILES_Y + DealParts.TileHeight() + 8 else DEAL_TILES_Y
-	local list = DealParts.BuildYouGet(fill, parts, z + 2, UDim.new(1, -(listLeft + textRight)), 15)
-	list.Position = UDim2.fromOffset(listLeft, listTop)
-	dealRefs.Worth = UIKit.Label({
-		Name = "Worth",
-		Text = ShopController.GetWorthLine(deal.Key) or "",
-		Font = Fonts.BodyHeavy,
-		TextSize = 14,
-		AnchorPoint = Vector2.new(0, 1),
-		Position = if narrow then UDim2.new(0, 16, 1, -(70 + 4)) else UDim2.new(0, listLeft, 1, -(UITheme.SmallShadowOffset + 14)),
-		Size = UDim2.new(1, -(listLeft + textRight), 0, 18),
-		ZIndex = z + 2,
-		Stroke = 1.5,
-		Parent = fill,
+	local worthLabel: TextLabel? = nil
+	if hasParts then
+		local tilesY = if narrow then 16 + artSize + 10 else 82
+		local partRow = DealParts.BuildTiles(fill, parts, z + 2, BANNER_TILE)
+		partRow.Position = UDim2.fromOffset(if narrow then 16 else x0, tilesY)
+		local youGet: Frame
+		local listTop: number
+		if narrow then
+			listTop = tilesY + tileHeight + 8
+			youGet = DealParts.BuildYouGet(fill, parts, z + 2, UDim.new(1, -32), LINE_TEXT)
+			youGet.Position = UDim2.fromOffset(16, listTop)
+		else
+			listTop = 14
+			youGet = DealParts.BuildYouGet(fill, parts, z + 2, UDim.new(1, -(listX + 16)), LINE_TEXT)
+			youGet.Position = UDim2.fromOffset(listX, listTop)
+		end
+		refs.YouGet = youGet
+		refs.Parts = parts
+		-- "Worth R$ N if bought separately" and the live SAVE %, in a row.
+		local rowY = if narrow then listTop + listHeight + 6 else tilesY + tileHeight + 6
+		local row = Instance.new("Frame")
+		row.Name = "WorthRow"
+		row.BackgroundTransparency = 1
+		row.Position = UDim2.fromOffset(if narrow then 16 else x0, rowY)
+		row.Size = UDim2.new(1, -((if narrow then 16 else x0) + 16), 0, 28)
+		row.ZIndex = z + 2
+		row.Parent = fill
+		local rowLayout = Instance.new("UIListLayout")
+		rowLayout.FillDirection = Enum.FillDirection.Horizontal
+		rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+		rowLayout.Padding = UDim.new(0, 10)
+		rowLayout.SortOrder = Enum.SortOrder.LayoutOrder
+		rowLayout.Parent = row
+		worthLabel = UIKit.Label({
+			Name = "Worth",
+			Text = ShopController.GetWorthLine(key) or "",
+			Font = Fonts.BodyHeavy,
+			TextSize = LINE_TEXT,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 22),
+			LayoutOrder = 1,
+			ZIndex = z + 2,
+			Stroke = 1.5,
+			Parent = row,
+		})
+		if tag then
+			UIKit.Pill({
+				Name = "Save",
+				Parent = row,
+				Text = tag,
+				Gradient = UITheme.Gradients.Gold,
+				Font = Fonts.Display,
+				TextSize = LINE_TEXT,
+				Height = 28,
+				LayoutOrder = 2,
+				ZIndex = z + 2,
+			})
+		end
+	else
+		-- A sale or the best value: its one live money line, then SAVE / ends.
+		local detailY = if narrow then 16 + artSize + 8 else 84
+		refs.Detail = UIKit.Label({
+			Name = "Detail",
+			Text = featuredDetail(key),
+			RichText = true,
+			Font = Fonts.BodyHeavy,
+			TextSize = LINE_TEXT,
+			TextWrapped = true,
+			Position = UDim2.fromOffset(if narrow then 16 else x0, detailY),
+			Size = UDim2.new(1, -((if narrow then 16 else x0) + (if narrow then 16 else rightReserve)), 0, if narrow then 46 else 44),
+			TextYAlignment = Enum.TextYAlignment.Top,
+			ZIndex = z + 2,
+			Stroke = 1.5,
+			Parent = fill,
+		})
+		local rowY = if narrow then detailY + 46 + 8 else 134
+		local rowX = if narrow then 16 else x0
+		if tag then
+			UIKit.Pill({
+				Name = "Save",
+				Parent = fill,
+				Text = tag,
+				Gradient = UITheme.Gradients.Gold,
+				Font = Fonts.Display,
+				TextSize = LINE_TEXT,
+				Height = 28,
+				Position = UDim2.fromOffset(rowX, rowY),
+				ZIndex = z + 2,
+			})
+		end
+		if entry.SaleOf then
+			refs.Timer = UIKit.Label({
+				Name = "Ends",
+				Font = Fonts.BodyHeavy,
+				TextSize = SMALL_TEXT,
+				Position = UDim2.fromOffset(rowX + (if tag then 120 else 0), rowY + 4),
+				Size = UDim2.fromOffset(300, 20),
+				ZIndex = z + 2,
+				Stroke = 1.5,
+				Parent = fill,
+			})
+		end
+	end
+
+	local buy = buyButton(fill, key, nil, {
+		AnchorPoint = if narrow then Vector2.new(0.5, 1) else if hasParts then Vector2.new(1, 1) else Vector2.new(1, 0.5),
+		Position = if narrow
+			then UDim2.new(0.5, 0, 1, -14)
+			elseif hasParts then UDim2.new(1, -20, 1, -16)
+			else UDim2.new(1, -20, 0.5, 0),
+		Size = if narrow then UDim2.new(1, -32, 0, BUY_HEIGHT) else UDim2.fromOffset(BUY_WIDTH, BUY_HEIGHT),
 	})
-	dealRefs.Price = UIKit.Button({
-		Name = "Buy",
-		Parent = fill,
-		Style = "Green",
-		Text = ShopController.GetPriceText(deal.Key),
-		TextSize = 28,
-		AnchorPoint = if narrow then Vector2.new(0.5, 1) else Vector2.new(1, 0.5),
-		Position = if narrow then UDim2.new(0.5, 0, 1, -14) else UDim2.new(1, -20, 0.5, -2),
-		Size = if narrow then UDim2.new(1, -32, 0, 56) else UDim2.fromOffset(170, 64),
-		ZIndex = z + 2,
-		OnClick = function()
-			ShopController.Buy(deal.Key)
-		end,
-	})
-	dealRefs.Key = deal.Key
+	if kind == "Featured" and not owned then
+		addShine(buy, BUY_SHINE_SECONDS)
+	end
+	refs.Price = buy
+	refs.Worth = worthLabel
+	refs.Key = key
+	if owned then
+		dimOwned(holder)
+	end
 end
 
--- A pass: a big card (large icon, name, benefit, buy).
+-- A pass: a big card (art, name, benefit, buy). An owned pass dims, in place.
 local function buildPassCard(parent: Frame, section: ShopConfig.Section, key: string, order: number)
 	local entry = item(key)
-	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
+	local pair = sectionPair(section)
+	local body, holder, scale = tilePanel(parent, key, order, pair)
 	newTag(body, entry)
-	iconView(body, key, 88, UDim2.new(0, 16, 0.5, 0), Vector2.new(0, 0.5), body.ZIndex + 2)
-	textLabel(body, "Title", {
+	artBox(body, key, TILE_ART, UDim2.new(0, 14, 0.5, -SHOP_SHADOW / 2), Vector2.new(0, 0.5), body.ZIndex + 2, pair, false)
+	local textLeft = 14 + TILE_ART + 12
+	local title = textLabel(body, "Title", {
 		Text = entry.Name,
 		Font = Fonts.Display,
-		TextSize = 22,
-		Position = UDim2.fromOffset(118, 14),
-		Size = UDim2.new(1, -134, 0, 26),
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Stroke = UITheme.Stroke.Text,
+		TextSize = NAME_TEXT,
+		Position = UDim2.fromOffset(textLeft, 12),
+		Size = UDim2.new(1, -(textLeft + 12), 0, 34),
+		Stroke = 3,
 	})
+	UIKit.FitText(title, NAME_TEXT, 16)
 	local main = textLabel(body, "Main", {
 		Text = entry.Effect,
-		Font = Fonts.Body,
-		TextSize = 14,
+		Font = Fonts.BodyHeavy,
+		TextSize = LINE_TEXT,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(118, 42),
-		Size = UDim2.new(1, -134, 0, 36),
+		Position = UDim2.fromOffset(textLeft, 48),
+		Size = UDim2.new(1, -(textLeft + 12), 0, 40),
 		TextYAlignment = Enum.TextYAlignment.Top,
 		Stroke = 1.5,
 	})
+	UIKit.FitText(main, LINE_TEXT, SMALL_TEXT)
 	local button = buyButton(body, key, scale, {
 		AnchorPoint = Vector2.new(0, 1),
-		Position = UDim2.new(0, 118, 1, -14),
-		Size = UDim2.new(1, -134, 0, UITheme.MinTapSize),
+		Position = UDim2.new(0, textLeft, 1, -12),
+		Size = UDim2.new(1, -(textLeft + 12), 0, BUY_HEIGHT),
+		Fill = true,
 	})
-	table.insert(tiles, { Key = key, Main = main, Price = button, Owned = ShopController.IsOwned(key) })
+	local owned = ShopController.IsOwned(key)
+	table.insert(tiles, { Key = key, Main = main, Price = button, Owned = owned })
+	if owned then
+		dimOwned(holder)
+	end
 end
 
--- A boost / cash / luck / safe tile.
+-- A boost / cash / luck / safe tile. A bundle (Safe Fusion x5) shows its
+-- parts as a tile and a YOU GET line instead of the art box.
 local function buildTile(parent: Frame, section: ShopConfig.Section, key: string, order: number, best: string?)
 	local entry = item(key)
-	local body, _, scale = tilePanel(parent, key, order, sectionPair(section))
-	iconView(body, key, 120, UDim2.new(0.5, 0, 0, 10), Vector2.new(0.5, 0), body.ZIndex + 2)
+	local pair = sectionPair(section)
+	local body, holder, scale = tilePanel(parent, key, order, pair)
+	local parts: { string } = entry.Parts or {}
+	local hasParts = #parts > 0
+	local titleY = if hasParts then 110 else 116
+	if hasParts then
+		local row = DealParts.BuildTiles(body, parts, body.ZIndex + 2, BANNER_TILE)
+		row.AnchorPoint = Vector2.new(0.5, 0)
+		row.Position = UDim2.new(0.5, 0, 0, 8)
+	else
+		artBox(body, key, TILE_ART, UDim2.new(0.5, 0, 0, 14), Vector2.new(0.5, 0), body.ZIndex + 2, pair, false)
+	end
 	local tag = tagText(key, best)
 	if tag then
 		cornerTag(body, tag, body.ZIndex + 5)
 	end
 	newTag(body, entry)
-	textLabel(body, "Title", {
+	local title = textLabel(body, "Title", {
 		Text = if entry.SaleOf then item(entry.SaleOf).Name .. " · SALE" else entry.Name,
 		Font = Fonts.Display,
-		TextSize = 19,
-		Position = UDim2.fromOffset(8, 134),
-		Size = UDim2.new(1, -16, 0, 22),
+		TextSize = NAME_TEXT,
+		Position = UDim2.fromOffset(8, titleY),
+		Size = UDim2.new(1, -16, 0, 34),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		Stroke = UITheme.Stroke.Text,
+		Stroke = 3,
 	})
+	UIKit.FitText(title, NAME_TEXT, 16)
 	local mainText, subText = tileLines(key)
 	local isCash = ShopConfig.CashPacks[key] ~= nil
-	local main = textLabel(body, "Main", {
-		Text = mainText,
-		RichText = true,
-		Font = if isCash then Fonts.Display else Fonts.BodyHeavy,
-		TextSize = if isCash then 20 else 13,
-		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 158),
-		Size = UDim2.new(1, -16, 0, 32),
-		TextXAlignment = Enum.TextXAlignment.Center,
-		TextYAlignment = Enum.TextYAlignment.Top,
-		Stroke = 1.5,
-	})
-	-- Two lines at most; a longer line shrinks instead of spilling out.
-	UIKit.FitText(main, if isCash then 20 else 13, 10)
+	local main: TextLabel? = nil
+	local subY = titleY + 38 + 40 + 2
+	if hasParts then
+		local list = DealParts.BuildYouGet(body, parts, body.ZIndex + 3, UDim.new(1, -20), LINE_TEXT)
+		list.Position = UDim2.fromOffset(10, titleY + 38)
+		subY = titleY + 38 + 84
+	else
+		main = textLabel(body, "Main", {
+			Text = mainText,
+			RichText = true,
+			Font = if isCash then Fonts.Display else Fonts.BodyHeavy,
+			TextSize = LINE_TEXT,
+			TextWrapped = true,
+			Position = UDim2.fromOffset(8, titleY + 38),
+			Size = UDim2.new(1, -16, 0, 40),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			Stroke = 1.5,
+		})
+		-- Two lines at most; a longer line shrinks instead of spilling out.
+		UIKit.FitText(main :: TextLabel, LINE_TEXT, SMALL_TEXT)
+	end
 	local sub = textLabel(body, "Sub", {
 		Text = subText,
 		RichText = true,
 		Font = Fonts.Body,
-		TextSize = 12,
+		TextSize = SMALL_TEXT,
 		TextWrapped = true,
-		Position = UDim2.fromOffset(8, 194),
-		Size = UDim2.new(1, -16, 0, 26),
+		Position = UDim2.fromOffset(8, subY),
+		Size = UDim2.new(1, -16, 0, 20),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		Stroke = 1.5,
@@ -881,9 +1027,13 @@ local function buildTile(parent: Frame, section: ShopConfig.Section, key: string
 	local button = buyButton(body, key, scale, {
 		AnchorPoint = Vector2.new(0.5, 1),
 		Position = UDim2.new(0.5, 0, 1, -12),
-		Size = UDim2.new(1, -24, 0, UITheme.MinTapSize + 4),
+		Size = UDim2.new(1, -20, 0, BUY_HEIGHT),
+		Fill = true,
 	})
 	table.insert(tiles, { Key = key, Main = main, Sub = sub, Price = button, Owned = false })
+	if ShopController.IsOwned(key) then
+		dimOwned(holder)
+	end
 end
 
 --[[ Chips + scrolling -------------------------------------------------------------- ]]
@@ -947,7 +1097,7 @@ end
 	is measured from each move and kept, so one nudge after the tween lands
 	it exactly. The end of the canvas clamps: the last sections may not be
 	able to reach the top. ]]
-local SCROLL_PAD_TOP = 4 -- the page's UIPadding top
+local SCROLL_PAD_TOP = 12 -- the page's UIPadding top
 local JUMP_TOLERANCE = 2 -- logical px
 local canvasUnitRatio: number? = nil -- measured screen px per canvas unit, / effective scale
 
@@ -1103,7 +1253,7 @@ local function signature(): string
 			dealIcons ..= (ShopPrices.GetIcon(part) or "") .. ","
 		end
 	end
-	local parts = { if deal then deal.Key .. ":" .. tostring(deal.SlotStart) .. dealIcons else "-", featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()) }
+	local parts = { if deal then deal.Key .. ":" .. tostring(deal.SlotStart) .. dealIcons else "-", featuredKey() or "-", bestValueKey() or "-", tostring(isNarrow()), tostring(passColumns()), tostring(bannerNarrow(true)), tostring(bannerNarrow(false)) }
 	for _, section in ShopConfig.Sections do
 		for _, key in keysFor(section) do
 			table.insert(parts, key .. (if ShopController.IsOwned(key) then "+" else "") .. (ShopPrices.GetIcon(key) or ""))
@@ -1137,16 +1287,23 @@ local function rebuild()
 			sectionHeader(section, order)
 			order += 1
 			if hasDeal and deal then
-				buildDeal(deal, order)
+				buildBanner("Deal", deal.Key, order, dealRefs)
 			elseif featured then
-				buildFeatured(featured, order)
+				buildBanner("Featured", featured, order, featuredRefs)
 			elseif section.Id == "Passes" then
 				local cards = grid("PassesGrid", order, passColumns(), PASS_HEIGHT)
 				for index, key in keys do
 					buildPassCard(cards, section, key, index)
 				end
 			else
-				local cells = grid(section.Id .. "Grid", order, tileColumns(), TILE_HEIGHT)
+				-- A bundle tile lists its parts, so its row is taller.
+				local cellHeight = TILE_HEIGHT
+				for _, key in keys do
+					if item(key).Parts then
+						cellHeight = TILE_PARTS_HEIGHT
+					end
+				end
+				local cells = grid(section.Id .. "Grid", order, tileColumns(), cellHeight)
 				for index, key in keys do
 					buildTile(cells, section, key, index, best)
 				end
@@ -1158,22 +1315,39 @@ local function rebuild()
 	builtSignature = signature()
 end
 
--- Text-only refresh (cash amounts, banks, prices, tags, the sale timer).
+-- A banner's live texts: the money line, the worth, the cash amounts in
+-- its YOU GET list and the price (unless bought).
+local function refreshBanner(refs: BannerRefs)
+	local key = refs.Key
+	if not key then
+		return
+	end
+	local detail = refs.Detail
+	if detail then
+		detail.Text = featuredDetail(key)
+	end
+	local worth = refs.Worth
+	if worth then
+		worth.Text = ShopController.GetWorthLine(key) or ""
+	end
+	local list, parts = refs.YouGet, refs.Parts
+	if list and parts then
+		DealParts.UpdateYouGet(list, parts)
+	end
+	local price = refs.Price
+	if price and not ShopController.IsOwned(key) then
+		UIKit.SetButton(price, { Text = ShopController.GetPriceText(key) })
+	end
+end
+
+-- Text-only refresh (cash amounts, banks, prices, tags, the deal and sale timers).
 local function refreshTexts()
-	local dealKey = dealRefs.Key
-	if dealKey then
+	refreshBanner(dealRefs)
+	local dealTimer = dealRefs.Timer
+	if dealRefs.Key and dealTimer then
 		local deal = ShopController.GetDeal()
-		local timer = dealRefs.Timer
-		if deal and timer then
-			timer.Text = ("🔥 DEAL · ends in %s"):format(EventState.FormatTimer(deal.SecondsLeft))
-		end
-		local worth = dealRefs.Worth
-		if deal and worth then
-			worth.Text = ShopController.GetWorthLine(dealKey) or ""
-		end
-		local price = dealRefs.Price
-		if price then
-			UIKit.SetButton(price, { Text = ShopController.GetPriceText(dealKey) })
+		if deal then
+			dealTimer.Text = ("🔥 DEAL · ends in %s"):format(EventState.FormatTimer(deal.SecondsLeft))
 		end
 	end
 	for _, refs in tiles do
@@ -1188,24 +1362,15 @@ local function refreshTexts()
 			UIKit.SetButton(refs.Price, { Text = ShopController.GetPriceText(refs.Key) })
 		end
 	end
+	refreshBanner(featuredRefs)
 	local key = featuredRefs.Key
-	if key then
-		local detail = featuredRefs.Detail
-		if detail then
-			detail.Text = featuredDetail(key)
-		end
-		local price = featuredRefs.Price
-		if price then
-			UIKit.SetButton(price, { Text = ShopController.GetPriceText(key) })
-		end
-		local timer = featuredRefs.Timer
-		local sale = item(key).SaleOf
-		if timer and sale then
-			local _, ends = ShopState.GetLiveSaleFor(sale)
-			timer.Text = if ends
-				then ("Ends when Admin Abuse ends · %s"):format(EventState.FormatTimer(ends - workspace:GetServerTimeNow()))
-				else ""
-		end
+	local timer = featuredRefs.Timer
+	local sale = if key then item(key).SaleOf else nil
+	if timer and sale then
+		local _, ends = ShopState.GetLiveSaleFor(sale)
+		timer.Text = if ends
+			then ("Ends when Admin Abuse ends · %s"):format(EventState.FormatTimer(ends - workspace:GetServerTimeNow()))
+			else ""
 	end
 end
 
@@ -1250,7 +1415,7 @@ local function build()
 	shineStrip.Size = UDim2.new(1, -60, 1, 0)
 	shineStrip.ZIndex = modal.Header.ZIndex
 	shineStrip.Parent = modal.Header
-	addShine(shineStrip)
+	addShine(shineStrip, SHINE_EVERY_SECONDS)
 	-- A radial-looking violet glow behind the title.
 	local glow = Instance.new("Frame")
 	glow.Name = "Glow"
@@ -1302,11 +1467,11 @@ local function build()
 	scroller.CanvasSize = UDim2.new()
 	scroller.ScrollingDirection = Enum.ScrollingDirection.Y
 	scroller.ScrollBarThickness = 6
-	scroller.ScrollBarImageColor3 = Colors.Faint
+	scroller.ScrollBarImageColor3 = Colors.ShopScrollbar
 	scroller.VerticalScrollBarInset = Enum.ScrollBarInset.Always
 	scroller.ZIndex = content.ZIndex
 	scroller.Parent = content
-	UIKit.Padding(scroller, 4, 8, 12, 4)
+	UIKit.Padding(scroller, 12, 12, 12, 12)
 	local layout = Instance.new("UIListLayout")
 	layout.Padding = UDim.new(0, SECTION_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder

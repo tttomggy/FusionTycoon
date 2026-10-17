@@ -527,7 +527,7 @@ function HudController.BounceCash()
 	bounce(cashLabel)
 end
 
--- Where an effect's icon is (EffectsTray, bottom right) for a purchase flight:
+-- Where an effect's icon is (EffectsTray, bottom left) for a purchase flight:
 -- "Income" | "Luck" | "Server", screen px.
 function HudController.GetEffectTarget(kind: string): Vector2
 	return EffectsTray.GetTarget(kind)
@@ -1073,7 +1073,7 @@ local cashHolder: Frame
 	A big gold "🛒 SHOP" on the left edge, above the LOCK chip (>= 56 px
 	tall), wiggling gently every SHOP_WIGGLE_SECONDS; a red SALE tag only
 	while a real sale is live. The active effects (boost, luck,
-	Overclock, ...) are round icons in UI/EffectsTray, bottom right.
+	Overclock, ...) are round icons in UI/EffectsTray, bottom left.
 	Beside SHOP, the pink "🎁 GIFTS" (GiftsPanel): a green count badge and a
 	bounce while any playtime gift is ready, otherwise a small "next in
 	3:12" pill (hidden once today's gifts are all open).
@@ -2186,7 +2186,7 @@ function HudController.Init()
 	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
-	EffectsTray.Init({ GetBottomRowRect = HudController.GetBottomRowRect })
+	EffectsTray.Init({ GetObstacles = HudController.GetObstacleRects, GetBottomRowRect = HudController.GetBottomRowRect })
 	registerGate()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
