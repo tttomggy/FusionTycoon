@@ -68,6 +68,8 @@ immediate repeat, 2 s fades, default on at 25%.
 
 | Track | Asset id | Source |
 |---|---|---|
-| Morning Mood (Grieg, Kalimba) | 81929495044985 | DistroKid |
+| Morning Mood (Grieg, "Morning" from Peer Gynt, orchestra) | 1839900634 | APM |
 | Clair de Lune (Debussy, solo piano) | 1838457617 | APM |
 | Canon in D (Pachelbel) | 1846764081 | APM |
+| Minute Waltz (Chopin, Op. 64 No. 1) | 1837532334 | APM |
+| The Happy Farmer (Schumann) | 1837532258 | APM |

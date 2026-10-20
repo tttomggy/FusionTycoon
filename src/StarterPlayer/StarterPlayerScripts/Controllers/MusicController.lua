@@ -22,6 +22,7 @@
 	Studio /selftest: MusicController.CheckAll (every track loads) and
 	MusicController.GetSound / IsPlaying (the toggle test).
 ]]
+local Players = game:GetService("Players")
 local ContentProvider = game:GetService("ContentProvider")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -78,6 +79,10 @@ local function nextIndex(): number?
 end
 
 local playNext: () -> ()
+-- /music next: the chosen next track and when the fade-out of this one began.
+local skipTo: number? = nil
+local skipAt = 0
+local SKIP_FADE_SECONDS = 1
 
 -- Skips a track that never loads or errors.
 local function skipFailed(index: number, why: string)
@@ -97,7 +102,8 @@ playNext = function()
 	if not music then
 		return
 	end
-	local index = nextIndex()
+	local index = skipTo or nextIndex()
+	skipTo = nil
 	if not index then
 		music:Stop()
 		current = 0
@@ -154,6 +160,15 @@ local function step(dt: number)
 		fade = math.min(1, music.TimePosition / fadeSeconds, (length - music.TimePosition) / fadeSeconds)
 		fade = math.clamp(fade, 0, 1)
 	end
+	-- /music next: this track fades out over SKIP_FADE_SECONDS, then the next starts.
+	if skipTo then
+		local left = 1 - (os.clock() - skipAt) / SKIP_FADE_SECONDS
+		if left <= 0 then
+			playNext()
+			return
+		end
+		fade = math.min(fade, left)
+	end
 	music.Volume = TycoonController.GetMusicVolume() * fade * duck
 end
 
@@ -175,9 +190,76 @@ function MusicController.Init()
 		end
 	end)
 	SoundKit.SetDuckHandler(onDuck)
+	if RunService:IsStudio() then
+		-- Studio chat: /music next | list (client side, the Sound is here).
+		Players.LocalPlayer.Chatted:Connect(function(message: string)
+			local command, argument = message:lower():match("^(%S+)%s*(.*)$")
+			if command ~= "/music" then
+				return
+			end
+			if argument == "next" then
+				local name = MusicController.Next()
+				print(if name then ("MusicController: next -> %s"):format(name) else "MusicController: no track left to play")
+			elseif argument == "list" then
+				for _, line in MusicController.List() do
+					print(line)
+				end
+			else
+				warn("MusicController: /music next | /music list")
+			end
+		end)
+	end
 	RunService.Heartbeat:Connect(step)
 	started = true
 	playNext()
+end
+
+-- Studio /music next: fades this track out and starts the next one (the
+-- shuffle's pick); returns its name, nil when every track failed.
+function MusicController.Next(): string?
+	local index = nextIndex()
+	if not index then
+		return nil
+	end
+	skipTo = index
+	skipAt = os.clock()
+	return MusicConfig.Tracks[index].Name
+end
+
+-- Studio /music list: each track's name, id, IsLoaded and TimeLength (the
+-- playing one from the playlist Sound, the rest from a probe Sound).
+function MusicController.List(): { string }
+	local lines: { string } = {}
+	local probes: { Sound } = {}
+	for index, track in MusicConfig.Tracks do
+		local music = sound
+		local source: Sound
+		if music and current == index then
+			source = music
+		else
+			source = Instance.new("Sound")
+			source.SoundId = track.Id
+			source.Parent = SoundService
+			table.insert(probes, source)
+		end
+		local waited = 0
+		while not source.IsLoaded and waited < 3 do
+			task.wait(0.25)
+			waited += 0.25
+		end
+		table.insert(lines, ("%d. %s  %s  IsLoaded %s  TimeLength %.1f s%s"):format(
+			index,
+			track.Name,
+			track.Id,
+			tostring(source.IsLoaded),
+			source.TimeLength,
+			if current == index then "  (playing)" else ""
+		))
+	end
+	for _, probe in probes do
+		probe:Destroy()
+	end
+	return lines
 end
 
 -- Studio /selftest (yields): the Sound the playlist uses.
@@ -210,6 +292,24 @@ function MusicController.CheckAll(): { string }
 	end)
 	if not ok then
 		table.insert(problems, "PreloadAsync: " .. tostring(err))
+	end
+	-- Each track must also report IsLoaded within LoadTimeoutSeconds (the same
+	-- limit the playlist skips a track at).
+	local deadline = os.clock() + MusicConfig.LoadTimeoutSeconds
+	for _, probe in probes do
+		probe.Parent = SoundService
+	end
+	for index, probe in probes do
+		while not probe.IsLoaded and os.clock() < deadline do
+			task.wait(0.25)
+		end
+		if not probe.IsLoaded then
+			local track = MusicConfig.Tracks[index]
+			local entry = ("%s %s"):format(track.Name, track.Id)
+			if not table.find(problems, entry) then
+				table.insert(problems, entry .. " (not loaded in time)")
+			end
+		end
 	end
 	for _, probe in probes do
 		probe:Destroy()

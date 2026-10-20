@@ -24,12 +24,16 @@ local function asset(id: number): string
 end
 
 MusicConfig.Tracks = {
-	-- Grieg, "Morning Mood" (Kalimba), DistroKid.
-	{ Name = "Morning Mood", Id = asset(81929495044985) },
+	-- Grieg, "Morning" from Peer Gynt (orchestra), APM.
+	{ Name = "Morning Mood", Id = asset(1839900634) },
 	-- Debussy, "Clair de Lune" (solo piano), APM.
 	{ Name = "Clair de Lune", Id = asset(1838457617) },
 	-- Pachelbel, "Canon in D", APM.
 	{ Name = "Canon in D", Id = asset(1846764081) },
+	-- Chopin, "Minute Waltz" Op. 64 No. 1, APM.
+	{ Name = "Minute Waltz", Id = asset(1837532334) },
+	-- Schumann, "The Happy Farmer" (Album for the Young), APM.
+	{ Name = "The Happy Farmer", Id = asset(1837532258) },
 } :: { Track }
 
 MusicConfig.FadeSeconds = 2 -- in at the start of a track, out at its end

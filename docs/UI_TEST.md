@@ -2094,7 +2094,8 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   slots). In a fight: a swing whooshes, a Bat hit bonks, a Glove hit slaps,
   guns fire, the Freeze Ray crackles, a peel slip whistles, equipping makes a
   small pick-up sound. Tell Claude any slot to swap.
-- [ ] Music plays after the join (Morning Mood, Clair de Lune, Canon in D,
+- [ ] Music plays after the join (Morning Mood (orchestral), Clair de Lune, Canon in D, Minute Waltz, The Happy Farmer;
+  `/music list` shows 5 tracks all loaded, `/music next` skips with a fade,
   shuffled, no immediate repeat, soft fades between tracks). ⚙ Settings →
   **Music**: the toggle stops it and brings it back where it was, the slider
   sets 0–100% (default 25%); it survives a rejoin. Muting Sound effects
