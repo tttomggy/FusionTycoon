@@ -197,11 +197,12 @@ function MusicController.Init()
 			if command ~= "/music" then
 				return
 			end
-			if argument == "next" then
+			local rest: string = argument or ""
+			if rest == "next" then
 				local name = MusicController.Next()
 				print(if name then ("MusicController: next -> %s"):format(name) else "MusicController: no track left to play")
-			elseif argument:sub(1, 5) == "play " then
-				local name = MusicController.Play(argument:sub(6))
+			elseif rest:sub(1, 5) == "play " then
+				local name = MusicController.Play(rest:sub(6))
 				if name then
 					print(("MusicController: playing %s"):format(name))
 				else
@@ -210,7 +211,7 @@ function MusicController.Init()
 						print(line)
 					end
 				end
-			elseif argument == "list" then
+			elseif rest == "list" then
 				for _, line in MusicController.List() do
 					print(line)
 				end
