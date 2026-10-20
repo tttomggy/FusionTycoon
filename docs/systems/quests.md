@@ -52,7 +52,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   **HUD:** the amber 📜 QUESTS button under SHOP / GIFTS (red "!" badge + bounce), the power-up row beside it (only what you own, count
   badges, ✓ armed, Speed Boots seconds; each has a `Plain` line), the active
   ones (Speed Boots timer, Fusion Spark armed, Coin Magnet READY) also show
-  as round cartoon sticker badges in `UI/EffectsTray` bottom LEFT (Bubble Gum Simulator style) with the bank effects (code-built: a gradient disc, a white rim, an outlined glyph and a small animated effect layer behind it; no shop photos; hover or tap shows a tooltip card with the name, the Plain line and the time left), a
+  as round cartoon sticker badges in `UI/EffectsTray` bottom LEFT (Bubble Gum Simulator style) with the bank effects (code-built: a gradient disc, a white rim, an outlined glyph and a small animated effect layer behind it; no shop photos; hover or tap shows a tooltip card to the right of the icon, in its own ScreenGui above the HUD, with the name, the Plain line and the time left), a
   tracker under NEXT GOAL (the
   nearest unfinished quest; tap opens the panel). Analytics
   `QuestClaimed` (id), `PowerUpUsed` (key). Sim (`--quests`, 3 dailies

@@ -2199,7 +2199,13 @@ function HudController.Init()
 	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
-	EffectsTray.Init({ GetObstacles = HudController.GetObstacleRects, GetBottomRowRect = HudController.GetBottomRowRect })
+	EffectsTray.Init({
+		GetObstacles = HudController.GetObstacleRects,
+		GetBottomRowRect = HudController.GetBottomRowRect,
+		GetDisplayOrder = function()
+			return screenGui.DisplayOrder
+		end,
+	})
 	registerGate()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()

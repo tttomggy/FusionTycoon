@@ -109,7 +109,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   the held-weapon checks scaled by avatar height;
   `/combat box` toggles drawing each melee swing's server hitbox (red,
   0.2 s, that weapon's box size);
-  Polish 12 checks: **music** (every track loads, plays, a sting ducks it,
+  Polish 12 checks (the tooltip opens right of the icon in its own layer above the HUD, overlapping no HUD rect): **music** (every track loads, plays, a sting ducks it,
   the toggle stops and resumes it), the **effects tray** cartoon badges and
   tooltips (hover shows name / Plain / time, leave hides, a tap closes after
   3 s), the **unlock card** (Rebirth 0 mentions Rebirth 1), the **QUESTS

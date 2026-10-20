@@ -2111,10 +2111,10 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   with speed lines, 🛡 violet breathing, ⚡ gold with rising sparks, 🧲 red
   with coins drifting in, ⚙️ orange for the server Overclock): no product
   photo, nothing flashing.
-- [ ] Hover an icon (desktop): a dark card pops up ABOVE it at once with the
+- [ ] Hover an icon (desktop): a dark card pops up to the RIGHT of it (above only if there is no room), drawn over the HUD and never covered by the deal tile or the left column, at once with the
   name in bold, what it does ("Rare orbs 2× more likely") and the time left
   ("12:41 left" / "×3 left" / "Ready"), an arrow on the icon, never wider than
-  220 px, never off screen; moving away hides it. On the phone (or a tap) it
+  220 px, never off screen, its arrow pointing left at the icon; moving away hides it. On the phone (or a tap) it
   shows for 3 s or until you tap anywhere else.
 - [ ] Lab chain "Fuse a Mythic": fuse a Mythic BEFORE reaching that step,
   then finish the earlier steps: the step is complete the moment it starts,

@@ -77,6 +77,7 @@ local TOOLTIP_TEXT_SIZE = 14
 local TOOLTIP_PAD = 10
 local TOOLTIP_ARROW = 12 -- the rotated square that points at the icon
 local TOOLTIP_EDGE = 8 -- px kept clear of the screen edge
+local TOOLTIP_LAYER_ABOVE_HUD = 5 -- the tooltip gui's DisplayOrder over the HUD's
 local TAP_SECONDS = 3 -- a tapped tooltip closes by itself after this
 local GLYPH_STROKE = 2
 
@@ -116,10 +117,16 @@ export type Hooks = {
 	GetObstacles: () -> { [string]: Rect },
 	-- Screen-px rect (AbsolutePosition space) of the HUD bottom row, or nil.
 	GetBottomRowRect: () -> Rect?,
+	-- The HUD ScreenGui's DisplayOrder: the tooltip layer sits just above it.
+	GetDisplayOrder: () -> number,
 }
 
 local hooks: Hooks? = nil
 local screenGui: ScreenGui
+-- The tooltip, its arrow and cover live in their own ScreenGui above the HUD
+-- (the tray's own layer is below it, so a tooltip over the HUD's left column
+-- was drawn under it).
+local tooltipGui: ScreenGui
 local tray: Frame
 local gridLayout: UIGridLayout
 local tooltip: Frame
@@ -448,8 +455,11 @@ local function fillTooltip(cell: Cell)
 	tooltipTime.Text = cell.State.Tail
 end
 
--- Above the shown icon, its arrow on the icon's centre, kept on screen.
--- Runs every frame while open (the card's size settles a frame after its text).
+-- To the RIGHT of the shown icon (the empty floor beside the tray), centred
+-- on the badge, its arrow pointing left at the badge's centre; clamped inside
+-- the screen. If it would run past the right edge it opens ABOVE the icon
+-- instead (arrow down). Runs every frame while open (the card's size settles
+-- a frame after its text).
 local function placeTooltip()
 	local id = shownId
 	local cell = if id then cells[id] else nil
@@ -459,16 +469,32 @@ local function placeTooltip()
 	end
 	local scale = UIKit.EffectiveScale(tray)
 	local view = viewportSize()
+	local viewX, viewY = view.X / scale, view.Y / scale
 	local circlePosition, circleSize = cell.Circle.AbsolutePosition, cell.Circle.AbsoluteSize
 	local centreX = (circlePosition.X + circleSize.X / 2) / scale
-	local width = tooltip.AbsoluteSize.X / scale
-	local left = math.clamp(centreX - width / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, view.X / scale - width - TOOLTIP_EDGE))
-	-- Bottom-anchored: the arrow's tip is TOOLTIP_GAP above the badge.
-	local bottom = circlePosition.Y / scale - TOOLTIP_GAP - TOOLTIP_ARROW / 2
-	tooltip.Position = UDim2.fromOffset(left, bottom)
-	local arrowX = math.clamp(centreX - left, TOOLTIP_ARROW + 6, math.max(TOOLTIP_ARROW + 6, width - TOOLTIP_ARROW - 6))
-	tooltipArrow.Position = UDim2.fromOffset(left + arrowX, bottom)
-	tooltipCover.Position = UDim2.fromOffset(left + arrowX, bottom)
+	local centreY = (circlePosition.Y + circleSize.Y / 2) / scale
+	local rightEdge = (circlePosition.X + circleSize.X) / scale
+	local width, height = tooltip.AbsoluteSize.X / scale, tooltip.AbsoluteSize.Y / scale
+	local margin = TOOLTIP_ARROW + 6
+	local left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2
+	if left + width + TOOLTIP_EDGE <= viewX then
+		local top = math.clamp(centreY - height / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewY - height - TOOLTIP_EDGE))
+		local arrowY = top + math.clamp(centreY - top, margin, math.max(margin, height - margin))
+		tooltip.AnchorPoint = Vector2.new(0, 0)
+		tooltip.Position = UDim2.fromOffset(left, top)
+		tooltipCover.Size = UDim2.fromOffset(6, TOOLTIP_ARROW)
+		tooltipArrow.Position = UDim2.fromOffset(left, arrowY)
+		tooltipCover.Position = UDim2.fromOffset(left, arrowY)
+	else
+		left = math.clamp(centreX - width / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE))
+		local bottom = circlePosition.Y / scale - TOOLTIP_GAP - TOOLTIP_ARROW / 2
+		local arrowX = math.clamp(centreX - left, margin, math.max(margin, width - margin))
+		tooltip.AnchorPoint = Vector2.new(0, 1)
+		tooltip.Position = UDim2.fromOffset(left, bottom)
+		tooltipCover.Size = UDim2.fromOffset(TOOLTIP_ARROW, 6)
+		tooltipArrow.Position = UDim2.fromOffset(left + arrowX, bottom)
+		tooltipCover.Position = UDim2.fromOffset(left + arrowX, bottom)
+	end
 	tooltip.Visible = true
 	tooltipArrow.Visible = true
 	tooltipCover.Visible = true
@@ -738,6 +764,7 @@ end
 local function refresh()
 	local hidden = TycoonController.IsTutorialActive() or not TycoonController.HasSynced()
 	screenGui.Enabled = not hidden
+	tooltipGui.Enabled = not hidden
 	local states: { [string]: EffectState } = {}
 	if not hidden then
 		for _, state in collect() do
@@ -833,6 +860,11 @@ function EffectsTray.GetCells(): { CellView }
 	return views
 end
 
+-- /selftest: the tooltip layer's DisplayOrder (it must be above the HUD's).
+function EffectsTray.GetTooltipDisplayOrder(): number
+	return tooltipGui.DisplayOrder
+end
+
 export type TooltipView = {
 	Visible: boolean,
 	Name: string,
@@ -878,6 +910,7 @@ end
 function EffectsTray.Init(hudHooks: Hooks)
 	hooks = hudHooks
 	screenGui = UIKit.Screen("EffectsTray", 39)
+	tooltipGui = UIKit.Screen("EffectsTooltip", hudHooks.GetDisplayOrder() + TOOLTIP_LAYER_ABOVE_HUD)
 
 	tray = Instance.new("Frame")
 	tray.Name = "Tray"
@@ -894,7 +927,7 @@ function EffectsTray.Init(hudHooks: Hooks)
 	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	gridLayout.Parent = tray
 
-	-- One tooltip for the whole tray, above whichever icon is shown: a dark
+	-- One tooltip for the whole tray, beside whichever icon is shown (to its right): a dark
 	-- card (max 220 px wide) with its arrow on the icon.
 	tooltip = Instance.new("Frame")
 	tooltip.Name = "Tooltip"
@@ -905,7 +938,7 @@ function EffectsTray.Init(hudHooks: Hooks)
 	tooltip.Size = UDim2.new()
 	tooltip.Visible = false
 	tooltip.ZIndex = 10
-	tooltip.Parent = screenGui
+	tooltip.Parent = tooltipGui
 	UIKit.Corner(tooltip, 12)
 	UIKit.Stroke(tooltip, 2)
 	-- The text lives in its own padded column.
@@ -956,7 +989,7 @@ function EffectsTray.Init(hudHooks: Hooks)
 	tooltipArrow.BorderSizePixel = 0
 	tooltipArrow.Visible = false
 	tooltipArrow.ZIndex = 9
-	tooltipArrow.Parent = screenGui
+	tooltipArrow.Parent = tooltipGui
 	UIKit.Stroke(tooltipArrow, 2)
 	tooltipCover = Instance.new("Frame")
 	tooltipCover.Name = "TooltipArrowCover"
@@ -966,7 +999,7 @@ function EffectsTray.Init(hudHooks: Hooks)
 	tooltipCover.BorderSizePixel = 0
 	tooltipCover.Visible = false
 	tooltipCover.ZIndex = 11
-	tooltipCover.Parent = screenGui
+	tooltipCover.Parent = tooltipGui
 
 	-- A tap elsewhere closes a pinned tooltip.
 	UserInputService.InputBegan:Connect(function(input: InputObject)

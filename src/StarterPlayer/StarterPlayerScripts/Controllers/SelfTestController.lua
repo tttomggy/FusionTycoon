@@ -2700,8 +2700,34 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if tip.Position.X < -1 or tip.Position.X + tip.Size.X > viewport.X + 1 then
 			table.insert(tipProblems, ("off screen: x %d-%d of %d"):format(tip.Position.X, tip.Position.X + tip.Size.X, viewport.X))
 		end
-		if luckCell and tip.Position.Y + tip.Size.Y > luckCell.Position.Y - inset + 1 then
-			table.insert(tipProblems, "not above the icon")
+		-- Opens to the RIGHT of the icon, centred on it (it only falls back to
+		-- above when there is no room on the right).
+		if luckCell and tip.Position.X < luckCell.Position.X + luckCell.Size.X - 1 and tip.Position.Y + tip.Size.Y > luckCell.Position.Y - inset + 1 then
+			table.insert(tipProblems, "neither right of nor above the icon")
+		end
+		-- Nothing covers it: no HUD rect (left column, deal tile, bottom row)
+		-- or the weapon bar under it, and its layer is above the HUD's.
+		local tipRect = { Position = tip.Position + Vector2.new(0, inset), Size = tip.Size }
+		local covered: { string } = {}
+		local tipObstacles: { [string]: any } = hud.GetObstacleRects()
+		local weaponBar = (require(script.Parent.CombatController) :: any).GetBarRect()
+		if weaponBar then
+			tipObstacles.WeaponBar = weaponBar
+		end
+		for name, rect in tipObstacles do
+			local ox = math.min(tipRect.Position.X + tipRect.Size.X, rect.Position.X + rect.Size.X) - math.max(tipRect.Position.X, rect.Position.X)
+			local oy = math.min(tipRect.Position.Y + tipRect.Size.Y, rect.Position.Y + rect.Size.Y) - math.max(tipRect.Position.Y, rect.Position.Y)
+			if ox > 1 and oy > 1 then
+				table.insert(covered, name)
+			end
+		end
+		table.sort(covered)
+		if #covered > 0 then
+			table.insert(tipProblems, "overlaps " .. table.concat(covered, ", "))
+		end
+		local hudGuiForOrder = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
+		if hudGuiForOrder and hudGuiForOrder:IsA("ScreenGui") and EffectsTray.GetTooltipDisplayOrder() <= hudGuiForOrder.DisplayOrder then
+			table.insert(tipProblems, ("layer %d is not above the HUD's %d"):format(EffectsTray.GetTooltipDisplayOrder(), hudGuiForOrder.DisplayOrder))
 		end
 		table.insert(lines, {
 			Ok = #tipProblems == 0,
