@@ -22,7 +22,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   (a daily id or `chain`; the warning lists today's) / `/quest reset` /
   **`/quest status`** (each quest's kind, counter base, progress, Done /
   Claimed and your `Fused_*` stats: why a quest isn't done),
-  `/powerup <key> <n>`, **`/music next`** (fades to the next playlist track now and prints its name) / **`/music list`** (each track's name, id, `IsLoaded`, `TimeLength`; both run on the client and print to its Output), **`/sound <slot>`** (plays that SoundConfig slot at
+  `/powerup <key> <n>`, **`/music play <name>`** (fades to the track whose name contains `<name>`, case-insensitive, e.g. `/music play radetzky`; no match prints the track list) / **`/music next`** (fades to the next playlist track now and prints its name) / **`/music list`** (each track's name, id, `IsLoaded`, `TimeLength`; both run on the client and print to its Output), **`/sound <slot>`** (plays that SoundConfig slot at
   your character, any case; no argument lists the slots; swap ids in
   `SoundConfig.lua`),
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,

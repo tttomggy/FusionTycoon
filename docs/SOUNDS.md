@@ -73,3 +73,9 @@ immediate repeat, 2 s fades, default on at 25%.
 | Canon in D (Pachelbel) | 1846764081 | APM |
 | Minute Waltz (Chopin, Op. 64 No. 1) | 1837532334 | APM |
 | The Happy Farmer (Schumann) | 1837532258 | APM |
+| Eine kleine Nachtmusik, 1st mvt (Mozart) | 1837488321 | APM |
+| Rondo alla Turca (Mozart) | 1836330848 | APM |
+| Hungarian Dance No. 5 (Brahms, orchestra) | 1842150470 | APM |
+| Radetzky March (J. Strauss I, orchestra) | 1844280451 | APM |
+| Waltz of the Flowers (Tchaikovsky) | 117798839485945 | APM |
+| Brandenburg Concerto No. 3, 1st mvt (Bach) | 1842163801 | APM |

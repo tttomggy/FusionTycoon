@@ -200,12 +200,22 @@ function MusicController.Init()
 			if argument == "next" then
 				local name = MusicController.Next()
 				print(if name then ("MusicController: next -> %s"):format(name) else "MusicController: no track left to play")
+			elseif argument:sub(1, 5) == "play " then
+				local name = MusicController.Play(argument:sub(6))
+				if name then
+					print(("MusicController: playing %s"):format(name))
+				else
+					warn("MusicController: no track matches; the tracks are:")
+					for _, line in MusicController.List() do
+						print(line)
+					end
+				end
 			elseif argument == "list" then
 				for _, line in MusicController.List() do
 					print(line)
 				end
 			else
-				warn("MusicController: /music next | /music list")
+				warn("MusicController: /music next | /music list | /music play <name>")
 			end
 		end)
 	end
@@ -224,6 +234,23 @@ function MusicController.Next(): string?
 	skipTo = index
 	skipAt = os.clock()
 	return MusicConfig.Tracks[index].Name
+end
+
+-- Studio /music play <name>: fades to the first track whose name contains
+-- `query` (case-insensitive); returns its name, nil when none matches.
+function MusicController.Play(query: string): string?
+	local needle = query:lower():gsub("^%s+", ""):gsub("%s+$", "")
+	if needle == "" then
+		return nil
+	end
+	for index, track in MusicConfig.Tracks do
+		if track.Name:lower():find(needle, 1, true) then
+			skipTo = index
+			skipAt = os.clock()
+			return track.Name
+		end
+	end
+	return nil
 end
 
 -- Studio /music list: each track's name, id, IsLoaded and TimeLength (the

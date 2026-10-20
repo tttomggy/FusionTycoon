@@ -34,6 +34,18 @@ MusicConfig.Tracks = {
 	{ Name = "Minute Waltz", Id = asset(1837532334) },
 	-- Schumann, "The Happy Farmer" (Album for the Young), APM.
 	{ Name = "The Happy Farmer", Id = asset(1837532258) },
+	-- Mozart, "Eine kleine Nachtmusik" 1st mvt Allegro, APM.
+	{ Name = "Eine kleine Nachtmusik", Id = asset(1837488321) },
+	-- Mozart, "Rondo alla Turca" (Turkish March), APM.
+	{ Name = "Rondo alla Turca", Id = asset(1836330848) },
+	-- Brahms, "Hungarian Dance No. 5" (orchestra), APM.
+	{ Name = "Hungarian Dance No. 5", Id = asset(1842150470) },
+	-- J. Strauss I, "Radetzky March" (orchestra), APM.
+	{ Name = "Radetzky March", Id = asset(1844280451) },
+	-- Tchaikovsky, "Waltz of the Flowers", APM.
+	{ Name = "Waltz of the Flowers", Id = asset(117798839485945) },
+	-- Bach, "Brandenburg Concerto No. 3" 1st mvt, APM.
+	{ Name = "Brandenburg Concerto No. 3", Id = asset(1842163801) },
 } :: { Track }
 
 MusicConfig.FadeSeconds = 2 -- in at the start of a track, out at its end
