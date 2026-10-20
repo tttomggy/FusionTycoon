@@ -45,16 +45,29 @@ needs to change.
 | `RevealMinor` | 15675055424 | Roblox_UI_Cute_Pop | 0.45 | Other fusion reveals (RevealEffects), skipped-card pulls (ResultController) | picked by Claude |
 | `Toast` | 15675059323 | Roblox_UI_Bright_Click | 0.35 | Top announcement banners (AnnouncementController); the Settings volume preview | picked by Claude |
 | `Station` | 10066947742 | RBLX UI Purchase (SFX) | 0.5 | A station purchase: Multiplier Pad, gacha (TycoonService, at the pad) | server-played, still follows each player's volume; picked by Claude |
-| `Bonk` | **empty** | (pick: a cartoon bonk, a short hollow "bonk" / wooden thunk with a boing, 0.3–0.6 s) | 0.6 | A Bat / Slap Glove / Laser hit lands, at the target (CombatController, `PlayAt`) | positional, RollOffMaxDistance 120, PlaybackSpeed 0.9–1.1; silent until an id is set |
-| `Laser` | **empty** | (pick: a short sci-fi laser zap, a bright "pew", 0.2–0.5 s) | 0.5 | A Laser Gun shot, at the muzzle | positional, RollOffMaxDistance 150; silent until an id is set |
-| `Freeze` | **empty** | (pick: an ice crackle: a glassy freeze-over "shhk" with crystal tinkles, 0.5–1 s) | 0.5 | A Freeze Ray shot (at the muzzle) and the freeze landing (at the target) | positional, RollOffMaxDistance 120; silent until an id is set |
-| `Slip` | **empty** | (pick: a cartoon slip: a rising slide-whistle "wheeeee" or a squeaky skid, 0.4–0.8 s) | 0.6 | Someone steps on a Banana Peel | positional, RollOffMaxDistance 120; silent until an id is set |
-| `Swing` | **empty** | (pick: a quick whoosh, airy and short, 0.2–0.35 s; it plays at the start of every Bat / Slap Glove swing, hit or miss) | 0.5 | A melee swing starts, at the swinger (yours the moment you click, others from `HitFx` Swing) | positional, RollOffMaxDistance 90, PlaybackSpeed 0.95–1.1; silent until an id is set |
-| `Shoot` | **empty** | (pick: a soft mechanical trigger click plus a small air thump, 0.1–0.25 s; layered under Laser / Freeze) | 0.45 | A gun fires, at the shooter (Freeze Ray plays it at 0.8 speed) | positional, RollOffMaxDistance 120; silent until an id is set |
-| `Equip` | **empty** | (pick: a light metallic "shink" / holster slide, 0.15–0.3 s) | 0.4 | A weapon comes up in someone's hand, at them | positional, RollOffMaxDistance 60; silent until an id is set |
+| `Bonk` | 121015905545694 | "Hit_Fryingpan" | 0.6 | A **Bat** hit lands, at the target (CombatController, `PlayAt`) | positional, RollOffMaxDistance 120, PlaybackSpeed 0.9–1.1; picked by Claude (Polish 12), judge by ear with `/sound Bonk` |
+| `Slap` | 9114758204 | ProSoundEffects "Hand Clap 1" | 0.65 | A **Slap Glove** hit lands, at the target | positional, RollOffMaxDistance 120, PlaybackSpeed 0.95–1.05; `/sound Slap` |
+| `Laser` | 96445944074750 | "eblaster_blast_fire_01" at 1.3× | 0.5 | A Laser Gun beam, at the muzzle | positional, RollOffMaxDistance 150, fixed `PlaybackSpeed` 1.3 (the same clip as `Shoot`); `/sound Laser` |
+| `Freeze` | 87971519891129 | "AW Freeze Spreading" | 0.5 | A Freeze Ray shot (at the muzzle) and the freeze landing (at the target) | positional, RollOffMaxDistance 120; `/sound Freeze` |
+| `Slip` | 97197794979302 | "slide whistle" | 0.6 | Someone steps on a Banana Peel | positional, RollOffMaxDistance 120; `/sound Slip` |
+| `Swing` | 9120972321 | ProSoundEffects "Wood Whoosh Quick Swing" | 0.5 | A melee swing starts, at the swinger (yours the moment you click, others from `HitFx` Swing) | positional, RollOffMaxDistance 90, PlaybackSpeed 0.95–1.1; `/sound Swing` |
+| `Shoot` | 96445944074750 | "eblaster_blast_fire_01" | 0.45 | A gun fires, at the shooter (Freeze Ray plays it at 0.8 speed) | positional, RollOffMaxDistance 120; `/sound Shoot` |
+| `Equip` | 9117509491 | ProSoundEffects "Plastic Flashlight pick up" | 0.4 | A weapon comes up in someone's hand, at them | positional, RollOffMaxDistance 60; `/sound Equip` |
 
-> **For Harris:** the seven combat slots above are still empty. I couldn't
-> look up Creator Store ids from the build environment, so none are picked;
-> each row says what it should sound like. Search the Creator Store
-> (Audio → Sound effects) for the creator "Roblox", put the numeric id
-> into the slot in `SoundConfig.lua`, and tune `Volume`.
+> **For Harris (Polish 12):** every combat slot now has an id (APM /
+> ProSoundEffects / short public SFX, picked by name, not by ear). Audition
+> each in Studio with `/sound <slot>` (e.g. `/sound Bonk`), swap any that
+> miss in `SoundConfig.lua` and tune `Volume`. `RevealMajor` and
+> `EventReveal` also duck the background music (`DucksMusic`).
+
+## Music (`MusicConfig`, `MusicController`)
+
+Not a SoundConfig slot: one `Sound` in SoundService (not in the SFX group,
+so muting sound effects keeps the music), playlist shuffled with no
+immediate repeat, 2 s fades, default on at 25%.
+
+| Track | Asset id | Source |
+|---|---|---|
+| Morning Mood (Grieg, Kalimba) | 81929495044985 | DistroKid |
+| Clair de Lune (Debussy, solo piano) | 1838457617 | APM |
+| Canon in D (Pachelbel) | 1846764081 | APM |

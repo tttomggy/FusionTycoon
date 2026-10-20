@@ -16,7 +16,13 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   UpgradeLevels, Knocks, Fused_<Tier>; bumped at the real sources via
   `PlayerDataService.AddStat`), TotalFusions, TotalSteals, the inventory,
   the Index, rebirths, base income; counted kinds measure growth from a
-  Base taken when the quest started. An OnSync hook hands out, measures,
+  Base taken when the quest started, **except chain steps of an
+  achievement kind** (`QuestConfig.AchievementKinds`, today `FuseInto`:
+  "Fuse a Mythic"): they count from 0, the lifetime `Fused_<Tier>` stat, so
+  a Mythic fused before the step began still counts (this was why a friend
+  who fused one early never got the Slap Glove; `onSync` ignores any stored
+  `ChainBase` for these, which heals old saves). Daily quests keep counting
+  from their start. An OnSync hook hands out, measures,
   latches `Done` and publishes the status (`SetQuestStatus` → snapshot
   `Quests`, plus `PowerUps` and `Armed`). `PlayerData.Quests = { UtcDay,
   Daily = { { Id, Target, Base, Done, Claimed } }, Chain, ChainBase,
@@ -32,11 +38,21 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   in the Fuse panel's %, spent success or fail), 🧲 Coin Magnet (armed:
   EventService collects every Golden Rain coin you may take within 20
   studs through the same path as a touch, then disarms at that rain's
-  end). **HUD:** the amber 📜 QUESTS button under SHOP / GIFTS (green ready
-  badge + bounce), the power-up row beside it (only what you own, count
+  end). **Ready claims are loud:** when a chain step completes the server sends
+  `QuestResult { Result = "Ready", Text }` once per step per session (a toast "Lab quest done!
+  Claim your Slap Glove in QUESTS" + sound; a still-unclaimed step tells
+  you again after a rejoin), and the QUESTS button wears a red "!" badge
+  (a daily or the chain) and bounces until it's claimed
+  (`HudController.GetQuestsBadge`, `/selftest`). A weapon earned before
+  Rebirth 1 (the Slap Glove at Rebirth 0) is saved; its unlock card reads
+  "You got the Slap Glove! … Fighting unlocks at Rebirth 1"
+  (`CombatController.GetUnlockCardText`) and the weapon bar appears at
+  Rebirth 1 with it in. Studio `/quest status` prints each quest's kind,
+  base, progress, Done / Claimed and the `Fused_*` stats.
+  **HUD:** the amber 📜 QUESTS button under SHOP / GIFTS (red "!" badge + bounce), the power-up row beside it (only what you own, count
   badges, ✓ armed, Speed Boots seconds; each has a `Plain` line), the active
   ones (Speed Boots timer, Fusion Spark armed, Coin Magnet READY) also show
-  as round icons in `UI/EffectsTray` bottom LEFT (Bubble Gum Simulator style) with the bank effects, a
+  as round cartoon sticker badges in `UI/EffectsTray` bottom LEFT (Bubble Gum Simulator style) with the bank effects (code-built: a gradient disc, a white rim, an outlined glyph and a small animated effect layer behind it; no shop photos; hover or tap shows a tooltip card with the name, the Plain line and the time left), a
   tracker under NEXT GOAL (the
   nearest unfinished quest; tap opens the panel). Analytics
   `QuestClaimed` (id), `PowerUpUsed` (key). Sim (`--quests`, 3 dailies

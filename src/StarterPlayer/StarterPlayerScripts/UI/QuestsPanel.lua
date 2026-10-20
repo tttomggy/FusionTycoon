@@ -379,6 +379,12 @@ local function onQuestResult(payload: any)
 	if typeof(payload) ~= "table" then
 		return
 	end
+	if payload.Result == "Ready" then
+		-- A lab quest step just completed: say where the reward is.
+		SoundKit.Play("RevealMinor", nil)
+		ToastController.Show(if typeof(payload.Text) == "string" then payload.Text else "Lab quest done! Claim it in QUESTS", "Neutral", { Big = true })
+		return
+	end
 	if typeof(payload.Id) == "string" then
 		pendingClaims[payload.Id] = nil
 	end

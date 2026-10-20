@@ -19,8 +19,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
   `/tutorial step <n>`, `/weapons all | reset`, `/anim export` (every weapon clip as a KeyframeSequence in `ServerStorage.WeaponAnimExports`; see combat.md for Save to Roblox), `/quest complete <id>`
-  (a daily id or `chain`; the warning lists today's) / `/quest reset`,
-  `/powerup <key> <n>`,
+  (a daily id or `chain`; the warning lists today's) / `/quest reset` /
+  **`/quest status`** (each quest's kind, counter base, progress, Done /
+  Claimed and your `Fused_*` stats: why a quest isn't done),
+  `/powerup <key> <n>`, **`/sound <slot>`** (plays that SoundConfig slot at
+  your character, any case; no argument lists the slots; swap ids in
+  `SoundConfig.lua`),
   `/event <id> [minutes]` (forces an event: GoldenRain, PowerSurge,
   MeteorShower, RainbowStorm, Night, VoidMoon), `/event off`,
   `/shop grant <key>` (any ShopConfig key, the real grant path, no Robux),
@@ -104,7 +108,14 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   its own client; then out of the box → MISS) and the combat section ends with
   the held-weapon checks scaled by avatar height;
   `/combat box` toggles drawing each melee swing's server hitbox (red,
-  0.2 s);
+  0.2 s, that weapon's box size);
+  Polish 12 checks: **music** (every track loads, plays, a sting ducks it,
+  the toggle stops and resumes it), the **effects tray** cartoon badges and
+  tooltips (hover shows name / Plain / time, leave hides, a tap closes after
+  3 s), the **unlock card** (Rebirth 0 mentions Rebirth 1), the **QUESTS
+  badge** and the "Fuse a Mythic" chain step (complete at once with
+  `Fused_Mythic = 1`, the claim grants the Slap Glove), and the swing test
+  with the victim 6 studs in front and 3 to the side (must HIT);
   **`/selftest cards`** only the card-placement checks (desktop +
   phone, next and running events, tutorial OK row on/off). Its
   last part drives a reset tutorial through every step on the real

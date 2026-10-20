@@ -11,7 +11,8 @@ src/ReplicatedStorage/Shared/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
                  EventConfig — the event clock, effects and info-card copy,
-                 SoundConfig — every sound slot, AdminConfig —
+                 SoundConfig — every sound slot,
+                 MusicConfig — the background playlist and its fades, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
                  GoalConfig — the ordered onboarding goals,
@@ -78,6 +79,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   toast + bump), FactoryController (client-only cash balls
                   on every nearby factory line, collector pops),
                   JumpPadController (the 2nd floor's jump pads),
+                  MusicController (the background playlist),
                   EventController (event banners, sky, FX, HUD chip, Event
                   Boards), AdminController (admin panel + broadcasts),
                   ShopController, DailyController (when the daily card
@@ -89,10 +91,10 @@ src/StarterPlayer/StarterPlayerScripts/
                   ItemPickerUI, RebirthPanel, IndexPanel, FusePanel (2–6
                   orb fusion chamber + picker, opened by the machine prompt),
                   AdminPanel (built only on the server's AdminOpen),
-                  SettingsPanel (the ⚙ button: reveal-card rules),
+                  SettingsPanel (the ⚙ button: reveal-card rules, sound and music volume),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
                   deal side cards), DealParts (part tiles + YOU GET list),
-                  EffectsTray (active effects as round icons, bottom left),
+                  EffectsTray (active effects as cartoon badges + tooltips, bottom left),
                   PurchaseCelebration (the reveal after a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),

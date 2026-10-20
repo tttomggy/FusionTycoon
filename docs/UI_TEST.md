@@ -1548,14 +1548,15 @@ Heist, the result cards, the celebration):
   worth line, Not now / See deal; on a phone the YOU GET list drops out if
   the card would climb into the top bar). The Starter Pack card (session 2)
   has the same tiles + list.
-- [ ] **Effects tray** (bottom LEFT, Polish 11): `/shop grant LuckPotion`, `/shop grant
+- [ ] **Effects tray** (bottom LEFT, Polish 11, restyled Polish 12): `/shop grant LuckPotion`, `/shop grant
   SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
-  Magnet: round icons with a timer under (m:ss, h:mm:ss past an hour), `×N`
+  Magnet: round cartoon sticker badges (60 px, gradient, white rim, an outlined
+  glyph and a small animation behind it) with a timer under (m:ss, h:mm:ss past an hour), `×N`
   badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
   pop in on gaining and shrink out at the end, nothing flashes in the last
-  minute. Tap or hover one: a tooltip ("Rare orbs 2× more likely · 12:41
-  left"), one at a time; tap elsewhere closes it. 16 px from the left edge,
-  bottom level with the bottom button row, 64 px icons, 4 to a row, more
+  minute. Hover or tap one: a dark tooltip card above it (name, what it
+  does, time left; see Polish 12). 16 px from the left edge,
+  bottom level with the bottom button row, 60 px badges, 4 to a row, more
   rows stack upward. If it would touch the left column or the bottom row
   the icons drop to 48 px, then 3 per row; if it still touches (a phone with
   a tall left column) it sits to the right of the left column, still
@@ -2085,3 +2086,42 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   4 per row, more rows upward; on the phone it never covers the left column.
 - [ ] `/selftest`: "shop bundles", "shop text", "side cards", "Pocket Cash
   line", the effects-tray lines (bottom-left quarter, live timers) pass.
+
+**Polish 12: weapon sounds, music, bigger melee box, cartoon effect badges, the Mythic quest.**
+
+- [ ] `/sound Bonk`, `Slap`, `Swing`, `Shoot`, `Laser`, `Freeze`, `Slip`,
+  `Equip`: each plays a sound at your character (`/sound` alone lists the
+  slots). In a fight: a swing whooshes, a Bat hit bonks, a Glove hit slaps,
+  guns fire, the Freeze Ray crackles, a peel slip whistles, equipping makes a
+  small pick-up sound. Tell Claude any slot to swap.
+- [ ] Music plays after the join (Morning Mood, Clair de Lune, Canon in D,
+  shuffled, no immediate repeat, soft fades between tracks). ⚙ Settings →
+  **Music**: the toggle stops it and brings it back where it was, the slider
+  sets 0–100% (default 25%); it survives a rejoin. Muting Sound effects
+  keeps the music. A big reveal sting (a Mythic fusion) dips the music for
+  about 2 s.
+- [ ] Melee is forgiving: a Bat swing lands on someone 6 studs ahead and 3
+  to the side; `/combat box` shows the box (Bat 9 × 8 × 10, Glove 11 × 8 × 11,
+  a red part for 0.2 s); a runner who just stepped out of the box as you
+  swung still gets hit; someone 7+ studs to the side is still a miss.
+- [ ] `/shop grant LuckPotion`, `/shop grant SafeFusion5`, `/powerup
+  CashBurst 1` + use it, `/powerup SpeedBoots 1` + use it, arm a Fusion
+  Spark and a Coin Magnet: each effect is a cartoon sticker (💵 green with
+  orbiting coins and a twinkle, 🍀 teal with a turning shine ring, 👟 blue
+  with speed lines, 🛡 violet breathing, ⚡ gold with rising sparks, 🧲 red
+  with coins drifting in, ⚙️ orange for the server Overclock): no product
+  photo, nothing flashing.
+- [ ] Hover an icon (desktop): a dark card pops up ABOVE it at once with the
+  name in bold, what it does ("Rare orbs 2× more likely") and the time left
+  ("12:41 left" / "×3 left" / "Ready"), an arrow on the icon, never wider than
+  220 px, never off screen; moving away hides it. On the phone (or a tap) it
+  shows for 3 s or until you tap anywhere else.
+- [ ] Lab chain "Fuse a Mythic": fuse a Mythic BEFORE reaching that step,
+  then finish the earlier steps: the step is complete the moment it starts,
+  a toast says "Lab quest done! Claim your Slap Glove in QUESTS", the QUESTS
+  button wears a red "!" until you claim it, and claiming grants the Slap
+  Glove. At Rebirth 0 its unlock card ends "Fighting unlocks at Rebirth 1";
+  at Rebirth 1 the weapon bar shows it. `/quest status` explains any quest.
+- [ ] `/selftest`: "music", "unlock card", "quests: a chain step …",
+  "effects tray (…): cartoon badges / hovering the Luck icon / leaving /
+  a tap", "combat swing (…): 6 studs in front and 3 to the side" pass.

@@ -46,6 +46,7 @@ local warned: { [string]: boolean } = {}
 -- Sounds of each slot currently playing (the per-slot cap).
 local playing: { [string]: number } = {}
 local sfxVolume = 1
+local duckHandler: (() -> ())? = nil
 local rng = Random.new()
 
 local function warnOnce(slot: string, id: string)
@@ -97,7 +98,7 @@ function SoundKit.Play(slot: string, parent: Instance?, options: PlayOptions?): 
 	sound.PlaybackSpeed = if options and options.PlaybackSpeed
 		then options.PlaybackSpeed
 		elseif jitter then rng:NextNumber(jitter[1], jitter[2])
-		else 1
+		else config.PlaybackSpeed or 1
 	if parent and config.RollOffMaxDistance then
 		sound.RollOffMaxDistance = config.RollOffMaxDistance
 	end
@@ -113,6 +114,9 @@ function SoundKit.Play(slot: string, parent: Instance?, options: PlayOptions?): 
 	sound.Destroying:Once(release)
 	sound.Parent = parent or SoundService
 	sound:Play()
+	if config.DucksMusic and duckHandler then
+		duckHandler()
+	end
 	Debris:AddItem(sound, if options and options.Lifetime then options.Lifetime else DEFAULT_LIFETIME)
 	return sound
 end
@@ -131,6 +135,11 @@ function SoundKit.PlayAt(slot: string, position: Vector3, options: PlayOptions?)
 	return sound
 end
 
+-- Client: MusicController's dip, run when a DucksMusic slot plays.
+function SoundKit.SetDuckHandler(handler: (() -> ())?)
+	duckHandler = handler
+end
+
 -- Client: the player's sound-effects volume (0..1; 0 = muted).
 function SoundKit.SetVolume(volume: number)
 	sfxVolume = math.clamp(if volume == volume then volume else 1, 0, 1)
@@ -142,7 +151,8 @@ function SoundKit.SetVolume(volume: number)
 end
 
 -- Studio /selftest (client, yields): loads every slot's sound now and
--- returns the slots whose id failed ("" ids are silent on purpose, skipped).
+-- returns "<slot> <id>" for each slot whose id failed ("" ids are silent on
+-- purpose, skipped).
 function SoundKit.CheckAll(): { string }
 	local failed: { string } = {}
 	local slotsById: { [string]: { string } } = {}
@@ -164,7 +174,7 @@ function SoundKit.CheckAll(): { string }
 				local slots = slotsById[contentId]
 				if slots then
 					for _, slot in slots do
-						table.insert(failed, slot)
+						table.insert(failed, ("%s %s"):format(slot, contentId))
 					end
 				end
 			end

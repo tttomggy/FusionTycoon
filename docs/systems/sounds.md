@@ -17,3 +17,29 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `RollOffMaxDistance` (Thunder 150, MeteorImpact 200 via
   `SoundKit.PlayAt`). No looping ambient sounds (the pedestal bell loop is
   gone). `docs/SOUNDS.md` lists every slot with its id and name.
+  **Combat sounds (Polish 12):** every combat slot has an id: `Swing`
+  (Bat / Glove swing), `Bonk` (Bat hit), **`Slap`** (Glove hit; the
+  CombatController `Bonk` HitFx plays `Slap` for `SlapGlove`), `Shoot`
+  (Laser Gun / Freeze Ray fire), `Laser` (the same clip at a fixed
+  `PlaybackSpeed` 1.3, via the slot's `PlaybackSpeed` field), `Freeze`,
+  `Slip`, `Equip`. Studio **`/sound <slot>`** plays a slot at your
+  character (no argument lists them). `SoundKit.CheckAll` (in `/selftest`)
+  loads every slot and the FAIL names each failing `<slot> <id>`.
+  **Music** (`MusicConfig`, client `MusicController`): one `Sound`
+  ("Music", SoundService, not in the SFX group) plays Morning Mood, Clair
+  de Lune and Canon in D shuffled with no immediate repeat (a shuffled bag
+  whose first track is never the last one played), not looped; the next
+  track starts when one ends, each fading in over 2 s and out over its last
+  2 s (`MusicConfig.FadeSeconds`). Level = `MusicVolume` × fade × duck, set
+  every frame. **Settings** `MusicOn` (default true) and `MusicVolume`
+  (0–1, default 0.25, server-clamped), via `SetSetting { Key = "MusicOn" |
+  "MusicVolume", Value }`; ⚙ Settings has a **Music** section (the same
+  slider + toggle row as Sound effects). Off = the Sound is paused and
+  resumes where it was; silent until the first snapshot (a saved "off"
+  never blips on at boot). **Ducking:** a slot with `DucksMusic`
+  (`RevealMajor`, `EventReveal`: the big reveal stings) tells
+  `MusicController` through `SoundKit.SetDuckHandler`, and the music dips
+  to 40% for 2 s (`MusicConfig.Duck*`). A track that has not loaded after
+  15 s is skipped (warn, not retried). `/selftest`: every track loads, the
+  playlist plays, a sting ducks it, the toggle stops it and turning it back
+  on resumes it.

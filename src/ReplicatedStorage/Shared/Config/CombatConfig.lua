@@ -36,6 +36,8 @@ export type Weapon = {
 	Knockback: number,
 	UnlockRebirth: number?,
 	Blurb: string, -- the unlock card
+	MeleeBox: Vector3?, -- melee only: the server's hit box (X wide, Y tall, Z deep)
+	MeleeBoxForward: number?, -- melee only: its centre, studs in front of the root
 }
 
 CombatConfig.MinRebirths = 1 -- both sides (the same gate as stealing)
@@ -58,13 +60,17 @@ CombatConfig.UpwardKick = 25 -- added to every knockback (a little hop)
 CombatConfig.HitsPerSecond = 4 -- RequestHit rate limit (spam is dropped)
 CombatConfig.HitBurst = 6
 -- Melee hit detection is the SERVER's: after MeleeHitDelay (about the clip's
--- Hit marker) it boxes MeleeBox studs (X wide, Y tall, Z deep) in front of
--- the attacker's root, its centre MeleeBoxForward studs forward, and takes
--- the players whose characters overlap it. The Bat hits the nearest one, the
--- Slap Glove everyone in the box. The client sends only the weapon id.
+-- Hit marker) it boxes the weapon's MeleeBox studs (X wide, Y tall, Z deep)
+-- in front of the attacker's root, its centre MeleeBoxForward studs forward,
+-- and takes the players whose characters overlap it. The box is generous on
+-- purpose ("you have to hit exactly at them" was the complaint). Lag
+-- tolerance: a player whose root was inside the box at the swing REQUEST
+-- time also counts (the server keeps each root's last HistorySeconds of
+-- positions). The Bat hits the nearest one, the Slap Glove everyone in the
+-- box. The client sends only the weapon id. A target further than the
+-- weapon's Range + RangeSlack from the attacker is never hit.
 CombatConfig.MeleeHitDelay = 0.15
-CombatConfig.MeleeBox = Vector3.new(6, 6, 7)
-CombatConfig.MeleeBoxForward = 3.5
+CombatConfig.HistorySeconds = 0.3
 
 CombatConfig.SpinImpulse = Vector3.new(0, 14, 5) -- per unit of mass: a peel slip / the glove spins you
 
@@ -106,6 +112,8 @@ CombatConfig.Weapons = {
 		Knockback = 30,
 		UnlockRebirth = 1,
 		Blurb = "Hit a thief to make them drop your orb.",
+		MeleeBox = Vector3.new(9, 8, 10),
+		MeleeBoxForward = 4.5,
 	},
 	{
 		Id = "LaserGun",
@@ -139,6 +147,8 @@ CombatConfig.Weapons = {
 		Knockback = 42,
 		UnlockRebirth = nil,
 		Blurb = "One slap sends them flying.",
+		MeleeBox = Vector3.new(11, 8, 11),
+		MeleeBoxForward = 5,
 	},
 	{
 		Id = "BananaPeel",
@@ -163,6 +173,12 @@ function CombatConfig.GetWeapon(id: unknown): Weapon?
 		end
 	end
 	return nil
+end
+
+-- A melee weapon's server hit box: its size and how far in front of the
+-- attacker's root its centre sits.
+function CombatConfig.GetMeleeBox(weapon: Weapon): (Vector3, number)
+	return weapon.MeleeBox or Vector3.new(6, 6, 7), weapon.MeleeBoxForward or 3.5
 end
 
 -- The weapons a rebirth count earns on its own (the Slap Glove and Banana

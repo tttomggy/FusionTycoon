@@ -36,6 +36,7 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local SoundConfig = require(ReplicatedStorage.Shared.Config.SoundConfig)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 local LogService = game:GetService("LogService")
 local Workspace = game:GetService("Workspace")
@@ -136,11 +137,16 @@ local TUTORIAL_COMMAND = "/tutorial"
 local WEAPONS_COMMAND = "/weapons"
 local ANIM_COMMAND = "/anim"
 -- "/combat box" toggles drawing each melee swing's server hitbox (a red
--- transparent part for 0.2 s).
+-- transparent part for 0.2 s, sized to that weapon's MeleeBox).
 local COMBAT_COMMAND = "/combat"
 -- "/quest complete <id>" latches a daily ("pull20", ...) or "chain" done;
--- "/quest reset" hands today's dailies out again and restarts the chain.
+-- "/quest reset" hands today's dailies out again and restarts the chain;
+-- "/quest status" prints each quest's kind, base, progress, Done / Claimed
+-- and the Fused_* stats (why a quest isn't done).
 local QUEST_COMMAND = "/quest"
+-- "/sound <slot>" plays that SoundConfig slot at your character (any case)
+-- to judge it by ear; "/sound" alone lists the slots.
+local SOUND_COMMAND = "/sound"
 -- "/powerup <key> <n>" sets a power-up's count (QuestConfig key, any case).
 local POWERUP_COMMAND = "/powerup"
 -- "/event powersurge 3" forces an event for 3 min (default its normal
@@ -385,14 +391,14 @@ function runLaunchSelfTest(player: Player, result: (boolean, string, string?) ->
 end
 
 -- 2 players: the REAL chain, which every other combat check skipped (they call
--- ApplyHit). Player2 is put 3 studs in front of Player1, face to face; the
+-- ApplyHit). Player2 is put 6 studs in front of Player1 and 3 to the side
+-- (a near miss that used to whiff), facing Player1; the
 -- Bat is equipped through a real Tool and Player1's CLIENT clicks it
 -- (CombatController.Use, what Tool.Activated calls); the server's box must
 -- log "HIT Player2" and Player2 must fly, measured on Player2's own client.
--- Then the Glove. Then Player2 6 studs to Player1's side, out of the box (the
--- box is 3 studs either side and an avatar 4 wide, so at 5 an arm only just
--- touches it): the
--- log says MISS and Player2 does not move.
+-- Then the Glove. Then Player2 out to the side beyond the weapon's box (box
+-- half-width + 2.5: 7 studs for the Bat; an avatar is 4 wide, so an arm
+-- reaches 2 in): the log says MISS and Player2 does not move.
 function runSwingSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	local target: Player? = nil
 	for _, candidate in Players:GetPlayers() do
@@ -468,8 +474,13 @@ function runSwingSelfTest(player: Player, result: (boolean, string, string?) -> 
 		local equipped = (tool :: Instance).Parent == attackerCharacter
 		result(equipped, ("combat swing (%s): the tool is equipped on the attacker"):format(weapon.Name), ("tool parent %s"):format(tostring((tool :: Instance).Parent)))
 		if equipped then
-			for _, case in { { "front", Vector3.new(0, 0, -3) }, { "side", Vector3.new(6, 0, 0) } } do
-				local label = ("%s, victim %s"):format(weapon.Name, if case[1] == "front" then "3 studs in front" else "6 studs to the side, out of the box")
+			local boxSize = CombatConfig.GetMeleeBox(weapon)
+			local missSide = boxSize.X / 2 + 2.5
+			for _, case in { { "front", Vector3.new(3, 0, -6) }, { "side", Vector3.new(missSide, 0, 0) } } do
+				local label = ("%s, victim %s"):format(
+					weapon.Name,
+					if case[1] == "front" then "6 studs in front and 3 to the side" else ("%.1f studs to the side, out of the box"):format(missSide)
+				)
 				place(case[2] :: Vector3)
 				CombatService.ResetCooldowns(player)
 				local before = askRootPos(victim, result)
@@ -897,6 +908,36 @@ local function runProgressionSelfTest(player: Player, result: (boolean, string, 
 		not used and QuestService.WhyNotUse(player, "CashBurst") == "NoneLeft" and PlayerDataService.GetBoostSeconds(player, "Income") == boostBefore,
 		"power-ups: refused at 0, nothing banked"
 	)
+
+	-- Lab chain "Fuse a Mythic" (Polish 12): a Mythic fused BEFORE the player
+	-- reached the step counts (achievement kinds count from 0), the step is
+	-- done at once, the QUESTS badge shows, and the claim grants the glove.
+	local weapons = PlayerDataService.GetWeapons(player)
+	local hadGlove = weapons.SlapGlove == true
+	weapons.SlapGlove = nil
+	local mythics = PlayerDataService.GetStat(player, "Fused_Mythic")
+	if mythics < 1 then
+		PlayerDataService.AddStat(player, "Fused_Mythic", 1 - mythics)
+	end
+	QuestService.DebugSetChain(player, 3)
+	local chainQuests = PlayerDataService.GetQuestState(player)
+	result(
+		chainQuests ~= nil and chainQuests.ChainBase == 0 and QuestService.WhyNotClaim(player, "chain") == nil,
+		"quests: a chain step 'Fuse a Mythic' is complete at once when a Mythic was fused before it started",
+		table.concat(QuestService.GetStatusLines(player), " | ")
+	)
+	PlayerDataService.SyncTycoon(player)
+	task.wait(0.6)
+	tutorialProbe(player, { Kind = "QuestBadge" }, result)
+	local claimed, claimReason = QuestService.Claim(player, "chain")
+	result(
+		claimed and PlayerDataService.GetWeapons(player).SlapGlove == true,
+		"quests: claiming 'Fuse a Mythic' grants the Slap Glove",
+		("claimed %s, reason %s"):format(tostring(claimed), tostring(claimReason))
+	)
+	weapons.SlapGlove = if hadGlove then true else nil
+	CombatService.RefreshTools(player)
+
 	PlayerDataService.SelfTestRestoreQuests(player, saved)
 	PlayerDataService.SyncTycoon(player)
 end
@@ -1431,10 +1472,34 @@ local function onPlayerChatted(player: Player, message: string)
 		elseif verb == "reset" then
 			QuestService.DebugReset(player)
 			print(("DebugService: %s's quests reset"):format(player.Name))
+		elseif verb == "status" then
+			print(("DebugService: %s's quests:"):format(player.Name))
+			for _, line in QuestService.GetStatusLines(player) do
+				print("  " .. line)
+			end
 		else
-			warn("DebugService: /quest complete <id> | /quest reset")
+			warn("DebugService: /quest complete <id> | /quest reset | /quest status")
 		end
 		PlayerDataService.SyncTycoon(player)
+	elseif command == SOUND_COMMAND then
+		local slotName: string? = nil
+		for slot in SoundConfig.Slots do
+			if argument ~= "" and slot:lower() == argument then
+				slotName = slot
+			end
+		end
+		local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		if slotName and root then
+			local sound = SoundKit.Play(slotName, root)
+			print(("DebugService: /sound %s -> %s"):format(slotName, if sound then SoundConfig.Slots[slotName].Id else "silent (empty or failed id)"))
+		else
+			local names = {}
+			for slot in SoundConfig.Slots do
+				table.insert(names, slot)
+			end
+			table.sort(names)
+			warn("DebugService: /sound <" .. table.concat(names, "|") .. ">")
+		end
 	elseif command == POWERUP_COMMAND then
 		local rawKey, rawCount = argument:match("^(%S+)%s*(%S*)$")
 		local key: string? = nil
@@ -1700,7 +1765,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /anim export, /quest complete <id>|reset, /powerup <key> <n>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /anim export, /quest complete <id>|reset|status, /powerup <key> <n>, /sound <slot>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()

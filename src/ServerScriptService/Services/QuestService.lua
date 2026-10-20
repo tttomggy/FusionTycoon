@@ -30,6 +30,12 @@
 	      Coin Magnet  arms the current or next Golden Rain (EventService
 	                   pulls coins in and disarms it when that rain ends).
 	    PowerUpResult carries the toast. Never sold, not in the shop.
+	  * Chain steps of an ACHIEVEMENT kind ("Fuse a Mythic",
+	    QuestConfig.AchievementKinds) count from 0: the lifetime Fused_<Tier>
+	    stat, so a Mythic fused before the step began still counts. When a
+	    step completes, QuestResult { Result = "Ready", Text } sends the
+	    "Lab quest done! Claim your ... in QUESTS" toast (once per step per
+	    session); the QUESTS button's red "!" stays until it is claimed.
 	  * Analytics: QuestClaimed (id), PowerUpUsed (key).
 
 	Follows the ServiceTemplate contract:
@@ -58,6 +64,9 @@ local PlayerDataService: PlayerDataServiceModule
 local CombatService: CombatServiceModule
 
 local QuestService = {}
+
+-- userId -> the chain step the "Lab quest done!" toast was last sent for.
+local chainNotified: { [number]: number } = {}
 
 local SPEED_ATTRIBUTE = "SpeedBootsUntil"
 local SPEED_LOOP_SECONDS = 0.25
@@ -188,12 +197,39 @@ local function ensureDay(player: Player, quests: QuestConfig.QuestState)
 	end
 end
 
--- Starts chain quest #n (its counter from now).
+-- The counter base a chain step measures from: its counter as of now, except
+-- an achievement kind ("Fuse a Mythic"), which counts the whole history (0).
+local function chainBase(player: Player, def: QuestConfig.QuestDef): number
+	if QuestConfig.CountedKinds[def.Kind] and not QuestConfig.AchievementKinds[def.Kind] then
+		return counter(player, def)
+	end
+	return 0
+end
+
+-- Starts chain quest #n (its counter from now; achievements from 0).
 local function startChain(player: Player, quests: QuestConfig.QuestState, n: number)
 	local def = QuestConfig.GetChainQuest(n)
 	quests.Chain = n
 	quests.ChainDone = false
-	quests.ChainBase = if QuestConfig.CountedKinds[def.Kind] then counter(player, def) else 0
+	quests.ChainBase = chainBase(player, def)
+end
+
+-- "Lab quest done! Claim your Slap Glove in QUESTS" (once per chain step per
+-- session: a step still unclaimed when you rejoin tells you again).
+local function notifyChainReady(player: Player, def: QuestConfig.QuestDef)
+	local names: { string } = {}
+	for _, part in def.Reward do
+		local weapon = if part.Weapon then CombatConfig.GetWeapon(part.Weapon) else nil
+		if weapon then
+			table.insert(names, weapon.Name)
+		end
+	end
+	local what = if #names > 0 then table.concat(names, " and ") else "reward"
+	RemoteEvents.QuestResult:FireClient(player, {
+		Id = "chain",
+		Result = "Ready",
+		Text = ("Lab quest done! Claim your %s in QUESTS"):format(what),
+	})
 end
 
 -- The sync hook: hand out, measure, latch, publish.
@@ -228,12 +264,19 @@ local function onSync(player: Player)
 		end
 	end
 	local chainDef = QuestConfig.GetChainQuest(quests.Chain)
-	local chainProgress = progressOf(player, chainDef, quests.ChainBase, chainDef.Target)
+	-- An achievement step measures from 0 whatever base the save holds (a
+	-- save made before this rule had one).
+	local base = if QuestConfig.AchievementKinds[chainDef.Kind] then 0 else quests.ChainBase
+	local chainProgress = progressOf(player, chainDef, base, chainDef.Target)
 	if chainProgress >= chainDef.Target then
 		quests.ChainDone = true
 	end
 	if quests.ChainDone then
 		ready += 1
+		if chainNotified[player.UserId] ~= quests.Chain then
+			chainNotified[player.UserId] = quests.Chain
+			notifyChainReady(player, chainDef)
+		end
 	end
 	local speedUntil = player:GetAttribute(SPEED_ATTRIBUTE)
 	local status: QuestStatus = {
@@ -482,6 +525,72 @@ function QuestService.DebugReset(player: Player)
 	end
 end
 
+-- /quest status: what the server holds for each quest (kind, counter base,
+-- progress, Done / Claimed) and the lifetime Fused_* stats.
+function QuestService.GetStatusLines(player: Player): { string }
+	local quests = PlayerDataService.GetQuestState(player)
+	if not quests then
+		return { "no quest data" }
+	end
+	local lines: { string } = {}
+	local def = QuestConfig.GetChainQuest(quests.Chain)
+	local achievement = QuestConfig.AchievementKinds[def.Kind] == true
+	local progress = progressOf(player, def, if achievement then 0 else quests.ChainBase, def.Target)
+	-- A claimed chain step is replaced by the next one, so a chain step is
+	-- never "Claimed".
+	table.insert(
+		lines,
+		("chain #%d \"%s\": kind %s%s, base %d%s, progress %d/%d, Done %s, Claimed false"):format(
+			quests.Chain,
+			QuestConfig.FormatText(def, def.Target),
+			def.Kind,
+			if def.Tier then " " .. def.Tier else "",
+			if achievement then 0 else quests.ChainBase,
+			if achievement then " (achievement: counts the whole history)" else "",
+			progress,
+			def.Target,
+			tostring(quests.ChainDone)
+		)
+	)
+	for _, entry in quests.Daily do
+		local daily = QuestConfig.GetDaily(entry.Id)
+		if daily then
+			table.insert(
+				lines,
+				("daily %s: kind %s%s, base %d, progress %d/%d, Done %s, Claimed %s"):format(
+					entry.Id,
+					daily.Kind,
+					if daily.Tier then " " .. daily.Tier else "",
+					entry.Base,
+					progressOf(player, daily, entry.Base, entry.Target),
+					entry.Target,
+					tostring(entry.Done),
+					tostring(entry.Claimed)
+				)
+			)
+		end
+	end
+	local fused: { string } = {}
+	for tier in ItemConfig.Tiers :: { [string]: number } do
+		local count = PlayerDataService.GetStat(player, "Fused_" .. tier)
+		if count > 0 then
+			table.insert(fused, ("%s %d"):format(tier, count))
+		end
+	end
+	table.sort(fused)
+	table.insert(lines, "Fused_* stats: " .. (if #fused > 0 then table.concat(fused, ", ") else "none"))
+	return lines
+end
+
+-- /selftest: puts the player on chain step `n` (its counter base as a real
+-- step start would set it).
+function QuestService.DebugSetChain(player: Player, n: number)
+	local quests = PlayerDataService.GetQuestState(player)
+	if quests then
+		startChain(player, quests, n)
+	end
+end
+
 -- Today's daily ids for `player` (selftest).
 function QuestService.GetDailyIds(player: Player): { string }
 	local quests = PlayerDataService.GetQuestState(player)
@@ -500,6 +609,9 @@ function QuestService.IsSpeedActive(player: Player): boolean
 end
 
 function QuestService:Init()
+	Players.PlayerRemoving:Connect(function(player: Player)
+		chainNotified[player.UserId] = nil
+	end)
 	RemoteEvents.ClaimQuest.OnServerEvent:Connect(onClaimQuest)
 	RemoteEvents.UsePowerUp.OnServerEvent:Connect(onUsePowerUp)
 end

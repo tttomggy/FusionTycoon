@@ -6,7 +6,11 @@
 	snapshot; changed with SetSetting { Key, Tier?, Value }). Sections:
 	which BEST OF 10 / ×10 results, Auto-Fuse results and fusions get the big
 	reveal card (a single pull always gets it, at every tier), and the
-	sound-effects volume.
+	sound-effects volume and the background music (on / off + volume).
+
+	MusicOn (default true) and MusicVolume 0..1 (default 0.25; the server
+	clamps it): MusicController's Sound plays at MusicVolume (silent and
+	paused when off).
 
 	SfxVolume 0..1 (default 0.8; the server clamps it) and SfxMuted: every
 	SoundKit slot plays at its Volume x SfxVolume (0 when muted), through
@@ -31,13 +35,31 @@ export type RevealRule = { [string]: string }
 -- GoalPath: the lit path to the current goal (the goal card's 👣):
 -- "Auto" = on for the first TutorialConfig.GoalPathSessions sessions.
 export type GoalPath = "Auto" | "On" | "Off"
-export type Settings = { RevealRule: RevealRule, SfxVolume: number, SfxMuted: boolean, AutoFuse: boolean, GoalPath: GoalPath }
+export type Settings = {
+	RevealRule: RevealRule,
+	SfxVolume: number,
+	SfxMuted: boolean,
+	MusicOn: boolean,
+	MusicVolume: number,
+	AutoFuse: boolean,
+	GoalPath: GoalPath,
+}
 
 function SettingsConfig.IsGoalPathValue(value: unknown): boolean
 	return value == "Auto" or value == "On" or value == "Off"
 end
 
 SettingsConfig.DefaultSfxVolume = 0.8
+SettingsConfig.DefaultMusicVolume = 0.25
+
+-- A music volume from untrusted data: a finite number clamped to 0..1, else
+-- the default.
+function SettingsConfig.SanitizeMusicVolume(raw: unknown): number
+	if typeof(raw) ~= "number" or raw ~= raw or raw == math.huge or raw == -math.huge then
+		return SettingsConfig.DefaultMusicVolume
+	end
+	return math.clamp(raw, 0, 1)
+end
 
 -- A volume from untrusted data: a finite number clamped to 0..1, else the
 -- default.
@@ -56,6 +78,9 @@ function SettingsConfig.Sanitize(raw: unknown): Settings
 		RevealRule = SettingsConfig.SanitizeRevealRule(source.RevealRule),
 		SfxVolume = SettingsConfig.SanitizeSfxVolume(source.SfxVolume),
 		SfxMuted = source.SfxMuted == true,
+		-- Music is on unless the save says it was switched off.
+		MusicOn = source.MusicOn ~= false,
+		MusicVolume = SettingsConfig.SanitizeMusicVolume(source.MusicVolume),
 		-- The Auto-Fuse pass's toggle (Fuse panel); off until switched on.
 		AutoFuse = source.AutoFuse == true,
 		GoalPath = if SettingsConfig.IsGoalPathValue(source.GoalPath) then source.GoalPath else "Auto",
@@ -146,6 +171,8 @@ function SettingsConfig.GetDefaultSettings(): Settings
 		RevealRule = SettingsConfig.GetDefaultRevealRule(),
 		SfxVolume = SettingsConfig.DefaultSfxVolume,
 		SfxMuted = false,
+		MusicOn = true,
+		MusicVolume = SettingsConfig.DefaultMusicVolume,
 		AutoFuse = false,
 		GoalPath = "Auto",
 	}

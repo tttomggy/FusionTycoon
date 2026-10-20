@@ -273,9 +273,18 @@ never walked the chain. Detection is now the server's, the usual Roblox way.
 - **Server:** after the usual checks (cooldown, `whyCantSwing`) the swing's
   `Swing` HitFx goes out at once, then `CombatConfig.MeleeHitDelay` (0.15 s,
   about the clip's `Hit` marker) later `resolveMelee` runs
-  `Workspace:GetPartBoundsInBox` on `CombatConfig.MeleeBox` (6 × 6 × 7), its
-  centre `MeleeBoxForward` (3.5) studs in front of the attacker's root along
-  its flat facing, an `OverlapParams` excluding the attacker's character. The
+  `Workspace:GetPartBoundsInBox` on the **weapon's** box (Polish 12: Bat
+  `MeleeBox` 9 × 8 × 10, forward 4.5; Glove 11 × 8 × 11, forward 5; each in
+  its `CombatConfig.Weapons` entry, `CombatConfig.GetMeleeBox(weapon)`), its
+  centre `MeleeBoxForward` studs in front of the attacker's root along
+  its flat facing, an `OverlapParams` excluding the attacker's character.
+  **Lag tolerance:** the service keeps each root's last
+  `CombatConfig.HistorySeconds` (0.3 s) of positions (one Heartbeat sample
+  per player); a swing stores its request time and its box, and a player
+  whose root was inside THAT box at the request time counts too, as well as
+  whoever overlaps at the delayed check. **Range check:** nobody further
+  than the weapon's `Range` + `RangeSlack` from the attacker is ever hit
+  (a sanity limit). The
   distinct characters become players (an accessory or tool part counts), nearest
   first. The **Bat** hits the nearest one `WhyNotHittable` allows; the **Slap
   Glove** every valid one (a sweep). Every other player in the box gets the
@@ -287,13 +296,15 @@ never walked the chain. Detection is now the server's, the usual Roblox way.
   `... box found [] -> MISS`, `... box found [Player2 3.0 studs] -> Player2 Immune`.
   `CombatService.GetLastVerdict(player)` keeps the last one (`Seq`, `Found`,
   `Hit`, `Line`) for the selftest. `/combat box` toggles drawing the box (a red
-  transparent part for 0.2 s per swing, Studio only).
+  transparent part for 0.2 s per swing, sized to that weapon's box, Studio only).
 - **Selftest (`/selftest combat`, 2 players)** now walks the whole chain:
   Player2 is put 3 studs in front of Player1 (facing each other, immunity
   cleared), the tool is equipped for real, **Player1's client** clicks it
   through `CombatController.Use`, the server's verdict must say `HIT Player2`
   and Player2 must fly (≥ 12 studs Bat, ≥ 20 Glove in 0.6 s, measured on
-  Player2's own client). Then Player2 is put 6 studs to the side, out of the
-  box (3 either side + a 4-wide avatar: at 5 an arm only just touches it): the verdict is `MISS` and Player2 does not move. The held-weapon
+  Player2's own client). (Polish 12: the hit case is **6 studs in front and 3 to the side**, a near
+  miss the old 6 × 6 × 7 box whiffed.) Then Player2 is put out to the side
+  beyond the weapon's box (box half-width + 2.5: **7 studs for the Bat**, 8
+  for the Glove; an arm reaches 2 in): the verdict is `MISS` and Player2 does not move. The held-weapon
   thresholds (clearance 1.5, swing peak 1.5) scale with the avatar's height
   (× height / 5, clamped 0.6-1.0) so the small monkey avatar passes.

@@ -37,12 +37,12 @@ local REMOTE_EVENT_NAMES = {
 	"HitFx", -- server -> all: { Weapon, Kind, From?, To?, Attacker?, Target? } Kind = Bonk | Swing | Beam | FreezeBeam | Freeze | Slip | Throw (UserIds for Attacker / Target)
 	"WeaponUnlocked", -- server -> client: { Weapon } a weapon was just earned (the unlock card)
 	"ClaimQuest", -- client -> server: { Id } claim a finished quest ("pull20", ... or "chain"); re-checked complete and unclaimed
-	"QuestResult", -- server -> client: { Id, Result = "Claimed" | "Refused", Reason?, Lines? } the claim and what it paid
+	"QuestResult", -- server -> client: { Id, Result = "Claimed" | "Refused" | "Ready", Reason?, Lines?, Text? } the claim and what it paid; "Ready" = a lab quest step just completed (Text is its toast)
 	"UsePowerUp", -- client -> server: { Key } use one power-up (QuestConfig.PowerUps); re-checked count and conditions
 	"PowerUpResult", -- server -> client: { Key, Result = "Used" | "Refused", Reason?, Text? } the toast
 	"TutorialAdvance", -- client -> server: { Step } a tutorial Card / Open / Arrive step was done (re-checked), or { Replay = true } (Settings)
 	"MarkDealPopup", -- client -> server: the "New deal!" card showed; { Slot } (the current deal slot only; saved as DealPopupSlot)
-	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } (SettingsConfig-validated; the next snapshot carries Settings)
+	"SetSetting", -- client -> server: { Key = "RevealRule", Tier, Value } | { Key = "SfxVolume", Value } | { Key = "SfxMuted", Value } | { Key = "MusicVolume", Value } | { Key = "MusicOn", Value } (SettingsConfig-validated; the next snapshot carries Settings)
 	"RequestShopPurchase", -- client -> server: { Key } (ShopConfig key; the server checks policy, sale window, one-time, then prompts)
 	"ShopPurchased", -- server -> client: { Key, Result = "Granted" | "Refused", Reason?, Lines?, Effects?, Test? } (the purchase celebration / a refusal toast)
 	"ShopAnalytics", -- client -> server: { Event = "ShopOpened" | "OfferShown" | "OfferAccepted" | "OfferDismissed", Key? } (analytics only; whitelisted, rate-limited)

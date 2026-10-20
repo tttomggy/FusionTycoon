@@ -93,6 +93,8 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { Key = "RevealRule", Tier = "Nope", Value = "Always" } },
 			{ { Key = "RevealRule", Tier = "Common", Value = "Bogus" } },
 			{ { Key = "SfxMuted", Value = "yes" } },
+			{ { Key = "MusicOn", Value = "yes" } },
+			{ { Key = "MusicVolume", Value = "loud" } },
 			{ { Key = "AutoFuse", Value = 1 } },
 		},
 		MarkTipSeen = { {}, { { Id = "nope" } }, { { Id = 5 } }, { { Id = BIG_STRING } } },
@@ -141,6 +143,7 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		table.insert(cases.RequestHit, { { Weapon = "Bat", TargetUserId = n, Direction = Vector3.new(n, n, n) } })
 		table.insert(cases.RequestGachaPull, { { Count = n } })
 		table.insert(cases.SetSetting, { { Key = "SfxVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
+		table.insert(cases.SetSetting, { { Key = "MusicVolume", Value = if n == n and math.abs(n) ~= INF then "x" else n } })
 	end
 	return cases
 end
@@ -849,6 +852,76 @@ local function testSkippedLines(): { string }
 end
 
 -- Every product and power-up has a plain-words line for a 7-year-old.
+-- The background music: every track loads, the toggle stops it and turning it
+-- back on resumes it, and a big sting ducks it. The player's setting is put back.
+local function testMusic(): { string }
+	local MusicConfig = require(ReplicatedStorage.Shared.Config.MusicConfig)
+	local Music = require(script.Parent.MusicController) :: any
+	local tycoon = require(script.Parent.TycoonController) :: any
+	local lines: { string } = {}
+	local failed = Music.CheckAll()
+	table.insert(
+		lines,
+		if #failed == 0
+			then ("PASS music: all %d tracks load"):format(#MusicConfig.Tracks)
+			else "FAIL music: a track did not load: " .. table.concat(failed, ", ")
+	)
+	local sound: Sound? = Music.GetSound()
+	if not sound then
+		table.insert(lines, "FAIL music: the playlist Sound exists")
+		return lines
+	end
+	local music = sound :: Sound
+	local wasOn, wasVolume = tycoon.IsMusicOn(), tycoon.GetMusicVolume()
+	tycoon.SetMusicOn(true)
+	tycoon.SetMusicVolume(require(ReplicatedStorage.Shared.Config.SettingsConfig).DefaultMusicVolume, false)
+	local waited = 0
+	while not (music.IsLoaded and music.IsPlaying) and waited < 10 do
+		task.wait(0.25)
+		waited += 0.25
+	end
+	local playing = music.IsPlaying
+	table.insert(lines, (if playing then "PASS" else "FAIL") .. " music: the playlist is playing (Settings -> Music on)")
+	-- Ducking: a big sting dips the level to about 40%.
+	local level = music.Volume
+	local steady = music.TimePosition > 3 and music.TimeLength > 0 and music.TimeLength - music.TimePosition > 4
+	if playing and steady and level > 0.01 then
+		SoundKit.Play("RevealMajor", nil)
+		task.wait(0.7)
+		local ducked = music.Volume
+		table.insert(
+			lines,
+			(if ducked <= level * (MusicConfig.DuckFraction + 0.15) then "PASS" else "FAIL")
+				.. (" music: a big reveal sting ducks the music (%.3f -> %.3f)"):format(level, ducked)
+		)
+		task.wait(MusicConfig.DuckSeconds)
+	else
+		table.insert(lines, "PASS music: ducking check skipped (a track fade is in progress)")
+	end
+	tycoon.SetMusicOn(false)
+	task.wait(0.5)
+	table.insert(lines, (if not music.IsPlaying then "PASS" else "FAIL") .. " music: turning it off stops the music")
+	tycoon.SetMusicOn(true)
+	task.wait(0.6)
+	table.insert(lines, (if music.IsPlaying then "PASS" else "FAIL") .. " music: turning it back on resumes it")
+	tycoon.SetMusicVolume(wasVolume, true)
+	tycoon.SetMusicOn(wasOn)
+	return lines
+end
+
+-- A weapon earned before Rebirth 1 says when it works.
+local function testUnlockCard(): { string }
+	local combat = require(script.Parent.CombatController) :: any
+	local title, body = combat.GetUnlockCardText("SlapGlove", 0)
+	local earlyOk = title:find("Slap Glove", 1, true) ~= nil and body:find("Rebirth 1", 1, true) ~= nil
+	local _, later = combat.GetUnlockCardText("SlapGlove", 1)
+	local laterOk = later:find("Rebirth", 1, true) == nil
+	return {
+		(if earlyOk then "PASS" else "FAIL") .. (" unlock card at Rebirth 0 says '%s' / '%s'"):format(title, (body:gsub("\n", " / "))),
+		(if laterOk then "PASS" else "FAIL") .. " unlock card at Rebirth 1+ has no Rebirth note",
+	}
+end
+
 local function testPlain(): { string }
 	local missing: { string } = {}
 	local count = 0
@@ -2583,6 +2656,76 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			Name = ("effects tray (%s): every tap target is at least %d px"):format(label, UITheme.MinTapSize),
 			Detail = ("smallest %d px"):format(math.floor(smallest)),
 		})
+		-- Cartoon sticker badges (no product photos): the glyph, an effect
+		-- layer behind it, and the glyph sized with the circle.
+		local wantGlyphs: { [string]: string } = { Luck = "🍀", SpeedBoots = "👟", SafeFusion = "🛡" }
+		local stickerBad: { string } = {}
+		for id, glyph in wantGlyphs do
+			local view = byId[id]
+			if not view then
+				table.insert(stickerBad, id .. " missing")
+			elseif view.Glyph ~= glyph or view.FxCount < 1 or view.GlyphSize < 24 then
+				table.insert(stickerBad, ("%s glyph '%s' size %d, %d effect parts"):format(id, view.Glyph, view.GlyphSize, view.FxCount))
+			end
+		end
+		table.sort(stickerBad)
+		table.insert(lines, {
+			Ok = #stickerBad == 0,
+			Name = ("effects tray (%s): cartoon badges with a glyph and an effect layer"):format(label),
+			Detail = table.concat(stickerBad, ", "),
+		})
+		-- Tooltip: hover shows the name, the Plain line and the time; leaving hides it.
+		EffectsTray.TestHover("Luck", true)
+		task.wait(0.2)
+		local tip = EffectsTray.GetTooltip()
+		local plainWant = ("Rare orbs %d× more likely"):format(ShopConfig.LuckPotionMultiplier)
+		local viewport = if camera then camera.ViewportSize else Vector2.new(1366, 768)
+		local luckCell = byId.Luck
+		local tipProblems: { string } = {}
+		if not tip.Visible then
+			table.insert(tipProblems, "not visible after MouseEnter")
+		end
+		if tip.Name == "" then
+			table.insert(tipProblems, "no name")
+		end
+		if tip.Plain ~= plainWant then
+			table.insert(tipProblems, ("plain '%s', want '%s'"):format(tip.Plain, plainWant))
+		end
+		if not tip.Time:match("%d+:%d%d") then
+			table.insert(tipProblems, ("time '%s'"):format(tip.Time))
+		end
+		if tip.Size.X / tip.Scale > 220 + 1 then
+			table.insert(tipProblems, ("%d px wide (max 220)"):format(tip.Size.X / tip.Scale))
+		end
+		if tip.Position.X < -1 or tip.Position.X + tip.Size.X > viewport.X + 1 then
+			table.insert(tipProblems, ("off screen: x %d-%d of %d"):format(tip.Position.X, tip.Position.X + tip.Size.X, viewport.X))
+		end
+		if luckCell and tip.Position.Y + tip.Size.Y > luckCell.Position.Y - inset + 1 then
+			table.insert(tipProblems, "not above the icon")
+		end
+		table.insert(lines, {
+			Ok = #tipProblems == 0,
+			Name = ("effects tray (%s): hovering the Luck icon shows its name, what it does and the time left"):format(label),
+			Detail = table.concat(tipProblems, "; "),
+		})
+		EffectsTray.TestHover("Luck", false)
+		task.wait(0.1)
+		table.insert(lines, {
+			Ok = not EffectsTray.GetTooltip().Visible,
+			Name = ("effects tray (%s): leaving the icon hides the tooltip"):format(label),
+			Detail = "",
+		})
+		-- A tap shows it too and it closes by itself after 3 s.
+		EffectsTray.TestTap("SafeFusion")
+		task.wait(0.2)
+		local tapTip = EffectsTray.GetTooltip()
+		local tapOk = tapTip.Visible and tapTip.Time == ("×%d left"):format(tokens)
+		task.wait(3.2)
+		table.insert(lines, {
+			Ok = tapOk and not EffectsTray.GetTooltip().Visible,
+			Name = ("effects tray (%s): a tap shows the tooltip (×N left) and it closes after 3 s"):format(label),
+			Detail = ("shown '%s' %s"):format(tapTip.Time, if tapTip.Visible then "visible" else "NOT visible"),
+		})
 		-- No overlap with any HUD rect or the weapon bar.
 		local obstacles = hud.GetObstacleRects()
 		local overlaps: { string } = {}
@@ -2619,6 +2762,21 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		Detail = table.concat(leftovers, ", "),
 	})
 	return lines
+end
+
+-- The quests badge (the server completes the "Fuse a Mythic" chain step first):
+-- the QUESTS button shows a red "!" for it.
+local function probeQuestBadge(): { ProbeLine }
+	local hud = require(script.Parent.HudController) :: any
+	task.wait(0.3)
+	local visible, text = hud.GetQuestsBadge()
+	return {
+		{
+			Ok = visible and text == "!",
+			Name = "quests: the QUESTS button shows a red ! while the lab chain step is done and unclaimed",
+			Detail = ("badge %s, text '%s'"):format(if visible then "visible" else "hidden", text),
+		},
+	}
 end
 
 -- The knockback checks run on the TARGET's client (the one that simulates
@@ -2711,6 +2869,8 @@ local function probeTutorial(payload: any)
 			return probeGachaFar()
 		elseif payload.Kind == "GachaBack" then
 			return probeGachaBack()
+		elseif payload.Kind == "QuestBadge" then
+			return probeQuestBadge()
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
 		elseif payload.Kind == "AutoReset" then
@@ -2833,6 +2993,12 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testChipJumps() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testUnlockCard() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testMusic() do
 		table.insert(panelLines, line)
 	end
 	local failedSounds = SoundKit.CheckAll()

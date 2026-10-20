@@ -96,9 +96,13 @@ local revealRule: SettingsConfig.RevealRule = SettingsConfig.GetDefaultRevealRul
 local pendingReveal: { [string]: string } = {}
 local sfxVolume = SettingsConfig.DefaultSfxVolume
 local sfxMuted = false
+local musicVolume = SettingsConfig.DefaultMusicVolume
+local musicOn = true
 -- Local sound changes not echoed yet (nil = none pending).
 local pendingSfxVolume: number? = nil
 local pendingSfxMuted: boolean? = nil
+local pendingMusicVolume: number? = nil
+local pendingMusicOn: boolean? = nil
 -- The Auto-Fuse pass's toggle (Settings.AutoFuse), optimistic like the rest.
 local autoFuse = false
 local pendingAutoFuse: boolean? = nil
@@ -296,6 +300,30 @@ function TycoonController.SetSfxMuted(muted: boolean)
 	pendingSfxMuted = muted
 	applySfx()
 	RemoteEvents.SetSetting:FireServer({ Key = "SfxMuted", Value = muted })
+end
+
+-- Background music on / off and volume (SettingsConfig MusicOn / MusicVolume).
+function TycoonController.GetMusicVolume(): number
+	return musicVolume
+end
+
+function TycoonController.IsMusicOn(): boolean
+	return musicOn
+end
+
+-- Applies at once. `save` false while dragging the slider; true on release.
+function TycoonController.SetMusicVolume(volume: number, save: boolean)
+	musicVolume = SettingsConfig.SanitizeMusicVolume(volume)
+	pendingMusicVolume = musicVolume
+	if save then
+		RemoteEvents.SetSetting:FireServer({ Key = "MusicVolume", Value = musicVolume })
+	end
+end
+
+function TycoonController.SetMusicOn(on: boolean)
+	musicOn = on
+	pendingMusicOn = on
+	RemoteEvents.SetSetting:FireServer({ Key = "MusicOn", Value = on })
 end
 
 -- The lit path to the current goal: the 👣 toggle, else on for the first
@@ -564,6 +592,12 @@ local function onSyncTycoon(snapshot: any)
 	if pendingSfxMuted ~= nil and settings.SfxMuted == pendingSfxMuted then
 		pendingSfxMuted = nil
 	end
+	if pendingMusicVolume ~= nil and math.abs(settings.MusicVolume - pendingMusicVolume) < 1e-4 then
+		pendingMusicVolume = nil
+	end
+	if pendingMusicOn ~= nil and settings.MusicOn == pendingMusicOn then
+		pendingMusicOn = nil
+	end
 	if pendingAutoFuse ~= nil and settings.AutoFuse == pendingAutoFuse then
 		pendingAutoFuse = nil
 	end
@@ -583,6 +617,8 @@ local function onSyncTycoon(snapshot: any)
 		sfxMuted = settings.SfxMuted
 	end
 	applySfx()
+	musicVolume = if pendingMusicVolume ~= nil then pendingMusicVolume else settings.MusicVolume
+	musicOn = if pendingMusicOn ~= nil then pendingMusicOn else settings.MusicOn
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	local rawShop = snapshot.Shop

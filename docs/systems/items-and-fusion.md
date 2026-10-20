@@ -242,7 +242,9 @@ look, never the odds.
   (`TycoonController.SetRevealRule`, kept until the snapshot echoes it).
   UI: the **⚙** 56 px button after REBIRTH opens `UI/SettingsPanel` (620
   wide, one scrolling list of sections: "Big reveal card" (one 5-segment
-  row per tier + a locked Secret row) and "Sound effects" (see Sounds)).
+  row per tier + a locked Secret row), "Sound effects" and "Music" (see
+  Sounds: `Settings.MusicOn` / `MusicVolume`, default on at 25%) and a
+  tutorial replay).
 - **Odds board** (FusionMachineService + `BillboardKit.OddsSurface`): 9 × 6
   studs at 60 px/stud, a real table (one rounded cell per %, 100% teal),
   no mutation line (the pad and Index have it). `SetOddsChances(gui, rows,

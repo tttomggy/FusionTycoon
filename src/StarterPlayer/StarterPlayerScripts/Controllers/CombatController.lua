@@ -33,8 +33,9 @@
 	    thin Neon beam seen from the side, an icy cone, SLIP!), the icy tint
 	    and frost on frozen players, a faint shimmer on immune ones, and the
 	    sound slots.
-	  * WeaponUnlocked: the tutorial-style card "You got a Bat!" with the
-	    big turning model (after the tutorial, if it's still running).
+	  * WeaponUnlocked: the tutorial-style card "You got the Bat!" with the
+	    big turning model (after the tutorial, if it's still running); under
+	    Rebirth 1 it adds "Fighting unlocks at Rebirth 1" (GetUnlockCardText).
 ]]
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
@@ -765,11 +766,11 @@ local function onHitFx(payload: any)
 	if payload.Kind == "Bonk" and to then
 		-- A landed hit: a bigger pop, hit-stop on the attacker's swing, a
 		-- camera shake for the attacker (short) and the target (longer), and
-		-- the target flashes white. (The Bonk sound slot is wired and empty.)
+		-- the target flashes white. Bat = Bonk, Glove = Slap.
 		local glove = payload.Weapon == "SlapGlove"
 		popText(to, if glove then "👋 SLAP! 👋" else "💫 BONK! 💫", World.AccentGold, 1.5)
 		WeaponFx.FlashRing(to, Colors.White)
-		SoundKit.PlayAt("Bonk", to)
+		SoundKit.PlayAt(if glove then "Slap" else "Bonk", to)
 		local attackerCharacter = attacker and attacker.Character
 		if attackerCharacter then
 			WeaponAnimator.HitStop(attackerCharacter, HIT_STOP_SECONDS)
@@ -877,6 +878,22 @@ end
 
 --[[ Unlock card ---------------------------------------------------------------------- ]]
 
+-- The unlock card's title and body for `weaponId` at `rebirths`: before
+-- Rebirth 1 nobody can fight, so a weapon earned early says when it works
+-- ("You got the Slap Glove! Fighting unlocks at Rebirth 1"). The bar
+-- appears at Rebirth 1 with the weapon already in.
+function CombatController.GetUnlockCardText(weaponId: string, rebirths: number): (string, string)
+	local weapon = CombatConfig.GetWeapon(weaponId)
+	if not weapon then
+		return "You got a weapon!", ""
+	end
+	local title = ("You got the %s!"):format(weapon.Name)
+	if rebirths < CombatConfig.MinRebirths then
+		return title, ("%s\nFighting unlocks at Rebirth %d."):format(weapon.Blurb, CombatConfig.MinRebirths)
+	end
+	return title, weapon.Blurb
+end
+
 local function showUnlocks()
 	if #pendingUnlocks == 0 or TycoonController.IsTutorialActive() or TutorialCards.IsOpen() then
 		return
@@ -884,11 +901,12 @@ local function showUnlocks()
 	local id = table.remove(pendingUnlocks, 1) :: string
 	local weapon = CombatConfig.GetWeapon(id)
 	if weapon then
+		local title, body = CombatController.GetUnlockCardText(weapon.Id, TycoonController.GetRebirths())
 		TutorialCards.ShowStep({
 			Icon = weapon.Glyph,
 			Weapon = weapon.Id,
-			Title = ("You got a %s!"):format(weapon.Name),
-			Body = weapon.Blurb,
+			Title = title,
+			Body = body,
 		}, nil, showUnlocks)
 	end
 end

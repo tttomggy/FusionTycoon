@@ -315,6 +315,14 @@ QuestConfig.CountedKinds = {
 	FuseInto = true,
 } :: { [string]: boolean }
 
+-- "Have you ever...?" kinds. A CHAIN step of one of these counts the player's
+-- whole history (counter base 0), not just what happens after the step
+-- starts: a Mythic fused before the step began still counts. (Daily quests
+-- keep counting from their start.)
+QuestConfig.AchievementKinds = {
+	FuseInto = true,
+} :: { [string]: boolean }
+
 -- The Stats keys the server keeps (PlayerData.Stats), whitelisted.
 local statKeys: { string } = { "Pulls", "Goldens", "RainCoins", "UpgradeLevels", "Knocks" }
 for tier in ItemConfig.Tiers :: { [string]: number } do

@@ -802,7 +802,7 @@ end
 -- /selftest: a copy of the quest state and power-ups, and the restore.
 function PlayerDataService.SelfTestSnapshotQuests(player: Player): any
 	local data = state.sessionCache[player.UserId]
-	return if data then deepCopy({ Quests = data.Quests, PowerUps = data.PowerUps, Armed = data.Armed }) else nil
+	return if data then deepCopy({ Quests = data.Quests, PowerUps = data.PowerUps, Armed = data.Armed, Stats = data.Stats }) else nil
 end
 
 function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
@@ -811,6 +811,7 @@ function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
 		data.Quests = saved.Quests
 		data.PowerUps = saved.PowerUps
 		data.Armed = saved.Armed
+		data.Stats = saved.Stats
 	end
 end
 
@@ -1359,6 +1360,21 @@ function PlayerDataService.SetSfx(player: Player, volume: number?, muted: boolea
 	end
 	if muted ~= nil then
 		data.Settings.SfxMuted = muted
+	end
+	return true
+end
+
+-- SetSetting MusicVolume / MusicOn (clamped / coerced server-side).
+function PlayerDataService.SetMusic(player: Player, volume: number?, on: boolean?): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	if volume ~= nil then
+		data.Settings.MusicVolume = SettingsConfig.SanitizeMusicVolume(volume)
+	end
+	if on ~= nil then
+		data.Settings.MusicOn = on
 	end
 	return true
 end
@@ -2196,8 +2212,8 @@ function PlayerDataService:Init()
 	)
 
 	-- SetSetting { Key = "RevealRule", Tier, Value } (tier and value
-	-- whitelisted), { Key = "SfxVolume", Value } (clamped 0..1) or
-	-- { Key = "SfxMuted", Value } (a boolean) (SettingsConfig); stored in the saved profile, then one
+	-- whitelisted), { Key = "SfxVolume" | "MusicVolume", Value } (clamped 0..1) or
+	-- { Key = "SfxMuted" | "MusicOn", Value } (a boolean) (SettingsConfig); stored in the saved profile, then one
 	-- (coalesced) sync carries Settings back.
 	table.insert(
 		state.connections,
@@ -2220,6 +2236,15 @@ function PlayerDataService:Init()
 				changed = PlayerDataService.SetSfx(player, request.Value, nil)
 			elseif request.Key == "SfxMuted" and typeof(request.Value) == "boolean" then
 				changed = PlayerDataService.SetSfx(player, nil, request.Value)
+			elseif
+				request.Key == "MusicVolume"
+				and typeof(request.Value) == "number"
+				and request.Value == request.Value
+				and math.abs(request.Value) ~= math.huge
+			then
+				changed = PlayerDataService.SetMusic(player, request.Value, nil)
+			elseif request.Key == "MusicOn" and typeof(request.Value) == "boolean" then
+				changed = PlayerDataService.SetMusic(player, nil, request.Value)
 			elseif request.Key == "GoalPath" and SettingsConfig.IsGoalPathValue(request.Value) then
 				local data = state.sessionCache[player.UserId]
 				if data then

@@ -1462,8 +1462,9 @@ local function buildShopRow()
 end
 
 --[[ QUESTS button, power-up row, goal tracker ----------------------------------
-	Under SHOP / GIFTS: the amber "📜 QUESTS" (QuestsPanel) with a green
-	ready badge (quests done, not claimed) and a bounce while any is, then
+	Under SHOP / GIFTS: the amber "📜 QUESTS" (QuestsPanel) with a red "!"
+	badge (a quest or the lab chain step done, not claimed) and a bounce
+	while any is, then
 	one round button per power-up you own (QuestConfig.PowerUpOrder; glyph,
 	a count badge; tap = UsePowerUp, server re-checked). An armed one shows
 	✓, Speed Boots its seconds left. Under the NEXT GOAL card, a small
@@ -1556,9 +1557,10 @@ end
 -- Once a second: the badge, the power-up buttons, the tracker.
 local function refreshQuestRow()
 	local ready = if TycoonController.HasSynced() then QuestsPanel.GetReadyCount() else 0
+	-- A red "!" while any quest (a daily or the lab chain) is done and not
+	-- claimed; UIKit.Badge hides it at 0.
 	local badge = UIKit.Badge(questsButton, ready)
-	badge.BackgroundColor3 = Colors.Cash
-	badge.TextColor3 = Colors.CoinText
+	badge.Text = "!"
 	if ready > 0 and not questsBounce then
 		local tween = TweenService:Create(
 			questsScale,
@@ -1598,6 +1600,17 @@ local function refreshQuestRow()
 			NumberFormat.Short(tonumber(nearest.Target) or 0)
 		)
 	end
+end
+
+-- /selftest: redraws the QUESTS button now and returns whether its badge is
+-- showing and what it says (a red "!" while a quest or the chain is unclaimed).
+function HudController.GetQuestsBadge(): (boolean, string)
+	refreshQuestRow()
+	local badge = questsButton:FindFirstChild("Badge")
+	if badge and badge:IsA("TextLabel") then
+		return badge.Visible, badge.Text
+	end
+	return false, ""
 end
 
 -- The tracker sits under the goal card (or where it would be when the

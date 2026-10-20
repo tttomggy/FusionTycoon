@@ -13,8 +13,12 @@
 	  Sound effects     a 0–100% slider (default 80%) and a mute toggle
 	                    beside it; every SoundKit slot scales with it.
 
+	  Music             the same row for the background playlist
+	                    (MusicController): an on / off toggle and a 0–100%
+	                    slider (default on at 25%).
+
 	Changes apply at once (TycoonController.SetRevealRule / SetSfxVolume /
-	SetSfxMuted, optimistic) and save on the server (SetSetting); the slider
+	SetSfxMuted / SetMusicVolume / SetMusicOn, optimistic) and save on the server (SetSetting); the slider
 	saves on release and plays a click at the new level. 620 wide; on a
 	phone the list scrolls.
 ]]
@@ -49,11 +53,8 @@ local modal: UIKit.Modal
 local list: ScrollingFrame
 local segments: { [string]: { [string]: Segment } } = {}
 local order = 0
-local sliderTrack: Frame
-local sliderFill: Frame
-local sliderKnob: Frame
-local sliderLabel: TextLabel
-local muteButton: TextButton
+-- Slider rows (Sound effects, Music) redraw themselves through these.
+local sliderRefreshers: { () -> () } = {}
 local dragging = false
 
 local function nextOrder(): number
@@ -61,22 +62,14 @@ local function nextOrder(): number
 	return order
 end
 
-local function refreshSound()
-	local volume = TycoonController.GetSfxVolume()
-	local muted = TycoonController.IsSfxMuted()
-	sliderFill.Size = UDim2.fromScale(volume, 1)
-	sliderKnob.Position = UDim2.fromScale(volume, 0.5)
-	sliderLabel.Text = ("%d%%"):format(math.floor(volume * 100 + 0.5))
-	sliderLabel.TextColor3 = if muted then Colors.Faint else Colors.Text
-	sliderFill.BackgroundColor3 = if muted then Colors.Faint else Colors.ShieldTeal
-	UIKit.SetButton(muteButton, {
-		Style = if muted then "Red" else "Disabled",
-		Text = if muted then "🔇" else "🔊",
-	})
+local function refreshSliders()
+	for _, redraw in sliderRefreshers do
+		redraw()
+	end
 end
 
 local function refresh()
-	refreshSound()
+	refreshSliders()
 	local rule = TycoonController.GetRevealRule()
 	for tier, row in segments do
 		for value, segment in row do
@@ -242,21 +235,25 @@ local function lockedRow()
 	})
 end
 
--- The volume at a screen x on the track (0..1).
-local function volumeAt(x: number): number
-	local left = sliderTrack.AbsolutePosition.X
-	local width = math.max(sliderTrack.AbsoluteSize.X, 1)
-	return math.clamp((x - left) / width, 0, 1)
-end
-
 local function isPointer(input: InputObject): boolean
 	return input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch
 end
 
-local function soundRow()
+type SliderSpec = {
+	Name: string,
+	GetVolume: () -> number,
+	IsOff: () -> boolean, -- muted (sound effects) / switched off (music)
+	SetVolume: (number, boolean) -> (), -- volume, save (false while dragging)
+	Toggle: () -> (),
+	OnIcon: string,
+	OffIcon: string,
+}
+
+-- One "Volume" row: a 0-100% slider, its percent and the on / off button.
+local function sliderRow(spec: SliderSpec)
 	local z = list.ZIndex + 1
 	local row = Instance.new("Frame")
-	row.Name = "SoundRow"
+	row.Name = spec.Name
 	row.BackgroundColor3 = Colors.Panel2
 	row.Size = UDim2.new(1, 0, 0, ROW_HEIGHT)
 	row.LayoutOrder = nextOrder()
@@ -286,32 +283,32 @@ local function soundRow()
 	hit.Size = UDim2.new(1, -(TIER_COLUMN + SLIDER_LABEL_WIDTH + MUTE_SIZE + 30), 0, UITheme.MinTapSize)
 	hit.ZIndex = z + 1
 	hit.Parent = row
-	sliderTrack = Instance.new("Frame")
-	sliderTrack.Name = "Track"
-	sliderTrack.AnchorPoint = Vector2.new(0, 0.5)
-	sliderTrack.Position = UDim2.new(0, SLIDER_KNOB / 2, 0.5, 0)
-	sliderTrack.Size = UDim2.new(1, -SLIDER_KNOB, 0, SLIDER_TRACK_HEIGHT)
-	sliderTrack.BackgroundColor3 = Colors.Ink
-	sliderTrack.ZIndex = z + 2
-	sliderTrack.Parent = hit
-	UIKit.Corner(sliderTrack, 999)
-	sliderFill = Instance.new("Frame")
-	sliderFill.Name = "Fill"
-	sliderFill.BackgroundColor3 = Colors.ShieldTeal
-	sliderFill.BorderSizePixel = 0
-	sliderFill.ZIndex = z + 3
-	sliderFill.Parent = sliderTrack
-	UIKit.Corner(sliderFill, 999)
-	sliderKnob = Instance.new("Frame")
-	sliderKnob.Name = "Knob"
-	sliderKnob.AnchorPoint = Vector2.new(0.5, 0.5)
-	sliderKnob.Size = UDim2.fromOffset(SLIDER_KNOB, SLIDER_KNOB)
-	sliderKnob.BackgroundColor3 = Colors.White
-	sliderKnob.ZIndex = z + 4
-	sliderKnob.Parent = sliderTrack
-	UIKit.Corner(sliderKnob, 999)
-	UIKit.Stroke(sliderKnob, 3)
-	sliderLabel = UIKit.Label({
+	local track = Instance.new("Frame")
+	track.Name = "Track"
+	track.AnchorPoint = Vector2.new(0, 0.5)
+	track.Position = UDim2.new(0, SLIDER_KNOB / 2, 0.5, 0)
+	track.Size = UDim2.new(1, -SLIDER_KNOB, 0, SLIDER_TRACK_HEIGHT)
+	track.BackgroundColor3 = Colors.Ink
+	track.ZIndex = z + 2
+	track.Parent = hit
+	UIKit.Corner(track, 999)
+	local fill = Instance.new("Frame")
+	fill.Name = "Fill"
+	fill.BackgroundColor3 = Colors.ShieldTeal
+	fill.BorderSizePixel = 0
+	fill.ZIndex = z + 3
+	fill.Parent = track
+	UIKit.Corner(fill, 999)
+	local knob = Instance.new("Frame")
+	knob.Name = "Knob"
+	knob.AnchorPoint = Vector2.new(0.5, 0.5)
+	knob.Size = UDim2.fromOffset(SLIDER_KNOB, SLIDER_KNOB)
+	knob.BackgroundColor3 = Colors.White
+	knob.ZIndex = z + 4
+	knob.Parent = track
+	UIKit.Corner(knob, 999)
+	UIKit.Stroke(knob, 3)
+	local percent = UIKit.Label({
 		Name = "Percent",
 		Font = Fonts.Display,
 		TextSize = 17,
@@ -323,11 +320,26 @@ local function soundRow()
 		Stroke = UITheme.Stroke.Text,
 		Parent = row,
 	})
-	muteButton = UIKit.Button({
-		Name = "Mute",
+
+	local toggle: TextButton
+	local function redraw()
+		local volume = spec.GetVolume()
+		local off = spec.IsOff()
+		fill.Size = UDim2.fromScale(volume, 1)
+		knob.Position = UDim2.fromScale(volume, 0.5)
+		percent.Text = ("%d%%"):format(math.floor(volume * 100 + 0.5))
+		percent.TextColor3 = if off then Colors.Faint else Colors.Text
+		fill.BackgroundColor3 = if off then Colors.Faint else Colors.ShieldTeal
+		UIKit.SetButton(toggle, {
+			Style = if off then "Red" else "Disabled",
+			Text = if off then spec.OffIcon else spec.OnIcon,
+		})
+	end
+	toggle = UIKit.Button({
+		Name = "Toggle",
 		Parent = row,
 		Style = "Disabled",
-		Text = "🔊",
+		Text = spec.OnIcon,
 		TextSize = 20,
 		Size = UDim2.fromOffset(MUTE_SIZE, MUTE_SIZE),
 		AnchorPoint = Vector2.new(1, 0.5),
@@ -335,32 +347,42 @@ local function soundRow()
 		ShadowOffset = UITheme.SmallShadowOffset,
 		ZIndex = z + 1,
 		OnClick = function()
-			TycoonController.SetSfxMuted(not TycoonController.IsSfxMuted())
-			refreshSound()
+			spec.Toggle()
+			redraw()
 			SoundKit.Play("Toast", nil)
 		end,
 	})
+	table.insert(sliderRefreshers, redraw)
 
+	-- The volume at a screen x on the track (0..1).
+	local function volumeAt(x: number): number
+		local left = track.AbsolutePosition.X
+		local width = math.max(track.AbsoluteSize.X, 1)
+		return math.clamp((x - left) / width, 0, 1)
+	end
+	local mine = false -- this slider is being dragged
 	hit.InputBegan:Connect(function(input: InputObject)
 		if isPointer(input) then
+			mine = true
 			dragging = true
-			TycoonController.SetSfxVolume(volumeAt(input.Position.X), false)
-			refreshSound()
+			spec.SetVolume(volumeAt(input.Position.X), false)
+			redraw()
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(input: InputObject)
 		local moved = input.UserInputType == Enum.UserInputType.MouseMovement
 			or input.UserInputType == Enum.UserInputType.Touch
-		if dragging and moved then
-			TycoonController.SetSfxVolume(volumeAt(input.Position.X), false)
-			refreshSound()
+		if mine and moved then
+			spec.SetVolume(volumeAt(input.Position.X), false)
+			redraw()
 		end
 	end)
 	UserInputService.InputEnded:Connect(function(input: InputObject)
-		if dragging and isPointer(input) then
+		if mine and isPointer(input) then
+			mine = false
 			dragging = false
 			-- Save on release, and let them hear the new level.
-			TycoonController.SetSfxVolume(TycoonController.GetSfxVolume(), true)
+			spec.SetVolume(spec.GetVolume(), true)
 			SoundKit.Play("Toast", nil)
 		end
 	end)
@@ -403,8 +425,35 @@ local function build()
 
 	-- Section: Sound effects.
 	sectionTitle("Sound effects")
-	note("Every sound in the game. Music isn't in yet.")
-	soundRow()
+	note("Every sound in the game.")
+	sliderRow({
+		Name = "SoundRow",
+		GetVolume = TycoonController.GetSfxVolume,
+		IsOff = TycoonController.IsSfxMuted,
+		SetVolume = TycoonController.SetSfxVolume,
+		Toggle = function()
+			TycoonController.SetSfxMuted(not TycoonController.IsSfxMuted())
+		end,
+		OnIcon = "🔊",
+		OffIcon = "🔇",
+	})
+
+	-- Section: Music.
+	sectionTitle("Music")
+	note("Chill classical in the background. Turn it off or down here.")
+	sliderRow({
+		Name = "MusicRow",
+		GetVolume = TycoonController.GetMusicVolume,
+		IsOff = function()
+			return not TycoonController.IsMusicOn()
+		end,
+		SetVolume = TycoonController.SetMusicVolume,
+		Toggle = function()
+			TycoonController.SetMusicOn(not TycoonController.IsMusicOn())
+		end,
+		OnIcon = "🎵",
+		OffIcon = "🔇",
+	})
 
 	-- Section: Tutorial.
 	sectionTitle("Tutorial")

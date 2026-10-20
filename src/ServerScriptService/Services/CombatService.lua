@@ -15,10 +15,12 @@
 	    cooldown (per player and weapon), both sides' eligibility (Rebirth 1+,
 	    not protected, not spawn-protected, not ragdolled / immune, the
 	    attacker not carrying). Melee: MeleeHitDelay after the swing the
-	    server boxes CombatConfig.MeleeBox in front of the attacker's root; the
-	    Bat hits the nearest hittable player in it, the Glove all of them, and
+	    server boxes the weapon's MeleeBox in front of the attacker's root; a
+	    player whose root was in the box at the swing REQUEST time (the
+	    last HistorySeconds of every root are kept) counts too; the Bat hits
+	    the nearest hittable player in it, the Glove all of them, and
 	    every other player in the box gets the attacker-only shield pop with
-	    its reason. One log line per swing in Studio ("box found [...] ->
+	    its reason. Nobody beyond Range + RangeSlack is hit. One log line per swing in Studio ("box found [...] ->
 	    HIT / MISS / <name> <reason>"). Ranged weapons: a server raycast with
 	    line of sight. Numbers through RemoteGuard; rate-limited.
 	  * Ragdoll: the server owns the until-times (Player attributes
@@ -90,6 +92,8 @@ local state = {
 	verdictSeq = 0,
 	-- /combat box: draw each swing's hitbox (Studio only)
 	drawBox = false,
+	-- userId -> the last HistorySeconds of the character root: { T = os.clock(), Pos }
+	history = {} :: { [number]: { { T: number, Pos: Vector3 } } },
 	-- userId -> placed banana peels
 	peels = {} :: { [number]: { Model } },
 	folder = nil :: Folder?,
@@ -580,6 +584,12 @@ function CombatService.GrantWeapon(player: Player, id: string): boolean
 	return true
 end
 
+-- /selftest: tools match what the player owns again (after the test took a
+-- weapon back).
+function CombatService.RefreshTools(player: Player)
+	giveTools(player)
+end
+
 -- Studio /weapons all | reset.
 function CombatService.DebugSetAll(player: Player, all: boolean)
 	if all then
@@ -708,17 +718,57 @@ local function playerOfPart(part: Instance): Player?
 	return nil
 end
 
--- The box in front of `root`: flat facing (no tilt), its centre
--- MeleeBoxForward studs forward.
-local function meleeBoxCFrame(root: BasePart): CFrame
+-- The box in front of `root`: flat facing (no tilt), its centre the
+-- weapon's MeleeBoxForward studs forward.
+local function meleeBoxCFrame(root: BasePart, weapon: CombatConfig.Weapon): CFrame
 	local look = root.CFrame.LookVector
 	local flat = Vector3.new(look.X, 0, look.Z)
 	local forward = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, -1)
-	return CFrame.lookAt(root.Position, root.Position + forward) * CFrame.new(0, 0, -CombatConfig.MeleeBoxForward)
+	local _, forwardStuds = CombatConfig.GetMeleeBox(weapon)
+	return CFrame.lookAt(root.Position, root.Position + forward) * CFrame.new(0, 0, -forwardStuds)
+end
+
+-- Where `player`'s root was at os.clock() time `at` (the nearest kept
+-- sample), or nil when nothing that recent is kept.
+local function positionAt(player: Player, at: number): Vector3?
+	local samples = state.history[player.UserId]
+	if not samples then
+		return nil
+	end
+	local best: Vector3? = nil
+	local bestGap = math.huge
+	for _, sample in samples do
+		local gap = math.abs(sample.T - at)
+		if gap < bestGap then
+			bestGap = gap
+			best = sample.Pos
+		end
+	end
+	return best
+end
+
+-- One Heartbeat sample of every root; samples older than HistorySeconds
+-- (plus a frame of slack) go.
+local function recordHistory()
+	local now = os.clock()
+	for _, player in Players:GetPlayers() do
+		local root = getRoot(player)
+		if root then
+			local samples = state.history[player.UserId]
+			if not samples then
+				samples = {}
+				state.history[player.UserId] = samples
+			end
+			table.insert(samples, { T = now, Pos = root.Position })
+			while #samples > 1 and now - samples[1].T > CombatConfig.HistorySeconds + 0.1 do
+				table.remove(samples, 1)
+			end
+		end
+	end
 end
 
 -- /combat box: a red transparent part where the box was, for 0.2 s.
-local function drawMeleeBox(cframe: CFrame)
+local function drawMeleeBox(cframe: CFrame, size: Vector3)
 	local part = Instance.new("Part")
 	part.Name = "MeleeBoxDebug"
 	part.Anchored = true
@@ -729,7 +779,7 @@ local function drawMeleeBox(cframe: CFrame)
 	part.Material = Enum.Material.SmoothPlastic
 	part.Color = Color3.new(1, 0.1, 0.1)
 	part.Transparency = 0.6
-	part.Size = CombatConfig.MeleeBox
+	part.Size = size
 	part.CFrame = cframe
 	part.Parent = getFolder()
 	task.delay(0.2, function()
@@ -747,7 +797,7 @@ end
 
 -- MeleeHitDelay after an accepted swing: the box, the verdict, the hits.
 -- (Everything is read now, from the attacker's root as it is now.)
-local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon)
+local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, requestAt: number, requestBox: CFrame)
 	local root = getRoot(attacker)
 	local humanoid = getHumanoid(attacker)
 	local prefix = ("[Combat] %s %s:"):format(attacker.Name, weapon.Id)
@@ -760,23 +810,49 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon)
 		recordVerdict(attacker, weapon, {}, {}, prefix .. " box found [] -> MISS (attacker ragdolled)")
 		return
 	end
-	local cframe = meleeBoxCFrame(root)
+	local boxSize = CombatConfig.GetMeleeBox(weapon)
+	local cframe = meleeBoxCFrame(root, weapon)
 	if state.drawBox then
-		drawMeleeBox(cframe)
+		drawMeleeBox(cframe, boxSize)
 	end
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = if attacker.Character then { attacker.Character } else {}
-	local parts = Workspace:GetPartBoundsInBox(cframe, CombatConfig.MeleeBox, params)
-	-- The distinct players in the box, nearest first.
+	local parts = Workspace:GetPartBoundsInBox(cframe, boxSize, params)
+	-- The distinct players in the box, nearest first. `seen` is their root
+	-- distance from the attacker; one past Range + RangeSlack never counts.
+	local maxReach = weapon.Range + CombatConfig.RangeSlack
 	local seen: { [Player]: number } = {}
 	local candidates: { Player } = {}
+	local function consider(owner: Player, distance: number)
+		if distance > maxReach then
+			return
+		end
+		if seen[owner] == nil then
+			table.insert(candidates, owner)
+		end
+		seen[owner] = math.min(seen[owner] or math.huge, distance)
+	end
 	for _, part in parts do
 		local owner = playerOfPart(part)
-		if owner and owner ~= attacker and not seen[owner] then
+		if owner and owner ~= attacker then
 			local ownerRoot = getRoot(owner)
-			seen[owner] = if ownerRoot then (ownerRoot.Position - root.Position).Magnitude else math.huge
-			table.insert(candidates, owner)
+			consider(owner, if ownerRoot then (ownerRoot.Position - root.Position).Magnitude else math.huge)
+		end
+	end
+	-- Lag tolerance: whoever's root was in the box when the swing was
+	-- requested (the box and the roots as they were THEN) counts as well.
+	local attackerThen = positionAt(attacker, requestAt) or root.Position
+	local half = boxSize / 2
+	for _, other in Players:GetPlayers() do
+		if other ~= attacker and seen[other] == nil then
+			local was = positionAt(other, requestAt)
+			if was then
+				local offset = requestBox:PointToObjectSpace(was)
+				if math.abs(offset.X) <= half.X and math.abs(offset.Y) <= half.Y and math.abs(offset.Z) <= half.Z then
+					consider(other, (was - attackerThen).Magnitude)
+				end
+			end
 		end
 	end
 	table.sort(candidates, function(a: Player, b: Player)
@@ -857,8 +933,9 @@ local function onRequestHit(attacker: Player, payload: unknown)
 			Attacker = attacker.UserId,
 		})
 		-- The hit lands where the clip's Hit marker is, not at the click.
+		local requestAt, requestBox = os.clock(), meleeBoxCFrame(root, weapon)
 		task.delay(CombatConfig.MeleeHitDelay, function()
-			resolveMelee(attacker, weapon)
+			resolveMelee(attacker, weapon, requestAt, requestBox)
 		end)
 	elseif weapon.Kind == "Ranged" or weapon.Kind == "Freeze" then
 		local direction = vector(p.Direction)
@@ -930,6 +1007,7 @@ end
 local function onPlayerRemoving(player: Player)
 	state.lastSwing[player.UserId] = nil
 	state.verdicts[player.UserId] = nil
+	state.history[player.UserId] = nil
 	state.joints[player.UserId] = nil
 	endLaunch(player.UserId, nil)
 	local peels: { Model } = state.peels[player.UserId] or {}
@@ -959,6 +1037,7 @@ end
 function CombatService:Init()
 	RemoteEvents.RequestHit.OnServerEvent:Connect(onRequestHit)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
+	RunService.Heartbeat:Connect(recordHistory)
 end
 
 function CombatService:Start()

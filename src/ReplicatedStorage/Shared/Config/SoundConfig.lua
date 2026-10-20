@@ -7,10 +7,12 @@
 	once and then stays silent. docs/SOUNDS.md lists each slot, what it
 	sounds like and where it plays.
 
-	Every Id is a public Creator Store sound effect uploaded by the Roblox
-	account (creator id 1), so it loads in any experience. Picked by Claude
-	from the store's names and lengths (not listened to): flag any that
-	sound wrong in a playtest. No slot reuses another's sound.
+	Every Id is a public Creator Store sound effect. The non-combat ones are
+	uploaded by the Roblox account (creator id 1); the combat ones are APM /
+	ProSoundEffects / DistroKid-licensed or short public SFX. Picked by
+	Claude from the store's names and lengths (not listened to): flag any
+	that sound wrong in a playtest ("/sound <slot>" auditions one). Shoot
+	and Laser are the same clip on purpose (Laser at 1.3x).
 
 	Optional per slot:
 	  SpeedJitter        { min, max } random PlaybackSpeed per play (a coin
@@ -25,6 +27,8 @@ export type Slot = {
 	Id: string,
 	Volume: number,
 	SpeedJitter: { number }?,
+	PlaybackSpeed: number?,
+	DucksMusic: boolean?,
 	RollOffMaxDistance: number?,
 }
 
@@ -46,32 +50,39 @@ SoundConfig.Slots = {
 	-- Cannon_Explode: a meteor landing, at the crater.
 	MeteorImpact = { Id = asset(3149249837), Volume = 0.5, RollOffMaxDistance = 200 },
 	-- Roblox_Pinball_8Bit_Riser_04 (3 s): the Charged / Void / Celestial reveal card.
-	EventReveal = { Id = asset(16480577565), Volume = 0.6 },
+	EventReveal = { Id = asset(16480577565), Volume = 0.6, DucksMusic = true },
 	-- Roblox_UI_Whoosh_01: a thief grabs an item.
 	Grab = { Id = asset(15675024286), Volume = 0.6 },
 	-- Roblox_Pinball_8Bit_Blip_05: your item is being stolen (played 3x).
 	Alarm = { Id = asset(16480579431), Volume = 0.5 },
 	-- victory.wav: a big fusion reveal at the machine.
-	RevealMajor = { Id = asset(12222253), Volume = 0.6 },
+	RevealMajor = { Id = asset(12222253), Volume = 0.6, DucksMusic = true },
 	-- Roblox_UI_Cute_Pop: other fusion reveals, skipped-card pulls.
 	RevealMinor = { Id = asset(15675055424), Volume = 0.45 },
 	-- Roblox_UI_Bright_Click: top banners (announcements).
 	Toast = { Id = asset(15675059323), Volume = 0.35 },
 	-- RBLX UI Purchase (SFX): a station purchase (Multiplier Pad, gacha).
 	Station = { Id = asset(10066947742), Volume = 0.5 },
-	-- Combat (CombatController). EMPTY until picked from the Creator Store
-	-- (creator id 1): a cartoon bonk, a laser zap, an ice crackle, a
-	-- banana slip (list in docs/SOUNDS.md). Silent meanwhile (an empty Id is
-	-- no error).
-	Bonk = { Id = "", Volume = 0.6, SpeedJitter = { 0.9, 1.1 }, RollOffMaxDistance = 120 },
-	Laser = { Id = "", Volume = 0.5, RollOffMaxDistance = 150 },
-	Freeze = { Id = "", Volume = 0.5, RollOffMaxDistance = 120 },
-	Slip = { Id = "", Volume = 0.6, RollOffMaxDistance = 120 },
-	-- A melee swing's whoosh (Bat, Slap Glove), a gun's trigger-and-kick, and
-	-- a weapon coming up in the hand. Same rule: silent until picked.
-	Swing = { Id = "", Volume = 0.5, SpeedJitter = { 0.95, 1.1 }, RollOffMaxDistance = 90 },
-	Shoot = { Id = "", Volume = 0.45, RollOffMaxDistance = 120 },
-	Equip = { Id = "", Volume = 0.4, RollOffMaxDistance = 60 },
+	-- Combat (CombatController). Ids picked from the Creator Store (Polish
+	-- 12; APM / ProSoundEffects / short public SFX), judged by name, not ear:
+	-- audition each in Studio with "/sound <slot>" and swap any that miss.
+	-- Hit_Fryingpan: a Bat hit.
+	Bonk = { Id = asset(121015905545694), Volume = 0.6, SpeedJitter = { 0.9, 1.1 }, RollOffMaxDistance = 120 },
+	-- ProSoundEffects "Hand Clap 1": a Slap Glove hit.
+	Slap = { Id = asset(9114758204), Volume = 0.65, SpeedJitter = { 0.95, 1.05 }, RollOffMaxDistance = 120 },
+	-- eblaster_blast_fire_01 at 1.3x: the Laser Gun's hit (Shoot is the same
+	-- clip at normal speed).
+	Laser = { Id = asset(96445944074750), Volume = 0.5, PlaybackSpeed = 1.3, RollOffMaxDistance = 150 },
+	-- AW Freeze Spreading: a Freeze Ray hit.
+	Freeze = { Id = asset(87971519891129), Volume = 0.5, RollOffMaxDistance = 120 },
+	-- slide whistle: a Banana Peel slip.
+	Slip = { Id = asset(97197794979302), Volume = 0.6, RollOffMaxDistance = 120 },
+	-- ProSoundEffects "Wood Whoosh Quick Swing": a Bat / Glove swing.
+	Swing = { Id = asset(9120972321), Volume = 0.5, SpeedJitter = { 0.95, 1.1 }, RollOffMaxDistance = 90 },
+	-- eblaster_blast_fire_01: a Laser Gun / Freeze Ray shot (the Ray at 0.8x).
+	Shoot = { Id = asset(96445944074750), Volume = 0.45, RollOffMaxDistance = 120 },
+	-- ProSoundEffects "Plastic Flashlight pick up": a weapon comes out.
+	Equip = { Id = asset(9117509491), Volume = 0.4, RollOffMaxDistance = 60 },
 } :: { [string]: Slot }
 
 -- At most this many sounds of one slot play at once; extra plays are

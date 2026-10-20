@@ -28,6 +28,7 @@ local TrailerController = require(Controllers.TrailerController)
 local TutorialController = require(Controllers.TutorialController)
 local CombatController = require(Controllers.CombatController)
 local JumpPadController = require(Controllers.JumpPadController)
+local MusicController = require(Controllers.MusicController)
 local GachaBoardController = require(Controllers.GachaBoardController)
 local HudGate = require(script.Parent.UI.HudGate)
 local TopStack = require(script.Parent.UI.TopStack)
@@ -55,6 +56,7 @@ TrailerController.Init() -- /trailer (admins; client-only cinematic)
 TutorialController.Init() -- the first-time tutorial (banner, dotted path, hand)
 HudGate.Init() -- the progressive HUD: what a new player sees builds up with the tutorial
 CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
+MusicController.Init() -- the background playlist (Settings -> Music)
 JumpPadController.Init() -- the 2nd floor's jump pads launch your own character
 GachaBoardController.Init() -- the Gacha odds card that pops up above your pad (+ its E / R / ? buttons)
 
