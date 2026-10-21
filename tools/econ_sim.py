@@ -85,6 +85,14 @@ FUSE_COUNT = 2  # how many items the simulated player puts in (--fuse N)
 SECRET_FUSION_REBIRTHS = 1  # Mythic -> Secret fusion unlocks at this many rebirths
 FUSE_SECONDS = 4.0
 PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
+# ...and the pulls the cap alone makes affordable (the climbing price is above
+# the cap) take at most this share of the cash earned since the last rebirth.
+# The old price stopped the greedy player on its own (it climbed past
+# PULL_BUDGET_SECONDS of income); a capped price never does, so without a
+# share the sim pulls on every tick and starves the upgrades, which no real
+# player does. Pulls at the climbing price are unchanged, so --cap=0 is the
+# old table. 1.0 = no limit. --share=N overrides.
+PULL_SHARE = 0.25
 # Mutations: (name, income mult, gacha chance, fusion-success chance)
 MUTATIONS = [("Rainbow", 12, 0.001, 0.0005), ("Diamond", 5, 0.008, 0.004), ("Golden", 2, 0.04, 0.02)]
 MUT_MULT = {"None": 1, "Golden": 2, "Charged": 3, "Diamond": 5, "Void": 8, "Rainbow": 12, "Celestial": 20}
@@ -258,6 +266,8 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     milestones = {}
     pulls = 0
     late_samples = []  # (t, seconds of steady income one x10 pull costs)
+    pull_spent = 0.0  # cash spent on capped pulls / earned, since the last rebirth
+    earned = 0.0
 
     def add(tier, mut):
         inv[(tier, mut)] = inv.get((tier, mut), 0) + 1
@@ -355,6 +365,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             price = min(price, max(GACHA_COST, GACHA_MAX_INCOME_SECONDS * steady))
         return float(int(price))
 
+    def climbing_price(n):
+        return float(int(GACHA_COST * GACHA_GROWTH ** n))
+
     def mark(name):
         if name not in milestones:
             milestones[name] = t
@@ -440,6 +453,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             quest_step()
         income = cps(ev)
         cash += income * step
+        earned += income * step
         qs["boost"] = max(0.0, qs["boost"] - step)
         qs["luck"] = max(0.0, qs["luck"] - step)
         if ev == "GoldenRain":
@@ -460,6 +474,8 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             if recent:
                 milestones[f"late10_{rebirths}"] = recent[len(recent) // 2]
             late_samples.clear()
+            milestones[f"pullshare{rebirths}"] = pull_spent / max(earned, 1e-9) * 1000  # permille
+            pull_spent = 0.0; earned = 0.0
             cash = 0; pulls = 0; mult_lvl = 0
             gen = {g[0]: 0 for g in GENS}; gen['basic'] = START_BASIC
             continue
@@ -481,8 +497,15 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             gcost = pull_price(pulls, steady)
             if int(t) % 10 == 0:
                 late_samples.append((t, sum(pull_price(pulls + k, steady) for k in range(MULTI_PULL)) / max(steady, 1e-9)))
-            if gcost <= max(income, 1) * PULL_BUDGET_SECONDS and cash >= gcost:
+            by_cap = gcost < climbing_price(pulls)  # the cap alone makes this pull cheap
+            if (
+                gcost <= max(income, 1) * PULL_BUDGET_SECONDS
+                and cash >= gcost
+                and (not by_cap or pull_spent + gcost <= PULL_SHARE * earned)
+            ):
                 cash -= gcost
+                if by_cap:
+                    pull_spent += gcost
                 pulls += 1
                 add(roll_tier(), roll_mut(False, ev))
                 bought = True
@@ -588,6 +611,8 @@ if __name__ == "__main__":
         QUESTS = True
     sessions = 0
     for a in sys.argv:
+        if a.startswith("--share="):
+            PULL_SHARE = float(a.split("=")[1])
         if a.startswith("--cap="):
             GACHA_MAX_INCOME_SECONDS = float(a.split("=")[1])
         if a.startswith("--fuse="):
@@ -616,6 +641,10 @@ if __name__ == "__main__":
         late = sorted(r[0][f"late10_{n}"] for r in runs if f"late10_{n}" in r[0])
         if late:
             print(f"x10 pull before rebirth {n}: median {late[len(late) // 2]:.0f} s of steady income ({len(late)} runs)")
+    for n in range(1, 9):
+        share = sorted(r[0][f"pullshare{n}"] for r in runs if f"pullshare{n}" in r[0])
+        if share:
+            print(f"pull spend before rebirth {n}: median {share[len(share) // 2] / 10:.1f}% of income earned ({len(share)} runs)")
     print(f"after {hours:g} h: rebirths median", sorted(r[2] for r in runs)[mid],
           " index entries median", sorted(r[3] for r in runs)[mid], "/", sum(ITEMS_PER_TIER.values()) * INDEX_VARIANTS,
           " cps median", f"{sorted(r[1] for r in runs)[mid]:.3g}")

@@ -12,11 +12,23 @@ local TycoonConfig = {}
 	`python3 tools/econ_sim.py 30 12 --fuse=2` (the player fuses pairs), with
 	`--fuse=3` (triples) in brackets:
 
-	    first Gacha pull ..... ~1:10 (1:10)    first Legendary ....... ~6 min (13 min)
-	    first Mythic ......... ~1:05 (2:10)    Rebirth 1 ............. ~1:04 (1:10)
-	    Rebirth 2 ............ ~1:46 (2:13)    Rebirth 3 ............. ~2:46 (3:15)
-	    Singularity Core ..... ~2:37 (3:05)    first Secret .......... ~8:30 (not in 12 h)
-	    Index after 12 h ..... ~38/68 (34/68)  Multiplier maxed ...... never in 12 h
+	    first Gacha pull ..... ~1:09 (1:09)    first Legendary ....... ~6 min (12 min)
+	    first Mythic ......... ~53 min (2:00)  Rebirth 1 ............. ~50 min (54 min)
+	    Rebirth 2 ............ ~1:30 (1:40)    Rebirth 3 ............. ~2:11 (2:27)
+	    Singularity Core ..... ~2:04 (2:15)    first Secret .......... not in 12 h (not in 12 h)
+	    Index after 12 h ..... ~37/119 (35/119) Multiplier maxed ...... never in 12 h
+
+	With the Gacha price cap (GachaMaxIncomeSeconds = 15, 30 seeds, 12 h). Before
+	the cap Rebirth 1 was ~1:03 (1:10), first Mythic ~1:04 (2:37), first Secret
+	~10:36 (not in 12 h). 15 because it is the largest cap that keeps a x10 pull
+	at 150 s (2.5 min) of steady income late in a run (20 s: 200 s, 30 s: 300 s;
+	uncapped it was 5-12 min); it leaves the first pull and first Legendary alone
+	and makes Mythic / Rebirth 1 ~15-20% sooner, not later. It does NOT bring the
+	first Secret in (it stays past 12 h at both fusion sizes): in the sim the cap
+	changes how many pulls a long run gets, not the Mythic -> Secret odds.
+	The sim's player spends at most PULL_SHARE (25%) of its income on pulls the
+	cap alone makes affordable; without that it pulls on every tick and starves
+	its upgrades (Rebirth 1 at 2-3 h).
 
 	Secret and Rainbow have huge spreads; judge them by order of magnitude.
 

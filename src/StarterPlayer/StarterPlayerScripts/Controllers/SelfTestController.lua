@@ -2037,7 +2037,7 @@ end
 -- the phone's, no GachaBoard in the workspace, the anchor 1 stud over the
 -- head; then each tier's drawn % equals GetGachaRates at the server's luck,
 -- the luck pill, the silhouettes and the (i) panel's per-orb sums.
-local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
+local function probeGachaCard(serverLuck: number, label: string, serverCost: number?, serverMultiCost: number?): { ProbeLine }
 	local lines: { ProbeLine } = {}
 	local TycoonController = require(script.Parent.TycoonController) :: any
 	local Board = require(script.Parent.GachaBoardController) :: any
@@ -2326,6 +2326,33 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		Name = ("gacha card (%s): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge"):format(label),
 		Detail = if #styleBad > 0 then table.concat(styleBad, "; ") else ("%d cells, price %q, mutation line %q"):format(cells, if price and price:IsA("TextLabel") then price.Text else "?", if line and line:IsA("TextLabel") then line.Text:gsub("<[^>]+>", "") else "?"),
 	})
+
+	-- The card's price is the server's charge: the server sent what it would
+	-- charge for the same pulls and income (its own steady income); the card's
+	-- label and the client's formula must show the same numbers once the sync
+	-- has landed (a mismatch lasts at most one sync).
+	if typeof(serverCost) == "number" and typeof(serverMultiCost) == "number" then
+		local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+		local free = TycoonController.GetTutorial().FreePulls > 0
+		local wantText = NumberFormat.Money(serverCost)
+		local priceLabel = cardFrame:FindFirstChild("Price", true)
+		local waited = os.clock()
+		while priceLabel and priceLabel:IsA("TextLabel") and not free and priceLabel.Text ~= wantText and os.clock() - waited < 3 do
+			task.wait(0.1)
+		end
+		local pulls = TycoonController.GetGachaPulls()
+		local steady = TycoonController.GetSteadyIncomePerSecond()
+		local clientCost = TycoonConfig.GetGachaPullCost(pulls, steady)
+		local clientMulti = TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount, steady)
+		local shown = if priceLabel and priceLabel:IsA("TextLabel") then priceLabel.Text else "?"
+		table.insert(lines, {
+			Ok = clientCost == serverCost and clientMulti == serverMultiCost and (free or shown == wantText),
+			Name = ("gacha card (%s): the pad card's price equals the server's charge for the same pulls and income"):format(label),
+			Detail = ("pulls %d, steady %.3f: server %s (x10 %s), client %s (x10 %s), card shows %q%s"):format(
+				pulls, steady, tostring(serverCost), tostring(serverMultiCost), tostring(clientCost), tostring(clientMulti), shown, if free then " (tutorial free pulls: label says FREE)" else ""
+			),
+		})
+	end
 
 	-- The (i) panel: per-orb % sum to the tier %.
 	Board.OpenPanel()
@@ -3225,7 +3252,7 @@ local function probeTutorial(payload: any)
 		elseif payload.Kind == "GachaOpen" then
 			return probeGachaOpen()
 		elseif payload.Kind == "GachaCard" then
-			return probeGachaCard(payload.Luck, tostring(payload.Label))
+			return probeGachaCard(payload.Luck, tostring(payload.Label), payload.ServerCost, payload.ServerMultiCost)
 		elseif payload.Kind == "GachaButtons" then
 			return probeGachaButtons()
 		elseif payload.Kind == "GachaApproach" then

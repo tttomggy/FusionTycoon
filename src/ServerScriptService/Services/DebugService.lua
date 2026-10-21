@@ -1232,7 +1232,12 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	-- On the pad: wait 0.4 s, then everything is read from the card's tree.
 	root.CFrame = onPad
 	task.wait(0.4)
-	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player) }, result)
+	-- What the server would charge now: the card must show the same.
+	local chargePulls = PlayerDataService.GetGachaPulls(player)
+	local chargeSteady = PlayerDataService.GetSteadyIncomePerSecond(player)
+	local serverCost = TycoonConfig.GetGachaPullCost(chargePulls, chargeSteady)
+	local serverMultiCost = TycoonConfig.GetGachaMultiPullCost(chargePulls, TycoonConfig.MultiPullCount, chargeSteady)
+	tutorialProbe(player, { Kind = "GachaCard", Label = "luck as is", Luck = PlayerDataService.GetLuck(player), ServerCost = serverCost, ServerMultiCost = serverMultiCost }, result)
 	local oldLuck, oldUntil = Workspace:GetAttribute("AdminLuck"), Workspace:GetAttribute("AdminLuckUntil")
 	Workspace:SetAttribute("AdminLuck", 3)
 	Workspace:SetAttribute("AdminLuckUntil", Workspace:GetServerTimeNow() + 120)

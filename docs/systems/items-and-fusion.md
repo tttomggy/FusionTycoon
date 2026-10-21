@@ -21,7 +21,10 @@ the price. `GetGachaMultiPullCost(pulls, count, steady)` is the sum of the next
 `count` prices. The server charges with `PlayerDataService.GetSteadyIncomePerSecond`;
 the pad card and Rebirth panel use `TycoonController.GetSteadyIncomePerSecond`
 (a mismatch lasts until the next sync). `tools/econ_sim.py` mirrors it
-(`GACHA_MAX_INCOME_SECONDS`, `--cap=N`).
+(`GACHA_MAX_INCOME_SECONDS`, `--cap=N`; its player spends at most `PULL_SHARE`,
+25%, of income on pulls only the cap makes cheap, `--share=N`). Cap 15 keeps a
+×10 pull at 150 s of steady income late in a run (uncapped 5–12 min); it does
+not bring the first Secret in (see the TycoonConfig header table).
 
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
 at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
