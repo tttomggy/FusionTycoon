@@ -79,6 +79,9 @@ local function isOnCooldown(userId: number): boolean
 end
 
 local rng = Random.new()
+-- /selftest: the roll every fusion uses instead of the RNG (1 - epsilon = the
+-- worst roll a fusion can get); nil = the real RNG.
+local rollOverride: number? = nil
 
 -- Every reject path fires a (Success = false) FusionResult so the client's
 -- pending-request flag always resolves. `isSuspicious` marks rejections that
@@ -116,6 +119,12 @@ type FuseOutcome = {
 	KeptUid: string?, -- fail only
 	-- A Safe Fusion token was used: on a fail every input stayed.
 	Safe: boolean,
+	-- Mythic -> Secret pity meter (FusionConfig): the meter after this fusion
+	-- (nil for other tiers), the points a fail added (0 otherwise), and
+	-- whether a full meter made this a sure success.
+	Pity: number?,
+	PityGained: number,
+	SurePity: boolean,
 	-- Success with a mutation: "Kept" (carried over from the inputs) or
 	-- "Rolled" (a fresh fusion roll beat it or stacked onto it). nil otherwise.
 	MutationSource: string?,
@@ -142,14 +151,19 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 	local nextTier = FusionConfig.GetNextTier(consumedTier)
 	-- Void Moon adds a success bonus (EventService hook; capped at 100%), an
 	-- armed Fusion Spark (QuestConfig) its own on top.
-	local chance = FusionConfig.GetFusionChance(consumedTier, count, EventService.GetFusionSuccessBonus() + (spark or 0))
+	local hasPity = FusionConfig.HasPity(consumedTier)
+	local pityBefore = if hasPity then PlayerDataService.GetSecretPity(player) else 0
+	local chance = FusionConfig.GetFusionChanceWithPity(consumedTier, count, EventService.GetFusionSuccessBonus() + (spark or 0), pityBefore)
 	if not nextTier or chance <= 0 then
 		return nil, "MaxTier"
 	end
+	-- A full Secret meter: 100%, so any roll succeeds.
+	local surePity = hasPity and FusionConfig.IsPityFull(pityBefore)
 
 	-- Roll before touching the inventory. The tutorial's first fusion (its
 	-- Fuse step, once per account) always succeeds.
-	local upgraded = rng:NextNumber() < chance or PlayerDataService.TakeTutorialFreeFuse(player, FUSE_STEP)
+	local roll = rollOverride or rng:NextNumber()
+	local upgraded = roll < chance or PlayerDataService.TakeTutorialFreeFuse(player, FUSE_STEP)
 	if not upgraded then
 		local keep = items[1]
 		for _, item in items do
@@ -173,6 +187,12 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		end
 		PlayerDataService.IncrementTotalFusions(player)
 		AnalyticsKit.Funnel(player, "FirstFuse")
+		-- A failed Mythic -> Secret fusion charges the meter by its input count.
+		local pityAfter = pityBefore
+		if hasPity then
+			pityAfter = math.min(FusionConfig.SecretPityFull, pityBefore + FusionConfig.GetPityCharge(count))
+			PlayerDataService.SetSecretPity(player, pityAfter)
+		end
 		return {
 			Upgraded = false,
 			Entry = keep,
@@ -181,6 +201,9 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 			Chance = chance,
 			KeptUid = keep.Uid,
 			Safe = safe == true,
+			Pity = if hasPity then pityAfter else nil,
+			PityGained = pityAfter - pityBefore,
+			SurePity = false,
 		},
 			nil
 	end
@@ -231,6 +254,10 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 	end
 	PlayerDataService.IncrementTotalFusions(player)
 	PlayerDataService.AddStat(player, "Fused_" .. rewardItem.Tier, 1) -- the chain's "Fuse a Mythic"
+	-- Any Secret from a fusion (lucky or pity) empties the meter.
+	if hasPity then
+		PlayerDataService.SetSecretPity(player, 0)
+	end
 	AnalyticsKit.Funnel(player, "FirstFuse")
 	return {
 		Upgraded = true,
@@ -246,6 +273,9 @@ local function fuseOnce(player: Player, items: { InventoryItem }, safe: boolean?
 		Added = added,
 		Stacked = added ~= nil and hadKept,
 		Safe = safe == true,
+		Pity = if hasPity then 0 else nil,
+		PityGained = 0,
+		SurePity = surePity,
 	},
 		nil
 end
@@ -414,6 +444,9 @@ local function onFusionRequest(player: Player, rawPayload: unknown)
 		Stacked = outcome.Stacked,
 		LostCount = if outcome.Upgraded then nil else #outcome.ConsumedUids,
 		Safe = outcome.Safe,
+		Pity = outcome.Pity,
+		PityGained = outcome.PityGained,
+		SurePity = outcome.SurePity,
 		NewIndex = outcome.IsNewIndex,
 		IndexTierComplete = completedTier(player, outcome.Entry, outcome.IsNewIndex),
 	})
@@ -569,6 +602,12 @@ end
 -- The RequestFusion remote's own handler (/selftest drives it).
 function FusionService.HandleFusionRequest(player: Player, payload: unknown)
 	onFusionRequest(player, payload)
+end
+
+-- /selftest: every fusion rolls `roll` instead of the RNG until called with
+-- nil (1 - 1e-9 is the worst roll there is).
+function FusionService.SelfTestSetRoll(roll: number?)
+	rollOverride = roll
 end
 
 function FusionService:Init()

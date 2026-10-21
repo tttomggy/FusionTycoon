@@ -1347,8 +1347,12 @@ end
 
 -- `safe`: a Safe Fusion token was spent, so every orb came back. (Safe
 -- Fusion is never offered here: this card only reports.)
-local function showFailCard(item: any, lostCount: number, safe: boolean?)
+-- `pityGained`: the points the Secret meter went up by (Mythic fusions only).
+local function showFailCard(item: any, lostCount: number, safe: boolean?, pityGained: number?)
 	local tier = item.Tier :: string
+	local pityLine = if pityGained and pityGained > 0
+		then " · " .. UIKit.Colored(("Secret meter +%d"):format(pityGained), UITheme.GetTierLight("Secret"))
+		else ""
 	local body, generation = newBottomCard("FailCard", FAIL_CARD_SIZE)
 	local z = body.ZIndex + 1
 
@@ -1372,8 +1376,8 @@ local function showFailCard(item: any, lostCount: number, safe: boolean?)
 	UIKit.Label({
 		Name = "Detail",
 		Text = if safe
-			then "🛡 Safe Fusion · every orb came back"
-			else ("Kept your %s (%s), lost %d"):format(
+			then "🛡 Safe Fusion · every orb came back" .. pityLine
+			else ("Kept your %s (%s), lost %d%s"):format(
 				"<b>"
 					.. UIKit.Colored(
 						(if topOf(item)
@@ -1383,7 +1387,8 @@ local function showFailCard(item: any, lostCount: number, safe: boolean?)
 					)
 					.. "</b>",
 				UIKit.EscapeRichText(itemName(item)),
-				lostCount
+				lostCount,
+				pityLine
 			),
 		RichText = true,
 		Font = Fonts.Body,
@@ -1691,7 +1696,12 @@ local function onFusionResolved(result: any)
 	end
 	local newItem = result.NewItem
 	if not result.Upgraded then
-		showFailCard(newItem, if typeof(result.LostCount) == "number" then result.LostCount else 1, result.Safe == true)
+		showFailCard(
+			newItem,
+			if typeof(result.LostCount) == "number" then result.LostCount else 1,
+			result.Safe == true,
+			if typeof(result.PityGained) == "number" then result.PityGained else nil
+		)
 		return
 	end
 	-- A Void Moon stacked Void on: the reveal card. Kept event mutations

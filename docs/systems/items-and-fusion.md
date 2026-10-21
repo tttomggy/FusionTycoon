@@ -26,8 +26,26 @@ the pad card and Rebirth panel use `TycoonController.GetSteadyIncomePerSecond`
 ×10 pull at 150 s of steady income late in a run (uncapped 5–12 min); it does
 not bring the first Secret in (see the TycoonConfig header table).
 
-Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
-at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
+Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse Mythics
+at 7–15% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`).
+
+**Secret pity meter** (`FusionConfig.SecretPityFull`, 4; `PlayerData.SecretPity`,
+saved, in the snapshot, kept through rebirths). A **failed** Mythic → Secret
+fusion adds its input count (`GetPityCharge`: 6 inputs +6, 2 inputs +2; the
+meter stops at full). At full the next Mythic fusion is a sure success
+(`GetFusionChanceWithPity` → 100%, so the Fuse panel's %, the chips and the
+roll agree); a Secret from a fusion, lucky or pity, resets it to 0; a Secret
+from the gacha doesn't touch it; other tiers never charge it. `FusionService`
+is the only writer (`PlayerDataService.Get/SetSecretPity`); the fusion result
+carries `Pity`, `PityGained` and `SurePity`. Safe Fusion still charges it (it
+only keeps the orbs). Fuse panel: on the Mythic tab, once Mythic fusion is
+unlocked, a slim "SECRET METER n / 4" bar under the success % (mint fill, 14 px
+text); at full it reads "NEXT FUSE IS A SURE SECRET!" and the % and chips show
+100%. The fail card adds "Secret meter +n". Chosen with `tools/econ_sim.py
+--pity=N` (the TycoonConfig header table has the sweep): 4 is the only value
+whose first Secret lands in 3–5 h at `--fuse=2` (~4:25); `--fuse=3` stays out of
+reach because that player never has spare Mythics (Mythic supply, not odds).
+Odds in this paragraph (7–15%) are unchanged. Any pull or
 successful fusion can roll a **mutation** (`MutationConfig`, ranked by
 multiplier: Golden ×2, Charged ×3, Diamond ×5, Void ×8, Rainbow ×12,
 Celestial ×20; Charged / Void / Celestial are **event-only**, 0 normal

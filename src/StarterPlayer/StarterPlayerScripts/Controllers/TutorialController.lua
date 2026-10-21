@@ -515,10 +515,9 @@ local function runTutorial(mine: number)
 		if not played then
 			break
 		end
-		lastPlayed = if jumped then math.max(index, serverStep - 1) else index
-		if jumped then
-			begun = math.max(begun, lastPlayed)
-		end
+		local reached = if jumped then math.max(index, serverStep - 1) else index
+		lastPlayed = reached
+		begun = math.max(begun, reached)
 	end
 	if runnerSeq == mine then
 		runnerRunning = false

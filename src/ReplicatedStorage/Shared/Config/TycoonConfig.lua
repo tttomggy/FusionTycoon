@@ -15,8 +15,9 @@ local TycoonConfig = {}
 	    first Gacha pull ..... ~1:09 (1:09)    first Legendary ....... ~6 min (12 min)
 	    first Mythic ......... ~53 min (2:00)  Rebirth 1 ............. ~50 min (54 min)
 	    Rebirth 2 ............ ~1:30 (1:40)    Rebirth 3 ............. ~2:11 (2:27)
-	    Singularity Core ..... ~2:04 (2:15)    first Secret .......... not in 12 h (not in 12 h)
-	    Index after 12 h ..... ~37/119 (35/119) Multiplier maxed ...... never in 12 h
+	    Singularity Core ..... ~2:04 (2:15)    first Secret .......... ~4:25 (not in 12 h)
+	    second Secret ........ ~7:18 (-)       Multiplier maxed ...... never in 12 h
+	    Index after 12 h ..... ~40/119 (35/119)
 
 	With the Gacha price cap (GachaMaxIncomeSeconds = 15, 30 seeds, 12 h). Before
 	the cap Rebirth 1 was ~1:03 (1:10), first Mythic ~1:04 (2:37), first Secret
@@ -29,6 +30,21 @@ local TycoonConfig = {}
 	The sim's player spends at most PULL_SHARE (25%) of its income on pulls the
 	cap alone makes affordable; without that it pulls on every tick and starves
 	its upgrades (Rebirth 1 at 2-3 h).
+
+	Secret pity meter (FusionConfig.SecretPityFull = 4, --pity=N): a failed
+	Mythic -> Secret fusion adds its input count, full = the next one is a sure
+	Secret. Before it the first Secret was not in 12 h at either fusion size
+	(~10:36 before the gacha cap). Full 4 = two failed pairs: first Secret ~4:25
+	(p10 3:24, p90 7:51) at --fuse=2, second ~7:18, 1:48 after the first
+	(p10 0:47). Full 6 and 8 give 5:25 and 5:36 (the same three failed pairs,
+	one more Mythic lost each); 12 / 16 / 24 give 7:22 / 7:56 / 10:19. Only 4
+	lands in 3-5 h: the sim's player only ever has a handful of spare plain
+	Mythics (8 by hour 12), so a bigger meter is not reached. --fuse=3 stays
+	out of reach (no first Secret in 12 h whatever the meter): a triple-fuser
+	has ~1 spare plain Mythic at a time, so the meter is never charged. That is
+	Mythic supply (Legendary -> Mythic odds, the gacha rate), not the Secret
+	odds, and not this meter's job. If Secrets feel too common, 8 is the next
+	step (5:36, 2:53 between the first two).
 
 	Secret and Rainbow have huge spreads; judge them by order of magnitude.
 

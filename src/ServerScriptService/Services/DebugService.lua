@@ -930,6 +930,124 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	end
 end
 
+-- The Secret pity meter (FusionConfig.SecretPityFull): fail charges, the
+-- sure success at full, the cap, the save and rebirth round trips, the Fuse
+-- panel's bar and 100% on the real client. Mythics are given and everything
+-- the section made is removed after; rebirths and the meter are put back.
+local function runSecretPitySelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local full = FusionConfig.SecretPityFull
+	local savedRebirths = PlayerDataService.GetRebirths(player)
+	local savedPity = PlayerDataService.GetSecretPity(player)
+	local before: { [string]: boolean } = {}
+	local owned: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in owned do
+		before[item.Uid] = true
+	end
+	local function countTier(tier: string): number
+		local total = 0
+		local current: { any } = PlayerDataService.GetInventory(player) or {}
+		for _, item in current do
+			if item.Tier == tier and not before[item.Uid] then
+				total += 1
+			end
+		end
+		return total
+	end
+	local mythic, legendary = ItemConfig.PickRandomOfTier("Mythic"), ItemConfig.PickRandomOfTier("Legendary")
+	if not mythic or not legendary then
+		result(false, "secret pity: ItemConfig has a Mythic and a Legendary to fuse")
+		return
+	end
+	if savedRebirths < RebirthConfig.SecretFusionRebirths then
+		PlayerDataService.SetRebirths(player, RebirthConfig.SecretFusionRebirths)
+	end
+	PlayerDataService.SetSecretPity(player, 0)
+
+	-- Fuses `count` fresh orbs of `item`'s tier with the worst roll (a fail
+	-- unless the meter is full). Waits out the fusion cooldown first.
+	local function giveMythics(count: number): ()
+		for _ = 1, count do
+			PlayerDataService.AddItem(player, mythic.Id, "Mythic", nil, nil)
+		end
+		RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	end
+	local function fuse(item: any, count: number): ()
+		local uids: { string } = {}
+		for _ = 1, count do
+			local entry = PlayerDataService.AddItem(player, item.Id, item.Tier, nil, nil)
+			if entry then
+				table.insert(uids, entry.Uid)
+			end
+		end
+		task.wait(1.7)
+		FusionService.HandleFusionRequest(player, { Uids = uids })
+	end
+	FusionService.SelfTestSetRoll(1 - 1e-9)
+
+	-- The charge is the input count; the meter stops at full (with a small
+	-- SecretPityFull a 6-input fail fills it from empty).
+	result(FusionConfig.GetPityCharge(6) == 6 and FusionConfig.GetPityCharge(2) == 2, "secret pity: a 6-input fail charges 6 points, a 2-input fail 2")
+	fuse(mythic, 2)
+	local afterPair = PlayerDataService.GetSecretPity(player)
+	result(afterPair == math.min(full, 2), "secret pity: a failed 2-input Mythic fusion adds 2 points", ("meter %d"):format(afterPair))
+	PlayerDataService.SetSecretPity(player, 0)
+	fuse(mythic, 6)
+	local afterSix = PlayerDataService.GetSecretPity(player)
+	result(afterSix == math.min(full, 6), "secret pity: a failed 6-input Mythic fusion adds 6 points (the meter stops at full)", ("meter %d of %d"):format(afterSix, full))
+	PlayerDataService.SetSecretPity(player, 0)
+	fuse(legendary, 2)
+	result(PlayerDataService.GetSecretPity(player) == 0, "secret pity: a failed Legendary fusion leaves the meter alone", ("meter %d"):format(PlayerDataService.GetSecretPity(player)))
+	result(countTier("Secret") == 0, "secret pity: below full the worst roll still fails (no Secret yet)")
+
+	-- Round trips with a part-full meter.
+	local part = math.max(1, full - 2)
+	PlayerDataService.SetSecretPity(player, part)
+	local afterSave, afterRebirth = PlayerDataService.SelfTestPityPersists(player)
+	local roundOk, roundDetail = PlayerDataService.SelfTestRoundTrip(player)
+	result(afterSave == part and roundOk, "secret pity: the meter survives toDisk -> reconcile", ("after save %d, %s"):format(afterSave, tostring(roundDetail)))
+	result(afterRebirth == part, "secret pity: a rebirth does not reset the meter", ("after rebirth %d"):format(afterRebirth))
+	local fingerprint = PlayerDataService.SelfTestFingerprint(player)
+	PlayerDataService.SetSecretPity(player, part - 1)
+	result(PlayerDataService.SelfTestFingerprint(player) ~= fingerprint, "secret pity: the remote-fuzz fingerprint covers the meter")
+
+	-- The cap, then the sure success at full.
+	PlayerDataService.SetSecretPity(player, full - 1)
+	fuse(mythic, 6)
+	result(PlayerDataService.GetSecretPity(player) == full, "secret pity: the meter stops at full", ("meter %d of %d"):format(PlayerDataService.GetSecretPity(player), full))
+	local secretsBefore = countTier("Secret")
+	local showMeter = PlayerDataService.GetSecretPity(player)
+	-- The client's view at full (the panel is probed before the fuse eats it).
+	PlayerDataService.SyncTycoon(player)
+	tutorialProbe(player, { Kind = "ClearScreen", Label = "the pity fusions", Report = false }, result)
+	giveMythics(2)
+	tutorialProbe(player, { Kind = "FuseMeter", Pity = showMeter, Full = true }, result)
+	fuse(mythic, 2)
+	result(countTier("Secret") == secretsBefore + 1, "secret pity: at full the next Mythic fusion succeeds even on the worst roll", ("Secrets %d -> %d"):format(secretsBefore, countTier("Secret")))
+	result(PlayerDataService.GetSecretPity(player) == 0, "secret pity: a Secret from fusion resets the meter to 0", ("meter %d"):format(PlayerDataService.GetSecretPity(player)))
+	FusionService.SelfTestSetRoll(nil)
+
+	-- Not full: the panel shows the server's value.
+	PlayerDataService.SetSecretPity(player, part)
+	PlayerDataService.SyncTycoon(player)
+	tutorialProbe(player, { Kind = "ClearScreen", Label = "the pity fusion", Report = false }, result)
+	giveMythics(2)
+	tutorialProbe(player, { Kind = "FuseMeter", Pity = part, Full = false }, result)
+
+	-- Put it all back.
+	local added: { string } = {}
+	local current: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in current do
+		if not before[item.Uid] then
+			table.insert(added, item.Uid)
+		end
+	end
+	PlayerDataService.RemoveItemsByUid(player, added)
+	PlayerDataService.SetSecretPity(player, savedPity)
+	PlayerDataService.SetRebirths(player, savedRebirths)
+	PlayerDataService.SyncTycoon(player)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+end
+
 -- Progression: stacking (helpers, a live stacked item, an old save's
 -- migration), the fusion intersection, the 2nd floor's assertions and
 -- build, a quest claim refused while incomplete, a power-up refused at 0.
@@ -1615,6 +1733,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- quest / power-up refusals (the junk fuzz above covered their remotes).
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
+		runSecretPitySelfTest(player, result)
 		-- Claiming "Fuse a Mythic" there granted the Slap Glove: the real
 		-- "You got the Slap Glove!" card is up now. Close it (and its queue)
 		-- so section 12 starts on a bare screen.

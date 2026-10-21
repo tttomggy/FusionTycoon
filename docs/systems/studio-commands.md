@@ -208,6 +208,20 @@ Most of the 77 were the TEST, not the game:
 - The effects-tray position checks skip in a too-small window like the others.
 
 
+## /selftest: Secret pity meter
+
+Section 11 (progression) runs `runSecretPitySelfTest`: it gives Mythics and
+Legendaries, forces every fusion's roll to the worst value
+(`FusionService.SelfTestSetRoll`) and checks: a failed 2-input fusion adds 2,
+a 6-input one adds 6 (the meter stops at `SecretPityFull`), a Legendary fail
+adds nothing, the meter survives `toDisk` -> `reconcile` and
+`ApplyRebirth` (`PlayerDataService.SelfTestPityPersists`), the remote-fuzz
+fingerprint covers it (`SecretPity`), and at full the next Mythic fusion
+succeeds on the worst roll and resets it. The client probe `FuseMeter` opens
+the Fuse panel on the Mythic tab at a part-full and a full meter: the bar
+shows the server's value and the % reads 100% only at full. Everything the
+section made is removed after and the tester's rebirths and meter put back.
+
 ## /selftest notes (triage after f95f220)
 
 - `TycoonService.SelfTestClaim` claims the lab by calling the claim itself

@@ -3186,6 +3186,39 @@ local function probeAutoFillMutated(tier: string, expect: string, count: number)
 	}
 end
 
+-- The Fuse panel's Secret meter on the Mythic tab: it shows the server's
+-- value, and at full says so and the success % reads 100%.
+local function probeFuseMeter(pity: number, full: boolean): { ProbeLine }
+	local TycoonController = require(script.Parent.TycoonController) :: any
+	local panel = require(UI.FusePanel) :: any
+	local waited = os.clock()
+	while TycoonController.GetSecretPity() ~= pity and os.clock() - waited < 3 do
+		task.wait(0.1)
+	end
+	task.wait(0.4) -- the inventory sync
+	panel.Open()
+	task.wait(0.2)
+	local view = panel.SelfTestMeter("Mythic")
+	task.wait(0.6) -- the bar's tween
+	panel.Close()
+	local wantText = if full then "NEXT FUSE IS A SURE SECRET!" else ("SECRET METER  %d / %d"):format(pity, FusionConfig.SecretPityFull)
+	local label = if full then "full" else "part-full"
+	return {
+		{
+			Ok = TycoonController.GetSecretPity() == pity and view.Visible and view.Text == wantText and math.abs(view.Fill - pity / FusionConfig.SecretPityFull) < 1e-6,
+			Name = ("fuse panel (%s meter): the SECRET METER bar shows the server's value"):format(label),
+			Detail = ("client meter %d, server %d, visible %s, text %q, fill %.2f"):format(TycoonController.GetSecretPity(), pity, tostring(view.Visible), view.Text, view.Fill),
+		},
+		{
+			Ok = view.Selected >= FusionConfig.MinFusionInputs and ((view.Chance == "100%") == full),
+			Name = if full
+				then "fuse panel (full meter): the success % reads 100%"
+				else "fuse panel (part-full meter): the success % is the normal Mythic odds, not 100%",
+			Detail = ("%d orbs in the chamber, chance label %q"):format(view.Selected, view.Chance),
+		},
+	}
+end
+
 -- The knockback checks run on the TARGET's client (the one that simulates
 -- its character): where its own root is, and whether it is standing again.
 local function probeRootPos(): ({ ProbeLine }, { [string]: any })
@@ -3286,6 +3319,8 @@ local function probeTutorial(payload: any)
 			return probeQuestBadge()
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
+		elseif payload.Kind == "FuseMeter" then
+			return probeFuseMeter(tonumber(payload.Pity) or 0, payload.Full == true)
 		elseif payload.Kind == "AutoFillMutated" then
 			return probeAutoFillMutated(tostring(payload.Tier), tostring(payload.Expect), if typeof(payload.Count) == "number" then payload.Count else 0)
 		elseif payload.Kind == "AutoReset" then

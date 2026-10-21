@@ -473,6 +473,13 @@ testable without luck.
   - [ ] The portal turns READY and the pulsing orange **REBIRTH!** button
     appears above the bottom row.
   - [ ] Rebirthing takes the cash (cash → $0) and the next cost reads $48M.
+- [ ] **Secret meter.** `/rebirths 1`, `/give` yourself 8+ Mythics, open the
+  Fuse panel on the Mythic tab: a "SECRET METER 0 / 4" bar sits under the
+  success %. Fail a pair: the bar animates up, the fail card says "Secret
+  meter +2". At full the bar reads "NEXT FUSE IS A SURE SECRET!" in mint, the
+  % and the count chips read 100%, and the next fuse is a Secret (meter back
+  to 0). Rejoin: the meter is where you left it; Rebirth keeps it. Hidden on
+  the Mythic tab before Rebirth 1 (the tab is locked).
 - [ ] **Fuse panel.** Press F at the machine.
   - [ ] Four Commons in the chamber show **78%**; six always succeed
     (**100%**). The count chips match the odds board's columns.

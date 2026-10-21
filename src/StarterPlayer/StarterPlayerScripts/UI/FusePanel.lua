@@ -67,6 +67,8 @@ local CHIP_HEIGHT = 40 -- two lines: "3 orbs" over the chance
 local CHIP_GAP = 6
 local CHIP_CHANCE_MAX_TEXT = 18 -- the % scales down to fit ("100%" on the narrowest phone)
 local FLY_SECONDS = 0.35
+local METER_HEIGHT = 36 -- the Secret meter: its label (14 px) over the bar
+local METER_BAR_HEIGHT = 10
 
 -- Chamber geometry (px) per layout. Height = 2 x Radius + Slot. Desktop
 -- meets the legibility floor (slots 64, silhouette 96, chance 48); the
@@ -87,6 +89,15 @@ local slots: { Frame } = {}
 local silhouette: Frame? = nil
 local chanceLabel: TextLabel
 local recipeLabel: TextLabel
+-- The Secret pity meter (Mythic tab, once Mythic fusion is unlocked): label
+-- over a track with a mint fill.
+local meterBox: Frame
+local meterLabel: TextLabel
+local meterTrack: Frame
+local meterFill: Frame
+local meterShownPity = -1 -- the value the bar was last drawn at (-1: hidden)
+local pitySeen = -1 -- the meter value the chamber was last refreshed with
+local meterTarget = 0 -- the fill fraction the bar is heading for
 local chipsRow: Frame
 local predictionBox: Frame
 local optionsRow: Frame
@@ -289,13 +300,39 @@ local function refreshChamber()
 		then QuestConfig.PowerUps.FusionSpark.FusionBonus or 0
 		else 0
 	local bonus = EventState.GetFusionSuccessBonus() + spark
-	local chance = FusionConfig.GetFusionChance(selectedTier, math.max(count, FusionConfig.MinFusionInputs), bonus)
+	local pity = TycoonController.GetSecretPity()
+	pitySeen = pity
+	local chance = FusionConfig.GetFusionChanceWithPity(selectedTier, math.max(count, FusionConfig.MinFusionInputs), bonus, pity)
 	if count >= FusionConfig.MinFusionInputs then
 		chanceLabel.Text = percent(chance) .. (if spark > 0 then " ⚗️" else "")
 		chanceLabel.TextColor3 = chanceColor(chance)
 	else
 		chanceLabel.Text = ("Add %d+"):format(FusionConfig.MinFusionInputs)
 		chanceLabel.TextColor3 = Colors.Faint
+	end
+	-- The Secret meter: only on the Mythic tab and only once Mythic fusion is
+	-- unlocked; full says so in the Secret colour.
+	local meterOn = FusionConfig.HasPity(selectedTier) and FusionConfig.CanFuseTierFor(selectedTier, TycoonController.GetRebirths())
+	meterBox.Visible = meterOn
+	if meterOn then
+		local full = FusionConfig.IsPityFull(pity)
+		meterLabel.Text = if full
+			then "NEXT FUSE IS A SURE SECRET!"
+			else ("SECRET METER  %d / %d"):format(pity, FusionConfig.SecretPityFull)
+		meterLabel.TextColor3 = if full then UITheme.GetTierLight("Secret") else Colors.Muted
+		local fraction = math.clamp(pity / FusionConfig.SecretPityFull, 0, 1)
+		meterTarget = fraction
+		if meterShownPity < 0 then
+			meterFill.Size = UDim2.fromScale(fraction, 1)
+		elseif meterShownPity ~= pity then
+			-- Up after a fail (and back to empty after a Secret).
+			TweenService:Create(meterFill, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Size = UDim2.fromScale(fraction, 1),
+			}):Play()
+		end
+		meterShownPity = pity
+	else
+		meterShownPity = -1
 	end
 	recipeLabel.Text = ("%d %s → %s"):format(
 		count,
@@ -343,7 +380,7 @@ local function refreshChamber()
 		})
 		local chanceLabel = UIKit.Label({
 			Name = "Chance",
-			Text = percent(FusionConfig.GetFusionChance(selectedTier, chipCount, bonus)),
+			Text = percent(FusionConfig.GetFusionChanceWithPity(selectedTier, chipCount, bonus, pity)),
 			Font = Fonts.Display,
 			TextSize = CHIP_CHANCE_MAX_TEXT,
 			TextScaled = true,
@@ -754,11 +791,47 @@ local function buildChamber(column: ScrollingFrame)
 		RichText = true,
 		Size = UDim2.new(1, 0, 0, 22),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		LayoutOrder = 3,
+		LayoutOrder = 4,
 		ZIndex = column.ZIndex + 1,
 		Stroke = 1.5,
 		Parent = column,
 	})
+
+	-- The Secret meter, right under the success %.
+	meterBox = Instance.new("Frame")
+	meterBox.Name = "SecretMeter"
+	meterBox.BackgroundTransparency = 1
+	meterBox.Size = UDim2.new(1, 0, 0, METER_HEIGHT)
+	meterBox.LayoutOrder = 3
+	meterBox.ZIndex = column.ZIndex + 1
+	meterBox.Visible = false
+	meterBox.Parent = column
+	meterLabel = UIKit.Label({
+		Name = "Text",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		Size = UDim2.new(1, 0, 0, 18),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		ZIndex = meterBox.ZIndex + 1,
+		Parent = meterBox,
+	})
+	meterTrack = Instance.new("Frame")
+	meterTrack.Name = "Track"
+	meterTrack.BackgroundColor3 = Colors.Panel2
+	meterTrack.AnchorPoint = Vector2.new(0.5, 0)
+	meterTrack.Position = UDim2.new(0.5, 0, 0, 22)
+	meterTrack.Size = UDim2.new(1, -40, 0, METER_BAR_HEIGHT)
+	meterTrack.ZIndex = meterBox.ZIndex + 1
+	meterTrack.Parent = meterBox
+	UIKit.Corner(meterTrack, METER_BAR_HEIGHT / 2)
+	UIKit.Stroke(meterTrack, 2, Colors.Faint)
+	meterFill = Instance.new("Frame")
+	meterFill.Name = "Fill"
+	meterFill.BackgroundColor3 = UITheme.GetTierLight("Secret")
+	meterFill.Size = UDim2.fromScale(0, 1)
+	meterFill.ZIndex = meterTrack.ZIndex + 1
+	meterFill.Parent = meterTrack
+	UIKit.Corner(meterFill, METER_BAR_HEIGHT / 2)
 
 	-- The mutation prediction, right under the recipe: plain text when the
 	-- mutation carries, a red box when mixing loses it.
@@ -768,7 +841,7 @@ local function buildChamber(column: ScrollingFrame)
 	predictionBox.BackgroundTransparency = 1
 	predictionBox.Size = UDim2.new(1, 0, 0, 0)
 	predictionBox.AutomaticSize = Enum.AutomaticSize.Y
-	predictionBox.LayoutOrder = 4
+	predictionBox.LayoutOrder = 5
 	predictionBox.ZIndex = column.ZIndex + 1
 	predictionBox.Visible = false
 	predictionBox.Parent = column
@@ -792,7 +865,7 @@ local function buildChamber(column: ScrollingFrame)
 	chipsRow.Name = "Chips"
 	chipsRow.BackgroundTransparency = 1
 	chipsRow.Size = UDim2.new(1, 0, 0, CHIP_HEIGHT)
-	chipsRow.LayoutOrder = 5
+	chipsRow.LayoutOrder = 6
 	chipsRow.ZIndex = column.ZIndex + 1
 	chipsRow.Parent = column
 	-- One row, never two: a non-wrapping list with scale widths (each chip
@@ -812,7 +885,7 @@ local function buildChamber(column: ScrollingFrame)
 		TextColor3 = Colors.Faint,
 		Size = UDim2.new(1, 0, 0, 18),
 		TextXAlignment = Enum.TextXAlignment.Center,
-		LayoutOrder = 6,
+		LayoutOrder = 7,
 		ZIndex = column.ZIndex + 1,
 		Parent = column,
 	})
@@ -821,7 +894,7 @@ local function buildChamber(column: ScrollingFrame)
 	optionsRow.Name = "ShopOptions"
 	optionsRow.BackgroundTransparency = 1
 	optionsRow.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize + UITheme.SmallShadowOffset)
-	optionsRow.LayoutOrder = 7
+	optionsRow.LayoutOrder = 8
 	optionsRow.ZIndex = column.ZIndex + 1
 	optionsRow.Visible = false
 	optionsRow.Parent = column
@@ -1092,6 +1165,25 @@ function FusePanel.SelfTestAutoFill(tier: string): { any }
 	return selectedItems()
 end
 
+-- /selftest: the Secret meter as drawn, with `tier` on the tab and its orbs
+-- auto-filled (so the success % shows): visible, its text, the fill fraction
+-- it is heading for, and the chamber's % text.
+function FusePanel.SelfTestMeter(tier: string): { Visible: boolean, Text: string, Fill: number, Chance: string, Selected: number }
+	if modal then
+		selectedTier = tier
+		table.clear(selected)
+		refreshAll()
+		autoFill()
+	end
+	return {
+		Visible = meterBox.Visible,
+		Text = meterLabel.Text,
+		Fill = meterTarget,
+		Chance = chanceLabel.Text,
+		Selected = #selected,
+	}
+end
+
 function FusePanel.GetSelectedCount(): number
 	return #selected
 end
@@ -1129,6 +1221,11 @@ function FusePanel.Init()
 		-- Rebirths unlock Mythic; cash doesn't matter here.
 		if modal.IsOpen() then
 			refreshTabs()
+			-- The Secret meter and a sure Secret's 100% come with the sync
+			-- that follows the fusion result.
+			if TycoonController.GetSecretPity() ~= pitySeen then
+				refreshChamber()
+			end
 		end
 	end)
 	FusionController.FusionResolved:Connect(refreshIfOpen)

@@ -88,6 +88,40 @@ function FusionConfig.CanFuseTierFor(tier: string, rebirths: number): boolean
 	return needed == nil or rebirths >= needed
 end
 
+--[[ Secret pity meter ---------------------------------------------------------
+	A failed Mythic -> Secret fusion adds its input count to the player's
+	SecretPity (saved, kept through rebirths); at SecretPityFull the next
+	Mythic fusion is a sure success and the meter resets (any Secret from a
+	fusion resets it, a gacha Secret doesn't touch it). Weighted by inputs so
+	pairs are never the better way to fill it. Mirrored in tools/econ_sim.py
+	(SECRET_PITY_FULL, --pity=N).
+]]
+FusionConfig.PityTier = "Mythic"
+FusionConfig.SecretPityFull = 4 -- two failed pairs, or any one fail of 4+ inputs; see TycoonConfig's header
+
+function FusionConfig.HasPity(tier: string): boolean
+	return tier == FusionConfig.PityTier
+end
+
+-- Points a failed fusion of `count` inputs adds.
+function FusionConfig.GetPityCharge(count: number): number
+	return count
+end
+
+function FusionConfig.IsPityFull(pity: number): boolean
+	return pity >= FusionConfig.SecretPityFull
+end
+
+-- GetFusionChance, 100% when `tier` has a full meter. The roll, the Fuse
+-- panel and the odds all call this, so they cannot disagree.
+function FusionConfig.GetFusionChanceWithPity(tier: string, count: number, bonus: number?, pity: number): number
+	local chance = FusionConfig.GetFusionChance(tier, count, bonus)
+	if chance > 0 and FusionConfig.HasPity(tier) and FusionConfig.IsPityFull(pity) then
+		return 1
+	end
+	return chance
+end
+
 --[[ Gacha --------------------------------------------------------------------
 	Odds for a Gacha Pad pull. Must sum to 1.
 ]]

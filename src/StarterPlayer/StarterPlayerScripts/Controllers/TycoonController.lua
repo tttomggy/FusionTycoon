@@ -21,6 +21,7 @@ local generatorLevels: { [string]: number } = {}
 local pedestalDisplays: { [number]: string } = {}
 local cashMultiplierLevel = 0
 local gachaPulls = 0
+local secretPity = 0 -- the server's Secret pity meter (snapshot SecretPity)
 local luckBase = 1 -- the server's luck without the admin-luck event (snapshot LuckBase)
 local serverLuck = 1 -- the server's whole luck at the last sync (snapshot Luck)
 local goalIndex: number? = nil
@@ -151,6 +152,11 @@ end
 
 function TycoonController.GetGachaPulls(): number
 	return gachaPulls
+end
+
+-- The Secret pity meter as of the last sync (FusionConfig.SecretPityFull is full).
+function TycoonController.GetSecretPity(): number
+	return secretPity
 end
 
 -- The luck the server rolls with, as of now: its luck without the event
@@ -482,6 +488,7 @@ local function onSyncTycoon(snapshot: any)
 	generatorLevels = snapshot.Generators or {}
 	cashMultiplierLevel = snapshot.CashMultiplierLevel or 0
 	gachaPulls = snapshot.GachaPulls or 0
+	secretPity = if typeof(snapshot.SecretPity) == "number" then snapshot.SecretPity else 0
 	serverLuck = if typeof(snapshot.Luck) == "number" then snapshot.Luck else 1
 	luckBase = if typeof(snapshot.LuckBase) == "number" then snapshot.LuckBase else serverLuck
 	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0

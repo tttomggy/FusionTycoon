@@ -16,6 +16,8 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # mutations or Index)
         python3 tools/econ_sim.py --fuse=3      # player puts 3 items per
                                                 # fusion (default 2)
+        python3 tools/econ_sim.py --pity=8      # Secret pity meter full at 8
+                                                # points (default 4; 0 = off)
         python3 tools/econ_sim.py --cap=20      # pull price capped at 20 s of
                                                 # steady income (0 = no cap)
         python3 tools/econ_sim.py --sessions=3  # 3 sessions of 45 min, 8 h
@@ -83,6 +85,10 @@ FUSE_CHANCE = {  # tier: {count: chance}
 }
 FUSE_COUNT = 2  # how many items the simulated player puts in (--fuse N)
 SECRET_FUSION_REBIRTHS = 1  # Mythic -> Secret fusion unlocks at this many rebirths
+# Secret pity meter (FusionConfig.SecretPityFull; --pity=0 turns it off): each failed
+# Mythic -> Secret fusion adds its input count; at full the next one succeeds.
+# Not reset by a rebirth.
+SECRET_PITY_FULL = 4
 FUSE_SECONDS = 4.0
 PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # ...and the pulls the cap alone makes affordable (the climbing price is above
@@ -265,12 +271,22 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     index = set()  # (itemNo, tier, mutation)
     milestones = {}
     pulls = 0
+    pity = 0  # Secret pity meter (points)
+    secrets = 0  # Secrets obtained, any source
+    mythic_fuses = 0  # Mythic -> Secret fusions tried
     late_samples = []  # (t, seconds of steady income one x10 pull costs)
     pull_spent = 0.0  # cash spent on capped pulls / earned, since the last rebirth
     earned = 0.0
 
     def add(tier, mut):
+        nonlocal secrets
         inv[(tier, mut)] = inv.get((tier, mut), 0) + 1
+        if tier == "Secret":
+            secrets += 1
+            if secrets <= 2:
+                mark(f"secret{secrets}")
+                if secrets == 2:
+                    milestones["gap_Secret"] = t - milestones["secret1"]
         if DEPTH:
             # A stacked item fills the entry of EACH of its mutations.
             item = rng.randrange(ITEMS_PER_TIER[tier])
@@ -523,16 +539,31 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         for tr in fusable:
             def keep():
                 return sum(1 for _, ptr, pmu in ped_items() if ptr == tr and pmu == "None")
-            while inv.get((tr, "None"), 0) - keep() >= FUSE_COUNT:
+            while True:
+                spare = inv.get((tr, "None"), 0) - keep()
+                # A Mythic fuser with 2 spare orbs fuses them (up to FUSE_COUNT):
+                # nobody waits for a 7th Mythic (4 on display + 3) for a Secret
+                # try. Same as FUSE_COUNT everywhere else, and at --fuse=2.
+                n = min(FUSE_COUNT, spare) if tr == "Mythic" else FUSE_COUNT
+                if spare < max(n, 2):
+                    break
                 t += FUSE_SECONDS
-                inv[(tr, "None")] -= FUSE_COUNT
+                inv[(tr, "None")] -= n
                 bonus = VOID_MOON_FUSION_BONUS if ev == "VoidMoon" else 0
-                if rng.random() < min(1, FUSE_CHANCE[tr][FUSE_COUNT] + bonus):
+                pity_tier = SECRET_PITY_FULL > 0 and tr == "Mythic"
+                if tr == "Mythic":
+                    mythic_fuses += 1
+                sure = pity_tier and pity >= SECRET_PITY_FULL
+                if sure or rng.random() < min(1, FUSE_CHANCE[tr][n] + bonus):
                     add(TIERS[TIERS.index(tr) + 1], roll_mut(True, ev))
                     if TIERS[TIERS.index(tr) + 1] == "Mythic":
                         qs["fused_mythic"] += 1
+                    if pity_tier:
+                        pity = 0
                 else:
                     inv[(tr, "None")] += 1
+                    if pity_tier:
+                        pity = min(SECRET_PITY_FULL, pity + n)
         if pulls >= 1: mark("first_pull")
         owned = {tr for (tr, mu), n in inv.items() if n > 0}
         for tr in TIERS[1:]:
@@ -542,6 +573,8 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
                 mark(f"first_{mu}")
         if mult_lvl == len(MULT_LEVELS): mark("mult_max")
         if gen["sing"] >= 10: mark("sing_lv10")
+    milestones["mythics_end"] = sum(n for (tr, mu), n in inv.items() if tr == "Mythic")
+    milestones["mythic_fuses"] = mythic_fuses
     return milestones, cps(), rebirths, len(index)
 
 
@@ -615,6 +648,8 @@ if __name__ == "__main__":
             PULL_SHARE = float(a.split("=")[1])
         if a.startswith("--cap="):
             GACHA_MAX_INCOME_SECONDS = float(a.split("=")[1])
+        if a.startswith("--pity="):
+            SECRET_PITY_FULL = int(a.split("=")[1])
         if a.startswith("--fuse="):
             FUSE_COUNT = int(a.split("=")[1])
         if a.startswith("--sessions="):
@@ -629,7 +664,7 @@ if __name__ == "__main__":
     hours = float(args[1]) if len(args) > 1 else 10
     keys = ["first_pull", "gen_ember", "first_Rare", "first_Epic", "mult1", "first_Golden", "gen_flare",
             "first_Legendary", "first_Diamond", "gen_core", "first_Mythic", "rebirth1", "gen_sing", "rebirth2",
-            "rebirth3", "first_Rainbow", "first_Charged", "first_Void", "first_Celestial", "rebirth4", "sing_lv10", "rebirth5", "first_Secret", "rebirth6",
+            "rebirth3", "first_Rainbow", "first_Charged", "first_Void", "first_Celestial", "rebirth4", "sing_lv10", "rebirth5", "first_Secret", "secret2", "gap_Secret", "mythic_fuses", "mythics_end", "rebirth6",
             "rebirth7", "rebirth8", "mult_max"]
     runs = [run(s, hours * 3600) for s in range(seeds)]
     lo, mid, hi = seeds // 10, seeds // 2, seeds - 1 - seeds // 10

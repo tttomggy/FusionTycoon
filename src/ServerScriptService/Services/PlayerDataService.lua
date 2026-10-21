@@ -32,6 +32,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
@@ -126,6 +127,9 @@ export type PlayerData = {
 	-- Timed boosts as REMAINING seconds (they pause while offline).
 	Boosts: { Income: number, Luck: number },
 	SafeFusionTokens: number,
+	-- Secret pity meter (FusionConfig.SecretPityFull): failed Mythic fusions
+	-- add their input count; kept through rebirths.
+	SecretPity: number,
 	StarterPackBought: boolean,
 	-- Cosmetics owned through a product (the Starter Pack's LabStyle);
 	-- passes are checked with Roblox at join instead.
@@ -189,6 +193,8 @@ export type TycoonSnapshot = {
 	-- which made the client think occupied pedestals were empty.
 	PedestalDisplays: { [string]: string },
 	GachaPulls: number,
+	-- The Secret pity meter (0..FusionConfig.SecretPityFull).
+	SecretPity: number,
 	-- The luck the rolls use (GetLuck) and the same without the admin-luck
 	-- event (the client multiplies it by the live EventState value, which
 	-- replicates by itself): the Gacha Pad card shows these odds.
@@ -359,6 +365,7 @@ local DEFAULT_DATA: PlayerData = {
 	Receipts = {},
 	Boosts = { Income = 0, Luck = 0 },
 	SafeFusionTokens = 0,
+	SecretPity = 0,
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
@@ -613,6 +620,9 @@ local function reconcile(raw: any): PlayerData
 		data.Boosts.Income = if typeof(income) == "number" then math.clamp(income, 0, ShopConfig.MaxBoostBankSeconds) else 0
 		data.Boosts.Luck = if typeof(luck) == "number" then math.clamp(luck, 0, ShopConfig.MaxLuckBankSeconds) else 0
 	end
+	if typeof(raw.SecretPity) == "number" and raw.SecretPity == raw.SecretPity then
+		data.SecretPity = math.clamp(math.floor(raw.SecretPity), 0, FusionConfig.SecretPityFull)
+	end
 	if typeof(raw.SafeFusionTokens) == "number" and raw.SafeFusionTokens >= 0 then
 		data.SafeFusionTokens = math.floor(raw.SafeFusionTokens)
 	end
@@ -829,6 +839,7 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		CashMultiplierLevel = data.CashMultiplierLevel,
 		Rebirths = data.Rebirths,
 		GachaPulls = data.GachaPulls,
+		SecretPity = data.SecretPity,
 		FreePulls = data.FreePulls,
 		Settings = data.Settings,
 		Tips = data.Tips,
@@ -1282,6 +1293,24 @@ function PlayerDataService.ApplyRebirth(player: Player, startingBasicLevel: numb
 	return data.Rebirths
 end
 
+-- /selftest: the Secret meter through toDisk -> reconcile (a save and load),
+-- and through ApplyRebirth (the run reset); everything the rebirth resets is
+-- put back. Returns (afterSave, afterRebirth).
+function PlayerDataService.SelfTestPityPersists(player: Player): (number, number)
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return -1, -1
+	end
+	local afterSave = reconcile(deepCopy(toDisk(data))).SecretPity
+	local cash, generators, level, pulls, rebirths = data.Cash, data.Generators, data.CashMultiplierLevel, data.GachaPulls, data.Rebirths
+	PlayerDataService.ApplyRebirth(player, TycoonConfig.StartingBasicGeneratorLevel)
+	local afterRebirth = data.SecretPity
+	data.Cash, data.Generators, data.CashMultiplierLevel, data.GachaPulls, data.Rebirths = cash, generators, level, pulls, rebirths
+	updateLeaderstatsCash(player)
+	updateLeaderstatsRebirths(player)
+	return afterSave, afterRebirth
+end
+
 --[[ Public API: goals ---------------------------------------------------- ]]
 
 function PlayerDataService.GetGoalIndex(player: Player): number
@@ -1677,6 +1706,19 @@ function PlayerDataService.RecordBestIncome(player: Player, income: number): num
 	return data.BestIncome
 end
 
+-- The Secret pity meter (0..SecretPityFull). FusionService is the only writer.
+function PlayerDataService.GetSecretPity(player: Player): number
+	local data = state.sessionCache[player.UserId]
+	return if data then data.SecretPity else 0
+end
+
+function PlayerDataService.SetSecretPity(player: Player, points: number)
+	local data = state.sessionCache[player.UserId]
+	if data and points == points then
+		data.SecretPity = math.clamp(math.floor(points), 0, FusionConfig.SecretPityFull)
+	end
+end
+
 function PlayerDataService.GetSafeFusionTokens(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.SafeFusionTokens else 0
@@ -1877,6 +1919,7 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		CashMultiplierLevel = PlayerDataService.GetCashMultiplierLevel(player),
 		PedestalDisplays = pedestalDisplaysToDisk(PlayerDataService.GetPedestalDisplays(player)),
 		GachaPulls = PlayerDataService.GetGachaPulls(player),
+		SecretPity = PlayerDataService.GetSecretPity(player),
 		Luck = PlayerDataService.GetLuck(player),
 		LuckBase = PlayerDataService.GetLuck(player) / math.max(EventState.GetLuckMultiplier(), 1e-9),
 		GoalIndex = PlayerDataService.GetGoalIndex(player),

@@ -26,6 +26,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   saved), unless ServerScriptService has the attribute `FT_StudioSaves =
   true` (and API access), which uses the separate store `FT_StudioTest_1`
   to test persistence. PedestalDisplays are stored with string keys on disk.
+- **`SecretPity`** (number, default 0): the Secret pity meter
+  (`FusionConfig.SecretPityFull`; failed Mythic fusions fill it, see
+  items-and-fusion.md). Saved with the profile (`toDisk` copies it,
+  `reconcile` floors it and clamps it to 0..full, so an old save loads at 0),
+  part of the snapshot (`SecretPity`), **not** reset by a rebirth
+  (`ApplyRebirth` leaves it) or by offline time. `/selftest` round-trips it.
 - **Offline earnings** (`OfflineConfig`): away time earns 25% of passive
   income per second, for at most 4 h, and nothing under 2 min.
   - `PlayerData.LastOnline` (`os.time()`) is written on every save. On load,
