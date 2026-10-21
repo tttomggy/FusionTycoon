@@ -32,10 +32,18 @@
 	end.
 
 	Placement: 16 px from the left edge, its bottom level with the HUD bottom
-	row's bottom edge. If it would touch the HUD's left column or the bottom
-	row, the icons drop from 60 to 48 px, then to 3 per row; if it still
-	touches (a phone with a tall left column) the tray sits to the right of
-	the left column, still bottom-aligned.
+	row's bottom edge. If it would touch the HUD (the left column, the bottom
+	row) the plan tries, in order: the icons at 60 px, 48 px, 3 per row, each
+	first at the bottom, then lifted ABOVE the bottom row; and when the left
+	column is in the way, the same list again to the right of it. The first
+	spot that touches nothing wins; with none, the least overlap.
+	EffectsTray.PlanTrayFor / PlanTooltipFor are that maths on their own
+	(logical px, screen space), so /selftest runs them at 1251 x 666,
+	1366 x 768 and 844 x 390.
+
+	The tooltip tries RIGHT of the icon, ABOVE-RIGHT, ABOVE, then LEFT, each
+	against every HUD rect; none clear -> the card narrows to 140 px, and with
+	still none the one that overlaps least is used.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -73,6 +81,7 @@ local SHRINK_SECONDS = 0.15
 local TICK_SECONDS = 0.25
 local TOOLTIP_GAP = 6
 local TOOLTIP_MAX_WIDTH = 220
+local TOOLTIP_MIN_WIDTH = 140 -- the narrow card used when no spot is clear at full width
 local TOOLTIP_TEXT_SIZE = 14
 local TOOLTIP_PAD = 10
 local TOOLTIP_ARROW = 12 -- the rotated square that points at the icon
@@ -111,6 +120,25 @@ type Cell = {
 
 export type Rect = { Position: Vector2, Size: Vector2 }
 
+export type TrayPlan = {
+	Circle: number, -- icon px
+	PerRow: number,
+	Shift: number, -- px right of the left margin
+	Lift: number, -- px above the bottom row's baseline
+	Rect: Rect, -- the tray's cells
+	Hits: { string }, -- obstacles it still touches (empty = clear)
+}
+
+export type TooltipPlan = {
+	Side: string, -- "Right" | "Above" | "Left"
+	Left: number,
+	Top: number, -- of the card ("Above": its bottom is AboveBottom)
+	AboveBottom: number,
+	Overlap: number, -- px² still touching a HUD rect (0 = clear)
+	OnScreen: boolean,
+	Hits: { string },
+}
+
 export type Hooks = {
 	-- Every HUD rect the tray must stay clear of (left column, bottom row),
 	-- screen px with the top-bar inset added back (HudController.GetObstacleRects).
@@ -139,8 +167,11 @@ local cells: { [string]: Cell } = {}
 local shownId: string? = nil
 local pinned = false
 local pinToken = 0 -- a newer tap makes an older tap's 3 s close do nothing
+local tooltipMax = TOOLTIP_MAX_WIDTH -- the card's current max width (narrowed when nothing is clear)
+local tooltipLimits: { UISizeConstraint } = {}
 -- What the last placement settled on (icon px, icons per row, x shift).
 local fitSize, fitPerRow = FITS[1][1], FITS[1][2]
+local lastPlan: TrayPlan? = nil
 
 --[[ What is active right now ------------------------------------------------------ ]]
 
@@ -439,6 +470,17 @@ local function viewportSize(): Vector2
 	return if camera then camera.ViewportSize else Vector2.new(1920, 1080)
 end
 
+-- The card wraps at `width` less its padding.
+local function setTooltipMax(width: number)
+	if tooltipMax == width then
+		return
+	end
+	tooltipMax = width
+	for _, limit in tooltipLimits do
+		limit.MaxSize = Vector2.new(width - 2 * (TOOLTIP_PAD + 2), math.huge)
+	end
+end
+
 local function closeTooltip()
 	shownId = nil
 	pinned = false
@@ -446,6 +488,7 @@ local function closeTooltip()
 	tooltip.Visible = false
 	tooltipArrow.Visible = false
 	tooltipCover.Visible = false
+	setTooltipMax(TOOLTIP_MAX_WIDTH)
 end
 
 -- The card's three lines from the shown cell's live state.
@@ -455,13 +498,180 @@ local function fillTooltip(cell: Cell)
 	tooltipTime.Text = cell.State.Tail
 end
 
--- Candidates, first that clears every HUD rect and stays on screen wins:
--- 1. RIGHT of the shown icon (the empty floor beside the tray), centred on
---    the badge, its arrow pointing left; 2. ABOVE-RIGHT: over the icon,
---    pushed right so it clears the left column; 3. ABOVE, centred on the
---    icon, the arrow down. When none is clear the first one on screen is
---    used. Runs every frame while open (the card's size settles a frame
---    after its text).
+--[[ Placement maths (pure) ----------------------------------------------------------
+	Logical px in screen space: AbsolutePosition + the top-bar inset, divided
+	by the gui's UIScale (the same space as the Position offsets of this
+	gui's children). The HUD's obstacle rects arrive in the same space.
+]]
+
+local function overlapArea(a: Rect, b: Rect): number
+	local ox = math.min(a.Position.X + a.Size.X, b.Position.X + b.Size.X) - math.max(a.Position.X, b.Position.X)
+	local oy = math.min(a.Position.Y + a.Size.Y, b.Position.Y + b.Size.Y) - math.max(a.Position.Y, b.Position.Y)
+	if ox > 1 and oy > 1 then
+		return ox * oy
+	end
+	return 0
+end
+
+-- Names and total area of the obstacles `rect` touches.
+local function touching(rect: Rect, obstacles: { [string]: Rect }): ({ string }, number)
+	local names: { string } = {}
+	local total = 0
+	for name, other in obstacles do
+		local area = overlapArea(rect, other)
+		if area > 0 then
+			table.insert(names, name)
+			total += area
+		end
+	end
+	table.sort(names)
+	return names, total
+end
+
+-- Where the tray goes for `count` cells in a `view` (logical px): see the
+-- header for the order it tries.
+function EffectsTray.PlanTrayFor(view: Vector2, obstacles: { [string]: Rect }, count: number): TrayPlan
+	local cellCount = math.max(1, count)
+	local function rectFor(circle: number, perRow: number, shift: number, lift: number): Rect
+		local rows = math.ceil(cellCount / perRow)
+		local width = math.min(cellCount, perRow) * cellWidth(circle)
+		local height = rows * cellHeight(circle) + (rows - 1) * ROW_GAP
+		return {
+			Position = Vector2.new(LEFT_MARGIN + shift, view.Y - BOTTOM_BASE - lift - height),
+			Size = Vector2.new(width, height),
+		}
+	end
+	-- The lift that puts the tray's bottom BESIDE_GAP above the bottom row.
+	local lifts = { 0 }
+	local bottomRow = obstacles.BottomRow
+	if bottomRow then
+		local above = view.Y - BOTTOM_BASE - bottomRow.Position.Y + BESIDE_GAP
+		if above > 0 then
+			table.insert(lifts, above)
+		end
+	end
+	local best: TrayPlan? = nil
+	local bestScore = math.huge
+	local function consider(circle: number, perRow: number, shift: number, lift: number): TrayPlan?
+		local rect = rectFor(circle, perRow, shift, lift)
+		local hits, area = touching(rect, obstacles)
+		-- Off the screen counts as a heavy overlap.
+		if rect.Position.X + rect.Size.X > view.X or rect.Position.Y < 0 then
+			area += 1e6
+		end
+		local plan: TrayPlan = { Circle = circle, PerRow = perRow, Shift = shift, Lift = lift, Rect = rect, Hits = hits }
+		if area < bestScore then
+			best, bestScore = plan, area
+		end
+		return if area == 0 then plan else nil
+	end
+	-- 1. At the left margin: each icon size, at the bottom, then above the bottom row.
+	for _, fit in FITS do
+		for _, lift in lifts do
+			local plan = consider(fit[1], fit[2], 0, lift)
+			if plan then
+				return plan
+			end
+		end
+	end
+	-- 2. Right of whatever the left column is (a bottom row that is in the way is not
+	-- passed: the lift above it is the answer to that).
+	for _, fit in FITS do
+		for _, lift in lifts do
+			local shift = 0
+			for _ = 1, 3 do
+				local hits = touching(rectFor(fit[1], fit[2], shift, lift), obstacles)
+				if #hits == 0 or table.find(hits, "BottomRow") then
+					break
+				end
+				local right = 0
+				for _, name in hits do
+					local other = obstacles[name]
+					right = math.max(right, other.Position.X + other.Size.X)
+				end
+				shift = math.max(shift, right + BESIDE_GAP - LEFT_MARGIN)
+				local plan = consider(fit[1], fit[2], shift, lift)
+				if plan then
+					return plan
+				end
+			end
+		end
+	end
+	return best :: TrayPlan
+end
+
+-- The circle of the tray's `slot`-th cell (1 = bottom left, then right, then up).
+function EffectsTray.CircleRectFor(plan: TrayPlan, slot: number): Rect
+	local column = (slot - 1) % plan.PerRow
+	local row = (slot - 1) // plan.PerRow
+	local height = cellHeight(plan.Circle)
+	return {
+		Position = Vector2.new(
+			plan.Rect.Position.X + column * cellWidth(plan.Circle),
+			plan.Rect.Position.Y + plan.Rect.Size.Y - height - row * (height + ROW_GAP)
+		),
+		Size = Vector2.new(plan.Circle, plan.Circle),
+	}
+end
+
+-- Candidates, first that is on screen and clears every HUD rect wins:
+-- 1. RIGHT of the icon (the empty floor beside the tray), centred on the
+--    badge, its arrow pointing left; 2. ABOVE-RIGHT: over the icon, pushed
+--    right; 3. ABOVE, centred on the icon, the arrow down; 4. LEFT of the
+--    icon, the arrow pointing right. None clear: the on-screen one that
+--    overlaps least (the caller narrows the card first).
+function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }, circle: Rect, size: Vector2): TooltipPlan
+	local width, height = size.X, size.Y
+	local centreX = circle.Position.X + circle.Size.X / 2
+	local centreY = circle.Position.Y + circle.Size.Y / 2
+	local rightEdge = circle.Position.X + circle.Size.X
+	local aboveBottom = circle.Position.Y - TOOLTIP_GAP - TOOLTIP_ARROW / 2
+	local sideTop = math.clamp(centreY - height / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, view.Y - height - TOOLTIP_EDGE))
+	local function clampX(left: number): number
+		return math.clamp(left, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, view.X - width - TOOLTIP_EDGE))
+	end
+	local candidates = {
+		{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = sideTop },
+		{ Side = "Above", Left = clampX(rightEdge - 24), Top = aboveBottom - height },
+		{ Side = "Above", Left = clampX(centreX - width / 2), Top = aboveBottom - height },
+		{ Side = "Left", Left = circle.Position.X - TOOLTIP_GAP - TOOLTIP_ARROW / 2 - width, Top = sideTop },
+	}
+	local chosen: TooltipPlan? = nil
+	local fallback: TooltipPlan? = nil
+	local lastResort: TooltipPlan? = nil
+	for index, candidate in candidates do
+		local rect: Rect = { Position = Vector2.new(candidate.Left, candidate.Top), Size = size }
+		local onScreen = rect.Position.X >= TOOLTIP_EDGE
+			and rect.Position.Y >= TOOLTIP_EDGE
+			and rect.Position.X + width + TOOLTIP_EDGE <= view.X
+			and rect.Position.Y + height + TOOLTIP_EDGE <= view.Y
+		local hits, area = touching(rect, obstacles)
+		local plan: TooltipPlan = {
+			Side = candidate.Side,
+			Left = candidate.Left,
+			Top = candidate.Top,
+			AboveBottom = aboveBottom,
+			Overlap = area,
+			OnScreen = onScreen,
+			Hits = hits,
+		}
+		if onScreen and area == 0 then
+			chosen = plan
+			break
+		end
+		if onScreen and (not fallback or area < fallback.Overlap) then
+			fallback = plan
+		end
+		-- The old last resort: the centred "Above" card, on screen or not.
+		if index == 3 then
+			lastResort = plan
+		end
+	end
+	return (chosen or fallback or lastResort) :: TooltipPlan
+end
+
+-- The shown icon's tooltip. Runs every frame while open (the card's size
+-- settles a frame after its text).
 local function placeTooltip()
 	local id = shownId
 	local cell = if id then cells[id] else nil
@@ -470,80 +680,44 @@ local function placeTooltip()
 		return
 	end
 	local scale = UIKit.EffectiveScale(tray)
-	local view = viewportSize()
-	local viewX, viewY = view.X / scale, view.Y / scale
-	local circlePosition, circleSize = cell.Circle.AbsolutePosition, cell.Circle.AbsoluteSize
-	local centreX = (circlePosition.X + circleSize.X / 2) / scale
-	local centreY = (circlePosition.Y + circleSize.Y / 2) / scale
-	local rightEdge = (circlePosition.X + circleSize.X) / scale
-	local width, height = tooltip.AbsoluteSize.X / scale, tooltip.AbsoluteSize.Y / scale
-	local margin = TOOLTIP_ARROW + 6
-	local aboveBottom = circlePosition.Y / scale - TOOLTIP_GAP - TOOLTIP_ARROW / 2
 	local inset = GuiService:GetGuiInset().Y
-	local obstacles: { [string]: Rect } = if hooks then hooks.GetObstacles() else {}
-
-	-- A candidate: Side "Right" (Left, Top) or "Above" (Left; bottom = aboveBottom).
-	local function rectOf(side: string, left: number, top: number): (Vector2, Vector2)
-		local topY = if side == "Right" then top else aboveBottom - height
-		return Vector2.new(left, topY), Vector2.new(width, height)
-	end
-	local function onScreen(position: Vector2): boolean
-		return position.X >= TOOLTIP_EDGE
-			and position.Y >= TOOLTIP_EDGE
-			and position.X + width + TOOLTIP_EDGE <= viewX
-			and position.Y + height + TOOLTIP_EDGE <= viewY
-	end
-	local function clear(position: Vector2): boolean
-		for _, rect in obstacles do
-			local ox = math.min((position.X + width) * scale, rect.Position.X + rect.Size.X) - math.max(position.X * scale, rect.Position.X)
-			local oy = math.min((position.Y + height) * scale + inset, rect.Position.Y + rect.Size.Y) - math.max(position.Y * scale + inset, rect.Position.Y)
-			if ox > 1 and oy > 1 then
-				return false
-			end
-		end
-		return true
-	end
-
-	local rightTop = math.clamp(centreY - height / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewY - height - TOOLTIP_EDGE))
-	local candidates = {
-		{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = rightTop },
-		{ Side = "Above", Left = math.clamp(rightEdge - 24, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE)), Top = 0 },
-		{ Side = "Above", Left = math.clamp(centreX - width / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE)), Top = 0 },
+	local view = viewportSize() / scale
+	local circle: Rect = {
+		Position = (cell.Circle.AbsolutePosition + Vector2.new(0, inset)) / scale,
+		Size = cell.Circle.AbsoluteSize / scale,
 	}
-	local chosen = nil
-	for _, candidate in candidates do
-		local position = rectOf(candidate.Side, candidate.Left, candidate.Top)
-		if onScreen(position) and clear(position) then
-			chosen = candidate
-			break
+	local size = tooltip.AbsoluteSize / scale
+	local margin = TOOLTIP_ARROW + 6
+	local obstacles: { [string]: Rect } = {}
+	if hooks then
+		for name, rect in hooks.GetObstacles() do
+			obstacles[name] = { Position = rect.Position / scale, Size = rect.Size / scale }
 		end
 	end
-	if not chosen then
-		for _, candidate in candidates do
-			if onScreen((rectOf(candidate.Side, candidate.Left, candidate.Top))) then
-				chosen = candidate
-				break
-			end
-		end
+	local plan = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
+	if plan.Overlap > 0 and tooltipMax > TOOLTIP_MIN_WIDTH then
+		-- Nothing is clear at full width: narrow the card (it re-plans next frame).
+		setTooltipMax(TOOLTIP_MIN_WIDTH)
 	end
-	chosen = chosen or candidates[3]
-
-	if chosen.Side == "Right" then
-		local left, top = chosen.Left, chosen.Top
-		local arrowY = top + math.clamp(centreY - top, margin, math.max(margin, height - margin))
+	local centreY = circle.Position.Y + circle.Size.Y / 2
+	local centreX = circle.Position.X + circle.Size.X / 2
+	if plan.Side == "Right" or plan.Side == "Left" then
+		local left, top = plan.Left, plan.Top
+		local arrowY = top + math.clamp(centreY - top, margin, math.max(margin, size.Y - margin))
+		local arrowX = if plan.Side == "Right" then left else left + size.X
 		tooltip.AnchorPoint = Vector2.new(0, 0)
 		tooltip.Position = UDim2.fromOffset(left, top)
 		tooltipCover.Size = UDim2.fromOffset(6, TOOLTIP_ARROW)
-		tooltipArrow.Position = UDim2.fromOffset(left, arrowY)
-		tooltipCover.Position = UDim2.fromOffset(left, arrowY)
+		tooltipArrow.Position = UDim2.fromOffset(arrowX, arrowY)
+		tooltipCover.Position = UDim2.fromOffset(arrowX, arrowY)
 	else
-		local left = chosen.Left
-		local arrowX = math.clamp(centreX - left, margin, math.max(margin, width - margin))
+		local left = plan.Left
+		local arrowX = math.clamp(centreX - left, margin, math.max(margin, size.X - margin))
 		tooltip.AnchorPoint = Vector2.new(0, 1)
-		tooltip.Position = UDim2.fromOffset(left, aboveBottom)
+		tooltip.Position = UDim2.fromOffset(left, plan.AboveBottom)
 		tooltipCover.Size = UDim2.fromOffset(TOOLTIP_ARROW, 6)
-		tooltipArrow.Position = UDim2.fromOffset(left + arrowX, aboveBottom)
-		tooltipCover.Position = UDim2.fromOffset(left + arrowX, aboveBottom)
+		tooltipArrow.Position = UDim2.fromOffset(left + arrowX, plan.AboveBottom)
+		tooltipCover.Position = UDim2.fromOffset(left + arrowX, plan.AboveBottom)
 	end
 	tooltip.Visible = true
 	tooltipArrow.Visible = true
@@ -558,6 +732,7 @@ local function openTooltip(id: string, pin: boolean)
 	shownId = id
 	pinned = pin
 	pinToken += 1
+	setTooltipMax(TOOLTIP_MAX_WIDTH)
 	fillTooltip(cell)
 	placeTooltip()
 	if pin then
@@ -733,15 +908,10 @@ end
 
 --[[ Placement ---------------------------------------------------------------------- ]]
 
-local function overlaps(a: Rect, b: Rect): boolean
-	local ox = math.min(a.Position.X + a.Size.X, b.Position.X + b.Size.X) - math.max(a.Position.X, b.Position.X)
-	local oy = math.min(a.Position.Y + a.Size.Y, b.Position.Y + b.Size.Y) - math.max(a.Position.Y, b.Position.Y)
-	return ox > 1 and oy > 1
-end
-
--- Sizes the tray to its cells and puts it 16 px from the left with its
--- bottom level with the bottom row's bottom edge (see the header for what
--- it does when it would touch the left column or the bottom row).
+-- Sizes the tray to its cells and puts it where PlanTrayFor says (see the
+-- header): 16 px from the left with its bottom level with the bottom row's
+-- bottom edge, or above that row / right of the left column when it would
+-- touch the HUD.
 local function place()
 	local count = 0
 	for _, cell in cells do
@@ -750,51 +920,16 @@ local function place()
 		end
 	end
 	local scale = UIKit.EffectiveScale(tray)
-	local view = viewportSize()
-	local inset = GuiService:GetGuiInset().Y
-	local obstacles: { [string]: Rect } = if hooks and count > 0 then hooks.GetObstacles() else {}
-
-	-- The screen rect (raw AbsolutePosition space) of a fit at `shift` px (logical) from the left margin.
-	local function rectFor(circle: number, perRow: number, shift: number): Rect
-		local rows = math.max(1, math.ceil(count / perRow))
-		local width = math.min(count, perRow) * cellWidth(circle)
-		local height = rows * cellHeight(circle) + (rows - 1) * ROW_GAP
-		return {
-			Position = Vector2.new((LEFT_MARGIN + shift) * scale, view.Y - (BOTTOM_BASE + height) * scale),
-			Size = Vector2.new(width * scale, height * scale),
-		}
-	end
-	local function touches(rect: Rect): { string }
-		local hit: { string } = {}
-		for name, other in obstacles do
-			-- Obstacle rects carry the top-bar inset, the tray's don't.
-			if overlaps(rect, { Position = other.Position - Vector2.new(0, inset), Size = other.Size }) then
-				table.insert(hit, name)
-			end
-		end
-		return hit
-	end
-
-	local circle, perRow, shift = FITS[1][1], FITS[1][2], 0
-	local found = false
-	for _, fit in FITS do
-		circle, perRow = fit[1], fit[2]
-		if #touches(rectFor(circle, perRow, 0)) == 0 then
-			found = true
-			break
+	local view = viewportSize() / scale
+	local obstacles: { [string]: Rect } = {}
+	if hooks and count > 0 then
+		for name, rect in hooks.GetObstacles() do
+			obstacles[name] = { Position = rect.Position / scale, Size = rect.Size / scale }
 		end
 	end
-	if not found then
-		-- Still touching: sit to the right of whatever the smallest fit hits.
-		local hit = touches(rectFor(circle, perRow, 0))
-		local right = 0
-		for _, name in hit do
-			local other = obstacles[name]
-			right = math.max(right, (other.Position.X + other.Size.X) / scale)
-		end
-		shift = math.max(0, right + BESIDE_GAP - LEFT_MARGIN)
-	end
-
+	local plan = EffectsTray.PlanTrayFor(view, obstacles, count)
+	local circle, perRow = plan.Circle, plan.PerRow
+	lastPlan = plan
 	fitSize, fitPerRow = circle, perRow
 	for _, cell in cells do
 		if cell.Fit ~= circle then
@@ -806,7 +941,7 @@ local function place()
 	gridLayout.CellSize = UDim2.fromOffset(cellWidth(circle), cellHeight(circle))
 	gridLayout.CellPadding = UDim2.fromOffset(0, ROW_GAP)
 	tray.Size = UDim2.fromOffset(perRow * cellWidth(circle), rows * cellHeight(circle) + (rows - 1) * ROW_GAP)
-	tray.Position = UDim2.new(0, LEFT_MARGIN + shift, 1, -BOTTOM_BASE)
+	tray.Position = UDim2.new(0, LEFT_MARGIN + plan.Shift, 1, -(BOTTOM_BASE + plan.Lift))
 end
 
 --[[ Refresh -------------------------------------------------------------------------- ]]
@@ -952,6 +1087,11 @@ function EffectsTray.TestTap(id: string)
 	tapCell(id)
 end
 
+-- /selftest: what the last placement settled on (nil before the first).
+function EffectsTray.GetPlan(): TrayPlan?
+	return lastPlan
+end
+
 -- /selftest: forces a refresh now (tests don't wait for the next tick).
 function EffectsTray.Refresh()
 	refresh()
@@ -1022,6 +1162,7 @@ function EffectsTray.Init(hudHooks: Hooks)
 		local limit = Instance.new("UISizeConstraint")
 		limit.MaxSize = Vector2.new(TOOLTIP_MAX_WIDTH - 2 * (TOOLTIP_PAD + 2), math.huge)
 		limit.Parent = label
+		table.insert(tooltipLimits, limit)
 		return label
 	end
 	tooltipName = line("Name", 1, Fonts.Display, Colors.Text)

@@ -35,6 +35,7 @@ local REFUSALS: { [string]: string } = {
 }
 
 local autoOpened = false
+local autoSuppressed = false -- /selftest: no card pops up by itself while a section runs
 local lastCanClaim = false
 local claimSentAt = 0
 
@@ -64,8 +65,17 @@ local function tryAutoOpen()
 		while UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() or TycoonController.IsTutorialActive() do
 			task.wait(RETRY_SECONDS)
 		end
-		DailyController.Open()
+		if not autoSuppressed then
+			DailyController.Open()
+		end
 	end)
+end
+
+-- /selftest: while on, the daily card does not open by itself (a claimable
+-- day after 00:00 UTC would pop up in the middle of a section). It never
+-- blocks DailyController.Open (the Gifts panel's daily row).
+function DailyController.SelfTestSuppress(on: boolean)
+	autoSuppressed = on
 end
 
 local function onDailyResult(payload: any)

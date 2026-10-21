@@ -210,6 +210,11 @@ local function build()
 		Parent = content,
 	})
 	UIKit.FitText(bodyLabel, BODY_TEXT, BODY_MIN)
+	-- The body is "what is left above the OK": in a short card that goes
+	-- negative, so it never gets less than one line.
+	local bodyMin = Instance.new("UISizeConstraint")
+	bodyMin.MinSize = Vector2.new(0, BODY_MIN)
+	bodyMin.Parent = bodyLabel
 
 	okButton = UIKit.Button({
 		Name = "Ok",

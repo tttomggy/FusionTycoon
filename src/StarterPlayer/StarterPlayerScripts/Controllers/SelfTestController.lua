@@ -1251,7 +1251,17 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 			-- any card (reported once as "selftest window").
 			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body and (tooSmall or (body.AbsoluteSize.X > 0 and body.AbsoluteSize.Y > 0 and body.TextBounds.Y > 0)),
 			Name = ("tutorial %s: its explain card opens first (text >= 22 px, drawn)"):format(stepId),
-			Detail = if body then ("%d px, drawn %dx%d, text height %d"):format(body.TextSize, body.AbsoluteSize.X, body.AbsoluteSize.Y, body.TextBounds.Y) else "no card",
+			Detail = if body
+				then ("open %s, text matches %s, %d px, drawn %dx%d, text height %d, shows %q"):format(
+					tostring(TutorialExplain.IsOpen()),
+					tostring(body.Text == step.Card.Body),
+					body.TextSize,
+					body.AbsoluteSize.X,
+					body.AbsoluteSize.Y,
+					body.TextBounds.Y,
+					body.Text:sub(1, 30)
+				)
+				else "no card",
 		})
 		table.insert(lines, dimLine(stepId .. " (card up)"))
 		-- Read time: OK is off when the card opens and on 1.5 s after it
@@ -1385,6 +1395,66 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		table.insert(lines, { Ok = not bar.Enabled, Name = "tutorial: no weapon bar before Rebirth 1" })
 	end
 	return lines
+end
+
+-- Closes every card an earlier section may have left up (a tutorial card, the
+-- explain card, the daily reward, the event info, a shop side card, a result
+-- card, a queued weapon-unlock card) and returns what it found open, then what
+-- is still registered after closing. `suppressDaily` (true / false / nil to
+-- leave it) keeps the daily reward from opening by itself during a section.
+local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
+	local TutorialCards = require(UI.TutorialCards) :: any
+	local TutorialExplain = require(UI.TutorialExplain) :: any
+	local DailyCard = require(UI.DailyCard) :: any
+	local EventInfoCard = require(UI.EventInfoCard) :: any
+	local ShopCards = require(UI.ShopCards) :: any
+	local ResultController = require(script.Parent.ResultController) :: any
+	local CombatController = require(script.Parent.CombatController) :: any
+	if suppressDaily ~= nil then
+		(require(script.Parent.DailyController) :: any).SelfTestSuppress(suppressDaily)
+	end
+	local found = UIKit.GetOpenOverlays()
+	if EventInfoCard.IsOpen() then
+		table.insert(found, "EventInfoCard")
+	end
+	local side = ShopCards.GetSideName()
+	if side then
+		table.insert(found, "side card " .. side)
+	end
+	local queued = CombatController.SelfTestClearUnlocks()
+	if queued > 0 then
+		table.insert(found, ("%d queued weapon-unlock cards"):format(queued))
+	end
+	TutorialCards.Close()
+	TutorialExplain.Close()
+	DailyCard.Close()
+	EventInfoCard.Hide()
+	ShopCards.CloseSide()
+	ResultController.CloseCards()
+	local deadline = os.clock() + 1.5
+	while UIKit.IsOverlayOpen() and os.clock() < deadline do
+		task.wait(0.1)
+	end
+	return found, UIKit.GetOpenOverlays()
+end
+
+-- "no overlay open": the precondition of a section that measures the bare
+-- screen. Closes what it finds (one leak is one FAIL, not one per check).
+local function probeClearScreen(label: string, report: boolean, suppressDaily: boolean?): { ProbeLine }
+	local found, remaining = clearScreen(suppressDaily)
+	if not report then
+		return {}
+	end
+	return {
+		{
+			Ok = #found == 0 and #remaining == 0,
+			Name = ("no overlay open before %s"):format(label),
+			Detail = ("open: %s; still open after closing them: %s"):format(
+				if #found > 0 then table.concat(found, ", ") else "none",
+				if #remaining > 0 then table.concat(remaining, ", ") else "none"
+			),
+		},
+	}
 end
 
 local function probeBigCard(expect: string, fakeFusion: boolean?): { ProbeLine }
@@ -2655,11 +2725,69 @@ end
 -- quarter of the screen, their timers read the live seconds, tap targets are
 -- >= 44 px on screen, nothing overlaps a HUD rect, and the old effect pills
 -- are gone. Measured at both layouts.
+-- The tray's and the tooltip's placement maths against the real HUD rects at
+-- three explicit window sizes (the same idea as "cards centred"): the tray
+-- touches no HUD rect and the Luck tooltip is on screen, touching none.
+-- Phone layout for the 844 x 390 window.
+local EFFECTS_VIEWPORTS = {
+	{ Name = "1251 x 666", Size = Vector2.new(1251, 666), Phone = false },
+	{ Name = "1366 x 768", Size = Vector2.new(1366, 768), Phone = false },
+	{ Name = "844 x 390", Size = Vector2.new(844, 390), Phone = true },
+}
+
+local function probeEffectsTrayViewports(): { ProbeLine }
+	local EffectsTray = require(UI.EffectsTray) :: any
+	local hud = require(script.Parent.HudController) :: any
+	local lines: { ProbeLine } = {}
+	for _, viewport in EFFECTS_VIEWPORTS do
+		UIKit.SetForcedPhone(viewport.Phone)
+		task.wait(0.4)
+		EffectsTray.Refresh()
+		task.wait(0.2)
+		local cellCount = #EffectsTray.GetCells()
+		-- The card's natural size and the scale it is drawn at, from the live card.
+		EffectsTray.TestHover("Luck", true)
+		task.wait(0.2)
+		local live = EffectsTray.GetTooltip()
+		EffectsTray.TestHover("Luck", false)
+		local view = viewport.Size / live.Scale
+		local obstacles = hud.GetObstacleRectsFor(view)
+		local plan = EffectsTray.PlanTrayFor(view, obstacles, cellCount)
+		table.insert(lines, {
+			Ok = cellCount > 0 and #plan.Hits == 0,
+			Name = ("effects tray plan (%s): the %d icons touch no HUD rect"):format(viewport.Name, cellCount),
+			Detail = ("%d px icons, %d per row, shift %d, lift %d, rect %d,%d %dx%d, touches: %s"):format(
+				plan.Circle, plan.PerRow, plan.Shift, plan.Lift, plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y, table.concat(plan.Hits, ", ")
+			),
+		})
+		local size = live.Size / live.Scale
+		local circle = EffectsTray.CircleRectFor(plan, 1)
+		local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
+		local narrow = false
+		if tip.Overlap > 0 or not tip.OnScreen then
+			-- The live card narrows to 140 px when nothing is clear (taller by the wrap).
+			tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(140, size.Y * 1.6))
+			narrow = true
+		end
+		table.insert(lines, {
+			Ok = tip.OnScreen and tip.Overlap == 0,
+			Name = ("effects tray plan (%s): the Luck tooltip is on screen and touches no HUD rect"):format(viewport.Name),
+			Detail = ("%s%s at %d,%d, card %dx%d, on screen %s, touches: %s"):format(
+				tip.Side, if narrow then " (narrow)" else "", tip.Left, tip.Top, size.X, size.Y, tostring(tip.OnScreen), table.concat(tip.Hits, ", ")
+			),
+		})
+	end
+	return lines
+end
+
 local function probeEffectsTray(tokens: number): { ProbeLine }
 	local EffectsTray = require(UI.EffectsTray) :: any
 	local hud = require(script.Parent.HudController) :: any
 	local tycoon = require(script.Parent.TycoonController) :: any
 	local lines: { ProbeLine } = {}
+	-- A window too small to lay the HUD out reports "selftest window" once;
+	-- the checks that measure positions on it are skipped here too.
+	local tooSmall = windowProblem() ~= nil
 	for _, phone in { false, true } do
 		UIKit.SetForcedPhone(phone)
 		task.wait(0.4)
@@ -2693,11 +2821,13 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			end
 		end
 		table.sort(outside)
-		table.insert(lines, {
-			Ok = next(byId) ~= nil and #outside == 0,
-			Name = ("effects tray (%s, window %d × %d): in the bottom-left quarter"):format(label, window.X, window.Y),
-			Detail = table.concat(outside, ", "),
-		})
+		if not tooSmall then
+			table.insert(lines, {
+				Ok = next(byId) ~= nil and #outside == 0,
+				Name = ("effects tray (%s, window %d × %d): in the bottom-left quarter"):format(label, window.X, window.Y),
+				Detail = table.concat(outside, ", "),
+			})
+		end
 		local liveOk = true
 		local liveDetail: { string } = {}
 		local checks: { { Id: string, Want: number } } = {
@@ -2767,13 +2897,16 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if tip.Size.X / tip.Scale > 220 + 1 then
 			table.insert(tipProblems, ("%d px wide (max 220)"):format(tip.Size.X / tip.Scale))
 		end
-		if tip.Position.X < -1 or tip.Position.X + tip.Size.X > viewport.X + 1 then
+		if not tooSmall and (tip.Position.X < -1 or tip.Position.X + tip.Size.X > viewport.X + 1) then
 			table.insert(tipProblems, ("off screen: x %d-%d of %d"):format(tip.Position.X, tip.Position.X + tip.Size.X, viewport.X))
 		end
-		-- Opens to the RIGHT of the icon, centred on it (it only falls back to
-		-- above when there is no room on the right).
-		if luckCell and tip.Position.X < luckCell.Position.X + luckCell.Size.X - 1 and tip.Position.Y + tip.Size.Y > luckCell.Position.Y - inset + 1 then
-			table.insert(tipProblems, "neither right of nor above the icon")
+		-- Opens to the RIGHT of the icon (or above / left of it when the right is taken).
+		if not tooSmall and luckCell then
+			local cellTop = luckCell.Position.Y - inset
+			if tip.Position.X < luckCell.Position.X + luckCell.Size.X - 1 and tip.Position.X + tip.Size.X > luckCell.Position.X + 1
+				and tip.Position.Y < cellTop + luckCell.Size.Y - 1 and tip.Position.Y + tip.Size.Y > cellTop + 1 then
+				table.insert(tipProblems, "covers the icon")
+			end
 		end
 		-- Nothing covers it: no HUD rect (left column, deal tile, bottom row)
 		-- or the weapon bar under it, and its layer is above the HUD's.
@@ -2792,7 +2925,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			end
 		end
 		table.sort(covered)
-		if #covered > 0 then
+		if #covered > 0 and not tooSmall then
 			table.insert(tipProblems, "overlaps " .. table.concat(covered, ", "))
 		end
 		local hudGuiForOrder = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
@@ -2835,11 +2968,18 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			end
 		end
 		table.sort(overlaps)
-		table.insert(lines, {
-			Ok = #overlaps == 0,
-			Name = ("effects tray (%s): no overlap with any HUD rect"):format(label),
-			Detail = table.concat(overlaps, ", "),
-		})
+		if not tooSmall then
+			local plan = EffectsTray.GetPlan()
+			table.insert(lines, {
+				Ok = #overlaps == 0,
+				Name = ("effects tray (%s): no overlap with any HUD rect"):format(label),
+				Detail = table.concat(overlaps, ", ")
+					.. (if plan then (" | plan %d px icons, %d per row, shift %d, lift %d"):format(plan.Circle, plan.PerRow, plan.Shift, plan.Lift) else ""),
+			})
+		end
+	end
+	for _, line in probeEffectsTrayViewports() do
+		table.insert(lines, line)
 	end
 	UIKit.SetForcedPhone(nil)
 	-- The old pills are gone from the SHOP row and the phone status stack.
@@ -2976,6 +3116,8 @@ local function probeTutorial(payload: any)
 			return probeStep(payload.StepIndex, payload.StepId)
 		elseif payload.Kind == "BigCard" then
 			return probeBigCard(payload.Expect, payload.FakeFusion == true)
+		elseif payload.Kind == "ClearScreen" then
+			return probeClearScreen(tostring(payload.Label), payload.Report == true, if typeof(payload.Suppress) == "boolean" then payload.Suppress else nil)
 		elseif payload.Kind == "Weapon" then
 			return probeWeapon(payload.Weapon)
 		elseif payload.Kind == "SampleRest" then
@@ -3136,6 +3278,9 @@ local function run(payload: any)
 	for _, line in testTopStack() do
 		table.insert(panelLines, line)
 	end
+	-- The cards above were measured live; the deal path needs the screen bare
+	-- (the daily reward card is up after 00:00 UTC until it is claimed).
+	clearScreen(true)
 	local shopController = require(script.Parent.ShopController) :: any
 	for _, line in shopController.SelfTestDealPath() do
 		table.insert(panelLines, line)

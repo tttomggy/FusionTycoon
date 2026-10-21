@@ -1949,6 +1949,24 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 	return rects
 end
 
+-- /selftest: the same rects in logical px (screen space divided by the HUD's
+-- UIScale) as they would sit in a `view` (logical px) of another size: the
+-- left column is pinned to the top-left, the bottom row is centred on the
+-- bottom edge. The caller has forced the layout (phone / desktop) first.
+function HudController.GetObstacleRectsFor(view: Vector2): { [string]: ScreenRect }
+	local rects: { [string]: ScreenRect } = {}
+	local scale = UIKit.EffectiveScale(screenGui)
+	for name, rect in HudController.GetObstacleRects() do
+		local position = rect.Position / scale
+		local size = rect.Size / scale
+		if name == "BottomRow" then
+			position = Vector2.new((view.X - size.X) / 2, view.Y - (BOTTOM_MARGIN + UITheme.ShadowOffset) - size.Y)
+		end
+		rects[name] = { Position = position, Size = size }
+	end
+	return rects
+end
+
 -- /selftest "deal tile": the art (picture or emoji fallback) is drawn, the
 -- ribbon and the timer show the numbers they were given, the tile overlaps
 -- no other HUD rect (left column, bottom row), and it is hidden for a

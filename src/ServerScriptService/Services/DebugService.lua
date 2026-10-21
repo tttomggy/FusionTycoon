@@ -1517,8 +1517,14 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- own handlers): every step completes in order, no shop / deal pop-up
 	-- while it runs, and a save left mid-way resumes at its step. The
 	-- tester's own tutorial state is restored after.
+	-- The daily reward (claimable after 00:00 UTC) is closed and kept from
+	-- popping up by itself for the rest of the run; whatever the section
+	-- opens (an explain card, a "?" card, a weapon-unlock card) is closed at
+	-- its end, so a leak cannot reach the sections that measure the screen.
 	runSection("9. tutorial", result, function()
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the tutorial", Report = false, Suppress = true }, result)
 		runTutorialSelfTest(player, result)
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the tutorial's end", Report = false }, result)
 	end)
 
 	-- 10. Combat: a Rebirth-0 player is never hittable; the cooldown is the
@@ -1532,11 +1538,18 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- quest / power-up refusals (the junk fuzz above covered their remotes).
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
+		-- Claiming "Fuse a Mythic" there granted the Slap Glove: the real
+		-- "You got the Slap Glove!" card is up now. Close it (and its queue)
+		-- so section 12 starts on a bare screen.
+		task.wait(0.5)
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the progression section's end", Report = false }, result)
 	end)
 
 	-- 12. The Gacha Pad card: odds against the server's luck, silhouettes,
 	-- the (i) panel, the custom buttons.
 	runSection("12. gacha card", result, function()
+		-- One precondition line instead of one FAIL per check when a card is up.
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the gacha card", Report = true }, result)
 		runGachaCardSelfTest(player, result)
 	end)
 
@@ -1544,6 +1557,8 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- round icons bottom right.
 	runSection("13. effects tray", result, function()
 		runEffectsTraySelfTest(player, result)
+		-- The daily reward may open by itself again.
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the end", Report = false, Suppress = false }, result)
 	end)
 end
 

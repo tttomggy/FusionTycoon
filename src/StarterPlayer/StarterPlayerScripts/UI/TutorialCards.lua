@@ -137,6 +137,11 @@ local function build()
 		Parent = content,
 	})
 	UIKit.FitText(bodyLabel, 20, 13)
+	-- Never a negative height in a short card (the body is what is left
+	-- between the icon and the nav row).
+	local bodyMin = Instance.new("UISizeConstraint")
+	bodyMin.MinSize = Vector2.new(0, 20)
+	bodyMin.Parent = bodyLabel
 
 	local nav = Instance.new("Frame")
 	nav.Name = "Nav"

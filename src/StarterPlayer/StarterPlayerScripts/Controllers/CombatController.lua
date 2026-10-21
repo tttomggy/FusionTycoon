@@ -922,6 +922,14 @@ local function showUnlocks()
 	end
 end
 
+-- /selftest: drops the queued unlock cards (the test's own grants must not
+-- pop up later); returns how many there were.
+function CombatController.SelfTestClearUnlocks(): number
+	local count = #pendingUnlocks
+	table.clear(pendingUnlocks)
+	return count
+end
+
 --[[ Watching tools in hand (everyone's) ---------------------------------------------- ]]
 
 local function isGun(weapon: CombatConfig.Weapon): boolean

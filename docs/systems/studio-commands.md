@@ -163,3 +163,32 @@ Most of the 77 were the TEST, not the game:
 - The gacha card and the (i) panel also redraw on `AdminLuck` / `EventId`
   attribute changes (not only the 0.5 s poll); the probe waits for the tiles to
   show the server's luck, and says so when the client's luck never matches.
+
+## /selftest notes (triage after 7dcb467: 77 → 37 FAILs)
+
+- **The leaks were the test's own cards.** The DailyReward card (claimable after
+  00:00 UTC) sat open from the start and the tutorial presenter waits for
+  `UIKit.IsOverlayOpen` (any card) before each explain card, so section 9 stalled
+  behind it; and section 11's "Fuse a Mythic" claim grants the Slap Glove, whose
+  real unlock card (a `TutorialCard`) was still up for section 12 ("blocked by:
+  overlays TutorialCard", ~28 FAILs). Fix: a `ClearScreen` probe
+  (`SelfTestController.clearScreen`) closes the tutorial / explain / daily / event /
+  side / result cards and the queued unlock cards, and
+  `DailyController.SelfTestSuppress` keeps the daily from opening by itself. It
+  runs before and after section 9, after section 11, before the deal path, and
+  releases the suppression after section 13. Section 12 starts with ONE line,
+  "no overlay open before the gacha card: open: …", naming what it found.
+  No real-player hole found: a card that registers but is off screen is closed by
+  the Modal watchdog (0.5 s), and the daily only auto-opens with no tutorial active.
+- The explain-card line's Detail now says `open`, `text matches` and the first 30
+  characters of the text shown; the card body has a minimum height (no negative size).
+- "deal real path" names the cards blocking it.
+- The effects tray placement and tooltip are pure functions
+  (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
+  `/selftest` runs them against the real HUD rects at 1251 × 666, 1366 × 768 and
+  844 × 390 (`effects tray plan (…)`). The tray goes above the bottom row when
+  it would touch it, the tooltip tries right, above-right, above, left, then
+  narrows to 140 px. The old code compared screen-space tray rects with obstacle
+  rects shifted by the top-bar inset; both are in one space now.
+- The effects-tray position checks skip in a too-small window like the others.
+

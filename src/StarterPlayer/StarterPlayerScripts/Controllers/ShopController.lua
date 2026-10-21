@@ -475,7 +475,13 @@ function ShopController.SelfTestDealPath(): { string }
 	joinedAt, lastOfferAt, lastLossAt, dealPopSlot = savedJoined, savedOffer, savedLoss, savedSlot
 	tutorialGuardOverride = savedTutorial
 	if blocked then
-		return { ("FAIL deal real path: still blocked by %s with the guards cleared"):format(blocked) }
+		-- Name the card: the open overlays and the shop's side card.
+		local names = UIKit.GetOpenOverlays()
+		local side = ShopCards.GetSideName()
+		if side then
+			table.insert(names, "side card " .. side)
+		end
+		return { ("FAIL deal real path: still blocked by %s with the guards cleared (open: %s)"):format(blocked, if #names > 0 then table.concat(names, ", ") else "nothing registered") }
 	end
 	return { if shown then "PASS deal real path (card shown)" else "FAIL deal real path: no card" }
 end
