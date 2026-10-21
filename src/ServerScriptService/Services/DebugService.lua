@@ -135,6 +135,9 @@ local TUTORIAL_COMMAND = "/tutorial"
 -- "/weapons all" grants every weapon (quest ones too); "/weapons reset"
 -- takes them all (rebirth ones come back on the next sync).
 local WEAPONS_COMMAND = "/weapons"
+-- "/data slowload <seconds>" delays the NEXT join's data load (Studio), to
+-- reproduce a character that spawns before its data.
+local DATA_COMMAND = "/data"
 local ANIM_COMMAND = "/anim"
 -- "/combat box" toggles drawing each melee swing's server hitbox (a red
 -- transparent part for 0.2 s, sized to that weapon's MeleeBox).
@@ -641,6 +644,75 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 		result(true, "combat: weapons are held (skipped: no living character)")
 	end
 
+	-- Tools after a live-server spawn that beat the data load: wipe every
+	-- weapon Tool, fire a sync, and all owned ones are back within 1 s; then
+	-- the RequestWeaponTools handler adds no duplicates.
+	local function countTools(): ({ [string]: number }, number)
+		local counts: { [string]: number } = {}
+		local total = 0
+		local backpack = player:FindFirstChildOfClass("Backpack")
+		for _, container in { backpack, player.Character } do
+			if container then
+				for _, child in container:GetChildren() do
+					if child:IsA("Tool") and child:GetAttribute("Weapon") then
+						counts[child.Name] = (counts[child.Name] or 0) + 1
+						total += 1
+					end
+				end
+			end
+		end
+		return counts, total
+	end
+	if player.Character and player:FindFirstChildOfClass("Backpack") then
+		local owned = PlayerDataService.GetWeapons(player)
+		local ownedCount = 0
+		for _ in owned do
+			ownedCount += 1
+		end
+		local backpack = player:FindFirstChildOfClass("Backpack") :: Backpack
+		for _, container in { backpack, player.Character :: Instance } do
+			for _, child in container:GetChildren() do
+				if child:IsA("Tool") and child:GetAttribute("Weapon") then
+					child:Destroy()
+				end
+			end
+		end
+		local _, afterWipe = countTools()
+		PlayerDataService.SyncTycoon(player)
+		local deadline = os.clock() + 1
+		local counts, total = countTools()
+		while total < ownedCount and os.clock() < deadline do
+			task.wait(0.1)
+			counts, total = countTools()
+		end
+		local allBack = true
+		for id in owned do
+			if counts[id] ~= 1 then
+				allBack = false
+			end
+		end
+		result(
+			afterWipe == 0 and allBack and total == ownedCount,
+			"combat: with every weapon Tool destroyed, a SyncTycoon gives all owned ones back within 1 s",
+			("owned %d, wiped to %d, back %d"):format(ownedCount, afterWipe, total)
+		)
+		CombatService.SelfTestRequestWeaponTools(player)
+		local countsAgain, totalAgain = countTools()
+		local duplicates = false
+		for _, n in countsAgain do
+			if n > 1 then
+				duplicates = true
+			end
+		end
+		result(
+			not duplicates and totalAgain == ownedCount,
+			"combat: the RequestWeaponTools handler adds no duplicates",
+			("owned %d, tools %d"):format(ownedCount, totalAgain)
+		)
+	else
+		result(true, "combat: weapon Tools come back after a wipe (skipped: no character / Backpack)")
+	end
+
 	runLaunchSelfTest(player, result)
 	runSwingSelfTest(player, result)
 
@@ -993,6 +1065,51 @@ local function runAutoDisplaySelfTest(player: Player, result: (boolean, string, 
 	PlayerDataService.SyncTycoon(player)
 end
 
+-- AUTO-FILL on a tier the tester holds nothing of: 6 Golden orbs fill the
+-- chamber (same stack, toast); 1 Golden + 1 Rainbow select nothing and show
+-- the "not enough" toast. The test orbs are removed after.
+local function runAutoFillSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local rebirths = PlayerDataService.GetRebirths(player)
+	local held: { [string]: boolean } = {}
+	for _, item in PlayerDataService.GetInventory(player) or {} do
+		held[item.Tier] = true
+	end
+	local tier: string? = nil
+	for _, candidate in FusionConfig.TierOrder do
+		if not held[candidate] and FusionConfig.CanFuseTierFor(candidate, rebirths) and ItemConfig.PickRandomOfTier(candidate) then
+			tier = candidate
+			break
+		end
+	end
+	if not tier then
+		print("[SelfTest] SKIP auto-fill: every fusable tier already holds items")
+		return
+	end
+	local def = ItemConfig.PickRandomOfTier(tier) :: any
+	local function add(mutation: string, count: number): { string }
+		local uids = {}
+		for _ = 1, count do
+			local item = PlayerDataService.AddItem(player, def.Id, tier :: string, mutation)
+			if item then
+				table.insert(uids, item.Uid)
+			end
+		end
+		return uids
+	end
+	local goldens = add("Golden", FusionConfig.MaxFusionInputs)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	tutorialProbe(player, { Kind = "AutoFillMutated", Tier = tier, Expect = "Fill", Count = FusionConfig.MaxFusionInputs }, result)
+	PlayerDataService.RemoveItemsByUid(player, goldens)
+	local pair = add("Golden", 1)
+	for _, uid in add("Rainbow", 1) do
+		table.insert(pair, uid)
+	end
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	tutorialProbe(player, { Kind = "AutoFillMutated", Tier = tier, Expect = "None", Count = 0 }, result)
+	PlayerDataService.RemoveItemsByUid(player, pair)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+end
+
 -- One section of the run: a header, then the body in a pcall so an error is
 -- a FAIL line and the next section still runs.
 local function runSection(title: string, result: (boolean, string, string?) -> (), body: () -> ())
@@ -1336,6 +1453,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- 8. Auto-display (see runAutoDisplaySelfTest).
 	runSection("8. auto-display", result, function()
 		runAutoDisplaySelfTest(player, result)
+		runAutoFillSelfTest(player, result)
 	end)
 
 	-- 9. The tutorial, driven step by step on the real paths (the remote's
@@ -1523,6 +1641,14 @@ local function onPlayerChatted(player: Player, message: string)
 			print(("DebugService: %s's weapons -> %s"):format(player.Name, argument))
 		else
 			warn("DebugService: /weapons all | /weapons reset")
+		end
+	elseif command == DATA_COMMAND then
+		local seconds = tonumber(argument:match("^slowload%s+(%S+)$"))
+		if seconds and seconds == seconds then
+			PlayerDataService.DebugSlowLoad(seconds)
+			print(("DebugService: the next join's data load waits %d s first"):format(math.clamp(seconds, 0, 60)))
+		else
+			warn("DebugService: /data slowload <seconds>")
 		end
 	elseif command == COMBAT_COMMAND then
 		if argument == "box" then
@@ -1765,7 +1891,7 @@ function DebugService:Init()
 		end
 	end))
 
-	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /anim export, /quest complete <id>|reset|status, /powerup <key> <n>, /sound <slot>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
+	print("DebugService: Studio commands active: /cash <amount>, /resetmultiplier, /rebirthready, /rebirths <n>, /give <itemId> [mutation], /offline <minutes>, /shield <s>, /stealable, /tips reset, /tutorial reset|step <n>, /weapons all|reset, /data slowload <s>, /anim export, /quest complete <id>|reset|status, /powerup <key> <n>, /sound <slot>, /event <id> [min] | off, /eventclock <min>, /eventmut <charged|void|celestial>, /shop grant <key>, /deal slot <h> | pop, /daily day|miss|reset, /gifts time|reset, /selftest, /wipe")
 end
 
 function DebugService:Start()

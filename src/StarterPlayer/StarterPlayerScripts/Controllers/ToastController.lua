@@ -34,6 +34,7 @@ local BASE_BOTTOM_OFFSET = UITheme.BottomStackOffset
 local stack: Frame? = nil
 local visible: { Frame } = {}
 local bottomInset = 0
+local lastText = ""
 
 local function ensureBuilt(): Frame
 	if stack then
@@ -85,7 +86,13 @@ function ToastController.SetBigHold(hold: () -> boolean)
 	holdBig = hold
 end
 
+-- /selftest: the text of the last toast asked for.
+function ToastController.GetLastText(): string
+	return lastText
+end
+
 function ToastController.Show(text: string, kind: ToastKind?, options: ToastOptions?)
+	lastText = text
 	if options and options.Big and holdBig and holdBig() then
 		table.insert(held, { Text = text, Kind = kind, Options = options })
 		return

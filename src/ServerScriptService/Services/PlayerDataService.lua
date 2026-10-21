@@ -863,9 +863,21 @@ local runReleaseHooks: (player: Player) -> ()
 -- Starts the player's session (yields; waits for another server's lock up to
 -- ProfileStore's steal timeout). Returns true once the data is ready; on
 -- failure kicks in a live game (nothing is overwritten).
+-- Studio only (/data slowload <seconds>): the next join's load waits this long first.
+local slowLoadSeconds = 0
+
+function PlayerDataService.DebugSlowLoad(seconds: number)
+	slowLoadSeconds = if isStudio then math.clamp(seconds, 0, 60) else 0
+end
+
 local function loadData(player: Player): boolean
 	local userId = player.UserId
 	local started = os.clock()
+	if slowLoadSeconds > 0 then
+		local delay = slowLoadSeconds
+		slowLoadSeconds = 0
+		task.wait(delay)
+	end
 	local profile = store:StartSessionAsync(PROFILE_KEY_PREFIX .. userId, {
 		Cancel = function()
 			return player.Parent ~= Players or os.clock() - started > LOAD_TIMEOUT_SECONDS

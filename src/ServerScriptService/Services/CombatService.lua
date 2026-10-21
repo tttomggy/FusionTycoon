@@ -73,6 +73,8 @@ CombatService.Name = "CombatService"
 local MAX_COORDINATE = 1e5
 local ROOT_JOINT_NAMES = { RootJoint = true, Root = true }
 local FOLDER_NAME = "CombatObjects"
+local DATA_POLL_SECONDS = 0.25 -- a spawn that beat the DataStore load re-checks this often
+local DATA_WAIT_SECONDS = 30
 
 type Joint = { Motor: Motor6D, Constraint: BallSocketConstraint, A0: Attachment, A1: Attachment }
 
@@ -559,7 +561,23 @@ local function giveTools(player: Player)
 	end
 end
 
--- The sync hook: rebirth milestones grant their weapons.
+-- True when an owned weapon is in neither the Backpack nor the character.
+local function missingTools(player: Player): boolean
+	local backpack = player:FindFirstChildOfClass("Backpack")
+	if not backpack then
+		return false
+	end
+	local character = player.Character
+	for id in PlayerDataService.GetWeapons(player) do
+		if not backpack:FindFirstChild(id) and not (character and character:FindFirstChild(id)) then
+			return true
+		end
+	end
+	return false
+end
+
+-- The sync hook: rebirth milestones grant their weapons, and a Backpack
+-- that lost (or never got) an owned weapon is refilled.
 local function grantByRebirths(player: Player)
 	local granted = false
 	for _, id in CombatConfig.GetUnlockedByRebirths(PlayerDataService.GetRebirths(player)) do
@@ -568,7 +586,7 @@ local function grantByRebirths(player: Player)
 			RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = id })
 		end
 	end
-	if granted then
+	if granted or (player.Character ~= nil and missingTools(player)) then
 		giveTools(player)
 	end
 end
@@ -588,6 +606,11 @@ end
 -- weapon back).
 function CombatService.RefreshTools(player: Player)
 	giveTools(player)
+end
+
+-- /selftest: the RequestWeaponTools handler, called directly.
+function CombatService.SelfTestRequestWeaponTools(player: Player)
+	onRequestWeaponTools(player)
 end
 
 -- Studio /weapons all | reset.
@@ -988,11 +1011,31 @@ local function onCharacterAdded(player: Player, character: Model)
 	player:SetAttribute("RagdollUntil", nil)
 	player:SetAttribute("FrozenUntil", nil)
 	-- The Backpack is rebuilt on each spawn: give the tools once it's there.
+	-- On a live server the character spawns before the DataStore load ends:
+	-- wait for the data (up to DATA_WAIT_SECONDS), then give them.
 	task.defer(function()
-		if player.Character == character and PlayerDataService.IsDataLoaded(player) then
+		local waited = 0
+		while player.Parent == Players and player.Character == character and not PlayerDataService.IsDataLoaded(player) do
+			if waited >= DATA_WAIT_SECONDS then
+				return
+			end
+			task.wait(DATA_POLL_SECONDS)
+			waited += DATA_POLL_SECONDS
+		end
+		if player.Parent == Players and player.Character == character and PlayerDataService.IsDataLoaded(player) then
 			giveTools(player)
 		end
 	end)
+end
+
+-- Client fallback (CombatController.toggleEquip found no Tool for an owned weapon).
+local function onRequestWeaponTools(player: Player)
+	if not RemoteGuard.Allow(player, "RequestWeaponTools", 1, 2) then
+		return
+	end
+	if PlayerDataService.IsDataLoaded(player) then
+		giveTools(player)
+	end
 end
 
 local function onPlayerAdded(player: Player)
@@ -1036,6 +1079,7 @@ end
 
 function CombatService:Init()
 	RemoteEvents.RequestHit.OnServerEvent:Connect(onRequestHit)
+	RemoteEvents.RequestWeaponTools.OnServerEvent:Connect(onRequestWeaponTools)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
 	RunService.Heartbeat:Connect(recordHistory)
 end

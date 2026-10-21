@@ -26,7 +26,12 @@ FusionService carries and what the Fuse panel predicts **before** FUSE
 roll better"; mixed → a red warning box naming how many lower orbs are in
 and what is lost ("⚠ 1 plain orb mixed in: the Epic comes out plain, not
 Golden…"), those orbs ringed red; all plain → no line. AUTO-FILL only adds
-the first orb's mutation (an empty chamber fills plain orbs). The fusion
+the first orb's mutation (an empty chamber fills plain orbs; with NO plain
+orb of the tier it fills the largest same-stack group of mutated orbs, not
+carried or displayed, needing 2+, ties to the lower stacked value, toast
+"Filled with GOLDEN orbs (they keep their mutation)", else "Not enough
+matching orbs to fuse" + a tab pulse; `FusionController.GetAutoFill`, AGAIN
+and FUSE ALL still skip mutated items). The fusion
 result carries `MutationSource = "Kept" | "Rolled"`: the big card shows
 the pill and "GOLDEN kept" / "GOLDEN rolled!";
 the fail card says "Kept your Golden Rare (…)". The five count chips sit in

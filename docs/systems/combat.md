@@ -11,7 +11,14 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   (quest: one out, 10 s, lasts 20 s, the first enemy to step on it slips).
   `PlayerData.Weapons` (a set, sanitised, snapshot `Weapons`); an OnSync
   hook grants rebirth weapons + `WeaponUnlocked` (the tutorial-style card);
-  Roblox `Tool`s in the Backpack, given on every spawn; the default Backpack
+  Roblox `Tool`s in the Backpack, given on every spawn **once the data is
+  loaded** (a live server spawns the character first: `onCharacterAdded`
+  polls `IsDataLoaded` every 0.25 s, up to 30 s). The OnSync hook also
+  refills any owned weapon missing from the Backpack and character, and the
+  client's `toggleEquip` shows "Getting your weapons…" and fires
+  `RequestWeaponTools` (C→S, no payload, rate-limited; `giveTools` is
+  idempotent) then retries the equip once after 0.5 s. Studio:
+  `/data slowload <s>` delays the next join's load to reproduce it. The default Backpack
   bar is replaced by the weapon bar (below). **Rules:** only Rebirth 1+ vs Rebirth 1+; no hits for 5 s after
   spawning; a hit ragdolls 1.5 s with knockback (+ an upward kick), then 3 s
   immune (a shimmer). **Server authority:** `RequestHit { Weapon, Origin?,

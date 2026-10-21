@@ -585,12 +585,74 @@ local function matchingUids(first: any?): { string }
 	return uids
 end
 
+-- Empty chamber and no unmutated item of this tier: the largest group of
+-- mutated items sharing one stack (not carried, not on a pedestal), max 6.
+-- Ties go to the lower stacked multiplier, so the rarest stack is kept.
+-- Returns the uids and the stack's label; nothing when no group has 2+.
+local function largestMutatedGroup(): ({ string }, string?)
+	local groups: { { Uids: { string }, Base: string?, Events: { string }?, Value: number } } = {}
+	for _, item in InventoryController.GetInventory() do
+		if
+			item.Tier == selectedTier
+			and MutationConfig.GetTop(item.Mutation, item.EventMutations) ~= nil
+			and not InventoryController.IsCarried(item)
+			and not InventoryController.IsInUse(item)
+		then
+			local group = nil
+			for _, candidate in groups do
+				if MutationConfig.SameStack(candidate.Base, candidate.Events, item.Mutation, item.EventMutations) then
+					group = candidate
+					break
+				end
+			end
+			if not group then
+				group = {
+					Uids = {},
+					Base = item.Mutation,
+					Events = item.EventMutations,
+					Value = MutationConfig.GetStackedMultiplier(item.Mutation, item.EventMutations),
+				}
+				table.insert(groups, group)
+			end
+			table.insert(group.Uids, item.Uid)
+		end
+	end
+	local best = nil
+	for _, group in groups do
+		if #group.Uids >= FusionConfig.MinFusionInputs and (not best or #group.Uids > #best.Uids or (#group.Uids == #best.Uids and group.Value < best.Value)) then
+			best = group
+		end
+	end
+	if not best then
+		return {}, nil
+	end
+	local uids = {}
+	for index = 1, math.min(#best.Uids, FusionConfig.MaxFusionInputs) do
+		uids[index] = best.Uids[index]
+	end
+	return uids, MutationConfig.GetStackLabel(best.Base, best.Events)
+end
+
 local function autoFill()
 	if rebirthsNeeded(selectedTier) then
 		return
 	end
 	local first = selectedItems()[1]
-	for _, uid in matchingUids(first) do
+	local fill = matchingUids(first)
+	if first == nil and #fill == 0 then
+		local label
+		fill, label = largestMutatedGroup()
+		if label then
+			ToastController.Show(("Filled with %s orbs (they keep their mutation)"):format(label), "Neutral")
+		else
+			ToastController.Show("Not enough matching orbs to fuse", "Neutral")
+			local tabButton = tabButtons[selectedTier]
+			if tabButton then
+				UIKit.SelectFeedback(tabButton)
+			end
+		end
+	end
+	for _, uid in fill do
 		if #selected >= FusionConfig.MaxFusionInputs then
 			break
 		end
@@ -1011,6 +1073,19 @@ function FusePanel.GetCoachTarget(name: string): GuiObject?
 		return fuseButton
 	end
 	return nil
+end
+
+-- /selftest: press AUTO-FILL on `tier` with an empty chamber; returns the
+-- selected items.
+function FusePanel.SelfTestAutoFill(tier: string): { any }
+	if not modal then
+		return {}
+	end
+	selectedTier = tier
+	table.clear(selected)
+	refreshAll()
+	autoFill()
+	return selectedItems()
 end
 
 function FusePanel.GetSelectedCount(): number

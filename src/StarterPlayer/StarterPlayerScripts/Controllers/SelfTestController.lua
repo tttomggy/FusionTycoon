@@ -34,6 +34,7 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
+local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
@@ -2805,6 +2806,43 @@ local function probeQuestBadge(): { ProbeLine }
 	}
 end
 
+-- AUTO-FILL on `tier` with an empty chamber: which orbs it selects and the
+-- toast it shows. `expect` = "Fill" (n orbs of one stack + the "Filled with"
+-- toast) or "None" (0 orbs + the "Not enough" toast).
+local function probeAutoFillMutated(tier: string, expect: string, count: number): { ProbeLine }
+	local panel = require(UI.FusePanel) :: any
+	local toasts = require(script.Parent.ToastController) :: any
+	task.wait(0.4) -- the inventory sync
+	panel.Open()
+	task.wait(0.2)
+	local picked = panel.SelfTestAutoFill(tier)
+	local toast = toasts.GetLastText()
+	panel.Close()
+	local sameStack = #picked > 0
+	for _, item in picked do
+		if not MutationConfig.SameStack(item.Mutation, item.EventMutations, picked[1].Mutation, picked[1].EventMutations) then
+			sameStack = false
+		end
+	end
+	local detail = ("%d selected, toast '%s'"):format(#picked, toast)
+	if expect == "Fill" then
+		return {
+			{
+				Ok = #picked == count and sameStack and toast:find("Filled with", 1, true) ~= nil,
+				Name = "fuse: AUTO-FILL with only mutated orbs left fills with the largest same-stack group and says so",
+				Detail = detail,
+			},
+		}
+	end
+	return {
+		{
+			Ok = #picked == 0 and toast == "Not enough matching orbs to fuse",
+			Name = "fuse: AUTO-FILL with no mutated pair selects nothing and shows the 'not enough' toast",
+			Detail = detail,
+		},
+	}
+end
+
 -- The knockback checks run on the TARGET's client (the one that simulates
 -- its character): where its own root is, and whether it is standing again.
 local function probeRootPos(): ({ ProbeLine }, { [string]: any })
@@ -2899,6 +2937,8 @@ local function probeTutorial(payload: any)
 			return probeQuestBadge()
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
+		elseif payload.Kind == "AutoFillMutated" then
+			return probeAutoFillMutated(tostring(payload.Tier), tostring(payload.Expect), if typeof(payload.Count) == "number" then payload.Count else 0)
 		elseif payload.Kind == "AutoReset" then
 			(require(script.Parent.ResultController) :: any).ResetAutoCardCount()
 			return {}

@@ -183,6 +183,17 @@ local function toggleEquip(weapon: CombatConfig.Weapon)
 	end
 	local tool = findTool(weapon.Id)
 	if not tool then
+		-- An owned weapon with no Tool: the server skipped giving them (data
+		-- loaded after the spawn). Ask once, then retry the equip once.
+		ToastController.Show("Getting your weapons…", "Neutral")
+		RemoteEvents.RequestWeaponTools:FireServer()
+		task.delay(0.5, function()
+			local retry = findTool(weapon.Id)
+			local current = getHumanoid()
+			if retry and current and retry.Parent ~= localPlayer.Character then
+				current:EquipTool(retry)
+			end
+		end)
 		return
 	end
 	if tool.Parent == localPlayer.Character then
