@@ -136,7 +136,7 @@ When you change a system, update its doc (not this file) unless a rule here chan
 - **Card placement:** every `UIKit.Modal` and centred card lives in the
   band from `UIKit.GetCardTop()` (top bar 58 + 8; on a phone also past the
   170 × 60 Roblox buttons after the 0.8 scale: 79 logical) down to the
-  HUD's bottom row (`UIKit.GetCardBottom()`: 99 / 95 logical), never over
+  HUD's bottom row (`UIKit.GetCardBottom()`: 99 / 91 logical), never over
   it, and is **centred in that band** (`UIKit.GetCardY(visualHeight)`,
   where visualHeight is what you SEE: the panel plus its shadow, after the
   size cap and the fit scale; the UIScale shrinks about the top-centre

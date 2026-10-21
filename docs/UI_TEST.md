@@ -2141,3 +2141,37 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
 - [ ] `/selftest`: "music", "unlock card", "quests: a chain step …",
   "effects tray (…): cartoon badges / hovering the Luck icon / leaving /
   a tap", "combat swing (…): 6 studs in front and 3 to the side" pass.
+
+
+## 43. Compact phone HUD (Bubble Gum style icon grid)
+
+iPhone XR landscape emulator (896 x 414), `/weapons all`, a few power-ups
+(`/powerup CashBurst 2`, `/powerup LuckyCharm 1`, `/powerup SpeedBoots 1`), a
+deal running (`/deal slot 4`). Desktop must look exactly as before.
+
+- [ ] The cash panel is slim: the cash number (the biggest text on the HUD) on
+  one line, "+$X/s" and the rebirth / multiplier pills on a small line under
+  it; about 60% of the old height.
+- [ ] Under it a **grid of 56 px icon cards**, 3 per row, 6 px gaps: 🛒 SHOP,
+  🎁 GIFTS, 📜 QUESTS, then the power-ups (a glyph, the count as a badge,
+  "ON" / the seconds under an armed / timed one), then LOCK (🔓 / 🛡 / ⏳ /
+  🚨 over "LOCK" / the seconds / "RUN!") and its "?" (Rebirth 1+). Each card is
+  its old colour with the glyph at 28 px over a 13 px word. The GIFTS count
+  badge, QUESTS red "!", SALE tag and the wiggle / bounce are on the cards'
+  corners; every card opens the same panel as before.
+- [ ] The deal tile (56 px) and "next in" sit under the grid; the goal card
+  and quest tracker under them. Nothing overlaps; the whole left group stays
+  inside the left 40% of the screen; the top-left 170 x 60 px is clear.
+- [ ] The bottom row is five 56 px icon cards centred under the weapon bar:
+  ⬆️ UPGRADE, 🎒 ITEMS, 📖 INDEX, 🔁 REBIRTH, ⚙️ OPTIONS. REBIRTH keeps its
+  progress as a thin bar along the card's bottom edge and still glows and
+  pulses when you can afford it. The row is never under the jump button.
+- [ ] Tutorial (`/tutorial reset`): SHOP / GIFTS / QUESTS appear together at the
+  same step as before (the grid pops in with its NEW! pill), UPGRADES,
+  ITEMS, INDEX, REBIRTH and ⚙ at their old steps; the hand points at the
+  right card each time.
+- [ ] `/selftest`: "phone HUD coverage (844 x 390 / 896 x 414)" prints the
+  covered % of the screen and passes at <= 20%; "phone HUD clear of the jump
+  button and weapon bar" and "phone HUD icon cards: n cards, each >= 44 px
+  with text >= 13 px" pass; the left-column checks pass; desktop checks are
+  unchanged.

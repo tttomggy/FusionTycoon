@@ -212,6 +212,19 @@ Most of the 77 were the TEST, not the game:
 - The effects-tray position checks skip in a too-small window like the others.
 
 
+## /selftest: compact phone HUD
+
+`testPhoneHudCoverage` forces the phone layout, builds the busiest HUD
+(`HudController.SelfTestBusy`: SHOP, GIFTS, QUESTS, three power-ups, LOCK and
+its "?", the deal tile, "next in", the goal card, the quest tracker) and at
+844 × 390 and 896 × 414 prints the UNION of all HUD rects as a % of the
+screen (`phone HUD coverage`, limit 20%), checks the HUD is clear of the
+weapon bar (when `/weapons all` is on) and the jump button, and that every icon
+card (`HudController.GetCardViews`) is ≥ 44 px with text ≥ 13 px. Layout
+numbers (logical px, from the constants, no Studio): before the compact
+HUD ≈ 22% (844 × 390) / 20% (896 × 414) with three power-ups up; after ≈ 18% /
+16% (about 20% / 18% with all five).
+
 ## /selftest: Secret pity meter
 
 Section 11 (progression) runs `runSecretPitySelfTest`: it gives Mythics and

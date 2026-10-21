@@ -167,7 +167,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     (`HudController.buildDealBadge`) under SHOP / GIFTS on its own line,
     desktop and phone (on a phone it heads the left-column status stack,
     "next in" under it, never toward the centre). A 92 px
-    (phone 76) Deal-pink square, 16 px corners, 3 px white stroke: the deal
+    (phone 56, the same card size as the utility grid) Deal-pink square, 16 px corners, 3 px white stroke: the deal
     product's LIVE icon (`ShopPrices.GetIcon` = the Creator Hub
     `IconImageAssetId`; none yet → the deal's emoji; never uploaded from
     code; 66% of the tile so a dark strip of the parts' glyphs, "⚡ 🧪", fits

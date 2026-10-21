@@ -1090,7 +1090,7 @@ UIKit.CHAT_WIDTH = 400 -- screen px from the left the desktop chat window spans
 UIKit.CARD_CHAT_GAP = 8
 -- The HUD's bottom button row (HudController: 22 margin + button + 5 shadow)
 -- plus an 8 px gap: cards stop above it.
-UIKit.BOTTOM_BAR_RESERVE = { Desktop = 22 + 64 + 5 + 8, Phone = 22 + 60 + 5 + 8 }
+UIKit.BOTTOM_BAR_RESERVE = { Desktop = 22 + 64 + 5 + 8, Phone = 22 + 56 + 5 + 8 }
 local TOP_LEFT_CLEAR_PX = 60 -- the 170 x 60 Roblox buttons, in screen px
 
 local function currentScale(): number

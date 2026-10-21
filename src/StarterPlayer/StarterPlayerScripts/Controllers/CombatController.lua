@@ -80,7 +80,7 @@ local SWEEP_DARK = 0.35 -- the cooldown wipe's transparency
 local LOCKED_DIM = 0.75
 local CARRYING_DIM = 0.55
 -- Above the HUD's bottom row (22 margin + 64 / 60 button + 5 shadow) + a gap.
-local BAR_BOTTOM = { Desktop = 22 + 64 + 5 + 12, Phone = 22 + 60 + 5 + 12 }
+local BAR_BOTTOM = { Desktop = 22 + 64 + 5 + 12, Phone = 22 + 56 + 5 + 12 }
 local LASER_BEAM_SECONDS = 0.12
 local FREEZE_BEAM_SECONDS = 0.18
 local FREEZE_CONE_STUDS = 24

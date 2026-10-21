@@ -9,6 +9,14 @@
 
 	Nothing is placed in the top-left 170x60 px, which belongs to the Roblox
 	top bar.
+
+	PHONE (UIKit.IsPhone, < 500 px tall) is a compact, icon-button HUD: a slim
+	cash panel (cash over "$/s" + pills), then a utility GRID of 56 px icon
+	cards (a glyph over a 13 px word; 3 per row, 6 px gaps): SHOP, GIFTS,
+	QUESTS, the power-ups and the LOCK chip; the deal tile and "next in" under
+	it; the bottom row is five 56 px icon cards. Desktop is unchanged. The
+	same buttons are re-parented and restyled by applyLayout (setCardCompact),
+	so every handler, badge and bounce is the one desktop uses.
 ]]
 local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
@@ -83,6 +91,16 @@ local LAYOUT = {
 }
 local CASH_CARD_SIZE = Vector2.new(260, 96)
 local PILL_ROW_WIDTH = 132 -- room for the rebirth pill and the Multiplier pill
+-- Phone: the slim cash panel (62% of the desktop card's height) and the
+-- 56 px icon cards of the utility grid and the bottom row.
+local CASH_CARD_PHONE = Vector2.new(232, 60)
+local PILL_ROW_PHONE = 124
+local PHONE_CARD = 56
+local PHONE_CARD_GAP = 6
+local PHONE_GRID_COLUMNS = 3
+local PHONE_GLYPH_SIZE = 28
+local PHONE_WORD_SIZE = 13
+local PHONE_BUTTON_GAP = 6
 local BOTTOM_MARGIN = 22
 local BUTTON_GAP = 14
 local SETTINGS_BUTTON_SIZE = 56
@@ -101,6 +119,18 @@ local breakdownLabel: TextLabel
 local breakdownToken = 0
 local BREAKDOWN_SECONDS = 5
 local rebirthPill: TextLabel
+-- The phone flag for the bottom row (buildButtons sets it; layoutIsPhone
+-- below is the left column's).
+local layoutIsPhoneEarly = false
+-- /selftest's left-column and coverage checks hold the forced cards (the
+-- refresh ticks would hide them again).
+local selfTestHold = false
+local cashCoin: Frame
+local cashPadding: UIPadding
+local cashPills: Frame
+-- Phone: the utility grid the SHOP / GIFTS / QUESTS / power-up / LOCK cards live in.
+local phoneGrid: Frame
+local phoneGridLayout: UIGridLayout
 
 local goalHolder: Frame
 local goalBody: Frame
@@ -121,6 +151,7 @@ local rebirthScale: UIScale? = nil
 local rebirthPulse: Tween? = nil
 local rebirthGlowTween: Tween? = nil
 local REBIRTH_FILL_TRANSPARENCY = 0.72
+local REBIRTH_BAR_HEIGHT = 6 -- phone: the progress bar along the card's bottom edge
 local REBIRTH_GLOW_PAD = 14
 local REBIRTH_PULSE_SCALE = 1.08
 local buttonsByName: { [string]: TextButton } = {}
@@ -305,7 +336,7 @@ local function buildCashCard(): Frame
 		Position = LAYOUT.Desktop.CashPosition,
 		Color = Colors.Panel,
 	})
-	UIKit.Padding(body, 12, 14, 12, 14)
+	cashPadding = UIKit.Padding(body, 12, 14, 12, 14)
 	local z = body.ZIndex + 1
 
 	-- Row 1: coin + amount.
@@ -316,6 +347,7 @@ local function buildCashCard(): Frame
 	coin.BackgroundColor3 = Colors.White
 	coin.ZIndex = z
 	coin.Parent = body
+	cashCoin = coin
 	UIKit.Corner(coin, 999)
 	UIKit.PairGradient(coin, UITheme.Gradients.Green)
 	UIKit.Stroke(coin, 3)
@@ -365,6 +397,7 @@ local function buildCashCard(): Frame
 	pills.Size = UDim2.fromOffset(PILL_ROW_WIDTH, 24)
 	pills.ZIndex = z
 	pills.Parent = body
+	cashPills = pills
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.FillDirection = Enum.FillDirection.Horizontal
 	pillLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
@@ -630,17 +663,115 @@ function HudController.SetButtonHighlight(name: string, on: boolean)
 	applyHighlight(name)
 end
 
+--[[ Icon cards (phone) ------------------------------------------------------------
+	SHOP, GIFTS, QUESTS and the power-ups are built once, as the wide desktop
+	buttons. On a phone setCardCompact turns each into a 56 px square card: the
+	glyph at 28 px over its word at 13 px, in the button's own colour; the badges,
+	bounces and handlers stay. Desktop gets its wide button back.
+]]
+type Card = {
+	Button: TextButton,
+	Holder: Frame,
+	Glyph: string,
+	Word: string,
+	DesktopSize: UDim2,
+	DesktopText: string,
+	DesktopTextSize: number,
+	DesktopRadius: number,
+}
+
+local cards: { Card } = {}
+
+local function addCard(button: TextButton, holder: Frame, glyph: string, word: string, desktopText: string, desktopTextSize: number): Card
+	-- A power-up button has two UICorners (UIKit.Button's and its round one):
+	-- the later one is what draws.
+	local corner: UICorner? = nil
+	for _, child in button:GetChildren() do
+		if child:IsA("UICorner") then
+			corner = child
+		end
+	end
+	local card: Card = {
+		Button = button,
+		Holder = holder,
+		Glyph = glyph,
+		Word = word,
+		DesktopSize = holder.Size,
+		DesktopText = desktopText,
+		DesktopTextSize = desktopTextSize,
+		DesktopRadius = if corner then corner.CornerRadius.Offset else UITheme.Radius.Button,
+	}
+	table.insert(cards, card)
+	return card
+end
+
+local function setCardCompact(card: Card, compact: boolean)
+	local content = card.Button:FindFirstChild("Content")
+	local layout = content and content:FindFirstChildOfClass("UIListLayout")
+	local column = content and content:FindFirstChild("TextColumn")
+	local label = column and column:FindFirstChild("Label") :: TextLabel?
+	local sub = column and column:FindFirstChild("SubLabel") :: TextLabel?
+	if not (layout and label and sub) then
+		return
+	end
+	if compact then
+		card.Holder.Size = UDim2.fromOffset(PHONE_CARD, PHONE_CARD)
+		layout.FillDirection = Enum.FillDirection.Vertical
+		layout.Padding = UDim.new(0, 0)
+		label.Text = card.Glyph
+		label.TextSize = PHONE_GLYPH_SIZE
+		sub.Text = card.Word
+		sub.TextSize = PHONE_WORD_SIZE
+		sub.Visible = card.Word ~= ""
+		for _, child in card.Button:GetChildren() do
+			if child:IsA("UICorner") then
+				child.CornerRadius = UDim.new(0, UITheme.Radius.Button)
+			end
+		end
+	else
+		card.Holder.Size = card.DesktopSize
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.Padding = UDim.new(0, 8)
+		label.Text = card.DesktopText
+		label.TextSize = card.DesktopTextSize
+		sub.Text = ""
+		sub.Visible = false
+		for _, child in card.Button:GetChildren() do
+			if child:IsA("UICorner") then
+				child.CornerRadius = UDim.new(0, card.DesktopRadius)
+			end
+		end
+	end
+end
+
 local function buildButtons(isPhone: boolean)
+	layoutIsPhoneEarly = isPhone
 	for _, child in buttonRow:GetChildren() do
 		if not child:IsA("UIListLayout") then
 			child:Destroy()
 		end
 	end
+	local rowLayout = buttonRow:FindFirstChildOfClass("UIListLayout")
+	if rowLayout then
+		rowLayout.Padding = UDim.new(0, if isPhone then PHONE_BUTTON_GAP else BUTTON_GAP)
+	end
 
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	local size = UDim2.fromOffset(layout.ButtonSize.X, layout.ButtonSize.Y)
+	-- Phone: a 56 px icon card (an emoji glyph over a 13 px word), no image icon.
+	local function forPhone(props: any, glyph: string, word: string): any
+		if isPhone then
+			props.Text = glyph
+			props.TextSize = PHONE_GLYPH_SIZE
+			props.SubText = word
+			props.SubTextSize = PHONE_WORD_SIZE
+			props.Icon = nil
+			props.Size = UDim2.fromOffset(PHONE_CARD, PHONE_CARD)
+		end
+		return props
+	end
 
-	local upgrades, holder = UIKit.Button({
+	local upgrades, holder = UIKit.Button(forPhone({
 		Name = "UpgradesButton",
 		Parent = buttonRow,
 		Style = "Green",
@@ -653,7 +784,7 @@ local function buildButtons(isPhone: boolean)
 		OnClick = function()
 			UpgradesPanel.Toggle()
 		end,
-	})
+	}, "⬆️", "UPGRADE"))
 	upgradesButton = upgrades
 	upgradesHolder = holder
 	buttonsByName.Upgrades = upgrades
@@ -661,7 +792,7 @@ local function buildButtons(isPhone: boolean)
 	pulseScale.Name = "PulseScale"
 	pulseScale.Parent = holder
 
-	buttonsByName.Items = UIKit.Button({
+	buttonsByName.Items = UIKit.Button(forPhone({
 		Name = "ItemsButton",
 		Parent = buttonRow,
 		Style = "Blue",
@@ -672,9 +803,9 @@ local function buildButtons(isPhone: boolean)
 		TextSize = layout.ButtonTextSize,
 		LayoutOrder = 2,
 		OnClick = HudController.OpenInventory,
-	})
+	}, "🎒", "ITEMS"))
 
-	buttonsByName.Index = UIKit.Button({
+	buttonsByName.Index = UIKit.Button(forPhone({
 		Name = "IndexButton",
 		Parent = buttonRow,
 		Style = "Teal",
@@ -685,12 +816,12 @@ local function buildButtons(isPhone: boolean)
 		TextSize = layout.ButtonTextSize,
 		LayoutOrder = 3,
 		OnClick = IndexPanel.Toggle,
-	})
+	}, "📖", "INDEX"))
 
 	-- REBIRTH: always there, a fill of cash against the next rebirth's cost
 	-- and "$2.1M / $15M"; glows and pulses once you can afford it. Opens
 	-- the Rebirth panel from anywhere (the Portal still works too).
-	local rebirth, rebirthHolder = UIKit.Button({
+	local rebirth, rebirthHolder = UIKit.Button(forPhone({
 		Name = "RebirthButton",
 		Parent = buttonRow,
 		Style = "Violet",
@@ -702,7 +833,7 @@ local function buildButtons(isPhone: boolean)
 		TextSize = layout.ButtonTextSize,
 		LayoutOrder = 4,
 		OnClick = RebirthPanel.Open,
-	})
+	}, "🔁", "REBIRTH"))
 	buttonsByName.Rebirth = rebirth
 	rebirthButton = rebirth
 	local fill = Instance.new("Frame")
@@ -713,7 +844,16 @@ local function buildButtons(isPhone: boolean)
 	fill.Size = UDim2.fromScale(0, 1)
 	fill.ZIndex = rebirth.ZIndex
 	fill.Parent = rebirth
-	UIKit.Corner(fill, UITheme.Radius.Button)
+	if isPhone then
+		-- The progress runs along the card's bottom edge.
+		fill.AnchorPoint = Vector2.new(0, 1)
+		fill.Position = UDim2.fromScale(0, 1)
+		fill.Size = UDim2.new(0, 0, 0, REBIRTH_BAR_HEIGHT)
+		fill.BackgroundTransparency = 0.1
+		UIKit.Corner(fill, REBIRTH_BAR_HEIGHT / 2)
+	else
+		UIKit.Corner(fill, UITheme.Radius.Button)
+	end
 	rebirthFill = fill
 	local glow = Instance.new("Frame")
 	glow.Name = "RebirthGlow"
@@ -735,7 +875,7 @@ local function buildButtons(isPhone: boolean)
 	rebirthGlowTween = nil
 
 	-- ⚙ Settings: a 56 px square at the right end of the bar.
-	buttonsByName.Settings = UIKit.Button({
+	buttonsByName.Settings = UIKit.Button(forPhone({
 		Name = "SettingsButton",
 		Parent = buttonRow,
 		Style = "Disabled",
@@ -744,7 +884,17 @@ local function buildButtons(isPhone: boolean)
 		TextSize = 26,
 		LayoutOrder = 5,
 		OnClick = SettingsPanel.Toggle,
-	})
+	}, "⚙️", "OPTIONS"))
+	if isPhone then
+		-- The fixed-size buttons above have no stacked icon layout: stack the
+		-- glyph over the word (what IconStacked does for the others).
+		local settingsContent = buttonsByName.Settings:FindFirstChild("Content")
+		local settingsLayout = settingsContent and settingsContent:FindFirstChildOfClass("UIListLayout")
+		if settingsLayout then
+			settingsLayout.FillDirection = Enum.FillDirection.Vertical
+			settingsLayout.Padding = UDim.new(0, 2)
+		end
+	end
 
 	refreshBadge()
 	for name in highlighted do
@@ -786,10 +936,14 @@ local function refreshRebirthButton()
 	local cost = TycoonController.GetRebirthCost()
 	local cash = TycoonController.GetCash()
 	local progress = if cost > 0 then math.clamp(cash / cost, 0, 1) else 0
-	fill.Size = UDim2.fromScale(progress, 1)
-	UIKit.SetButton(button, {
-		SubText = ("%s / %s"):format(NumberFormat.Money(math.min(cash, cost)), NumberFormat.Money(cost)),
-	})
+	if layoutIsPhoneEarly then
+		fill.Size = UDim2.new(progress, 0, 0, REBIRTH_BAR_HEIGHT)
+	else
+		fill.Size = UDim2.fromScale(progress, 1)
+		UIKit.SetButton(button, {
+			SubText = ("%s / %s"):format(NumberFormat.Money(math.min(cash, cost)), NumberFormat.Money(cost)),
+		})
+	end
 	local ready = TycoonController.IsRebirthReady()
 	if ready and not rebirthPulse and rebirthScale and rebirthGlow then
 		local pulse = TweenService:Create(
@@ -912,6 +1066,7 @@ local LOCK_BUTTON_GAP = 8
 local LOCK_REFRESH_SECONDS = 0.25
 
 local lockChip: TextButton
+local lockPadding: UIPadding? = nil
 local lockHolder: Frame
 -- The row holding the LOCK chip and the "?" (it takes the position).
 local lockRow: Frame
@@ -959,7 +1114,7 @@ local function buildLockChip()
 	if content and content:IsA("Frame") then
 		content.AutomaticSize = Enum.AutomaticSize.X
 		content.Size = UDim2.new(0, 0, 1, 0)
-		UIKit.Padding(content, 0, LOCK_CHIP_PADDING, 0, LOCK_CHIP_PADDING)
+		lockPadding = UIKit.Padding(content, 0, LOCK_CHIP_PADDING, 0, LOCK_CHIP_PADDING)
 	end
 	lockHolder.Visible = false
 	lockScale = Instance.new("UIScale")
@@ -978,6 +1133,51 @@ local function buildLockChip()
 	})
 	helpHolder = help
 	helpHolder.Visible = false
+end
+
+-- Phone: the chip is a 56 px icon card (a glyph over a 13 px word: "LOCK",
+-- the seconds left, "RUN!"); desktop: the chip that sizes itself to its text.
+local function applyLockLayout(isPhone: boolean)
+	local content = lockChip:FindFirstChild("Content")
+	local layout = content and content:FindFirstChildOfClass("UIListLayout")
+	local column = content and content:FindFirstChild("TextColumn")
+	local label = column and column:FindFirstChild("Label") :: TextLabel?
+	local sub = column and column:FindFirstChild("SubLabel") :: TextLabel?
+	if not (content and content:IsA("Frame") and layout and label and sub) then
+		return
+	end
+	if isPhone then
+		lockHolder.AutomaticSize = Enum.AutomaticSize.None
+		lockHolder.Size = UDim2.fromOffset(PHONE_CARD, PHONE_CARD)
+		lockChip.AutomaticSize = Enum.AutomaticSize.None
+		lockChip.Size = UDim2.fromScale(1, 1)
+		content.AutomaticSize = Enum.AutomaticSize.None
+		content.Size = UDim2.fromScale(1, 1)
+		if lockPadding then
+			lockPadding.PaddingLeft = UDim.new(0, 0)
+			lockPadding.PaddingRight = UDim.new(0, 0)
+		end
+		layout.FillDirection = Enum.FillDirection.Vertical
+		layout.Padding = UDim.new(0, 0)
+		label.TextSize = PHONE_GLYPH_SIZE
+		sub.TextSize = PHONE_WORD_SIZE
+	else
+		lockHolder.AutomaticSize = Enum.AutomaticSize.X
+		lockHolder.Size = UDim2.fromOffset(0, LOCK_CHIP_HEIGHT)
+		lockChip.AutomaticSize = Enum.AutomaticSize.X
+		lockChip.Size = UDim2.new(0, 0, 1, 0)
+		content.AutomaticSize = Enum.AutomaticSize.X
+		content.Size = UDim2.new(0, 0, 1, 0)
+		if lockPadding then
+			lockPadding.PaddingLeft = UDim.new(0, LOCK_CHIP_PADDING)
+			lockPadding.PaddingRight = UDim.new(0, LOCK_CHIP_PADDING)
+		end
+		layout.FillDirection = Enum.FillDirection.Horizontal
+		layout.Padding = UDim.new(0, 8)
+		label.TextSize = LOCK_CHIP_TEXT_SIZE
+		sub.Text = ""
+		sub.Visible = false
+	end
 end
 
 -- HeistController's tap handler (it owns the goal-arrow override).
@@ -1031,6 +1231,9 @@ function HudController.IsLockUrgent(): boolean
 end
 
 local function refreshLockChip()
+	if selfTestHold then
+		return
+	end
 	local plot = getOwnPlot()
 	local eligible = TycoonController.GetRebirths() >= HeistConfig.MinRebirths
 	helpHolder.Visible = eligible
@@ -1053,9 +1256,13 @@ local function refreshLockChip()
 		elseif state == "Locked" then ("🛡 LOCKED · %ds"):format(seconds)
 		elseif state == "Recharging" then ("RECHARGING · %ds"):format(seconds)
 		else "🔓 UNLOCKED"
+	-- Phone card: glyph over a short word.
+	local glyph = if alarm then "🚨" elseif state == "Locked" then "🛡" elseif state == "Recharging" then "⏳" else "🔓"
+	local word = if alarm then "RUN!" elseif state == "Ready" then "LOCK" else ("%ds"):format(seconds)
 	UIKit.SetButton(lockChip, {
 		Style = if style ~= lockStyle then style else nil,
-		Text = text,
+		Text = if layoutIsPhoneEarly then glyph else text,
+		SubText = if layoutIsPhoneEarly then word else nil,
 		TextColor3 = if state == "Recharging" and not alarm
 			then Colors.Muted
 			elseif state == "Ready" and not alarm then Colors.ShieldAmber
@@ -1068,6 +1275,61 @@ end
 --[[ Layout ---------------------------------------------------------------- ]]
 
 local cashHolder: Frame
+
+-- The cash panel: desktop is the big card; the phone's is slim (cash over
+-- "$/s" + the multiplier pills, ~60% of the height) with the cash number
+-- still the largest text on the HUD.
+local function applyCashLayout(isPhone: boolean)
+	local size = if isPhone then CASH_CARD_PHONE else CASH_CARD_SIZE
+	cashHolder.Size = UDim2.fromOffset(size.X, size.Y)
+	local coinLabel = cashCoin:FindFirstChildOfClass("TextLabel")
+	local pillRoots = { UIKit.PillRoot(rebirthPill), UIKit.PillRoot(multiplierPill) }
+	if isPhone then
+		cashPadding.PaddingTop = UDim.new(0, 6)
+		cashPadding.PaddingBottom = UDim.new(0, 6)
+		cashPadding.PaddingLeft = UDim.new(0, 10)
+		cashPadding.PaddingRight = UDim.new(0, 10)
+		cashCoin.Size = UDim2.fromOffset(24, 24)
+		cashCoin.Position = UDim2.fromOffset(0, 2)
+		if coinLabel then
+			coinLabel.TextSize = 14
+		end
+		cashLabel.TextSize = 28
+		cashLabel.Position = UDim2.fromOffset(30, 0)
+		cashLabel.Size = UDim2.new(1, -30, 0, 28)
+		incomeLabel.TextSize = 13
+		incomeLabel.Position = UDim2.fromOffset(0, 30)
+		incomeLabel.Size = UDim2.new(1, -PILL_ROW_PHONE, 0, 20)
+		cashPills.Position = UDim2.new(1, 0, 0, 30)
+		cashPills.Size = UDim2.fromOffset(PILL_ROW_PHONE, 20)
+	else
+		cashPadding.PaddingTop = UDim.new(0, 12)
+		cashPadding.PaddingBottom = UDim.new(0, 12)
+		cashPadding.PaddingLeft = UDim.new(0, 14)
+		cashPadding.PaddingRight = UDim.new(0, 14)
+		cashCoin.Size = UDim2.fromOffset(34, 34)
+		cashCoin.Position = UDim2.fromOffset(0, 3)
+		if coinLabel then
+			coinLabel.TextSize = 18
+		end
+		cashLabel.TextSize = 34
+		cashLabel.Position = UDim2.fromOffset(44, 0)
+		cashLabel.Size = UDim2.new(1, -44, 0, 40)
+		incomeLabel.TextSize = 16
+		incomeLabel.Position = UDim2.fromOffset(0, 46)
+		incomeLabel.Size = UDim2.new(1, -PILL_ROW_WIDTH, 0, 24)
+		cashPills.Position = UDim2.new(1, 0, 0, 46)
+		cashPills.Size = UDim2.fromOffset(PILL_ROW_WIDTH, 24)
+	end
+	for _, root in pillRoots do
+		root.Size = UDim2.fromOffset(0, if isPhone then 20 else 24)
+		local padding = root:FindFirstChild("Text") and (root :: any).Text:FindFirstChildOfClass("UIPadding")
+		if padding then
+			padding.PaddingLeft = UDim.new(0, if isPhone then 6 else 10)
+			padding.PaddingRight = UDim.new(0, if isPhone then 6 else 10)
+		end
+	end
+end
 
 --[[ SHOP button ---------------------------------------------------------------------
 	A big gold "🛒 SHOP" on the left edge, above the LOCK chip (>= 56 px
@@ -1092,6 +1354,7 @@ local shopRow: Frame
 local shopHolder: Frame
 local saleTag: TextLabel
 local giftsButton: TextButton
+local giftsHolderRef: Frame
 local giftsScale: UIScale
 local giftsNextPill: TextLabel
 -- Phone only: the left-column stack under SHOP / GIFTS that holds the deal
@@ -1110,7 +1373,7 @@ local giftsBounce: Tween? = nil
 -- with "next in" under it). Idle motion is only the rays (360° per
 -- 12 s) and one 0.5 s shine every 6 s: no flashing, and the timer looks the
 -- same at 5:59 and at 0:30 (monetization.md "never" list).
-local DEAL_TILE_SIZE = { Desktop = 92, Phone = 76 }
+local DEAL_TILE_SIZE = { Desktop = 92, Phone = 56 } -- phone: the same 56 px card as the grid
 local DEAL_HOLDER_WIDTH = 92
 local DEAL_TILE_RADIUS = 16
 local DEAL_ART_SCALE = 0.66 -- the pack picture, of the tile (it leaves the bottom strip free)
@@ -1155,7 +1418,7 @@ local function sizeDealTile(isPhone: boolean)
 	dealHolder.Size = UDim2.fromOffset(DEAL_HOLDER_WIDTH, dealHolderHeight(isPhone))
 	dealTile.Size = UDim2.fromOffset(size, size)
 	dealGlyph.TextSize = math.floor(size * 0.46) -- 42 px on desktop
-	dealParts.TextSize = math.floor(size * 0.17) -- 15 px on desktop
+	dealParts.TextSize = math.max(13, math.floor(size * 0.17)) -- 15 px on desktop; never under 13
 	UIKit.PillRoot(dealTimer).Position = UDim2.fromOffset(0, size + DEAL_TIMER_GAP)
 end
 
@@ -1391,7 +1654,7 @@ local function buildShopRow()
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = shopRow
 
-	local _, holder = UIKit.Button({
+	local shopButton, holder = UIKit.Button({
 		Name = "ShopButton",
 		Parent = shopRow,
 		Style = "Gold",
@@ -1404,6 +1667,7 @@ local function buildShopRow()
 		end,
 	})
 	shopHolder = holder
+	addCard(shopButton, holder, "🛒", "SHOP", "🛒 SHOP", 22).Holder.LayoutOrder = 1
 	saleTag = UIKit.Pill({
 		Name = "Sale",
 		Parent = holder,
@@ -1432,6 +1696,8 @@ local function buildShopRow()
 		end,
 	})
 	giftsButton = gifts
+	giftsHolderRef = giftsHolder
+	addCard(gifts, giftsHolder, "🎁", "GIFTS", "🎁 GIFTS", 20)
 	giftsScale = Instance.new("UIScale")
 	giftsScale.Parent = giftsHolder
 	giftsNextPill = UIKit.Pill({
@@ -1477,6 +1743,7 @@ local QUEST_TRACKER_HEIGHT = 32
 local QUEST_TRACKER_GAP = 6
 local questRow: Frame
 local questsButton: TextButton
+local questsHolderRef: Frame
 local questsScale: UIScale
 local questsBounce: Tween? = nil
 local powerButtons: { [string]: { Holder: Frame, Button: TextButton } } = {}
@@ -1509,6 +1776,8 @@ local function buildQuestRow()
 		end,
 	})
 	questsButton = button
+	questsHolderRef = holder
+	addCard(button, holder, "📜", "QUESTS", "📜 QUESTS", 18)
 	questsScale = Instance.new("UIScale")
 	questsScale.Parent = holder
 
@@ -1530,6 +1799,7 @@ local function buildQuestRow()
 		UIKit.Corner(powerButton, 999)
 		powerHolder.Visible = false
 		powerButtons[key] = { Holder = powerHolder, Button = powerButton }
+		addCard(powerButton, powerHolder, def.Glyph, "", def.Glyph, 22)
 	end
 
 	local tracker = Instance.new("TextButton")
@@ -1556,6 +1826,9 @@ end
 
 -- Once a second: the badge, the power-up buttons, the tracker.
 local function refreshQuestRow()
+	if selfTestHold then
+		return
+	end
 	local ready = if TycoonController.HasSynced() then QuestsPanel.GetReadyCount() else 0
 	-- A red "!" while any quest (a daily or the lab chain) is done and not
 	-- claimed; UIKit.Badge hides it at 0.
@@ -1584,10 +1857,19 @@ local function refreshQuestRow()
 		local timed = key == "SpeedBoots" and speedLeft > 0
 		view.Holder.Visible = count > 0 or armed or timed
 		local def = QuestConfig.PowerUps[key]
-		UIKit.SetButton(view.Button, {
-			Text = if timed then ("%s%d"):format(def.Glyph, speedLeft) elseif armed then def.Glyph .. "✓" else def.Glyph,
-			TextSize = if timed or armed then 15 else 22,
-		})
+		if layoutIsPhone then
+			-- A card: the glyph over "ON" / the seconds left; the count is the badge.
+			UIKit.SetButton(view.Button, {
+				Text = def.Glyph,
+				TextSize = PHONE_GLYPH_SIZE,
+				SubText = if timed then ("%ds"):format(speedLeft) elseif armed then "ON" else "",
+			})
+		else
+			UIKit.SetButton(view.Button, {
+				Text = if timed then ("%s%d"):format(def.Glyph, speedLeft) elseif armed then def.Glyph .. "✓" else def.Glyph,
+				TextSize = if timed or armed then 15 else 22,
+			})
+		end
 		local countBadge = UIKit.Badge(view.Button, count)
 		countBadge.BackgroundColor3 = Colors.Panel2
 	end
@@ -1683,10 +1965,6 @@ local function refreshDealBadge()
 	end
 end
 
--- /selftest's left-column check holds the forced pills (refreshShopRow
--- would hide them on its next tick).
-local selfTestHold = false
-
 local function refreshShopRow()
 	-- Cash ticks between snapshots: keep the REBIRTH fill moving.
 	refreshRebirthButton()
@@ -1732,6 +2010,46 @@ local function refreshShopRow()
 	end
 end
 
+-- Phone: the utility grid of 56 px icon cards (3 per row, 6 px gaps).
+local function buildPhoneGrid()
+	phoneGrid = Instance.new("Frame")
+	phoneGrid.Name = "PhoneGrid"
+	phoneGrid.BackgroundTransparency = 1
+	phoneGrid.AutomaticSize = Enum.AutomaticSize.Y
+	phoneGrid.Size = UDim2.fromOffset(PHONE_CARD, 0)
+	phoneGrid.Visible = false
+	phoneGrid.Parent = screenGui
+	phoneGridLayout = Instance.new("UIGridLayout")
+	phoneGridLayout.CellSize = UDim2.fromOffset(PHONE_CARD, PHONE_CARD)
+	-- 6 px between cards; the rows' gap also holds the 5 px shadow.
+	phoneGridLayout.CellPadding = UDim2.fromOffset(PHONE_CARD_GAP, PHONE_CARD_GAP + UITheme.ShadowOffset)
+	phoneGridLayout.FillDirection = Enum.FillDirection.Horizontal
+	phoneGridLayout.FillDirectionMaxCells = PHONE_GRID_COLUMNS
+	phoneGridLayout.StartCorner = Enum.StartCorner.TopLeft
+	phoneGridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	phoneGridLayout.Parent = phoneGrid
+end
+
+-- The cards live in the grid on a phone and in their desktop rows otherwise.
+local function parentCards(isPhone: boolean)
+	local function put(holder: Frame, desktopParent: Instance, desktopOrder: number, gridOrder: number)
+		holder.Parent = if isPhone then phoneGrid else desktopParent
+		holder.LayoutOrder = if isPhone then gridOrder else desktopOrder
+	end
+	put(shopHolder, shopRow, 1, 1)
+	put(giftsHolderRef, shopRow, 2, 2)
+	put(questsHolderRef, questRow, 0, 3)
+	for order, key in QuestConfig.PowerUpOrder do
+		put(powerButtons[key].Holder, questRow, order, 10 + order)
+	end
+	put(lockHolder, lockRow, 1, 30)
+	put(helpHolder, lockRow, 2, 31)
+	for _, card in cards do
+		setCardCompact(card, isPhone)
+	end
+	applyLockLayout(isPhone)
+end
+
 local function placeColumnFor(isPhone: boolean)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	-- The left column is one stack. Desktop: NEXT GOAL, the quest tracker,
@@ -1750,40 +2068,60 @@ local function placeColumnFor(isPhone: boolean)
 		cashPosition = UDim2.fromOffset(layout.CashPosition.X.Offset, math.max(layout.CashPosition.Y.Offset, bottom + LOCK_BUTTON_GAP))
 	end
 	cashHolder.Position = cashPosition
-	-- The left column, desktop and phone alike: cash card, then the SHOP /
-	-- GIFTS row, then the LOCK row (on a phone the goal
-	-- tracker follows them; on desktop it sits above the cash card).
+	if isPhone then
+		-- Phone stack: the slim cash panel, the utility grid (3 per row), the
+		-- status stack (deal tile, "next in"), then the goal card. SHOP / QUESTS
+		-- / LOCK rows are empty here (their cards are in the grid).
+		local x = cashPosition.X.Offset
+		local gridTop = cashPosition.Y.Offset + CASH_CARD_PHONE.Y + UITheme.ShadowOffset + PHONE_CARD_GAP
+		local shown = 0
+		for _, child in phoneGrid:GetChildren() do
+			if child:IsA("GuiObject") and child.Visible then
+				shown += 1
+			end
+		end
+		local columns = math.clamp(shown, 1, PHONE_GRID_COLUMNS)
+		phoneGrid.Size = UDim2.fromOffset(columns * PHONE_CARD + (columns - 1) * PHONE_CARD_GAP, 0)
+		phoneGrid.Position = UDim2.fromOffset(x, gridTop)
+		local top = gridTop
+		if shown > 0 then
+			-- AbsoluteContentSize is in screen px; the offsets are design px.
+			top += math.ceil(phoneGridLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneGrid)) + UITheme.ShadowOffset + PHONE_CARD_GAP
+		end
+		for _, row in { shopRow, questRow, lockRow } do
+			row.Position = phoneGrid.Position
+		end
+		phoneStatus.Visible = true
+		sizeDealTile(true)
+		dealHolder.Parent = phoneStatus
+		UIKit.PillRoot(giftsNextPill).Parent = phoneStatus
+		phoneStatus.Position = UDim2.fromOffset(x, top)
+		local height = phoneStatusLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneStatus)
+		if height > 0.5 then
+			top += math.ceil(height) + LOCK_BUTTON_GAP
+		end
+		goalHolder.Position = UDim2.fromOffset(x, top)
+		placeQuestTracker()
+		return
+	end
+	phoneStatus.Visible = false
+	-- The left column on desktop: cash card, then the SHOP / GIFTS row, then
+	-- the QUESTS row, then the LOCK row (the goal tracker sits above the cash card).
 	local shopTop = cashPosition + UDim2.fromOffset(0, CASH_CARD_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	shopRow.Position = shopTop
 	-- The QUESTS row under SHOP / GIFTS.
 	local questTop = shopTop + UDim2.fromOffset(0, SHOP_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
 	questRow.Position = questTop
 	local lockTop = questTop + UDim2.fromOffset(0, QUESTS_BUTTON_SIZE.Y + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
-	phoneStatus.Visible = isPhone
-	sizeDealTile(isPhone)
-	if isPhone then
-		-- Status stack under SHOP / GIFTS: the deal badge on its own line,
-		-- then "next in", stacked down the column.
-		dealHolder.Parent = phoneStatus
-		UIKit.PillRoot(giftsNextPill).Parent = phoneStatus
-		phoneStatus.Position = lockTop
-		-- AbsoluteContentSize is in screen px; the offsets are design px.
-		local height = phoneStatusLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneStatus)
-		if height > 0.5 then
-			lockTop += UDim2.fromOffset(0, math.ceil(height) + LOCK_BUTTON_GAP)
-		end
-	else
-		UIKit.PillRoot(giftsNextPill).Parent = shopRow
-		dealHolder.Parent = screenGui
-		dealHolder.Position = lockTop
-		if dealShown then
-			lockTop += UDim2.fromOffset(0, dealHolderHeight(false) + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
-		end
+	sizeDealTile(false)
+	UIKit.PillRoot(giftsNextPill).Parent = shopRow
+	dealHolder.Parent = screenGui
+	dealHolder.Position = lockTop
+	if dealShown then
+		lockTop += UDim2.fromOffset(0, dealHolderHeight(false) + UITheme.SmallShadowOffset + LOCK_BUTTON_GAP)
 	end
 	lockRow.Position = lockTop
-	goalHolder.Position = if isPhone
-		then UDim2.fromOffset(cashPosition.X.Offset, lockTop.Y.Offset + HELP_BUTTON_SIZE + UITheme.ShadowOffset + LOCK_BUTTON_GAP)
-		else layout.GoalPosition
+	goalHolder.Position = layout.GoalPosition
 	placeQuestTracker()
 end
 
@@ -1796,6 +2134,14 @@ end
 function applyLayout(isPhone: boolean)
 	layoutIsPhone = isPhone
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	applyCashLayout(isPhone)
+	parentCards(isPhone)
+	-- Which of the rows / the grid is the live one follows the layout; the
+	-- tutorial gate (HudGate "Shop") decides whether it shows yet.
+	local gateOpen = HudGate.IsShown("Shop")
+	phoneGrid.Visible = isPhone and gateOpen
+	shopRow.Visible = not isPhone and gateOpen
+	questRow.Visible = not isPhone and gateOpen
 	placeColumnFor(isPhone)
 	goalHolder.Size = UDim2.fromOffset(layout.GoalWidth, 0)
 	goalRewardLabel.Visible = not isPhone
@@ -1829,6 +2175,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		CashCard = cashHolder,
 		ShopRow = shopRow,
 		QuestRow = questRow,
+		PhoneGrid = phoneGrid,
 		PhoneStatus = phoneStatus,
 		DealBadge = dealHolder,
 		GiftsNext = UIKit.PillRoot(giftsNextPill),
@@ -1853,6 +2200,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		CashCard = cashHolder,
 		ShopRow = shopRow,
 		QuestRow = questRow,
+		PhoneGrid = phoneGrid,
 		LockRow = lockRow,
 		Goal = goalHolder,
 		QuestTracker = questTracker,
@@ -1934,6 +2282,7 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 		ShopRow = shopRow,
 		QuestRow = questRow,
 		LockRow = lockRow,
+		PhoneGrid = phoneGrid,
 		Goal = goalHolder,
 		QuestTracker = questTracker,
 		DealBadge = dealHolder,
@@ -2040,6 +2389,84 @@ function HudController.SelfTestDealTile(scaleName: string): { string }
 	selfTestHold = false
 	refreshShopRow()
 	return lines
+end
+
+-- /selftest "phone HUD coverage": the busiest phone HUD (every card up: SHOP,
+-- GIFTS, QUESTS, three power-ups, LOCK and its "?", the deal tile, "next
+-- in", the goal card and the quest tracker) is built, `measure` runs on it,
+-- and the real state comes back. The caller forces the phone layout first.
+function HudController.SelfTestBusy(measure: () -> any): any
+	selfTestHold = true
+	dealShown = true
+	dealHolder.Visible = true
+	applyDealView({ Icon = "🔥" }, "SelfTest", nil, 23, 5 * 3600 + 59 * 60 + 59, { "Boost", "LuckPotion" })
+	UIKit.SetPillVisible(giftsNextPill, true)
+	giftsNextPill.Text = "next in 59:59"
+	local goalWas, trackerWas = goalHolder.Visible, questTracker.Visible
+	goalHolder.Visible = true
+	questTracker.Visible = true
+	lockHolder.Visible = true
+	helpHolder.Visible = true
+	shopHolder.Visible = true
+	-- A few power-ups (three of the five), as in a real session.
+	for order, key in QuestConfig.PowerUpOrder do
+		powerButtons[key].Holder.Visible = order <= 3
+	end
+	phoneGrid.Visible = true
+	applyLayout(layoutIsPhone)
+	task.wait(0.4)
+	placeColumn()
+	task.wait(0.2)
+	local ok, result = pcall(measure)
+	goalHolder.Visible = goalWas
+	questTracker.Visible = trackerWas
+	selfTestHold = false
+	applyLayout(layoutIsPhone)
+	refreshShopRow()
+	refreshQuestRow()
+	refreshLockChip()
+	if not ok then
+		error(result)
+	end
+	return result
+end
+
+export type CardView = { Name: string, Size: Vector2, GlyphSize: number, WordSize: number?, WordText: string }
+
+-- /selftest: every icon card on screen right now (the grid cards, the LOCK
+-- card and the bottom row): its size in screen px and its text sizes.
+function HudController.GetCardViews(): { CardView }
+	local views: { CardView } = {}
+	local function add(name: string, holder: GuiObject, button: TextButton)
+		if not isShown(holder) then
+			return
+		end
+		local content = button:FindFirstChild("Content")
+		local column = content and content:FindFirstChild("TextColumn")
+		local label = column and column:FindFirstChild("Label") :: TextLabel?
+		local sub = column and column:FindFirstChild("SubLabel") :: TextLabel?
+		if not label then
+			return
+		end
+		table.insert(views, {
+			Name = name,
+			Size = holder.AbsoluteSize,
+			GlyphSize = label.TextSize,
+			WordSize = if sub and sub.Visible then sub.TextSize else nil,
+			WordText = if sub and sub.Visible then sub.Text else "",
+		})
+	end
+	for _, card in cards do
+		add(card.Button.Parent and card.Button.Parent.Name or "Card", card.Holder, card.Button)
+	end
+	add("LockChip", lockHolder, lockChip)
+	for name, button in buttonsByName do
+		local holder = button.Parent
+		if holder and holder:IsA("GuiObject") then
+			add(name, holder, button)
+		end
+	end
+	return views
 end
 
 --[[ Init ------------------------------------------------------------------ ]]
@@ -2157,7 +2584,8 @@ local function registerGate()
 	-- that hangs off them (on a phone they live in the status stack).
 	HudGate.Register("Shop", {
 		Roots = function()
-			return { shopRow, questRow }
+			-- A phone's SHOP / GIFTS / QUESTS cards live in the grid.
+			return if layoutIsPhone then { phoneGrid } else { shopRow, questRow }
 		end,
 		AlsoHide = function()
 			return { dealHolder, phoneStatus, UIKit.PillRoot(giftsNextPill) }
@@ -2167,6 +2595,7 @@ local function registerGate()
 		OnShow = function()
 			shopRow.Visible = true
 			questRow.Visible = true
+			phoneGrid.Visible = true
 			applyLayout(layoutIsPhone)
 			dealHolder.Visible = dealShown
 			refreshShopRow()
@@ -2210,6 +2639,7 @@ function HudController.Init()
 	buildShopRow()
 	buildQuestRow()
 	buildDealBadge()
+	buildPhoneGrid()
 	UpgradesPanel.Init(screenGui)
 	RebirthPanel.Init()
 	IndexPanel.Init()
@@ -2239,6 +2669,12 @@ function HudController.Init()
 	registerGate()
 	UIKit.LayoutChanged:Connect(applyLayout)
 	phoneStatusLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+		if layoutIsPhone then
+			placeColumn()
+		end
+	end)
+	-- A card came or went (a power-up, LOCK): the grid grows or shrinks.
+	phoneGridLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
 		if layoutIsPhone then
 			placeColumn()
 		end

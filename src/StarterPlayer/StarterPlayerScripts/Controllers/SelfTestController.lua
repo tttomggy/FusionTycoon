@@ -788,6 +788,122 @@ local function testHudLeftColumn(): { string }
 	return lines
 end
 
+-- Phone HUD coverage: with every card up (SHOP, GIFTS, QUESTS, three
+-- power-ups, LOCK, the deal tile, "next in", the goal card and the quest
+-- tracker) the UNION of all HUD rects covers at most 20% of the screen at
+-- 844 x 390 and 896 x 414 (the % is printed so before / after can be
+-- compared); every icon card is >= 44 px on screen with its words >= 13 px;
+-- the HUD stays clear of the weapon bar (when /weapons all is on) and of the
+-- phone jump button.
+local PHONE_COVERAGE_LIMIT = 20
+local PHONE_VIEWPORTS = {
+	{ Name = "844 x 390", Size = Vector2.new(844, 390) },
+	{ Name = "896 x 414", Size = Vector2.new(896, 414) }, -- iPhone XR landscape
+}
+
+-- Area of the union of rects (sweep over x; rects are { Position, Size }).
+local function unionArea(rects: { { Position: Vector2, Size: Vector2 } }): number
+	local xs: { number } = {}
+	for _, rect in rects do
+		table.insert(xs, rect.Position.X)
+		table.insert(xs, rect.Position.X + rect.Size.X)
+	end
+	table.sort(xs)
+	local total = 0
+	for index = 1, #xs - 1 do
+		local x0, x1 = xs[index], xs[index + 1]
+		if x1 > x0 then
+			local spans: { { number } } = {}
+			for _, rect in rects do
+				if rect.Position.X <= x0 and rect.Position.X + rect.Size.X >= x1 then
+					table.insert(spans, { rect.Position.Y, rect.Position.Y + rect.Size.Y })
+				end
+			end
+			table.sort(spans, function(a, b)
+				return a[1] < b[1]
+			end)
+			local covered, edge = 0, -math.huge
+			for _, span in spans do
+				local from = math.max(span[1], edge)
+				if span[2] > from then
+					covered += span[2] - from
+					edge = span[2]
+				end
+			end
+			total += covered * (x1 - x0)
+		end
+	end
+	return total
+end
+
+local function testPhoneHudCoverage(): { string }
+	local hud = require(script.Parent.HudController) :: any
+	local combat = require(script.Parent.CombatController) :: any
+	local EffectsTray = require(UI.EffectsTray) :: any
+	local lines: { string } = {}
+	UIKit.SetForcedPhone(true)
+	task.wait(0.3)
+	local ok, err = pcall(function()
+		hud.SelfTestBusy(function()
+			local scale = UITheme.PhoneScale
+			for _, viewport in PHONE_VIEWPORTS do
+				local view = viewport.Size / scale
+				local rects = hud.GetObstacleRectsFor(view)
+				local list: { { Position: Vector2, Size: Vector2 } } = {}
+				for _, rect in rects do
+					table.insert(list, rect)
+				end
+				local percent = unionArea(list) / (view.X * view.Y) * 100
+				table.insert(lines, ("%s phone HUD coverage (%s): %.1f%% of the screen (limit %d%%, %d rects)"):format(
+					if percent <= PHONE_COVERAGE_LIMIT then "PASS" else "FAIL", viewport.Name, percent, PHONE_COVERAGE_LIMIT, #list))
+				-- Clear of the weapon bar (when it is up) and the jump button.
+				local jump = EffectsTray.JumpRectFor(view, scale, true)
+				local bar = combat.GetBarRectFor(view)
+				local hits: { string } = {}
+				local blockers: { { Name: string, Rect: { Position: Vector2, Size: Vector2 } } } = {}
+				if bar then
+					table.insert(blockers, { Name = "WeaponBar", Rect = bar })
+				end
+				if jump then
+					table.insert(blockers, { Name = "JumpButton", Rect = jump })
+				end
+				for name, rect in rects do
+					for _, blocker in blockers do
+						local other, otherRect = blocker.Name, blocker.Rect
+						local ox = math.min(rect.Position.X + rect.Size.X, otherRect.Position.X + otherRect.Size.X) - math.max(rect.Position.X, otherRect.Position.X)
+						local oy = math.min(rect.Position.Y + rect.Size.Y, otherRect.Position.Y + otherRect.Size.Y) - math.max(rect.Position.Y, otherRect.Position.Y)
+						if ox > 1 and oy > 1 then
+							table.insert(hits, name .. "/" .. other)
+						end
+					end
+				end
+				table.sort(hits)
+				table.insert(lines, (if #hits == 0 then "PASS" else "FAIL") .. (" phone HUD clear of the jump button and weapon bar (%s%s): %s"):format(
+					viewport.Name, if bar then "" else ", weapon bar not showing (/weapons all)", if #hits == 0 then "no overlap" else table.concat(hits, ", ")))
+			end
+			-- Tap targets and text sizes of every icon card.
+			local bad: { string } = {}
+			local views = hud.GetCardViews()
+			for _, card in views do
+				if card.Size.X < UITheme.MinTapSize - 0.5 or card.Size.Y < UITheme.MinTapSize - 0.5 then
+					table.insert(bad, ("%s is %dx%d px"):format(card.Name, card.Size.X, card.Size.Y))
+				end
+				if card.GlyphSize < 13 or (card.WordSize ~= nil and card.WordSize < 13) then
+					table.insert(bad, ("%s text %d/%s"):format(card.Name, card.GlyphSize, tostring(card.WordSize)))
+				end
+			end
+			table.insert(lines, (if #bad == 0 and #views >= 10 then "PASS" else "FAIL") .. (" phone HUD icon cards: %d cards, each >= %d px with text >= 13 px%s"):format(
+				#views, UITheme.MinTapSize, if #bad > 0 then " | " .. table.concat(bad, "; ") else ""))
+			return nil
+		end)
+	end)
+	if not ok then
+		table.insert(lines, "FAIL phone HUD coverage: " .. tostring(err))
+	end
+	UIKit.SetForcedPhone(nil)
+	return lines
+end
+
 -- The deal tile (pack art or emoji fallback, ribbon = the saving, timer =
 -- the seconds left), clear of the left column and the bottom row, and the
 -- hidden gates, at the desktop and phone layouts.
@@ -3472,6 +3588,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testDealTile() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testPhoneHudCoverage() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testSkippedLines() do

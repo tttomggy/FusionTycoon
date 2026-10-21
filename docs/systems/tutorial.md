@@ -110,6 +110,17 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   plus the Timed refusals, the Multiplier skip, the Tutorial 1 migration and
   the mid-way resume.
 
+## Progressive HUD on a phone (compact icon HUD)
+
+On a phone (`UIKit.IsPhone`) the HUD is icon cards (see `HudController`'s
+header): SHOP / GIFTS / QUESTS, the power-ups and LOCK live in one 56 px card
+grid (`PhoneGrid`), the bottom row is five 56 px cards. The gate key `Shop`
+therefore pops `PhoneGrid` in one piece (its roots are `ShopRow` + `QuestRow`
+on desktop), at the same step as before; `Upgrades` / `Items` / `Index` /
+`Rebirth` / `Settings` still reveal their own card. The hand targets did not
+move: `HudController.GetCoachTarget` returns the same buttons ("Index",
+"Rebirth", "Gifts", "Quests", ...), now 56 px cards.
+
 ## TopStack (the top-centre of the screen)
 
 `UI/TopStack` is the only thing that places anything at top centre. Slots,
