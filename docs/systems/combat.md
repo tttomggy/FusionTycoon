@@ -121,7 +121,11 @@ never sold, server authority are unchanged.
   Hub and paste `rbxassetid://<id>` into `CombatConfig.AnimationIds` under
   the clip's name (BatHold, BatSwing, GloveHold, GloveSlap, GunAim,
   GunRecoil, PeelThrow). Restart Play: the ids are used instead of the
-  in-code clips (and a live server needs them).
+  in-code clips (and a live server needs them). **Ids are set (2026-10-21):**
+  all 7 clips are published on Harris's account and filled in
+  `CombatConfig.AnimationIds`; the in-code clips and `/anim export` now only
+  run for an empty id. `/selftest` (combat, with the live-fallback probe)
+  checks each entry is `rbxassetid://<digits>` and loads on the Animator.
 - **Knockback v3 (a server-made body mover):** v1 (`ChangeState` + impulse)
   moved the Bat target 0.1 studs; v2 (`PlatformStand`, `SetNetworkOwner(nil)`,
   SET `AssemblyLinearVelocity`, 3-Heartbeat re-assert) showed a velocity of

@@ -79,13 +79,13 @@ CombatConfig.SpinImpulse = Vector3.new(0, 14, 5) -- per unit of mass: a peel sli
 -- (WeaponAnims) registered with KeyframeSequenceProvider; empty live = the
 -- C0 WeaponPose fallback. Keys are WeaponAnims clip names.
 CombatConfig.AnimationIds = {
-	BatHold = "",
-	BatSwing = "",
-	GloveHold = "",
-	GloveSlap = "",
-	GunAim = "",
-	GunRecoil = "",
-	PeelThrow = "",
+	BatHold = "rbxassetid://110401007589373",
+	BatSwing = "rbxassetid://138784586483656",
+	GloveHold = "rbxassetid://130217269948133",
+	GloveSlap = "rbxassetid://101382817461159",
+	GunAim = "rbxassetid://76161756196333",
+	GunRecoil = "rbxassetid://140487467838970",
+	PeelThrow = "rbxassetid://126595384761881",
 } :: { [string]: string }
 
 CombatConfig.Freeze = {

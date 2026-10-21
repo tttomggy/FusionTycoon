@@ -1826,6 +1826,60 @@ local function probeFallback(): { ProbeLine }
 	}
 end
 
+-- Every CombatConfig.AnimationIds entry is a well-formed rbxassetid://<digits>
+-- and loads on the local Animator (a track with a length once preloaded).
+local function probeAnimationIds(): { ProbeLine }
+	local character = localPlayer.Character
+	local animator = character and character:FindFirstChildWhichIsA("Animator", true)
+	local problems = {}
+	local count = 0
+	local tracks: { [string]: AnimationTrack } = {}
+	for name, id in CombatConfig.AnimationIds do
+		count += 1
+		if not string.match(id, "^rbxassetid://%d+$") then
+			table.insert(problems, ("%s: malformed id %q"):format(name, id))
+		elseif animator then
+			local animation = Instance.new("Animation")
+			animation.AnimationId = id
+			local ok, track = pcall(function()
+				return (animator :: Animator):LoadAnimation(animation)
+			end)
+			if ok and track then
+				tracks[name] = track
+			else
+				table.insert(problems, ("%s: LoadAnimation failed"):format(name))
+			end
+		end
+	end
+	local started = os.clock()
+	while os.clock() - started < 5 do
+		local pending = false
+		for _, track in tracks do
+			if track.Length <= 0 then
+				pending = true
+				break
+			end
+		end
+		if not pending then
+			break
+		end
+		task.wait(0.1)
+	end
+	for name, track in tracks do
+		if track.Length <= 0 then
+			table.insert(problems, ("%s: no length after 5 s (not loadable by this place?)"):format(name))
+		end
+		track:Destroy()
+	end
+	return {
+		{
+			Ok = count > 0 and animator ~= nil and #problems == 0,
+			Name = "combat animation ids: every AnimationIds entry is rbxassetid://<digits> and loads",
+			Detail = if #problems == 0 then ("%d ids ok"):format(count) else table.concat(problems, "; "),
+		},
+	}
+end
+
 -- Why a GuiObject is NOT drawn (nil = drawn): both axes of AbsoluteSize > 0
 -- and Visible all the way up to `root`, which must be enabled. Every UI
 -- check reads the INSTANCE TREE through this, never a table the controller
@@ -3127,7 +3181,11 @@ local function probeTutorial(payload: any)
 		elseif payload.Kind == "WeaponReleased" then
 			return probeWeaponReleased()
 		elseif payload.Kind == "Fallback" then
-			return probeFallback()
+			local lines = probeFallback()
+			for _, line in probeAnimationIds() do
+				table.insert(lines, line)
+			end
+			return lines
 		elseif payload.Kind == "GachaOpen" then
 			return probeGachaOpen()
 		elseif payload.Kind == "GachaCard" then
