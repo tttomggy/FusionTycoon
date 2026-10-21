@@ -1,0 +1,17 @@
+  01:19:24.883   ▶ [UIKit] modal TutorialCard opened without a card on screen; closing its backdrop (x2)  -  Client - UIKit:1773
+  01:19:26.091  [UIKit] modal TutorialCard opened without a card on screen; closing its backdrop  -  Client - UIKit:1773
+  01:19:26.608   ▶ [UIKit] modal TutorialCard opened without a card on screen; closing its backdrop (x2)  -  Client - UIKit:1773
+  01:20:22.395  [SelfTest] == 8. auto-display ==  -  Server - DebugService:1143
+  01:20:24.072  [SelfTest] == 9. tutorial ==  -  Server - DebugService:1143
+  01:20:24.289  [SelfTest] SKIP tutorial drive: no free lab slot to claim  -  Server - DebugService:787
+  01:20:24.505  [SelfTest] == 10. combat ==  -  Server - DebugService:1143
+  01:20:26.955  [SelfTest] WARN combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso | 0.86 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  01:20:26.955  [SelfTest] PASS combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso (WARN)  -  Server - DebugService:1570
+  01:20:26.955  [SelfTest] WARN combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) | peak 1.15 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  01:20:26.955  [SelfTest] PASS combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) (WARN)  -  Server - DebugService:1570
+  01:20:44.827  [SelfTest] == 11. progression ==  -  Server - DebugService:1143
+  01:20:46.588  [SelfTest] == 12. gacha card ==  -  Server - DebugService:1143
+  01:20:46.804  [SelfTest] FAIL gacha card: a claimed lab to test on: could not claim a lab for the tester (no free slot or no character)  -  Server - DebugService:1573
+  01:20:46.804  [SelfTest] == 13. effects tray ==  -  Server - DebugService:1143
+  01:20:57.836  [SelfTest] FAIL tutorial EffectsTray: no report from the client  -  Server - DebugService:1573
+  01:20:58.038  [SelfTest] done: 236 passed, 2 failed  -  Server - DebugService:1591
