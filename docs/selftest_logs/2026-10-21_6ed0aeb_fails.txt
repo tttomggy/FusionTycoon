@@ -1,0 +1,26 @@
+  13:54:31.663  [SelfTest] FAIL selftest window: the game view is 801 x 413, the live-screen checks need at least 1000 x 600 (Studio: enlarge the game window, undock Output / other panels, then run /selftest again)  -  Server - DebugService:1575
+  13:54:33.382  [SelfTest] == 9. tutorial ==  -  Server - DebugService:1145
+  13:54:36.997  [Analytics] custom TutorialStep = 2 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:54:43.753  [Analytics] custom TutorialStep = 3 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:54:48.763  [Analytics] custom TutorialStep = 4 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:54:55.062  [Analytics] custom TutorialStep = 5 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:55:02.166  [Analytics] custom TutorialStep = 6 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:55:08.878  [Analytics] custom TutorialStep = 7 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:55:09.094  [SelfTest] PASS tutorial index: its explain card opens first (text >= 22 px, drawn)  -  Server - DebugService:1572
+  13:55:09.095  [SelfTest] PASS tutorial index (card up): no dim backdrop without a card on screen  -  Server - DebugService:1572
+  13:55:09.095  [SelfTest] PASS tutorial index: the card's OK turns on after 1.5 s  -  Server - DebugService:1572
+  13:55:09.095  [SelfTest] PASS tutorial index (after OK): no dim backdrop without a card on screen  -  Server - DebugService:1572
+  13:55:09.095  [SelfTest] PASS tutorial index: the banner takes over after OK  -  Server - DebugService:1572
+  13:55:39.226  [SelfTest] FAIL tutorial events: its banner shows: never presented  -  Server - DebugService:1575
+  13:55:39.226  [Analytics] custom TutorialStep = 9 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:56:09.492  [SelfTest] FAIL tutorial rebirth: its banner shows: never presented  -  Server - DebugService:1575
+  13:56:09.493  [Analytics] custom TutorialStep = 10 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:56:39.673  [SelfTest] FAIL tutorial finish: its banner shows: never presented  -  Server - DebugService:1575
+  13:56:39.673  [Analytics] custom TutorialStep = 11 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  13:56:43.308  [SelfTest] WARN combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso | 0.86 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:264
+  13:56:43.308  [SelfTest] PASS combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso (WARN)  -  Server - DebugService:1572
+  13:56:43.308  [SelfTest] WARN combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) | peak 1.14 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:264
+  13:56:43.308  [SelfTest] PASS combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) (WARN)  -  Server - DebugService:1572
+  13:57:50.539  [SelfTest] FAIL effects tray plan (844 x 390, desktop): the 4 icons touch no HUD rect, the weapon bar or the jump button: 60 px icons, 2 per column, 2 columns, rect 696,136 136x170, weapon bar up, touches: BottomRow  -  Server - DebugService:1575
+  13:57:50.540  [SelfTest] FAIL effects tray plan (844 x 390, phone): the Luck tooltip is on screen and touches no HUD rect: Above (narrow) at 863,-693, card 34x532, on screen false, touches:   -  Server - DebugService:1575
+  13:57:50.754  [SelfTest] done: 281 passed, 6 failed  -  Server - DebugService:1593
