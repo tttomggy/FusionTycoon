@@ -2312,7 +2312,7 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 		table.insert(styleBad, "no coin + 24 px price")
 	else
 		local free = TycoonController.GetTutorial().FreePulls > 0
-		local wantPrice = if free then "FREE" else require(ReplicatedStorage.Shared.Modules.NumberFormat).Money(require(ReplicatedStorage.Shared.Config.TycoonConfig).GetGachaPullCost(TycoonController.GetGachaPulls()))
+		local wantPrice = if free then "FREE" else require(ReplicatedStorage.Shared.Modules.NumberFormat).Money(require(ReplicatedStorage.Shared.Config.TycoonConfig).GetGachaPullCost(TycoonController.GetGachaPulls(), TycoonController.GetSteadyIncomePerSecond()))
 		if price.Text ~= wantPrice then
 			table.insert(styleBad, ("price shows %q, wanted %q"):format(price.Text, wantPrice))
 		end

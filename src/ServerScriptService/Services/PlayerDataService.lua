@@ -1545,6 +1545,13 @@ function PlayerDataService.GetIncomeInputs(player: Player, baseOnly: boolean?): 
 	}
 end
 
+-- The gacha price cap's base (TycoonConfig.GetSteadyIncomePerSecond): the
+-- server's number is the one charged.
+function PlayerDataService.GetSteadyIncomePerSecond(player: Player): number
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	return if inputs then TycoonConfig.GetSteadyIncomePerSecond(inputs) else 0
+end
+
 -- Income per second without timed boosts (offline earnings, cash packs).
 function PlayerDataService.GetBasePassiveCashPerSecond(player: Player): number
 	local inputs = PlayerDataService.GetIncomeInputs(player, true)

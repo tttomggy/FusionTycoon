@@ -1149,6 +1149,51 @@ local function runSection(title: string, result: (boolean, string, string?) -> (
 	end
 end
 
+-- The gacha price cap (TycoonConfig.GetGachaPullCost): the cap and the
+-- early climb, steady income ignoring everything temporary or bought, and
+-- the x10 price being the sum of the next ten. Pure maths on the tester's
+-- own income inputs; nothing is changed.
+local function runGachaPriceSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local cap = TycoonConfig.GachaMaxIncomeSeconds
+	local capped = TycoonConfig.GetGachaPullCost(1000, 1e6)
+	result(capped == cap * 1e6, ("gacha price: pull 1000 at $1M/s costs %d s of income"):format(cap), ("cost %s"):format(tostring(capped)))
+	local first = TycoonConfig.GetGachaPullCost(0, 1e9)
+	result(first == TycoonConfig.GachaBasePullCost, "gacha price: pull 0 costs the base price however rich you are", ("cost %s"):format(tostring(first)))
+	local broke = TycoonConfig.GetGachaPullCost(500, 0)
+	result(broke == TycoonConfig.GachaBasePullCost, "gacha price: the cap never goes under the base price (no income)", ("cost %s"):format(tostring(broke)))
+	local sum = 0
+	for offset = 0, TycoonConfig.MultiPullCount - 1 do
+		sum += TycoonConfig.GetGachaPullCost(300 + offset, 5e6)
+	end
+	local multi = TycoonConfig.GetGachaMultiPullCost(300, TycoonConfig.MultiPullCount, 5e6)
+	result(multi == sum and multi <= cap * 5e6 * TycoonConfig.MultiPullCount, "gacha price: x10 is the sum of the next ten prices, each under the cap", ("x10 %s, sum %s"):format(tostring(multi), tostring(sum)))
+	local inputs = PlayerDataService.GetIncomeInputs(player)
+	if not inputs then
+		result(false, "gacha price: steady income ignores boosts and passes", "no income inputs for the tester")
+		return
+	end
+	local steady = TycoonConfig.GetSteadyIncomePerSecond(inputs)
+	local boosted = table.clone(inputs)
+	boosted.BoostMultiplier = 2
+	boosted.PassMultiplier = 2
+	boosted.OverclockMultiplier = 3
+	boosted.EventGeneratorMultiplier = 4
+	local steadyBoosted = TycoonConfig.GetSteadyIncomePerSecond(boosted)
+	local live = TycoonConfig.GetPassiveCashPerSecond(boosted)
+	result(
+		steadyBoosted == steady and (live > TycoonConfig.GetPassiveCashPerSecond(inputs) or steady == 0),
+		"gacha price: a timed boost, an event, the Overclock or a 2x Cash pass does not change the steady income (the pull price)",
+		("steady %.3f, with boosts %.3f, live income with boosts %.3f"):format(steady, steadyBoosted, live)
+	)
+	local pulls = PlayerDataService.GetGachaPulls(player)
+	result(
+		TycoonConfig.GetGachaPullCost(pulls, steady) == TycoonConfig.GetGachaPullCost(pulls, steadyBoosted)
+			and PlayerDataService.GetSteadyIncomePerSecond(player) == steady,
+		"gacha price: the server's steady income is the one built from the same inputs",
+		("pulls %d, steady %.3f"):format(pulls, steady)
+	)
+end
+
 -- The Gacha Pad card (client-built, own pad): its numbers against the
 -- server's luck now and under an admin-luck event (no persistent state is
 -- touched: Workspace attributes, restored), then its buttons.
@@ -1229,7 +1274,7 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		result(true, "gacha keys: RequestGachaPull / Auto pull refusals (skipped: the tester still has tutorial free pulls)")
 	else
 		local cash = PlayerDataService.GetCash(player)
-		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player), PlayerDataService.GetSteadyIncomePerSecond(player))
 		TycoonService.SelfTestFreezeIncome(player, true) -- the "$0" steps below need cash that stays put
 		-- 25 studs away: refused, and Auto pull will not start.
 		root.CFrame = away
@@ -1262,7 +1307,7 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		task.wait(0.5)
 		local stop = TycoonService.GetAutoPullStop(player)
 		-- Auto pull is x10 per cycle: the price it reports is the x10 price.
-		local autoCost = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), TycoonConfig.MultiPullCount)
+		local autoCost = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), TycoonConfig.MultiPullCount, PlayerDataService.GetSteadyIncomePerSecond(player))
 		result(
 			not TycoonService.IsAutoPulling(player) and stop ~= nil and stop.Reason == "InsufficientCash" and stop.Cost == autoCost,
 			"gacha keys: Auto pull at $0 stops at once with the reason (InsufficientCash, the x10 price)",
@@ -1275,14 +1320,16 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		-- client, and no two cycles start within AutoPullMinSeconds. (Studio
 		-- Mock store only: this really pulls 20 items.)
 		local pulls0 = PlayerDataService.GetGachaPulls(player)
-		local cycle1 = TycoonConfig.GetGachaMultiPullCost(pulls0, TycoonConfig.MultiPullCount)
-		local cycle2 = TycoonConfig.GetGachaMultiPullCost(pulls0 + TycoonConfig.MultiPullCount, TycoonConfig.MultiPullCount)
+		local steady0 = PlayerDataService.GetSteadyIncomePerSecond(player)
+		local cycle1 = TycoonConfig.GetGachaMultiPullCost(pulls0, TycoonConfig.MultiPullCount, steady0)
+		local cycle2 = TycoonConfig.GetGachaMultiPullCost(pulls0 + TycoonConfig.MultiPullCount, TycoonConfig.MultiPullCount, steady0)
 		tutorialProbe(player, { Kind = "AutoReset" }, result)
 		-- Cash for EXACTLY two cycles: passive income paused for the run and
 		-- whatever the save has left is spent first, so nothing else pays.
 		TycoonService.SelfTestFreezeIncome(player, true)
 		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
-		PlayerDataService.AddCash(player, cycle1 + cycle2)
+		-- (+2% of a cycle: the first 10 items may move the steady income a little.)
+		PlayerDataService.AddCash(player, cycle1 + cycle2 + math.floor(cycle2 * 0.02))
 		TycoonService.SetAutoPull(player, true)
 		local autoStarted = os.clock()
 		while TycoonService.IsAutoPulling(player) and os.clock() - autoStarted < 40 do
@@ -1552,6 +1599,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	runSection("12. gacha card", result, function()
 		-- One precondition line instead of one FAIL per check when a card is up.
 		tutorialProbe(player, { Kind = "ClearScreen", Label = "the gacha card", Report = true }, result)
+		runGachaPriceSelfTest(player, result)
 		runGachaCardSelfTest(player, result)
 	end)
 

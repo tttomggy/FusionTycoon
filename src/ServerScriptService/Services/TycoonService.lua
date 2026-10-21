@@ -618,11 +618,12 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 	-- player's luck (so a rebirth updates them), and the x10 cost.
 	local function refreshLabel()
 		local pulls = PlayerDataService.GetGachaPulls(player)
-		local cost = TycoonConfig.GetGachaPullCost(pulls)
+		local steady = PlayerDataService.GetSteadyIncomePerSecond(player)
+		local cost = TycoonConfig.GetGachaPullCost(pulls, steady)
 		local free = PlayerDataService.GetTutorialFreePulls(player)
 		padLabel.SetPill(if free > 0 then ("FREE · %d left"):format(free) else ("%s / pull"):format(NumberFormat.Money(cost)))
 		prompt.ActionText = if free > 0 then "Pull (FREE)" else ("Pull (%s)"):format(NumberFormat.Money(cost))
-		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT))
+		multiPrompt.ObjectText = NumberFormat.Money(TycoonConfig.GetGachaMultiPullCost(pulls, MULTI_PULL_COUNT, steady))
 	end
 	refreshLabel()
 	addStationRefresh(player, refreshLabel)
@@ -683,7 +684,8 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 			return refuse("MissingRewardItem", nil)
 		end
 		local pulls = PlayerDataService.GetGachaPulls(player)
-		local cost = if multi then TycoonConfig.GetGachaMultiPullCost(pulls, count) else TycoonConfig.GetGachaPullCost(pulls)
+		local steady = PlayerDataService.GetSteadyIncomePerSecond(player)
+		local cost = if multi then TycoonConfig.GetGachaMultiPullCost(pulls, count, steady) else TycoonConfig.GetGachaPullCost(pulls, steady)
 		if not PlayerDataService.SpendCash(player, cost) then
 			return refuse("InsufficientCash", cost)
 		end

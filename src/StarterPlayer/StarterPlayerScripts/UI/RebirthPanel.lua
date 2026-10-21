@@ -170,7 +170,7 @@ local function resetText(cost: number): string
 		NumberFormat.Money(cost),
 		TycoonConfig.StartingBasicGeneratorLevel,
 		NumberFormat.Multiplier(TycoonConfig.GetCashMultiplierValue(0)),
-		NumberFormat.Money(TycoonConfig.GetGachaPullCost(0))
+		NumberFormat.Money(TycoonConfig.GetGachaPullCost(0, 0)) -- pull 0: the cap never matters
 	)
 end
 

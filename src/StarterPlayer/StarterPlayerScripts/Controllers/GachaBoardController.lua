@@ -277,11 +277,12 @@ type Inputs = { Luck: number, Free: number, Cost: number, MultiCost: number }
 
 local function currentInputs(): Inputs
 	local pulls = TycoonController.GetGachaPulls()
+	local steady = TycoonController.GetSteadyIncomePerSecond()
 	return {
 		Luck = TycoonController.GetLuck(),
 		Free = TycoonController.GetTutorial().FreePulls,
-		Cost = TycoonConfig.GetGachaPullCost(pulls),
-		MultiCost = TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount),
+		Cost = TycoonConfig.GetGachaPullCost(pulls, steady),
+		MultiCost = TycoonConfig.GetGachaMultiPullCost(pulls, TycoonConfig.MultiPullCount, steady),
 	}
 end
 

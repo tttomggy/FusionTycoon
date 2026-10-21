@@ -10,6 +10,19 @@ rebirth count, and gives
 income ×(1 + 0.5 n) and luck ×(1 + 0.05 n) (luck raises Legendary/Mythic
 gacha odds via `FusionConfig.GetGachaRates`, and every mutation chance).
 
+**Gacha price rule** (`TycoonConfig.GetGachaPullCost(pulls, steadyIncome)`):
+`floor(min(250 × 1.045^pulls, max(250, GachaMaxIncomeSeconds × steadyIncome)))`,
+so the price climbs as before early in a run but one pull never costs more than
+`GachaMaxIncomeSeconds` (15) seconds of **steady** income. Steady income is
+`TycoonConfig.GetSteadyIncomePerSecond(inputs)`: the same `IncomeInputs` and
+`GetPassiveCashPerSecond` with the event generator boost, Boost, Overclock **and
+passes** forced to 1, so a timed boost or a bought 2× Cash / VIP never raises
+the price. `GetGachaMultiPullCost(pulls, count, steady)` is the sum of the next
+`count` prices. The server charges with `PlayerDataService.GetSteadyIncomePerSecond`;
+the pad card and Rebirth panel use `TycoonController.GetSteadyIncomePerSecond`
+(a mismatch lasts until the next sync). `tools/econ_sim.py` mirrors it
+(`GACHA_MAX_INCOME_SECONDS`, `--cap=N`).
+
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse 2 Mythics
 at 8% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`). Any pull or
 successful fusion can roll a **mutation** (`MutationConfig`, ranked by

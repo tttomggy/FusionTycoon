@@ -392,6 +392,12 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 	}
 end
 
+-- The gacha price cap's base, from the client's own state (the server charges
+-- its own; a mismatch lasts until the next sync).
+function TycoonController.GetSteadyIncomePerSecond(): number
+	return TycoonConfig.GetSteadyIncomePerSecond(TycoonController.GetIncomeInputs())
+end
+
 --[[ Shop (read-only view of the server's state) ]]
 
 function TycoonController.GetShop(): ShopView

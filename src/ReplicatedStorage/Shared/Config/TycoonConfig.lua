@@ -34,21 +34,30 @@ TycoonConfig.StartingBasicGeneratorLevel = 1
 
 -- Gacha Pad: the only way to get a brand-new item. The price rises a little
 -- with every pull (GachaPullCostGrowth ^ pulls) so pulling stays a real choice
--- against buying upgrades instead of becoming free spam once income grows.
+-- against buying upgrades early in a run, but one pull never costs more than
+-- GachaMaxIncomeSeconds of STEADY income (GetSteadyIncomePerSecond: no boost,
+-- event, pass or Overclock, so buying one never raises the price). Without the
+-- cap the price goes x9 every 50 pulls and the pad is dead late in a run
+-- ($18.7B per pull at $24M/s). GachaMaxIncomeSeconds = 15: see the header table.
 TycoonConfig.GachaBasePullCost = 250
 TycoonConfig.GachaPullCostGrowth = 1.045
+TycoonConfig.GachaMaxIncomeSeconds = 15
 
-function TycoonConfig.GetGachaPullCost(pullsSoFar: number): number
-	return math.floor(TycoonConfig.GachaBasePullCost * TycoonConfig.GachaPullCostGrowth ^ math.max(0, pullsSoFar))
+-- The one pull price: server charge, pad label, card, Rebirth panel. The
+-- server's `steadyIncome` is the one charged; the client shows its own.
+function TycoonConfig.GetGachaPullCost(pullsSoFar: number, steadyIncome: number): number
+	local climbing = TycoonConfig.GachaBasePullCost * TycoonConfig.GachaPullCostGrowth ^ math.max(0, pullsSoFar)
+	local cap = math.max(TycoonConfig.GachaBasePullCost, TycoonConfig.GachaMaxIncomeSeconds * steadyIncome)
+	return math.floor(math.min(climbing, cap))
 end
 
 -- Pull xN: the sum of the next `count` single-pull prices (no discount).
 TycoonConfig.MultiPullCount = 10 -- Pull x10
 
-function TycoonConfig.GetGachaMultiPullCost(pullsSoFar: number, count: number): number
+function TycoonConfig.GetGachaMultiPullCost(pullsSoFar: number, count: number, steadyIncome: number): number
 	local total = 0
 	for offset = 0, count - 1 do
-		total += TycoonConfig.GetGachaPullCost(pullsSoFar + offset)
+		total += TycoonConfig.GetGachaPullCost(pullsSoFar + offset, steadyIncome)
 	end
 	return total
 end
@@ -375,6 +384,18 @@ function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
 		total += TycoonConfig.GetStackCashPerSecond(item)
 	end
 	return total * TycoonConfig.GetIncomeMultiplier(inputs)
+end
+
+-- Income without anything temporary or bought (the event's generator boost,
+-- a Boost, the Server Overclock, the passes), from the same inputs: the
+-- gacha price cap's base, so a buyer is never charged more for pulling.
+function TycoonConfig.GetSteadyIncomePerSecond(inputs: IncomeInputs): number
+	local steady = table.clone(inputs)
+	steady.EventGeneratorMultiplier = 1
+	steady.BoostMultiplier = 1
+	steady.OverclockMultiplier = 1
+	steady.PassMultiplier = 1
+	return TycoonConfig.GetPassiveCashPerSecond(steady)
 end
 
 -- The generators' share of GetPassiveCashPerSecond (what the factory balls

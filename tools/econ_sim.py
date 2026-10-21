@@ -16,6 +16,8 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # mutations or Index)
         python3 tools/econ_sim.py --fuse=3      # player puts 3 items per
                                                 # fusion (default 2)
+        python3 tools/econ_sim.py --cap=20      # pull price capped at 20 s of
+                                                # steady income (0 = no cap)
         python3 tools/econ_sim.py --sessions=3  # 3 sessions of 45 min, 8 h
                                                 # away between: Rebirth 1-3
                                                 # in played time, with vs.
@@ -62,6 +64,11 @@ PAYERS = {
 }
 GACHA_COST = 250
 GACHA_GROWTH = 1.045
+# TycoonConfig.GachaMaxIncomeSeconds: one pull never costs more than this many
+# seconds of STEADY income (no boost, event, pass or Overclock). 0 = no cap
+# (the old price). --cap=N overrides it.
+GACHA_MAX_INCOME_SECONDS = 15
+MULTI_PULL = 10  # TycoonConfig.MultiPullCount
 GACHA_RATES = {"Common": 0.77998, "Rare": 0.18, "Epic": 0.035, "Legendary": 0.0045,
                "Mythic": 0.0005, "Secret": 0.00002}
 LUCKY_TIERS = ("Legendary", "Mythic", "Secret")  # luck multiplies these; Common absorbs
@@ -250,6 +257,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     index = set()  # (itemNo, tier, mutation)
     milestones = {}
     pulls = 0
+    late_samples = []  # (t, seconds of steady income one x10 pull costs)
 
     def add(tier, mut):
         inv[(tier, mut)] = inv.get((tier, mut), 0) + 1
@@ -332,6 +340,20 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             g *= SURGE_GENERATOR_MULT
         p = sum(v for v, *_ in ped_items())
         return (g + p) * global_mult()
+
+    def steady_cps():
+        """GetSteadyIncomePerSecond: income without events, boosts, passes
+        or the Overclock (pad x rebirth x Index only)."""
+        g = sum(b * GEN_TIER_MULT[tr] * gen[i] for i, tr, b, *_ in GENS)
+        p = sum(v for v, *_ in ped_items())
+        return (g + p) * mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus()
+
+    def pull_price(n, steady):
+        """GetGachaPullCost(n, steady)."""
+        price = GACHA_COST * GACHA_GROWTH ** n
+        if GACHA_MAX_INCOME_SECONDS > 0:
+            price = min(price, max(GACHA_COST, GACHA_MAX_INCOME_SECONDS * steady))
+        return float(int(price))
 
     def mark(name):
         if name not in milestones:
@@ -432,6 +454,12 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         if cash >= rebirth_cost:
             rebirths += 1
             mark(f"rebirth{rebirths}")
+            # A x10 pull in the 30 min before this rebirth, in seconds of
+            # steady income (median of the samples).
+            recent = sorted(r for when, r in late_samples if when >= t - 1800)
+            if recent:
+                milestones[f"late10_{rebirths}"] = recent[len(recent) // 2]
+            late_samples.clear()
             cash = 0; pulls = 0; mult_lvl = 0
             gen = {g[0]: 0 for g in GENS}; gen['basic'] = START_BASIC
             continue
@@ -449,7 +477,10 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         bought = not saving
         while bought:
             bought = False
-            gcost = GACHA_COST * GACHA_GROWTH ** pulls
+            steady = steady_cps()
+            gcost = pull_price(pulls, steady)
+            if int(t) % 10 == 0:
+                late_samples.append((t, sum(pull_price(pulls + k, steady) for k in range(MULTI_PULL)) / max(steady, 1e-9)))
             if gcost <= max(income, 1) * PULL_BUDGET_SECONDS and cash >= gcost:
                 cash -= gcost
                 pulls += 1
@@ -557,6 +588,8 @@ if __name__ == "__main__":
         QUESTS = True
     sessions = 0
     for a in sys.argv:
+        if a.startswith("--cap="):
+            GACHA_MAX_INCOME_SECONDS = float(a.split("=")[1])
         if a.startswith("--fuse="):
             FUSE_COUNT = int(a.split("=")[1])
         if a.startswith("--sessions="):
@@ -579,6 +612,10 @@ if __name__ == "__main__":
         vals = sorted(r[0].get(k, 1e12) for r in runs)
         f = lambda v: fmt(v if v < 1e12 else None)
         print(f"{k:16s} median {f(vals[mid])}   p10 {f(vals[lo])}  p90 {f(vals[hi])}")
+    for n in range(1, 9):
+        late = sorted(r[0][f"late10_{n}"] for r in runs if f"late10_{n}" in r[0])
+        if late:
+            print(f"x10 pull before rebirth {n}: median {late[len(late) // 2]:.0f} s of steady income ({len(late)} runs)")
     print(f"after {hours:g} h: rebirths median", sorted(r[2] for r in runs)[mid],
           " index entries median", sorted(r[3] for r in runs)[mid], "/", sum(ITEMS_PER_TIER.values()) * INDEX_VARIANTS,
           " cps median", f"{sorted(r[1] for r in runs)[mid]:.3g}")
