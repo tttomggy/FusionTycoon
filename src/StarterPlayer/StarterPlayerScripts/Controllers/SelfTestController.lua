@@ -3168,7 +3168,7 @@ local function probeTutorial(payload: any)
 	if ok then
 		lines = result
 	else
-		table.insert(lines, { Ok = false, Name = "tutorial probe", Detail = tostring(result) })
+		table.insert(lines, { Ok = false, Name = ("probe %s errored on the client"):format(tostring(payload.Kind)), Detail = tostring(result) })
 	end
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", ProbeId = payload.ProbeId, Lines = lines, Data = reportData })
 end

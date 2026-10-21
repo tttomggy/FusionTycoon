@@ -192,3 +192,12 @@ Most of the 77 were the TEST, not the game:
   rects shifted by the top-bar inset; both are in one space now.
 - The effects-tray position checks skip in a too-small window like the others.
 
+
+## /selftest notes (triage after f95f220)
+
+- `TycoonService.SelfTestClaim` claims the lab by calling the claim itself
+  (`claimPlot`, the same function the pad's `Touched` runs): no teleport, no
+  physics (a server-side CFrame move does not reliably fire `Touched`). A "Skip"
+  now says why (no plot, no ClaimButton, save not loaded).
+- The effects-tray probe has its own 30 s timeout (`SELFTEST_EFFECTS_TIMEOUT`); a
+  probe that errors on the client reports `probe <Kind> errored on the client`.

@@ -1472,6 +1472,63 @@ end
 
 --[[ Claim ------------------------------------------------------------------------------ ]]
 
+-- Claim actions by player: what stepping on the pad does, callable without
+-- physics (/selftest).
+local claimers: { [number]: () -> () } = {}
+
+-- The claim itself (the pad's Touched calls it, and so does /selftest): the
+-- plot is marked, the pad turns into a plain green one, and the stations,
+-- pedestals and factory line are built once the save is loaded.
+local function claimPlot(plot: Model, origin: CFrame, player: Player, pad: BasePart, claimLabel: { Gui: BillboardGui }, connection: RBXScriptConnection?)
+	if plot:GetAttribute("Claimed") then
+		return
+	end
+	plot:SetAttribute("Claimed", true)
+	if connection then
+		connection:Disconnect()
+	end
+	claimLabel.Gui:Destroy()
+	PlotKit.SetWallStripsClaimed(plot, true)
+	-- The station stays as a plain green pad; only the arrow goes.
+	local station = pad.Parent
+	local arrow = station and station:FindFirstChild("Hologram")
+	if arrow then
+		arrow:Destroy()
+	end
+	local face = station and station:FindFirstChild("Face")
+	if face and face:IsA("BasePart") then
+		BillboardKit.SetPadFace(face, UITheme.Colors.Disabled, "YOURS", true)
+	end
+
+	-- Saved state (pedestals) is restored below.
+	while not PlayerDataService.IsDataLoaded(player) and player.Parent do
+		task.wait(0.25)
+	end
+	AnalyticsKit.Funnel(player, "ClaimLab")
+	if not player.Parent or not plot.Parent then
+		return
+	end
+
+	-- New saves (and old ones) start with the Basic Generator running.
+	local levels = PlayerDataService.GetGenerators(player) or {}
+	if (levels.basic_generator or 0) < TycoonConfig.StartingBasicGeneratorLevel then
+		PlayerDataService.SetGeneratorLevel(player, "basic_generator", TycoonConfig.StartingBasicGeneratorLevel)
+	end
+
+	createMultiplierStation(plot, origin, player)
+	createGachaStation(plot, origin, player)
+	createPedestals(plot, origin, player)
+	FloorKit.Build(origin, plot)
+	restoreSavedPedestals(plot, player)
+	TycoonService.RefreshPedestalLabels(player)
+	TycoonService.ApplyLabLook(player)
+	createFactoryLine(plot, origin, player)
+	createRebirthPortal(plot, origin, player)
+	createLockConsole(plot, origin)
+	syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
+	refreshPlotSigns()
+end
+
 local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 	local claimButton = findPart(plot, "ClaimButton")
 	if not claimButton then
@@ -1500,49 +1557,11 @@ local function connectClaimStation(plot: Model, origin: CFrame, player: Player)
 		if not toucher or toucher.UserId ~= player.UserId or plot:GetAttribute("Claimed") then
 			return
 		end
-		plot:SetAttribute("Claimed", true)
-		connection:Disconnect()
-		claimLabel.Gui:Destroy()
-		PlotKit.SetWallStripsClaimed(plot, true)
-		-- The station stays as a plain green pad; only the arrow goes.
-		local station = pad.Parent
-		local arrow = station and station:FindFirstChild("Hologram")
-		if arrow then
-			arrow:Destroy()
-		end
-		local face = station and station:FindFirstChild("Face")
-		if face and face:IsA("BasePart") then
-			BillboardKit.SetPadFace(face, UITheme.Colors.Disabled, "YOURS", true)
-		end
-
-		-- Saved state (pedestals) is restored below.
-		while not PlayerDataService.IsDataLoaded(player) and player.Parent do
-			task.wait(0.25)
-		end
-		AnalyticsKit.Funnel(player, "ClaimLab")
-		if not player.Parent or not plot.Parent then
-			return
-		end
-
-		-- New saves (and old ones) start with the Basic Generator running.
-		local levels = PlayerDataService.GetGenerators(player) or {}
-		if (levels.basic_generator or 0) < TycoonConfig.StartingBasicGeneratorLevel then
-			PlayerDataService.SetGeneratorLevel(player, "basic_generator", TycoonConfig.StartingBasicGeneratorLevel)
-		end
-
-		createMultiplierStation(plot, origin, player)
-		createGachaStation(plot, origin, player)
-		createPedestals(plot, origin, player)
-		FloorKit.Build(origin, plot)
-		restoreSavedPedestals(plot, player)
-		TycoonService.RefreshPedestalLabels(player)
-		TycoonService.ApplyLabLook(player)
-		createFactoryLine(plot, origin, player)
-		createRebirthPortal(plot, origin, player)
-		createLockConsole(plot, origin)
-		syncTycoon(player) -- also styles the factory line (refreshFactoryLine)
-		refreshPlotSigns()
+		claimPlot(plot, origin, player, pad, claimLabel, connection)
 	end)
+	claimers[player.UserId] = function()
+		claimPlot(plot, origin, player, pad, claimLabel, connection)
+	end
 end
 
 --[[ Plot lifecycle ----------------------------------------------------------------------- ]]
@@ -1595,6 +1614,7 @@ local function removePlotForPlayer(player: Player)
 		plotByUserId[player.UserId] = nil
 	end
 	originByUserId[player.UserId] = nil
+	claimers[player.UserId] = nil
 	plotSignByUserId[player.UserId] = nil
 	collectorLabelByUserId[player.UserId] = nil
 	stationRefreshesByUserId[player.UserId] = nil
@@ -1620,51 +1640,47 @@ function TycoonService.ResetPlot(player: Player)
 	createPlotForPlayer(player)
 end
 
--- /selftest: gives the tester a claimed lab through the real claim path (the
--- character steps on the claim pad). Returns "Claimed" (already was),
--- "Skip" (no free slot / no template) or "Ok" with a release function that
+-- /selftest: gives the tester a claimed lab by running the claim itself (what
+-- stepping on the pad does; no teleport, no physics). Returns "Claimed"
+-- (already was), "Skip" (with the reason as the third value: no template /
+-- plot, no ClaimButton, data not loaded) or "Ok" with a release function that
 -- puts the tester back to where they were (no plot, or a fresh unclaimed one).
-function TycoonService.SelfTestClaim(player: Player): (string, (() -> ())?)
+function TycoonService.SelfTestClaim(player: Player): (string, (() -> ())?, string?)
 	local plot = plotByUserId[player.UserId]
 	if plot and plot:GetAttribute("Claimed") == true then
-		return "Claimed", nil
+		return "Claimed", nil, nil
 	end
 	local hadPlot = plot ~= nil
 	if not plot then
 		createPlotForPlayer(player)
 		plot = plotByUserId[player.UserId]
 		if not plot then
-			return "Skip", nil
+			return "Skip", nil, "no plot could be built for the tester (TycoonTemplate missing or no free slot)"
 		end
 	end
-	local pad = findPart(plot, "ClaimButton")
-	local character = player.Character
-	local root = character and character:FindFirstChild("HumanoidRootPart")
-	if not pad or not root or not root:IsA("BasePart") then
+	local function skip(reason: string): (string, (() -> ())?, string?)
 		if not hadPlot then
 			removePlotForPlayer(player)
 		end
-		return "Skip", nil
+		return "Skip", nil, reason
 	end
-	local home = root.CFrame
-	root.CFrame = pad.CFrame + Vector3.new(0, 3, 0)
-	local deadline = os.clock() + 5
-	while plot:GetAttribute("Claimed") ~= true and os.clock() < deadline do
-		task.wait(0.1)
+	local claim = claimers[player.UserId]
+	if not claim then
+		return skip("the plot has no ClaimButton, so no claim station was built")
 	end
-	root.CFrame = home
+	if not PlayerDataService.IsDataLoaded(player) then
+		return skip("the tester's save is not loaded yet")
+	end
+	claim()
 	if plot:GetAttribute("Claimed") ~= true then
-		if not hadPlot then
-			removePlotForPlayer(player)
-		end
-		return "Skip", nil
+		return skip("the claim ran but the plot is still unclaimed")
 	end
 	return "Ok", function()
 		removePlotForPlayer(player)
 		if hadPlot then
 			createPlotForPlayer(player)
 		end
-	end
+	end, nil
 end
 
 function TycoonService:Init()

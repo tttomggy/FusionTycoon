@@ -194,6 +194,8 @@ local GIFTS_COMMAND = "/gifts"
 local SELFTEST_COMMAND = "/selftest"
 local SELFTEST_REPORT_TIMEOUT = 90 -- the client's big stages (Fuzz, Done)
 local SELFTEST_PROBE_TIMEOUT = 10 -- one combat / gacha probe
+-- The effects tray probe: two layouts x (a 3 s tooltip wait + checks) + three window sizes.
+local SELFTEST_EFFECTS_TIMEOUT = 30
 local SELFTEST_STEP_TIMEOUT = 75 -- one tutorial step probe: the presenter (30 s cap) + its card, bar, hand and HUD waits
 local SELFTEST_SLOT_COUNT = 200
 local selfTestReports: { [number]: { any } } = {}
@@ -248,7 +250,7 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 	local probeId = probeCounter
 	payload.ProbeId = probeId
 	RemoteEvents.SelfTest:FireClient(player, payload)
-	local report = waitForReport(player, "TutorialProbe", if payload.Kind == "Step" then SELFTEST_STEP_TIMEOUT else SELFTEST_PROBE_TIMEOUT, probeId)
+	local report = waitForReport(player, "TutorialProbe", if payload.Kind == "Step" then SELFTEST_STEP_TIMEOUT elseif payload.Kind == "EffectsTray" then SELFTEST_EFFECTS_TIMEOUT else SELFTEST_PROBE_TIMEOUT, probeId)
 	if not report or typeof(report.Lines) ~= "table" then
 		local which = if payload.Kind == "Weapon" or payload.Kind == "Switch" then "combat " .. tostring(payload.Weapon or payload.To or "")
 			elseif payload.Kind == "WeaponReleased" then "combat release"
@@ -782,9 +784,9 @@ end
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	result(not TutorialService.ShouldSkipOnJoin(false), "tutorial: a live server (not Studio) never skips the tutorial on join")
 	-- No lab yet: claim one through the real claim path, release it after.
-	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
+	local claimState, releaseClaim, claimWhy = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
-		print("[SelfTest] SKIP tutorial drive: no free lab slot to claim")
+		print(("[SelfTest] SKIP tutorial drive: could not claim a lab (%s)"):format(tostring(claimWhy)))
 		return
 	end
 	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
@@ -1152,9 +1154,9 @@ end
 -- touched: Workspace attributes, restored), then its buttons.
 local function runGachaCardSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	-- The card only exists for a claimed lab.
-	local claimState, releaseClaim = TycoonService.SelfTestClaim(player)
+	local claimState, releaseClaim, claimWhy = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
-		result(false, "gacha card: a claimed lab to test on", "could not claim a lab for the tester (no free slot or no character)")
+		result(false, "gacha card: a claimed lab to test on", ("could not claim a lab for the tester: %s"):format(tostring(claimWhy)))
 		return
 	end
 	local character = player.Character
