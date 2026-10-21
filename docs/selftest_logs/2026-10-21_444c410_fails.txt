@@ -1,0 +1,82 @@
+  00:06:13.799  [SelfTest] FAIL remote fuzz: no state change  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (SettingsPanel, desktop): Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Single pulls and single fusions always g"; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Every sound in the game."; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Chill classical in the background. Turn "; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Walk through the first steps again, one "  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (GiftsPanel, desktop): Players.ILIKESIMULATORGG.PlayerGui.Gifts.Root.Panel.Body.Content.Scroll.Footer "Gifts reset at 00:00 UTC; time adds up a"  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (RebirthPanel, desktop): Players.ILIKESIMULATORGG.PlayerGui.RebirthPanel.Root.Panel.Body.Content.List.Keep.Text "Every item · your pedestals · Index ·"; Players.ILIKESIMULATORGG.PlayerGui.RebirthPanel.Root.Panel.Body.Content.List.Reset.Text "Cash (pays $491M) · Generators → LV 1"  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (ShopPanel, phone): Players.ILIKESIMULATORGG.PlayerGui.ShopPanel.Root.Panel.Body.Content.Scroll.Footer "Prices read live from Roblox · odds are"  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (SettingsPanel, phone): Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Single pulls and single fusions always g"; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Every sound in the game."; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Chill classical in the background. Turn "; Players.ILIKESIMULATORGG.PlayerGui.SettingsPanel.Root.Panel.Body.Content.Sections.Note "Walk through the first steps again, one "  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (GiftsPanel, phone): Players.ILIKESIMULATORGG.PlayerGui.Gifts.Root.Panel.Body.Content.Scroll.Footer "Gifts reset at 00:00 UTC; time adds up a"  -  Server - DebugService:1513
+  00:06:57.532  [SelfTest] FAIL text fits (RebirthPanel, phone): Players.ILIKESIMULATORGG.PlayerGui.RebirthPanel.Root.Panel.Body.Content.List.Keep.Text "Every item · your pedestals · Index ·"; Players.ILIKESIMULATORGG.PlayerGui.RebirthPanel.Root.Panel.Body.Content.List.Reset.Text "Cash (pays $491M) · Generators → LV 1"  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (SettingsPanel, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (IndexPanel, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (Gifts, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (RebirthPanel, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (FusePanel, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (HowToHeist, desktop live): taller than the band but starts at 70, not 66  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (UpgradesPanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (ShopPanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (SettingsPanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (IndexPanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (Gifts, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (RebirthPanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (FusePanel, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.533  [SelfTest] FAIL cards centred (HowToHeist, phone live): taller than the band but starts at 82, not 79  -  Server - DebugService:1513
+  00:06:57.535  [SelfTest] FAIL shop text (desktop): under 13 px: Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8  -  Server - DebugService:1513
+  00:06:57.535  [SelfTest] FAIL shop text (phone): under 13 px: Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8, Box.Amount 8  -  Server - DebugService:1513
+  00:06:57.536  [SelfTest] FAIL chip Featured (desktop): header -10.4 px from the top  -  Server - DebugService:1513
+  00:06:57.536  [SelfTest] FAIL chip Passes (desktop): header -48.2 px from the top  -  Server - DebugService:1513
+  00:06:57.536  [SelfTest] FAIL chip Featured (phone): header -23.8 px from the top  -  Server - DebugService:1513
+  00:07:03.463  [SelfTest] FAIL tutorial upgrade: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 364x-204, text height 48  -  Server - DebugService:1513
+  00:07:03.464  [SelfTest] FAIL tutorial upgrade: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:08.963  [SelfTest] FAIL tutorial pull: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 365x-205, text height 48  -  Server - DebugService:1513
+  00:07:08.963  [SelfTest] FAIL tutorial pull: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:12.747  [SelfTest] FAIL tutorial pull2: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:19.680  [SelfTest] FAIL tutorial pedestals: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 364x-204, text height 48  -  Server - DebugService:1513
+  00:07:25.779  [SelfTest] FAIL tutorial fuse: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 310x-174, text height 72  -  Server - DebugService:1513
+  00:07:25.780  [SelfTest] FAIL tutorial fuse: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:32.280  [SelfTest] FAIL tutorial index: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 365x-204, text height 72  -  Server - DebugService:1513
+  00:07:32.281  [SelfTest] FAIL tutorial index: the card's OK turns on after 1.5 s: off at 0.4 s: true, on at 1.9 s: false  -  Server - DebugService:1513
+  00:07:42.413  [SelfTest] FAIL tutorial multiplier: no report from the client  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 328x-184, text height 48  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the card's OK turns on after 1.5 s: off at 0.4 s: false, on at 1.9 s: true  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the banner takes over after OK  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the objective bar is fully on screen below the top bar: top -24 (min 79), bottom 49 of 125, x 2-2344 of 2346  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the banner reads its instruction in 6 words or fewer: "Lab weather!" (2 words)  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the objective bar (width, text size, step counter): 1874 px wide, text 28, 9 / 11  -  Server - DebugService:1513
+  00:07:48.429  [SelfTest] FAIL tutorial multiplier: the HUD shows exactly its set: Event want false  -  Server - DebugService:1513
+  00:07:50.745  [SelfTest] FAIL tutorial events: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 368x-206, text height 72  -  Server - DebugService:1513
+  00:07:50.746  [SelfTest] FAIL tutorial events: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:50.746  [SelfTest] FAIL tutorial events: the hand does not cover its target: no hand  -  Server - DebugService:1513
+  00:07:50.746  [SelfTest] FAIL tutorial events: the hand's tip is within 12 px of its target's edge: no hand  -  Server - DebugService:1513
+  00:07:54.945  [SelfTest] FAIL tutorial finish: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:59.195  [SelfTest] WARN combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso | 0.86 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:248
+  00:07:59.195  [SelfTest] PASS combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso (WARN)  -  Server - DebugService:1510
+  00:07:59.195  [SelfTest] WARN combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) | peak 1.15 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:248
+  00:07:59.195  [SelfTest] PASS combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) (WARN)  -  Server - DebugService:1510
+  00:07:59.844  [SelfTest] FAIL tutorial rebirth: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 365x-204, text height 48  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the banner takes over after OK  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the objective bar is fully on screen below the top bar: top 79 (min 79), bottom 151 of 125, x 20-2326 of 2346  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the banner reads its instruction in 6 words or fewer: "You're ready!" (2 words)  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the objective bar (width, text size, step counter): 1845 px wide, text 28, 11 / 11  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the hand does not cover its target: no hand  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the hand's tip is within 12 px of its target's edge: no hand  -  Server - DebugService:1513
+  00:07:59.845  [SelfTest] FAIL tutorial rebirth: the HUD shows exactly its set: Settings want false, Shop want false, Goal want false  -  Server - DebugService:1513
+  00:08:01.728  [SelfTest] FAIL combat LaserGun: the hand is raised to about shoulder height while aiming: hand y -0.75 (shoulder 0.42), z 0.18 | rest (0.90, -0.74, 0.20), held (0.88, -0.75, 0.18); tracks {Animation1[Idle w1.00/1.00 t118.25], Animation2[Core w1.00/1.00 t1.67]}; shoulder: no Motor6D; anim nil, pose nil, forceFallback false; humanoid Running, platformStand false, root anchored false  -  Server - DebugService:1513
+  00:08:01.728  [SelfTest] FAIL combat LaserGun: the held weapon plays a looping hold track: no hold track (C0 fallback)  -  Server - DebugService:1513
+  00:08:01.728  [SelfTest] FAIL combat LaserGun: the hand is drawn travelling during the shot (aim + recoil): 2.10 studs (needs 0.2)  -  Server - DebugService:1513
+  00:08:03.178  [SelfTest] FAIL combat FreezeRay: the hand is raised to about shoulder height while aiming: hand y -0.70 (shoulder 0.42), z -0.42 | rest (0.82, -0.77, -0.30), held (0.85, -0.70, -0.42); tracks {Animation1[Idle w1.00/1.00 t119.73], Animation2[Core w1.00/1.00 t3.15]}; shoulder: no Motor6D; anim nil, pose nil, forceFallback false; humanoid Running, platformStand false, root anchored false  -  Server - DebugService:1513
+  00:08:03.178  [SelfTest] FAIL combat FreezeRay: the held weapon plays a looping hold track: no hold track (C0 fallback)  -  Server - DebugService:1513
+  00:08:03.178  [SelfTest] FAIL combat FreezeRay: the hand is drawn travelling during the shot (aim + recoil): 2.09 studs (needs 0.2)  -  Server - DebugService:1513
+  00:08:04.228  [SelfTest] FAIL combat SlapGlove: the action track plays, is long enough and its Hit marker fires once: playing true, length 0.50 s, Hit fired 0 x  -  Server - DebugService:1513
+  00:08:05.912  [SelfTest] FAIL combat BananaPeel: the hand is drawn at least 1 stud away from its rest pose and the hold track loops: moved 0.02 studs, hold track looping false, pose nil | rest (0.70, -0.85, -0.14), held (0.71, -0.85, -0.13); tracks {Animation1[Idle w1.00/1.00 t122.24], Animation1[Core w1.00/1.00 t1.34]}; shoulder: no Motor6D; anim nil, pose nil, forceFallback false; humanoid Running, platformStand false, root anchored false  -  Server - DebugService:1513
+  00:08:05.912  [SelfTest] FAIL combat BananaPeel: the held weapon plays a looping hold track: no hold track (C0 fallback)  -  Server - DebugService:1513
+  00:08:05.912  [SelfTest] FAIL combat BananaPeel: the action track plays, is long enough and its Hit marker fires once: playing false, length 0.00 s, Hit fired 0 x  -  Server - DebugService:1513
+  00:08:05.912  [SelfTest] FAIL combat BananaPeel: the hand is drawn travelling during the toss: 3.87 studs (needs 1.0)  -  Server - DebugService:1513
+  00:08:06.345  [SelfTest] FAIL combat switch Bat -> SlapGlove: the hand is drawn at least 1 stud away from its rest pose and the hold track loops: moved 0.01 studs, hold track looping false, pose nil | rest (0.71, -0.86, -0.12), held (0.70, -0.86, -0.12); tracks {Animation1[Idle w1.00/1.00 t123.92], Animation1[Core w1.00/1.00 t3.02]}; shoulder: no Motor6D; anim nil, pose nil, forceFallback false; humanoid Running, platformStand false, root anchored false  -  Server - DebugService:1513
+  00:08:13.612  [SelfTest] FAIL gacha card (luck as is): the (i) panel's per-orb % sum to each tier's %: Common orbs sum 75.902150, tier 77.634050, 3 orb lines; Legendary orbs sum 2.328750, tier 0.776250, 3 orb lines; Mythic orbs sum 0.258750, tier 0.086250, 3 orb lines; Secret orbs sum 0.010350, tier 0.003450, 2 orb lines  -  Server - DebugService:1513
+  00:08:17.611  [SelfTest] FAIL gacha card (luck x3 event): every tier's drawn % equals GetGachaRates at the server's luck (x5.17): 2/6 tiles drawn | Common shows "77.6%" (text height 22), wants "75.9%"; Legendary shows "0.78%" (text height 22), wants "2.3%"; Mythic shows "0.086%" (text height 22), wants "0.26%"; Secret shows "0.0035%" (text height 19), wants "0.010%"  -  Server - DebugService:1513
+  00:08:17.611  [SelfTest] FAIL gacha card (luck x3 event): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge: the mutation line lacks Golden 20.7%; the mutation line lacks Diamond 4.1%; the mutation line lacks Rainbow 0.52%  -  Server - DebugService:1513
+  00:08:17.611  [SelfTest] FAIL gacha card (luck x3 event): the (i) panel's per-orb % sum to each tier's %: Common orbs sum 77.634050, tier 75.902150, 3 orb lines; Legendary orbs sum 0.776250, tier 2.328750, 3 orb lines; Mythic orbs sum 0.086250, tier 0.258750, 3 orb lines; Secret orbs sum 0.003450, tier 0.010350, 2 orb lines  -  Server - DebugService:1513
+  00:09:04.293  [SelfTest] FAIL gacha keys: Auto pull ran exactly 2 x10 cycles with cash for 20 pulls, then stopped (InsufficientCash): 9 cycles, stop none (still running), pulls 0 -> 90  -  Server - DebugService:1513
+  00:09:04.293  [SelfTest] FAIL gacha keys: no Auto pull cycle starts within 3s of the previous one: gap n/a  -  Server - DebugService:1513
+  00:09:05.108  [SelfTest] FAIL auto pull: each x10 cycle showed the 10-pull card: 9 cards shown, 2 cycles ran  -  Server - DebugService:1513
+  00:09:05.109  [SelfTest] done: 289 passed, 77 failed  -  Server - DebugService:1530
