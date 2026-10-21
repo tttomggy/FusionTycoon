@@ -88,6 +88,10 @@ local function idFor(name: string): string?
 				animationIds[name] = id
 				return id
 			end
+			-- Not cached: a one-off failure must not turn this clip into the
+			-- C0 fallback for the rest of the session. Next Hold retries.
+			warn(("WeaponAnimator: registering %s failed (%s)"):format(name, tostring(id)))
+			return nil
 		end
 	end
 	animationIds[name] = ""
@@ -170,14 +174,17 @@ local function ensureLoop()
 	end)
 end
 
-local function stopRig(rig: Rig)
+-- Stops every weapon track except those named in `keep` (the clips the
+-- next weapon is about to play: stopping and replaying one track in the
+-- same frame can leave it faded out).
+local function stopRig(rig: Rig, keep: { [string]: boolean }?)
 	rig.Token += 1
 	if rig.Hit then
 		rig.Hit:Disconnect()
 		rig.Hit = nil
 	end
-	for _, track in rig.Tracks do
-		if track.IsPlaying then
+	for name, track in rig.Tracks do
+		if track.IsPlaying and not (keep and keep[name]) then
 			track:Stop(0.1)
 		end
 	end
@@ -195,7 +202,11 @@ function WeaponAnimator.Hold(character: Model, weapon: CombatConfig.Weapon): boo
 	if not clips or not rig then
 		return false
 	end
-	stopRig(rig) -- every hold / action track of the previous weapon, held or not
+	-- Every hold / action track of the previous weapon goes (held or not);
+	-- this weapon's own hold clip stays up if it already plays.
+	local keep: { [string]: boolean } = { [clips.Hold] = true }
+	local sameWeapon = rig.WeaponId == weapon.Id
+	stopRig(rig, keep)
 	local track = getTrack(rig, clips.Hold)
 	if not track then
 		if not warned and not forceFallback then
@@ -208,7 +219,9 @@ function WeaponAnimator.Hold(character: Model, weapon: CombatConfig.Weapon): boo
 	if clips.Action then
 		getTrack(rig, clips.Action) -- loaded now, so the first swing has no load hitch
 	end
-	track:Play(0.15)
+	if not (sameWeapon and track.IsPlaying) then
+		track:Play(0.15)
+	end
 	ensureLoop()
 	return true
 end
@@ -241,6 +254,20 @@ function WeaponAnimator.GetActionTrack(character: Model): AnimationTrack?
 	local rig = rigs[character]
 	local clips = rig and rig.WeaponId and CLIPS[rig.WeaponId]
 	return if rig and clips and clips.Action then rig.Tracks[clips.Action] else nil
+end
+
+-- /selftest diagnostics: the rig's state in one line.
+function WeaponAnimator.Describe(character: Model): string
+	local rig = rigs[character]
+	if not rig then
+		return "no rig (no Animator found yet)"
+	end
+	local names = {}
+	for name, track in rig.Tracks do
+		table.insert(names, ("%s%s"):format(name, if track.IsPlaying then "*" else ""))
+	end
+	table.sort(names)
+	return ("rig weapon %s, tracks [%s], token %d"):format(tostring(rig.WeaponId), table.concat(names, " "), rig.Token)
 end
 
 -- /selftest: is any weapon track of this character still playing?

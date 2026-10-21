@@ -193,7 +193,8 @@ local GIFTS_COMMAND = "/gifts"
 ]]
 local SELFTEST_COMMAND = "/selftest"
 local SELFTEST_REPORT_TIMEOUT = 90 -- the client's big stages (Fuzz, Done)
-local SELFTEST_PROBE_TIMEOUT = 10 -- one tutorial / combat probe
+local SELFTEST_PROBE_TIMEOUT = 10 -- one combat / gacha probe
+local SELFTEST_STEP_TIMEOUT = 75 -- one tutorial step probe: the presenter (30 s cap) + its card, bar, hand and HUD waits
 local SELFTEST_SLOT_COUNT = 200
 local selfTestReports: { [number]: { any } } = {}
 
@@ -211,7 +212,10 @@ local NUMBER_FORMAT_CASES: { { any } } = {
 	{ -1234, "$-1.23K" },
 }
 
-local function waitForReport(player: Player, stage: string, timeout: number?): any?
+-- `probeId`: only the report that answers THAT request counts. A probe
+-- that ran long and answered after its request timed out is dropped, never
+-- handed to the next request (that shifted every later tutorial line by one).
+local function waitForReport(player: Player, stage: string, timeout: number?, probeId: number?): any?
 	local started = os.clock()
 	local limit = timeout or SELFTEST_REPORT_TIMEOUT
 	while os.clock() - started < limit and player.Parent do
@@ -219,8 +223,13 @@ local function waitForReport(player: Player, stage: string, timeout: number?): a
 		if queue then
 			for index, report in queue do
 				if report.Stage == stage then
-					table.remove(queue, index)
-					return report
+					if probeId == nil or report.ProbeId == probeId then
+						table.remove(queue, index)
+						return report
+					elseif typeof(report.ProbeId) == "number" and report.ProbeId < probeId then
+						table.remove(queue, index) -- stale: its request already gave up
+						break
+					end
 				end
 			end
 		end
@@ -229,12 +238,17 @@ local function waitForReport(player: Player, stage: string, timeout: number?): a
 	return nil
 end
 
+local probeCounter = 0
+
 -- Asks the client what it shows right now (SelfTestController's probe) and
 -- turns each line it reports into a result.
 local function tutorialProbe(player: Player, payload: { [string]: any }, result: (boolean, string, string?) -> ())
 	payload.Stage = "TutorialProbe"
+	probeCounter += 1
+	local probeId = probeCounter
+	payload.ProbeId = probeId
 	RemoteEvents.SelfTest:FireClient(player, payload)
-	local report = waitForReport(player, "TutorialProbe", SELFTEST_PROBE_TIMEOUT)
+	local report = waitForReport(player, "TutorialProbe", if payload.Kind == "Step" then SELFTEST_STEP_TIMEOUT else SELFTEST_PROBE_TIMEOUT, probeId)
 	if not report or typeof(report.Lines) ~= "table" then
 		local which = if payload.Kind == "Weapon" or payload.Kind == "Switch" then "combat " .. tostring(payload.Weapon or payload.To or "")
 			elseif payload.Kind == "WeaponReleased" then "combat release"
@@ -281,8 +295,11 @@ local function askClient(target: Player, payload: { [string]: any }): any?
 		selfTestReports[target.UserId] = {}
 	end
 	payload.Stage = "TutorialProbe"
+	probeCounter += 1
+	local probeId = probeCounter
+	payload.ProbeId = probeId
 	RemoteEvents.SelfTest:FireClient(target, payload)
-	local report = waitForReport(target, "TutorialProbe", SELFTEST_PROBE_TIMEOUT)
+	local report = waitForReport(target, "TutorialProbe", SELFTEST_PROBE_TIMEOUT, probeId)
 	if not had then
 		selfTestReports[target.UserId] = nil
 	end
@@ -1211,6 +1228,7 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 	else
 		local cash = PlayerDataService.GetCash(player)
 		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player))
+		TycoonService.SelfTestFreezeIncome(player, true) -- the "$0" steps below need cash that stays put
 		-- 25 studs away: refused, and Auto pull will not start.
 		root.CFrame = away
 		task.wait(0.4)
@@ -1235,7 +1253,7 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		-- and says why (with the price), a bad count is refused.
 		root.CFrame = onPad
 		task.wait(0.4)
-		PlayerDataService.SpendCash(player, cash)
+		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
 		local okBroke, reasonBroke, costBroke = TycoonService.RequestGachaPull(player, 1)
 		result(not okBroke and reasonBroke == "InsufficientCash" and costBroke == cost, "gacha keys: RequestGachaPull at $0 is refused (InsufficientCash, with the price)", ("ok %s, reason %s, cost %s (price %s)"):format(tostring(okBroke), tostring(reasonBroke), tostring(costBroke), tostring(cost)))
 		TycoonService.SetAutoPull(player, true)
@@ -1258,6 +1276,10 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		local cycle1 = TycoonConfig.GetGachaMultiPullCost(pulls0, TycoonConfig.MultiPullCount)
 		local cycle2 = TycoonConfig.GetGachaMultiPullCost(pulls0 + TycoonConfig.MultiPullCount, TycoonConfig.MultiPullCount)
 		tutorialProbe(player, { Kind = "AutoReset" }, result)
+		-- Cash for EXACTLY two cycles: passive income paused for the run and
+		-- whatever the save has left is spent first, so nothing else pays.
+		TycoonService.SelfTestFreezeIncome(player, true)
+		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
 		PlayerDataService.AddCash(player, cycle1 + cycle2)
 		TycoonService.SetAutoPull(player, true)
 		local autoStarted = os.clock()
@@ -1275,6 +1297,7 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		result(gapOk, ("gacha keys: no Auto pull cycle starts within %ds of the previous one"):format(GachaConfig.AutoPullMinSeconds), ("gap %s"):format(if #autoLog == 2 then ("%.2f s"):format(autoLog[2] - autoLog[1]) else "n/a"))
 		tutorialProbe(player, { Kind = "AutoCards", Expect = 2 }, result)
 		TycoonService.SetAutoPull(player, false)
+		TycoonService.SelfTestFreezeIncome(player, false)
 		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
 		PlayerDataService.AddCash(player, cash)
 		PlayerDataService.SyncTycoon(player)
@@ -1421,6 +1444,18 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	end
 	selfTestReports[player.UserId] = {}
 	RemoteGuard.Reset(player)
+	-- A junk ClaimDaily / ClaimGift is a LEGIT claim when one is claimable
+	-- (right after 00:00 UTC the daily reward is): park that for the fuzz, so
+	-- a state change here still means a junk call changed something.
+	local fuzzData = PlayerDataService.GetData(player)
+	local savedDaily: { [string]: any }? = nil
+	local savedPlaySeconds = 0
+	if fuzzData then
+		savedDaily = table.clone(fuzzData.Daily)
+		DailyConfig.Apply(fuzzData.Daily, RewardConfig.GetUtcDay(os.time()))
+		savedPlaySeconds = fuzzData.Gifts.PlaySeconds
+		fuzzData.Gifts.PlaySeconds = 0
+	end
 	local before = PlayerDataService.SelfTestFingerprint(player)
 	local cashBefore = PlayerDataService.GetCash(player)
 	local serverErrors = {}
@@ -1432,11 +1467,21 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	RemoteEvents.SelfTest:FireClient(player, { OtherUserId = other, Slots = slots, DealSlots = dealSlots })
 	local fuzzReport = waitForReport(player, "Fuzz")
 	logConnection:Disconnect()
+	local fingerprintAfter = PlayerDataService.SelfTestFingerprint(player)
+	if fuzzData then
+		-- Put the daily and the gift clock back (play time that ticked meanwhile stays).
+		if savedDaily then
+			for key, value in savedDaily do
+				(fuzzData.Daily :: any)[key] = value
+			end
+		end
+		fuzzData.Gifts.PlaySeconds += savedPlaySeconds
+	end
 	if not fuzzReport then
 		result(false, "remote fuzz", "no report from the client")
 	else
 		result(#serverErrors == 0, ("remote fuzz: no server errors (%d junk calls)"):format(fuzzReport.Fired or 0), table.concat(serverErrors, " | "))
-		result(PlayerDataService.SelfTestFingerprint(player) == before, "remote fuzz: no state change")
+		result(fingerprintAfter == before, "remote fuzz: no state change")
 		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
 	end
 	RemoteGuard.Reset(player)
@@ -1523,6 +1568,7 @@ local function runSelfTest(player: Player, only: string?)
 	-- and is cleared on every way out.
 	selfTestReports[player.UserId] = {}
 	local ok, err = pcall(runSelfTestBody, player, result, only)
+	TycoonService.SelfTestFreezeIncome(player, false)
 	if not ok then
 		result(false, "self-test aborted", tostring(err))
 	end

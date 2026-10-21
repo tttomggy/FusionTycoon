@@ -315,6 +315,21 @@ local function testCardMath(): { string }
 	return lines
 end
 
+-- The checks that measure the live screen (cards in the band, text fits,
+-- the objective bar, the hand, shop chips) mean nothing in a squeezed game
+-- view: a 2346 x 125 window gave every card a negative height and 60 FAILs
+-- that were not the game's. Returns why the window is too small (nil = fine);
+-- the run then says so ONCE as a FAIL and skips those checks.
+local MIN_WINDOW = Vector2.new(1000, 600)
+local function windowProblem(): string?
+	local camera = Workspace.CurrentCamera
+	local size = if camera then camera.ViewportSize else Vector2.new(1366, 768)
+	if size.X >= MIN_WINDOW.X and size.Y >= MIN_WINDOW.Y then
+		return nil
+	end
+	return ("the game view is %d x %d, the live-screen checks need at least %d x %d (Studio: enlarge the game window, undock Output / other panels, then run /selftest again)"):format(size.X, size.Y, MIN_WINDOW.X, MIN_WINDOW.Y)
+end
+
 -- Logical px of `gui`'s visible rect: itself plus a "Shadow" sibling or
 -- child below it.
 -- AbsolutePosition is reported below the Roblox top-bar inset even in
@@ -1213,26 +1228,44 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	-- (title, >= 22 px text, an OK); OK hands over to the banner (or ends
 	-- the step). The claim has none.
 	local cardOpen = TutorialCards.IsOpen() or TutorialExplain.IsOpen()
+	local tooSmall = windowProblem() ~= nil
 	if step.Card then
+		-- THIS step's card: the previous step's may still be fading out.
 		local waited = os.clock()
-		while not TutorialExplain.IsOpen() and os.clock() - waited < 10 do
-			task.wait(0.1)
+		local function cardUp(): boolean
+			local shown = TutorialExplain.GetBody()
+			return TutorialExplain.IsOpen() and shown ~= nil and shown.Text == step.Card.Body
 		end
+		while not cardUp() and os.clock() - waited < 10 do
+			task.wait(0.05)
+		end
+		local firstSeen = os.clock()
+		local shownAt0 = TutorialExplain.GetReadTimes()
+		local seenEarly = firstSeen - shownAt0 <= 0.8 -- the OK must still be grey now
+		local lockedAtOpen = not TutorialExplain.IsOkReady()
+		-- The card as the player sees it: after its pop-in and placing loop.
+		task.wait(0.4)
 		local body = TutorialExplain.GetBody()
 		table.insert(lines, {
-			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body and body.AbsoluteSize.X > 0 and body.AbsoluteSize.Y > 0 and body.TextBounds.Y > 0,
+			-- Drawn: positive on both axes, unless the window is too small to draw
+			-- any card (reported once as "selftest window").
+			Ok = TutorialExplain.IsOpen() and body ~= nil and body.TextSize >= 22 and body.Text == step.Card.Body and (tooSmall or (body.AbsoluteSize.X > 0 and body.AbsoluteSize.Y > 0 and body.TextBounds.Y > 0)),
 			Name = ("tutorial %s: its explain card opens first (text >= 22 px, drawn)"):format(stepId),
 			Detail = if body then ("%d px, drawn %dx%d, text height %d"):format(body.TextSize, body.AbsoluteSize.X, body.AbsoluteSize.Y, body.TextBounds.Y) else "no card",
 		})
-		-- Read time: OK is off at first (✕ and a tap outside too), on after 1.5 s.
-		task.wait(0.4)
-		local lockedEarly = not TutorialExplain.IsOkReady()
 		table.insert(lines, dimLine(stepId .. " (card up)"))
-		task.wait(TutorialConfig.CardReadSeconds)
+		-- Read time: OK is off when the card opens and on 1.5 s after it
+		-- showed (measured from the card's own clock, not raced).
+		local readUntil = os.clock() + TutorialConfig.CardReadSeconds + 2
+		while not TutorialExplain.IsOkReady() and os.clock() < readUntil do
+			task.wait(0.05)
+		end
+		local shownAt, readyAt = TutorialExplain.GetReadTimes()
+		local delay = if readyAt > 0 then readyAt - shownAt else -1
 		table.insert(lines, {
-			Ok = lockedEarly and TutorialExplain.IsOkReady(),
+			Ok = (not seenEarly or lockedAtOpen) and delay >= TutorialConfig.CardReadSeconds - 0.2 and delay <= TutorialConfig.CardReadSeconds + 0.5,
 			Name = ("tutorial %s: the card's OK turns on after %.1f s"):format(stepId, TutorialConfig.CardReadSeconds),
-			Detail = ("off at 0.4 s: %s, on at %.1f s: %s"):format(tostring(lockedEarly), 0.4 + TutorialConfig.CardReadSeconds, tostring(TutorialExplain.IsOkReady())),
+			Detail = ("grey when first seen (%.2f s after it opened): %s, turned on after %.2f s"):format(firstSeen - shownAt0, tostring(lockedAtOpen), delay),
 		})
 		TutorialExplain.PressOk()
 		task.wait(0.2)
@@ -1256,7 +1289,7 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	task.wait(0.5) -- the slide-in
 	table.insert(lines, dimLine(stepId))
 	-- The objective bar sits fully on screen, under the Roblox top bar.
-	if TutorialBanner.IsShown() then
+	if TutorialBanner.IsShown() and not tooSmall then
 		local barBody = TutorialBanner.GetFrame()
 		local barView = UIKit.GetLogicalViewport()
 		local barTop, barHeight = visibleRect(barBody, nil, screenScale(barBody))
@@ -1291,7 +1324,7 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	-- bottom-centre (a button too near the top of the screen gets the hand
 	-- below it). The Fuse panel's buttons and the contextual button are
 	-- closed / out of reach in this drive.
-	if step.Hand then
+	if step.Hand and not tooSmall then
 		local until_ = os.clock() + 3
 		local tip = TutorialHand.GetTip()
 		while tip == nil and os.clock() < until_ do
@@ -1415,6 +1448,8 @@ local function describeRig(character: Model, rest: Vector3?, held: Vector3?): st
 	table.insert(parts, ("anim %s, pose %s, forceFallback %s"):format(tostring(WeaponAnimator.GetHeldWeapon(character)), tostring(WeaponPose.GetHeldWeapon(character)), tostring(WeaponAnimator.SelfTestIsForcingFallback())))
 	local humanoid = character:FindFirstChildOfClass("Humanoid")
 	local root = character:FindFirstChild("HumanoidRootPart")
+	table.insert(parts, WeaponAnimator.Describe(character))
+	table.insert(parts, "trace: " .. (require(script.Parent.CombatController) :: any).GetHoldTrace())
 	table.insert(parts, ("humanoid %s, platformStand %s, root anchored %s"):format(humanoid and humanoid:GetState().Name or "none", tostring(humanoid and humanoid.PlatformStand), tostring(root and root:IsA("BasePart") and root.Anchored)))
 	return table.concat(parts, "; ")
 end
@@ -1886,8 +1921,38 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	while math.abs(TycoonController.GetLuck() - serverLuck) > 1e-6 and os.clock() - started < 3 do
 		task.wait(0.1)
 	end
+	local clientLuck = TycoonController.GetLuck()
+	if math.abs(clientLuck - serverLuck) > 1e-6 then
+		-- Say so: every % below is then drawn at a luck the server does not have.
+		table.insert(lines, {
+			Ok = false,
+			Name = ("gacha card (%s): the client's luck equals the server's after the sync"):format(label),
+			Detail = ("client x%.4f, server x%.4f"):format(clientLuck, serverLuck),
+		})
+	end
 	Board.RefreshNow()
 	local card = waitForCard(true, 3)
+	-- The card redraws by itself when luck changes (the sync, an event
+	-- attribute, the 0.5 s poll): give it that, then measure what it drew.
+	local redrawBy = os.clock() + 2
+	local function tilesAtServerLuck(): boolean
+		local current = Board.GetCard()
+		if not current then
+			return false
+		end
+		local want = FusionConfig.GetGachaRates(serverLuck)
+		for _, tier in FusionConfig.TierOrder do
+			local tile = (current.Billboard :: BillboardGui):FindFirstChild("Tile_" .. tier, true)
+			local percent = tile and tile:FindFirstChild("Percent")
+			if not (percent and percent:IsA("TextLabel")) or percent.Text ~= FusionConfig.FormatPercent((want[tier] or 0) * 100) .. "%" then
+				return false
+			end
+		end
+		return true
+	end
+	while not tilesAtServerLuck() and os.clock() < redrawBy do
+		task.wait(0.1)
+	end
 	RunService.Heartbeat:Wait()
 	task.wait(0.15) -- the layout settles
 	if not card then
@@ -2963,7 +3028,7 @@ local function probeTutorial(payload: any)
 	else
 		table.insert(lines, { Ok = false, Name = "tutorial probe", Detail = tostring(result) })
 	end
-	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", Lines = lines, Data = reportData })
+	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", ProbeId = payload.ProbeId, Lines = lines, Data = reportData })
 end
 
 local function run(payload: any)
@@ -2982,9 +3047,14 @@ local function run(payload: any)
 		cardLines = {}
 		local lines: { string } = {}
 		local ok, err = pcall(function()
-			testPlacedCards()
-			for _, line in cardLines do
-				table.insert(lines, line)
+			local tooSmall = windowProblem()
+			if tooSmall then
+				table.insert(lines, "FAIL selftest window: " .. tooSmall)
+			else
+				testPlacedCards()
+				for _, line in cardLines do
+					table.insert(lines, line)
+				end
 			end
 			for _, line in testCardMath() do
 				table.insert(lines, line)
@@ -3014,9 +3084,15 @@ local function run(payload: any)
 
 	cardLines = {}
 	textFitLines = {}
-	local panelLines = testPanels()
-	for _, line in textFitLines do
-		table.insert(panelLines, line)
+	local tooSmall = windowProblem()
+	local panelLines: { string } = {}
+	if tooSmall then
+		table.insert(panelLines, "FAIL selftest window: " .. tooSmall)
+	else
+		panelLines = testPanels()
+		for _, line in textFitLines do
+			table.insert(panelLines, line)
+		end
 	end
 	for _, line in hoverLines do
 		table.insert(panelLines, line)
@@ -3024,9 +3100,11 @@ local function run(payload: any)
 	for _, line in testHover("after a pedestal rebuild") do
 		table.insert(panelLines, line)
 	end
-	testPlacedCards()
-	for _, line in cardLines do
-		table.insert(panelLines, line)
+	if not tooSmall then
+		testPlacedCards()
+		for _, line in cardLines do
+			table.insert(panelLines, line)
+		end
 	end
 	for _, line in testCardMath() do
 		table.insert(panelLines, line)
@@ -3062,8 +3140,10 @@ local function run(payload: any)
 	for _, line in shopController.SelfTestDealPath() do
 		table.insert(panelLines, line)
 	end
-	for _, line in testChipJumps() do
-		table.insert(panelLines, line)
+	if not tooSmall then
+		for _, line in testChipJumps() do
+			table.insert(panelLines, line)
+		end
 	end
 	for _, line in testUnlockCard() do
 		table.insert(panelLines, line)

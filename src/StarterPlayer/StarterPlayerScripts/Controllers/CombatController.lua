@@ -932,9 +932,25 @@ end
 -- pose for guns.
 local toolEventsLogged = 0
 
+-- The last few hold / release decisions (/selftest prints them with a
+-- failing weapon line, so a lost hold names who dropped it).
+local holdTrace: { string } = {}
+local function trace(text: string)
+	table.insert(holdTrace, ("%.2f %s"):format(os.clock() % 1000, text))
+	if #holdTrace > 12 then
+		table.remove(holdTrace, 1)
+	end
+end
+
+function CombatController.GetHoldTrace(): string
+	return table.concat(holdTrace, " | ")
+end
+
 -- The arm: an animation track when there is a clip, else the C0 pose.
 local function poseHold(character: Model, weapon: CombatConfig.Weapon)
-	if not WeaponAnimator.Hold(character, weapon) then
+	local usedTrack = WeaponAnimator.Hold(character, weapon)
+	trace(("hold %s %s"):format(weapon.Id, if usedTrack then "track" else "pose"))
+	if not usedTrack then
 		WeaponPose.Hold(character, weapon)
 	end
 end
@@ -979,6 +995,7 @@ local function reconcileHeld(character: Model, preferred: CombatConfig.Weapon?)
 	end
 	local posed = CombatController.GetHeldPoseWeapon(character)
 	if posed and not inHand[posed] then
+		trace("release stale " .. posed)
 		WeaponAnimator.Release(character, posed)
 		WeaponPose.Release(character, posed)
 		posed = CombatController.GetHeldPoseWeapon(character)
@@ -994,9 +1011,13 @@ end
 local function onToolAdded(player: Player, character: Model, tool: Instance)
 	local weapon = if tool:IsA("Tool") then CombatConfig.GetWeapon(tool:GetAttribute("Weapon")) else nil
 	if not weapon then
+		if tool:IsA("Tool") then
+			trace(("added %s without a Weapon attribute"):format(tool.Name))
+		end
 		return
 	end
 	logToolEvent("added", tool)
+	trace("added " .. weapon.Id)
 	reconcileHeld(character, weapon)
 	local root = getRoot(player)
 	if root then
@@ -1012,6 +1033,7 @@ local function onToolRemoved(player: Player, character: Model, tool: Instance)
 	-- Only the removed weapon's own pose goes: on a slot switch the new tool
 	-- was already added and its pose must stay.
 	local removedId = tostring(tool:GetAttribute("Weapon"))
+	trace("removed " .. removedId)
 	WeaponAnimator.Release(character, removedId)
 	WeaponPose.Release(character, removedId)
 	reconcileHeld(character, nil)

@@ -139,9 +139,13 @@ end
 
 --[[ Income + upgrades ----------------------------------------------------------- ]]
 
+-- /selftest: players whose passive income is paused (the Auto pull test
+-- needs cash for exactly two cycles; a rich save earned 90 pulls' worth).
+local incomeFrozen: { [number]: boolean? } = {}
+
 local function onPassiveIncomeTick()
 	for _, player in Players:GetPlayers() do
-		if PlayerDataService.IsDataLoaded(player) then
+		if PlayerDataService.IsDataLoaded(player) and not incomeFrozen[player.UserId] then
 			-- Same formula the HUD's "+$X/s" uses.
 			local cashPerSecond = PlayerDataService.GetPassiveCashPerSecond(player)
 			if cashPerSecond > 0 then
@@ -1215,6 +1219,11 @@ local function stopAutoPull(player: Player, reason: string, cost: number?)
 	if player.Parent then
 		RemoteEvents.AutoPullState:FireClient(player, { On = false, Reason = reason, Cost = cost })
 	end
+end
+
+-- /selftest: pauses (or resumes) the passive income tick for `player`.
+function TycoonService.SelfTestFreezeIncome(player: Player, frozen: boolean)
+	incomeFrozen[player.UserId] = if frozen then true else nil
 end
 
 -- Auto pull: while on, a x10 pull per cycle through the same pull function

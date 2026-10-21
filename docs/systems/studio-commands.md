@@ -139,3 +139,27 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
 - The tutorial `multiplier` skip check backdates the step to "now" first (the
   client probe before it takes longer than the 2.5 s skip window).
+
+## /selftest notes (triage after 444c410: 33 → 77 FAILs)
+
+Most of the 77 were the TEST, not the game:
+- **Probe replies are matched to their request** (`ProbeId`): a tutorial step probe
+  that ran past its timeout used to leave a late report in the queue, and every
+  later request (combat weapons, gacha, auto pull) took the one before it, so
+  the server destroyed a weapon while the client was still measuring it. A step
+  probe now has 75 s (`SELFTEST_STEP_TIMEOUT`); a stale report is dropped.
+- **Window guard.** The client refuses to measure the live screen in a game view
+  under 1000 × 600 (a 2346 × 125 window gave cards negative heights and ~60 FAILs):
+  ONE `FAIL selftest window: …` replaces card placement, text fits, shop chips and
+  the tutorial bar / hand geometry. Enlarge the Studio game window and run again.
+- The explain card's "OK turns on after 1.5 s" reads the card's own clock
+  (`TutorialExplain.GetReadTimes`), not a race against `task.wait`.
+- Auto pull test: passive income is paused (`TycoonService.SelfTestFreezeIncome`)
+  and cash set to exactly two cycles, or a rich save paid for 90 pulls.
+- The remote fuzz parks the daily claim and the gift clock first (a junk
+  `ClaimDaily` is a real claim after 00:00 UTC).
+- A failing weapon line prints `rig weapon …, tracks […*=playing]` and
+  `trace:` (the last hold / release decisions of `CombatController`).
+- The gacha card and the (i) panel also redraw on `AdminLuck` / `EventId`
+  attribute changes (not only the 0.5 s poll); the probe waits for the tiles to
+  show the server's luck, and says so when the client's luck never matches.

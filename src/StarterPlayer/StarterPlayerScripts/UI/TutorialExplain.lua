@@ -47,6 +47,8 @@ local onOk: (() -> ())? = nil
 local closingByOk = false
 local okReady = false -- the read time is over: OK, ✕ and a tap outside work
 local readToken = 0
+local shownAt = 0 -- os.clock() when the read time started (/selftest)
+local readyAt = 0 -- os.clock() when OK turned on, 0 while it is not
 local readFill: Frame
 
 -- A small wobble of the OK: "not yet".
@@ -248,6 +250,8 @@ local function startReadTime()
 	readToken += 1
 	local mine = readToken
 	okReady = false
+	shownAt = os.clock()
+	readyAt = 0
 	UIKit.SetButton(okButton, { Style = "Disabled", TextColor3 = Colors.Muted })
 	readFill.Size = UDim2.fromScale(0, 1)
 	readFill.Visible = true
@@ -257,6 +261,7 @@ local function startReadTime()
 			return
 		end
 		okReady = true
+		readyAt = os.clock()
 		readFill.Visible = false
 		UIKit.SetButton(okButton, { Style = "Green", TextColor3 = Colors.Text })
 	end)
@@ -306,6 +311,12 @@ end
 -- /selftest: whether the read time is over (OK, ✕ and a tap outside work).
 function TutorialExplain.IsOkReady(): boolean
 	return okReady
+end
+
+-- /selftest: when the current card's read time started and when its OK
+-- turned on (0 = not yet): the delay is measured, not raced.
+function TutorialExplain.GetReadTimes(): (number, number)
+	return shownAt, readyAt
 end
 
 -- /selftest: skips the read time and presses OK.

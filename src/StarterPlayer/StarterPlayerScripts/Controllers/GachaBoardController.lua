@@ -1507,6 +1507,12 @@ function GachaBoardController.Init()
 	TycoonController.TycoonChanged:Connect(function()
 		refresh()
 	end)
+	-- Luck also changes without a sync: an event starting or ending, the
+	-- admin luck boost. The card and the (i) panel redraw at once, not at
+	-- the next 0.5 s poll.
+	for _, name in { "AdminLuck", "AdminLuckUntil", "EventId", "EventEndsAt" } do
+		Workspace:GetAttributeChangedSignal(name):Connect(refresh)
+	end
 	RunService.RenderStepped:Connect(stepFrame)
 	-- The phone's 0.8 follows the HUD layout; the anchor itself never changes.
 	UIKit.LayoutChanged:Connect(function()
