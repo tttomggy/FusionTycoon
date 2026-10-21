@@ -308,7 +308,11 @@ local function place()
 	end
 	-- Whole design px, like the /selftest measurement (AbsoluteSize is rounded
 	-- to device pixels, so a fractional plan would sit up to a pixel off).
-	local height = math.round(frame.AbsoluteSize.Y / UIKit.EffectiveScale(frame))
+	-- The BODY's height, not the holder's: the holder auto-sizes around the
+	-- body AND its Shadow child (5 px lower), and FitHeight adds the shadow
+	-- itself, so the holder's height counted it twice (the card sat 2.5-3 px
+	-- off centre).
+	local height = math.round(body.AbsoluteSize.Y / UIKit.EffectiveScale(frame))
 	if height < 1 then
 		return
 	end

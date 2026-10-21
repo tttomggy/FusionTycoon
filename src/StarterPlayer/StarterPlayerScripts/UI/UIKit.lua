@@ -1486,6 +1486,18 @@ function UIKit.IsOverlayNamed(name: string): boolean
 	return openOverlays[name] == true
 end
 
+-- The names of the overlays open now (sorted), for a /selftest Detail.
+function UIKit.GetOpenOverlays(): { string }
+	local names = {}
+	for name, open in openOverlays do
+		if open then
+			table.insert(names, name)
+		end
+	end
+	table.sort(names)
+	return names
+end
+
 function UIKit.IsOverlayOpen(except: string?): boolean
 	for name, open in openOverlays do
 		if open and name ~= except then

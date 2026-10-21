@@ -41,7 +41,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   TrailerController plays the ~30 s video-thumbnail cinematic on that
   client only (local orbs / NPC rigs / cards / `EventController.PreviewLocal`
   skies, clean frame, everything restored), shots and plot-local camera
-  keyframes in `TrailerConfig`; `/trailer <shot>`, `/trailer stop` or F8. **`/selftest`** runs the Bug
+  keyframes in `TrailerConfig`; `/trailer <shot>`, `/trailer stop` or F8. **`/selftest`** runs the Bug 
   Hunt invariants (layouts, NumberFormat, sounds, event schedule, data
   round trip, a junk-remote fuzz with no error / state change, every panel
   at both scales with no leftover instances in the panels' own modal guis,
@@ -130,3 +130,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   built floor, a quest claim refused while incomplete and a power-up
   refused at 0 (the tester's state put back); the fuzz covers ClaimQuest /
   UsePowerUp.
+
+## /selftest notes (triage after 5264754)
+
+- A probe line may carry `Warn = true`: a miss prints `[SelfTest] WARN …` and
+  counts as a PASS (used for the Bat's two reach lines only, approved by eye).
+- The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
+  open overlays, ragdoll, carrying) so a card that stays shut names its gate.
+- The tutorial `multiplier` skip check backdates the step to "now" first (the
+  client probe before it takes longer than the 2.5 s skip window).

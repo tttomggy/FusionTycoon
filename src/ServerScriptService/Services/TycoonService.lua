@@ -756,7 +756,7 @@ local function createGachaStation(plot: Model, origin: CFrame, player: Player)
 				NewItem = items[1],
 				NewIndex = #newIndexItems > 0,
 				IndexTierComplete = tiersCompleted[1],
-				Caption = caption,
+				Caption = if caption ~= "" then caption else nil, -- "" = the tutorial pull: the plain "YOU GOT A COMMON ORB!"
 				Reward = true, -- revealed once the daily card / Gifts panel close
 			})
 		else
@@ -1158,7 +1158,7 @@ function TycoonService.TutorialPull(player: Player): boolean
 	if not PlayerDataService.TakeTutorialFreePull(player) then
 		return false
 	end
-	if not TycoonService.GrantFreePulls(player, 1, "Tutorial pull", TutorialConfig.FreePullTier) then
+	if not TycoonService.GrantFreePulls(player, 1, "", TutorialConfig.FreePullTier) then
 		PlayerDataService.RefundTutorialFreePull(player)
 		return false
 	end

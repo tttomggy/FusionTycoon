@@ -131,6 +131,7 @@ local modal: UIKit.Modal
 local chipBar: ScrollingFrame
 local scroller: ScrollingFrame
 local footer: TextLabel
+local tail: Frame -- blank space after the footer: lets the LAST chip put its header at the top too
 local chipButtons: { [string]: TextButton } = {}
 local headers: { [string]: Frame } = {}
 local sectionOrder: { string } = {}
@@ -1262,9 +1263,27 @@ local function signature(): string
 	return table.concat(parts, "|")
 end
 
+-- Sizes the tail so the last section can scroll its header up to the top
+-- like every other chip (the canvas used to end under it: the Safe chip on a
+-- phone left its header 32 px low).
+local function updateTail()
+	local lastId = sectionOrder[#sectionOrder]
+	local header = if lastId then headers[lastId] else nil
+	if not header or not header.Parent or not tail.Parent then
+		return
+	end
+	local scale = UIKit.EffectiveScale(scroller)
+	local blockPx = footer.AbsolutePosition.Y + footer.AbsoluteSize.Y - header.AbsolutePosition.Y
+	local windowPx = scroller.AbsoluteWindowSize.Y - 2 * SCROLL_PAD_TOP * scale
+	local need = math.max(0, math.ceil((windowPx - blockPx) / scale) - SECTION_GAP)
+	if math.abs(tail.Size.Y.Offset - need) > 0.5 then
+		tail.Size = UDim2.new(1, 0, 0, need)
+	end
+end
+
 local function rebuild()
 	for _, child in scroller:GetChildren() do
-		if child:IsA("GuiObject") and child ~= footer then
+		if child:IsA("GuiObject") and child ~= footer and child ~= tail then
 			child:Destroy()
 		end
 	end
@@ -1311,8 +1330,13 @@ local function rebuild()
 		end
 	end
 	footer.LayoutOrder = order + 1
+	tail.LayoutOrder = order + 2
 	buildChips()
 	builtSignature = signature()
+	task.spawn(function()
+		RunService.Heartbeat:Wait() -- the new rows are laid out first
+		updateTail()
+	end)
 end
 
 -- A banner's live texts: the money line, the worth, the cash amounts in
@@ -1492,11 +1516,20 @@ local function build()
 		Parent = scroller,
 	})
 
+	tail = Instance.new("Frame")
+	tail.Name = "Tail"
+	tail.BackgroundTransparency = 1
+	tail.BorderSizePixel = 0
+	tail.Size = UDim2.new(1, 0, 0, 0)
+	tail.LayoutOrder = 1000
+	tail.Parent = scroller
+
 	scroller:GetPropertyChangedSignal("CanvasPosition"):Connect(onScrolled)
 	-- A phone switch or a resize can change the column counts.
 	local function relayout()
 		if modal.IsOpen() then
 			refresh()
+			task.defer(updateTail)
 		end
 	end
 	UIKit.LayoutChanged:Connect(relayout)

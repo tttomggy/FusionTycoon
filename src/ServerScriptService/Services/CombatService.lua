@@ -608,11 +608,6 @@ function CombatService.RefreshTools(player: Player)
 	giveTools(player)
 end
 
--- /selftest: the RequestWeaponTools handler, called directly.
-function CombatService.SelfTestRequestWeaponTools(player: Player)
-	onRequestWeaponTools(player)
-end
-
 -- Studio /weapons all | reset.
 function CombatService.DebugSetAll(player: Player, all: boolean)
 	if all then
@@ -1036,6 +1031,12 @@ local function onRequestWeaponTools(player: Player)
 	if PlayerDataService.IsDataLoaded(player) then
 		giveTools(player)
 	end
+end
+
+-- /selftest: the RequestWeaponTools handler, called directly. (Below the
+-- handler: a local function is nil to code declared above it.)
+function CombatService.SelfTestRequestWeaponTools(player: Player)
+	onRequestWeaponTools(player)
 end
 
 local function onPlayerAdded(player: Player)

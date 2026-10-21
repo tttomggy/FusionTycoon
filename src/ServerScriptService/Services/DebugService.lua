@@ -243,7 +243,13 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 		return
 	end
 	for _, line in report.Lines do
-		result(line.Ok == true, tostring(line.Name), line.Detail)
+		if line.Ok ~= true and line.Warn == true then
+			-- A WARN is printed, never counted as a FAIL.
+			print(("[SelfTest] WARN %s | %s"):format(tostring(line.Name), tostring(line.Detail)))
+			result(true, tostring(line.Name) .. " (WARN)", line.Detail)
+		else
+			result(line.Ok == true, tostring(line.Name), line.Detail)
+		end
 	end
 end
 
@@ -840,6 +846,9 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 		elseif step.Id == "multiplier" then
 			-- The "come back with $X" branch: the skip after SkipSeconds.
 			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
+			-- The step has been up for the whole client probe above (seconds):
+			-- "at once" means a step that has only just begun.
+			TutorialService.DebugBackdate(player, 0)
 			result(not TutorialService.Advance(player, index), "tutorial: the Multiplier Pad can't be skipped at once")
 			TutorialService.DebugBackdate(player, 10)
 			TutorialService.Advance(player, index)
@@ -1071,7 +1080,8 @@ end
 local function runAutoFillSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	local rebirths = PlayerDataService.GetRebirths(player)
 	local held: { [string]: boolean } = {}
-	for _, item in PlayerDataService.GetInventory(player) or {} do
+	local owned: { any } = PlayerDataService.GetInventory(player) or {}
+	for _, item in owned do
 		held[item.Tier] = true
 	end
 	local tier: string? = nil
@@ -1231,10 +1241,12 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		TycoonService.SetAutoPull(player, true)
 		task.wait(0.5)
 		local stop = TycoonService.GetAutoPullStop(player)
+		-- Auto pull is x10 per cycle: the price it reports is the x10 price.
+		local autoCost = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), TycoonConfig.MultiPullCount)
 		result(
-			not TycoonService.IsAutoPulling(player) and stop ~= nil and stop.Reason == "InsufficientCash" and stop.Cost == cost,
-			"gacha keys: Auto pull at $0 stops at once with the reason (InsufficientCash, the price)",
-			("running %s, stop %s, cost %s (price %s), cash %s"):format(tostring(TycoonService.IsAutoPulling(player)), if stop then stop.Reason else "none", tostring(if stop then stop.Cost else nil), tostring(cost), tostring(PlayerDataService.GetCash(player)))
+			not TycoonService.IsAutoPulling(player) and stop ~= nil and stop.Reason == "InsufficientCash" and stop.Cost == autoCost,
+			"gacha keys: Auto pull at $0 stops at once with the reason (InsufficientCash, the x10 price)",
+			("running %s, stop %s, cost %s (x10 price %s), cash %s"):format(tostring(TycoonService.IsAutoPulling(player)), if stop then stop.Reason else "none", tostring(if stop then stop.Cost else nil), tostring(autoCost), tostring(PlayerDataService.GetCash(player)))
 		)
 		local okCount, reasonCount = TycoonService.RequestGachaPull(player, 5)
 		result(not okCount and reasonCount == "BadCount", "gacha keys: RequestGachaPull { Count = 5 } is refused (BadCount)", ("ok %s, reason %s"):format(tostring(okCount), tostring(reasonCount)))

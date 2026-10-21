@@ -1176,6 +1176,24 @@ local function blocked(): boolean
 	return localPlayer:GetAttribute("HeistTier") ~= nil -- carrying a stolen orb
 end
 
+-- Why the card is held shut right now (nil = nothing blocks it), for
+-- /selftest: the overlays up, a ragdoll, a carried orb.
+function GachaBoardController.GetBlockReason(): string?
+	local reasons: { string } = {}
+	local overlays = UIKit.GetOpenOverlays()
+	if #overlays > 0 then
+		table.insert(reasons, "overlays " .. table.concat(overlays, ","))
+	end
+	local ragdolled = localPlayer:GetAttribute("RagdollUntil")
+	if typeof(ragdolled) == "number" and ragdolled > Workspace:GetServerTimeNow() then
+		table.insert(reasons, "ragdolled")
+	end
+	if localPlayer:GetAttribute("HeistTier") ~= nil then
+		table.insert(reasons, "carrying")
+	end
+	return if #reasons > 0 then table.concat(reasons, "; ") else nil
+end
+
 local function buildCard(pad: BasePart)
 	local anchor = Instance.new("Attachment")
 	anchor.Name = "GachaCardAnchor"

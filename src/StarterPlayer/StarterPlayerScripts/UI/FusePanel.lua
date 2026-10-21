@@ -586,17 +586,16 @@ local function matchingUids(first: any?): { string }
 end
 
 -- Empty chamber and no unmutated item of this tier: the largest group of
--- mutated items sharing one stack (not carried, not on a pedestal), max 6.
--- Ties go to the lower stacked multiplier, so the rarest stack is kept.
+-- mutated items sharing one stack (not carried; displayed ones count, as
+-- everywhere else in the panel, but come last), max 6. Ties go to the lower stacked multiplier, so the rarest stack is kept.
 -- Returns the uids and the stack's label; nothing when no group has 2+.
 local function largestMutatedGroup(): ({ string }, string?)
-	local groups: { { Uids: { string }, Base: string?, Events: { string }?, Value: number } } = {}
+	local groups: { { Uids: { string }, Displayed: { string }, Base: string?, Events: { string }?, Value: number } } = {}
 	for _, item in InventoryController.GetInventory() do
 		if
 			item.Tier == selectedTier
 			and MutationConfig.GetTop(item.Mutation, item.EventMutations) ~= nil
 			and not InventoryController.IsCarried(item)
-			and not InventoryController.IsInUse(item)
 		then
 			local group = nil
 			for _, candidate in groups do
@@ -608,14 +607,19 @@ local function largestMutatedGroup(): ({ string }, string?)
 			if not group then
 				group = {
 					Uids = {},
+					Displayed = {},
 					Base = item.Mutation,
 					Events = item.EventMutations,
 					Value = MutationConfig.GetStackedMultiplier(item.Mutation, item.EventMutations),
 				}
 				table.insert(groups, group)
 			end
-			table.insert(group.Uids, item.Uid)
+			table.insert(if InventoryController.IsInUse(item) then group.Displayed else group.Uids, item.Uid)
 		end
+	end
+	-- Spare copies first, displayed ones after them.
+	for _, group in groups do
+		table.move(group.Displayed, 1, #group.Displayed, #group.Uids + 1, group.Uids)
 	end
 	local best = nil
 	for _, group in groups do

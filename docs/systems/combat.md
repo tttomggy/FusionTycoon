@@ -315,3 +315,9 @@ never walked the chain. Detection is now the server's, the usual Roblox way.
   for the Glove; an arm reaches 2 in): the verdict is `MISS` and Player2 does not move. The held-weapon
   thresholds (clearance 1.5, swing peak 1.5) scale with the avatar's height
   (× height / 5, clamped 0.6-1.0) so the small monkey avatar passes.
+
+**Pose follows the hand.** `CombatController.reconcileHeld` runs on every tool
+Add / Remove: a pose whose Tool left the character is released (all its hold
+and action tracks stop), and the weapon actually in hand is held, whatever
+order a slot switch's events arrived in. `WeaponAnimator.Hold` always stops
+every track of the previous weapon first.

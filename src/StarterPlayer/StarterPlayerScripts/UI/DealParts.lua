@@ -137,7 +137,7 @@ local function buildTile(parent: Instance, part: Part, tileSize: number, z: numb
 		})
 	end
 	-- Its duration or amount, on the tile.
-	UIKit.Label({
+	local amount = UIKit.Label({
 		Name = "Amount",
 		Text = item.Tile or "",
 		Font = Fonts.Display,
@@ -150,6 +150,7 @@ local function buildTile(parent: Instance, part: Part, tileSize: number, z: numb
 		Stroke = 1.5,
 		Parent = box,
 	})
+	UIKit.FitText(amount, 13, 8) -- "20 min cash" in a narrow tile shrinks, never clips
 	if part.Count > 1 then
 		local badge = UIKit.Badge(box, part.Count)
 		badge.Text = "×" .. part.Count

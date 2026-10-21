@@ -28,7 +28,7 @@ and what is lost ("⚠ 1 plain orb mixed in: the Epic comes out plain, not
 Golden…"), those orbs ringed red; all plain → no line. AUTO-FILL only adds
 the first orb's mutation (an empty chamber fills plain orbs; with NO plain
 orb of the tier it fills the largest same-stack group of mutated orbs, not
-carried or displayed, needing 2+, ties to the lower stacked value, toast
+carried (displayed ones allowed, spare copies first), needing 2+, ties to the lower stacked value, toast
 "Filled with GOLDEN orbs (they keep their mutation)", else "Not enough
 matching orbs to fuse" + a tab pulse; `FusionController.GetAutoFill`, AGAIN
 and FUSE ALL still skip mutated items). The fusion

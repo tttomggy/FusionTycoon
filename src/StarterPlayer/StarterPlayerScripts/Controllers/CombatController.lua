@@ -963,6 +963,32 @@ local function logToolEvent(what: string, tool: Instance)
 	print(("[CombatController] tool event: %s %s"):format(what, tool.Name))
 end
 
+-- Makes the pose match the tools actually in `character`'s hand: a pose
+-- whose tool is gone is released (all its hold and action tracks stop), and
+-- the weapon in hand (`preferred` if it is there) is held. Whatever order a
+-- slot switch's Add / Remove fired in, the old weapon's tracks never linger.
+local function reconcileHeld(character: Model, preferred: CombatConfig.Weapon?)
+	local inHand: { [string]: CombatConfig.Weapon } = {}
+	local first: CombatConfig.Weapon? = nil
+	for _, child in character:GetChildren() do
+		local weapon = if child:IsA("Tool") then CombatConfig.GetWeapon(child:GetAttribute("Weapon")) else nil
+		if weapon then
+			inHand[weapon.Id] = weapon
+			first = first or weapon
+		end
+	end
+	local posed = CombatController.GetHeldPoseWeapon(character)
+	if posed and not inHand[posed] then
+		WeaponAnimator.Release(character, posed)
+		WeaponPose.Release(character, posed)
+		posed = CombatController.GetHeldPoseWeapon(character)
+	end
+	local want = if preferred and inHand[preferred.Id] then preferred else first
+	if want and posed ~= want.Id then
+		poseHold(character, want)
+	end
+end
+
 -- A weapon came up in `character`'s hand: the raise, the sound, and the aim
 -- pose for guns.
 local function onToolAdded(player: Player, character: Model, tool: Instance)
@@ -971,7 +997,7 @@ local function onToolAdded(player: Player, character: Model, tool: Instance)
 		return
 	end
 	logToolEvent("added", tool)
-	poseHold(character, weapon)
+	reconcileHeld(character, weapon)
 	local root = getRoot(player)
 	if root then
 		SoundKit.PlayAt("Equip", root.Position)
@@ -988,15 +1014,7 @@ local function onToolRemoved(player: Player, character: Model, tool: Instance)
 	local removedId = tostring(tool:GetAttribute("Weapon"))
 	WeaponAnimator.Release(character, removedId)
 	WeaponPose.Release(character, removedId)
-	-- Whatever order the events fired in, a weapon still in the hand is held.
-	for _, child in character:GetChildren() do
-		if child ~= tool and child:IsA("Tool") then
-			local other = CombatConfig.GetWeapon(child:GetAttribute("Weapon"))
-			if other and CombatController.GetHeldPoseWeapon(character) ~= other.Id then
-				poseHold(character, other)
-			end
-		end
-	end
+	reconcileHeld(character, nil)
 end
 
 local function watchPlayer(player: Player)

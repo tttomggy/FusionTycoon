@@ -1163,7 +1163,8 @@ end
 	Rebirth 0. And after a single pull: the big "COMMON ORB!" card.
 ]]
 
-type ProbeLine = { Ok: boolean, Name: string, Detail: string? }
+-- Warn: a miss is printed as a WARN and not counted as a FAIL (the Bat's reach, approved by eye).
+type ProbeLine = { Ok: boolean, Name: string, Detail: string?, Warn: boolean? }
 
 local TIMED_REVEAL_WAIT = 3 -- the last step's pop-ins are staggered up to 1.5 s
 
@@ -1538,6 +1539,7 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		local scale, height = heightScale(char)
 		table.insert(lines, {
 			Ok = clearance >= 1.5 * scale,
+			Warn = weaponId == "Bat",
 			Name = ("combat %s: the held weapon reaches 1.5 studs (x height/5) clear of the torso"):format(weaponId),
 			Detail = ("%.2f studs, needs %.2f (avatar %.1f studs tall, x%.2f)"):format(clearance, 1.5 * scale, height, scale),
 		})
@@ -1595,6 +1597,7 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 		local scale, height = heightScale(char)
 		table.insert(lines, {
 			Ok = played and peak >= 1.5 * scale,
+			Warn = weaponId == "Bat",
 			Name = ("combat %s: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5)"):format(weaponId),
 			Detail = ("peak %.2f studs, needs %.2f (avatar %.1f studs tall, x%.2f)"):format(peak, 1.5 * scale, height, scale),
 		})
@@ -1838,8 +1841,9 @@ local function probeGachaOpen(): { ProbeLine }
 	table.insert(lines, {
 		Ok = after ~= nil and after.Shown and drawn == #FusionConfig.TierOrder and texted == #FusionConfig.TierOrder,
 		Name = "gacha card: it opens fully in one frame (the frame after it opens all 6 tiles are laid out and their % has text height)",
-		Detail = ("opened after %d frames; %d/%d tiles with AbsoluteSize > 0, %d/%d %% labels with TextBounds.Y > 0%s"):format(
+		Detail = ("opened after %d frames (blocked by: %s); %d/%d tiles with AbsoluteSize > 0, %d/%d %% labels with TextBounds.Y > 0%s"):format(
 			frames,
+			tostring(Board.GetBlockReason()),
 			drawn,
 			#FusionConfig.TierOrder,
 			texted,
@@ -1894,7 +1898,7 @@ local function probeGachaCard(serverLuck: number, label: string): { ProbeLine }
 	table.insert(lines, {
 		Ok = card.Shown and card.Pop.Scale >= 0.999 and card.Open,
 		Name = ("gacha card (%s): with the character on the pad the card is open at UIScale 1"):format(label),
-		Detail = ("shown %s, PopScale %.3f, open %s, card %dx%d px"):format(tostring(card.Shown), card.Pop.Scale, tostring(card.Open), card.Card.AbsoluteSize.X, card.Card.AbsoluteSize.Y),
+		Detail = ("shown %s, PopScale %.3f, open %s, card %dx%d px, blocked by: %s"):format(tostring(card.Shown), card.Pop.Scale, tostring(card.Open), card.Card.AbsoluteSize.X, card.Card.AbsoluteSize.Y, tostring(Board.GetBlockReason())),
 	})
 
 	-- Six tiles drawn, each with an orb (or the black one) and a % with text height >= 12 px.

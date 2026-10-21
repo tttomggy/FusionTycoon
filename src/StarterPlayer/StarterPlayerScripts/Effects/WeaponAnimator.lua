@@ -195,9 +195,7 @@ function WeaponAnimator.Hold(character: Model, weapon: CombatConfig.Weapon): boo
 	if not clips or not rig then
 		return false
 	end
-	if rig.WeaponId then
-		stopRig(rig)
-	end
+	stopRig(rig) -- every hold / action track of the previous weapon, held or not
 	local track = getTrack(rig, clips.Hold)
 	if not track then
 		if not warned and not forceFallback then

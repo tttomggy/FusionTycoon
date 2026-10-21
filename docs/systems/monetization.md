@@ -90,7 +90,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     VALUE" = most $ per Robux, `ShopConfig.GetBestValueKey`, live prices
     only, else no tag), 🍀 Luck, 🛡 Safe ("SAVE N%" live); empty sections and
     their chips are left out; the honest footer. A chip tweens the scroll
-    (never filters); the chip of the section on screen is green. Tiles 4
+    (never filters); the chip of the section on screen is green. A blank tail after the footer is sized so the LAST chip can put its header at the top too. Tiles 4
     per row (2 on phones / under 560 px), the section's colour, a green
     buy button with the live price, hover 1.03, press bounce. Icons: the
     store page's `IconImageAssetId` (`ShopPrices.GetIcon`, same cached

@@ -455,11 +455,13 @@ local function fillTooltip(cell: Cell)
 	tooltipTime.Text = cell.State.Tail
 end
 
--- To the RIGHT of the shown icon (the empty floor beside the tray), centred
--- on the badge, its arrow pointing left at the badge's centre; clamped inside
--- the screen. If it would run past the right edge it opens ABOVE the icon
--- instead (arrow down). Runs every frame while open (the card's size settles
--- a frame after its text).
+-- Candidates, first that clears every HUD rect and stays on screen wins:
+-- 1. RIGHT of the shown icon (the empty floor beside the tray), centred on
+--    the badge, its arrow pointing left; 2. ABOVE-RIGHT: over the icon,
+--    pushed right so it clears the left column; 3. ABOVE, centred on the
+--    icon, the arrow down. When none is clear the first one on screen is
+--    used. Runs every frame while open (the card's size settles a frame
+--    after its text).
 local function placeTooltip()
 	local id = shownId
 	local cell = if id then cells[id] else nil
@@ -476,9 +478,58 @@ local function placeTooltip()
 	local rightEdge = (circlePosition.X + circleSize.X) / scale
 	local width, height = tooltip.AbsoluteSize.X / scale, tooltip.AbsoluteSize.Y / scale
 	local margin = TOOLTIP_ARROW + 6
-	local left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2
-	if left + width + TOOLTIP_EDGE <= viewX then
-		local top = math.clamp(centreY - height / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewY - height - TOOLTIP_EDGE))
+	local aboveBottom = circlePosition.Y / scale - TOOLTIP_GAP - TOOLTIP_ARROW / 2
+	local inset = GuiService:GetGuiInset().Y
+	local obstacles: { [string]: Rect } = if hooks then hooks.GetObstacles() else {}
+
+	-- A candidate: Side "Right" (Left, Top) or "Above" (Left; bottom = aboveBottom).
+	local function rectOf(side: string, left: number, top: number): (Vector2, Vector2)
+		local topY = if side == "Right" then top else aboveBottom - height
+		return Vector2.new(left, topY), Vector2.new(width, height)
+	end
+	local function onScreen(position: Vector2): boolean
+		return position.X >= TOOLTIP_EDGE
+			and position.Y >= TOOLTIP_EDGE
+			and position.X + width + TOOLTIP_EDGE <= viewX
+			and position.Y + height + TOOLTIP_EDGE <= viewY
+	end
+	local function clear(position: Vector2): boolean
+		for _, rect in obstacles do
+			local ox = math.min((position.X + width) * scale, rect.Position.X + rect.Size.X) - math.max(position.X * scale, rect.Position.X)
+			local oy = math.min((position.Y + height) * scale + inset, rect.Position.Y + rect.Size.Y) - math.max(position.Y * scale + inset, rect.Position.Y)
+			if ox > 1 and oy > 1 then
+				return false
+			end
+		end
+		return true
+	end
+
+	local rightTop = math.clamp(centreY - height / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewY - height - TOOLTIP_EDGE))
+	local candidates = {
+		{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = rightTop },
+		{ Side = "Above", Left = math.clamp(rightEdge - 24, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE)), Top = 0 },
+		{ Side = "Above", Left = math.clamp(centreX - width / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE)), Top = 0 },
+	}
+	local chosen = nil
+	for _, candidate in candidates do
+		local position = rectOf(candidate.Side, candidate.Left, candidate.Top)
+		if onScreen(position) and clear(position) then
+			chosen = candidate
+			break
+		end
+	end
+	if not chosen then
+		for _, candidate in candidates do
+			if onScreen((rectOf(candidate.Side, candidate.Left, candidate.Top))) then
+				chosen = candidate
+				break
+			end
+		end
+	end
+	chosen = chosen or candidates[3]
+
+	if chosen.Side == "Right" then
+		local left, top = chosen.Left, chosen.Top
 		local arrowY = top + math.clamp(centreY - top, margin, math.max(margin, height - margin))
 		tooltip.AnchorPoint = Vector2.new(0, 0)
 		tooltip.Position = UDim2.fromOffset(left, top)
@@ -486,14 +537,13 @@ local function placeTooltip()
 		tooltipArrow.Position = UDim2.fromOffset(left, arrowY)
 		tooltipCover.Position = UDim2.fromOffset(left, arrowY)
 	else
-		left = math.clamp(centreX - width / 2, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, viewX - width - TOOLTIP_EDGE))
-		local bottom = circlePosition.Y / scale - TOOLTIP_GAP - TOOLTIP_ARROW / 2
+		local left = chosen.Left
 		local arrowX = math.clamp(centreX - left, margin, math.max(margin, width - margin))
 		tooltip.AnchorPoint = Vector2.new(0, 1)
-		tooltip.Position = UDim2.fromOffset(left, bottom)
+		tooltip.Position = UDim2.fromOffset(left, aboveBottom)
 		tooltipCover.Size = UDim2.fromOffset(TOOLTIP_ARROW, 6)
-		tooltipArrow.Position = UDim2.fromOffset(left + arrowX, bottom)
-		tooltipCover.Position = UDim2.fromOffset(left + arrowX, bottom)
+		tooltipArrow.Position = UDim2.fromOffset(left + arrowX, aboveBottom)
+		tooltipCover.Position = UDim2.fromOffset(left + arrowX, aboveBottom)
 	end
 	tooltip.Visible = true
 	tooltipArrow.Visible = true
