@@ -51,10 +51,37 @@ On the client, `CombatController.toggleEquip` silently returns when
    join's data load in Studio so the bug can be reproduced. Optional, but
    only if it's small.
 
+## Part 2: AUTO-FILL does nothing when only mutated orbs are left
+
+Harris's live screenshot shows the Common tab at **60**, and every card is
+mutated: Golden Spark Cell, Golden Copper Bolt, Golden Glass Shard (Golden
+Rain gives a lot of these). With an empty chamber, `FusePanel.matchingUids`
+→ `FusionController.GetAutoFill` takes **unmutated items only**. It finds
+none, so the button silently does nothing. The rule (never drag a mutation
+down) is right; the dead button is wrong.
+
+Fix, in `FusePanel.autoFill` with an empty chamber:
+1. Unmutated items exist → no change.
+2. None, but mutated items of this tier exist → group them by stack
+   (`MutationConfig.SameStack`, not carried, not displayed). Fill with the
+   **largest group** (ties: the lower mutation value first, so the rarest
+   stack is kept). Up to `MaxFusionInputs`, and only if that group has ≥ 2.
+   - Toast: "Filled with GOLDEN orbs (they keep their mutation)".
+3. No group has ≥ 2 → toast "Not enough matching orbs to fuse", and pulse
+   the tab count. Never a silent no-op.
+4. Don't change `FusionController.GetAutoFill` itself: AGAIN and FUSE ALL
+   keep skipping mutated items.
+5. **Selftest:** give 6 Golden Commons and 0 plain Commons, then press
+   AUTO-FILL on Common: 6 selected, all the same stack, and the toast shown.
+   Give 1 Golden and 1 Rainbow only: 0 selected, and the "not enough" toast.
+
 ## Check
 
 - `luau-lsp analyze` shows no new errors. `/selftest` has no FAILs.
-- Update `docs/systems/combat.md` and `architecture.md` (remote).
+- Update `docs/systems/combat.md`, `items-and-fusion.md` (auto-fill rule)
+  and `architecture.md` (remote).
+- Harris: open Fuse → Common with only Golden orbs, press AUTO-FILL, and it
+  fills with 6 Golden ones.
 - Harris, in the **live** game after publishing: join, and pressing 1 equips
   the Bat right away, without a reset.
 - Say which branch you pushed to.
