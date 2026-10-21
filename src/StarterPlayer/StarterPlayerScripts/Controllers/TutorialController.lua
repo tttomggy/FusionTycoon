@@ -81,7 +81,9 @@ local ARRIVE_STUDS = 8 -- inside this the distance is dropped (you're there)
 local PEDESTAL_POP_OFFSET = 6 -- studs above a pedestal for "+$X/s"
 local RESEND_SECONDS = 2
 local WAIT_STEP = 0.1 -- how often a wait looks again
-local QUIET_TIMEOUT = 120 -- a panel the player leaves open cannot stall the tutorial for ever
+local QUIET_TIMEOUT = 20 -- a panel the player leaves open holds the next step this long, not for ever
+local CARD_SHOW_TIMEOUT = 3 -- an explain card that is not drawn by then is dropped (warn), the banner goes on
+local CARD_MAX_SECONDS = 90 -- a card nobody answers closes by itself after this long
 local SPLASH_TIMEOUT = 4
 local NICE_TEXT = "Nice!"
 local EXPLAIN_OVERLAY = "TutorialExplain" -- the card's own UIKit overlay name
@@ -271,6 +273,13 @@ local function screenQuiet(): boolean
 		and not TutorialCards.IsOpen()
 end
 
+-- The server moved past a step the player was never shown, and it is a step
+-- the server skips when the save already satisfies it (TutorialConfig `Skip`:
+-- the Multiplier already bought): nothing is left to teach or to do.
+local function serverSkipped(index: number, step: TutorialConfig.Step): boolean
+	return active and step.Skip ~= nil and serverStep > index
+end
+
 local function waitFor(mine: number, predicate: () -> boolean, timeout: number?): boolean
 	local started = os.clock()
 	while runnerSeq == mine do
@@ -328,32 +337,61 @@ local function beginGuidance(index: number)
 	guideUp = true
 end
 
--- The explain card: true once the player pressed OK (or closed it).
-local function showCard(step: TutorialConfig.Step, mine: number): boolean
+-- The explain card is on screen: open and with a size you can see.
+local function cardDrawn(): boolean
+	local body = TutorialExplain.GetBody()
+	return TutorialExplain.IsOpen() and body ~= nil and body.AbsoluteSize.X > 0 and body.AbsoluteSize.Y > 0
+end
+
+-- The explain card. Returns (closed, drawn): `closed` is true once the player
+-- pressed OK (or closed it); `drawn` is false when the card never showed
+-- (warned, the step goes on to its banner). A card the server moved past, or
+-- that nobody answers for CARD_MAX_SECONDS, is closed without an OK.
+local function showCard(step: TutorialConfig.Step, index: number, mine: number): (boolean, boolean)
 	local card = step.Card
 	if not card then
-		return true
+		return true, true
 	end
 	local model = if card.Model then GoalMarkerController.ResolvePlotTarget(card.Model) else nil
 	local closed = false
 	TutorialExplain.Show(card, model, function()
 		closed = true
 	end)
+	local drawn = closed or waitFor(mine, function()
+		return closed or cardDrawn()
+	end, CARD_SHOW_TIMEOUT)
+	if runnerSeq ~= mine then
+		return closed, true
+	end
+	if not drawn then
+		warn(("[Tutorial] step %d (%s): its explain card did not show within %d s; going on to the banner"):format(index, step.Id, CARD_SHOW_TIMEOUT))
+		TutorialExplain.Close()
+		return false, false
+	end
 	waitFor(mine, function()
-		return closed or not active
-	end)
-	return closed
+		return closed or not active or serverStep > index
+	end, CARD_MAX_SECONDS)
+	if not closed and runnerSeq == mine then
+		TutorialExplain.Close()
+	end
+	return closed, true
 end
 
 -- Plays step `index` from its card to the pause after it. False: the runner
--- was stopped (a restart, the tutorial ended).
-local function playStep(index: number, mine: number): boolean
+-- was stopped (a restart, the tutorial ended). The second value is true when
+-- the server moved past the step (skipped, or while its card was up): the
+-- runner then goes to the server's step, not to index + 1.
+local function playStep(index: number, mine: number): (boolean, boolean?)
 	local step = TutorialConfig.GetStep(index)
 	if not step then
 		return false
 	end
 	presented = index
 	begun = math.max(begun, index)
+	if serverSkipped(index, step) then
+		-- The server skipped it (already satisfied): present the server's step.
+		return true, true
+	end
 	stepStart = os.clock()
 	advanceSentFor = nil
 	openSeen = false
@@ -366,16 +404,26 @@ local function playStep(index: number, mine: number): boolean
 	-- 1. The explain card, on a quiet screen (after CardDelay: INDEX has
 	-- popped in by then).
 	if step.Card then
-		waitFor(mine, screenQuiet, QUIET_TIMEOUT)
+		waitFor(mine, function()
+			return screenQuiet() or serverSkipped(index, step)
+		end, QUIET_TIMEOUT)
 		if (step.CardDelay or 0) > 0 and runnerSeq == mine then
 			task.wait(step.CardDelay)
 		end
 		if runnerSeq ~= mine then
 			return false
 		end
-		showCard(step, mine)
+		if serverSkipped(index, step) then
+			return true, true
+		end
+		local closed = showCard(step, index, mine)
 		if runnerSeq ~= mine then
 			return false
+		end
+		-- The server moved on while the card was up and the player never
+		-- answered it: drop it and present the server's step.
+		if not closed and active and serverStep > index then
+			return true, true
 		end
 		-- The action may have happened while the card was up.
 		already = isStepDone(index)
@@ -463,10 +511,14 @@ local function runTutorial(mine: number)
 		if index > #TutorialConfig.Steps then
 			break
 		end
-		if not playStep(index, mine) then
+		local played, jumped = playStep(index, mine)
+		if not played then
 			break
 		end
-		lastPlayed = index
+		lastPlayed = if jumped then math.max(index, serverStep - 1) else index
+		if jumped then
+			begun = math.max(begun, lastPlayed)
+		end
 	end
 	if runnerSeq == mine then
 		runnerRunning = false

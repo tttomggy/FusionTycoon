@@ -156,10 +156,25 @@ steps ahead of what the player has been shown; the client plays
    is over, then `SettleSeconds` (0.8 s) with nothing new on screen. Only
    then the next step's card.
 
-A step the player already did early (the Multiplier bought during the Index
-step) still gets its card; then the bar shows its instruction and completes
-at once with **"Already done ✓"** (`AlreadyDoneText`). Never several steps
-in one go. Steps only `sendAdvance` when they are the server's current step.
+A step the player already did early still gets its card; then the bar shows
+its instruction and completes at once with **"Already done ✓"**
+(`AlreadyDoneText`). Never several steps in one go.
+
+**The presenter never waits for ever, and follows the server.**
+- A step the server **skipped** because the save already satisfies it
+  (`Step.Skip`: the Multiplier Pad bought during the Index step) is skipped by
+  the client too: no card, no "Already done" bar; it presents the server's
+  step. (Before, its card waited for an OK; `/selftest` never pressed it, so
+  `events`, `rebirth` and `finish` were "never presented" for 30 s each.) A
+  card whose step the server moves past while it is up, and that the player did
+  not answer, is closed and the server's step is presented.
+- An explain card that is not drawn (open, with a size you can see) within 3 s
+  (`CARD_SHOW_TIMEOUT`) logs `[Tutorial] step n (id): its explain card did not
+  show …`, is closed, and the step goes on to its banner. A card nobody answers
+  closes by itself after 90 s (`CARD_MAX_SECONDS`). A panel the player leaves
+  open holds the next step for at most 20 s (`QUIET_TIMEOUT`).
+- Waiting for the player's real action (the banner phase) is the tutorial
+  itself and stays; the server's step is the clock. Steps only `sendAdvance` when they are the server's current step.
 `TutorialConfig.Steps[].HoldSeconds` (Pedestals, 4 s): after OK the banner,
 path and "+$X/s" stay up at least that long, and Timed/Hold steps wait for
 any open card. "Ready" is 4 s. The server stamps `enteredAt` when a step

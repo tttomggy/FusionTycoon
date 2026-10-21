@@ -46,8 +46,10 @@
 
 	The tooltip tries LEFT of the icon, ABOVE-LEFT, BELOW-LEFT, then centred
 	ABOVE, centred BELOW and RIGHT, each against every HUD rect; none clear ->
-	the card narrows to 140 px, and with still none the one that overlaps
-	least is used.
+	the card narrows to 160 px (its minimum width: the text shrinks, the
+	card never gets narrower), and with still none the one that overlaps
+	least is used; with no side on screen at all it goes under the icon,
+	clamped on screen.
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
@@ -86,7 +88,7 @@ local SHRINK_SECONDS = 0.15
 local TICK_SECONDS = 0.25
 local TOOLTIP_GAP = 6
 local TOOLTIP_MAX_WIDTH = 220
-local TOOLTIP_MIN_WIDTH = 140 -- the narrow card used when no spot is clear at full width
+local TOOLTIP_MIN_WIDTH = 160 -- the card is never narrower (the narrow card used when no spot is clear at full width)
 local TOOLTIP_TEXT_SIZE = 14
 local TOOLTIP_PAD = 10
 local TOOLTIP_ARROW = 12 -- the rotated square that points at the icon
@@ -619,7 +621,10 @@ end
 -- None clear: the on-screen one that overlaps least (the caller narrows
 -- the card first).
 function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }, circle: Rect, size: Vector2): TooltipPlan
-	local width, height = size.X, size.Y
+	-- A card is never narrower than TOOLTIP_MIN_WIDTH (a 34 px reading was a
+	-- wrap measured before the card had a width; it planned a 532 px column).
+	local width, height = math.max(size.X, TOOLTIP_MIN_WIDTH), size.Y
+	size = Vector2.new(width, height)
 	local centreX = circle.Position.X + circle.Size.X / 2
 	local centreY = circle.Position.Y + circle.Size.Y / 2
 	local rightEdge = circle.Position.X + circle.Size.X
@@ -641,7 +646,7 @@ function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }
 	local chosen: TooltipPlan? = nil
 	local fallback: TooltipPlan? = nil
 	local lastResort: TooltipPlan? = nil
-	for index, candidate in candidates do
+	for _, candidate in candidates do
 		local rect: Rect = { Position = Vector2.new(candidate.Left, candidate.Top), Size = size }
 		local onScreen = rect.Position.X >= TOOLTIP_EDGE
 			and rect.Position.Y >= TOOLTIP_EDGE
@@ -664,10 +669,21 @@ function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }
 		if onScreen and (not fallback or area < fallback.Overlap) then
 			fallback = plan
 		end
-		-- The last resort: the first "Above" card, on screen or not.
-		if index == 2 then
-			lastResort = plan
-		end
+	end
+	if not chosen and not fallback then
+		-- No side is on screen: under the icon, clamped on screen.
+		local top = math.clamp(belowTop, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, view.Y - height - TOOLTIP_EDGE))
+		local left = clampX(centreX - width / 2)
+		local hits, area = touching({ Position = Vector2.new(left, top), Size = size }, obstacles)
+		lastResort = {
+			Side = "Below",
+			Left = left,
+			Top = top,
+			AboveBottom = aboveBottom,
+			Overlap = area,
+			OnScreen = left >= TOOLTIP_EDGE and top >= TOOLTIP_EDGE and left + width + TOOLTIP_EDGE <= view.X and top + height + TOOLTIP_EDGE <= view.Y,
+			Hits = hits,
+		}
 	end
 	return (chosen or fallback or lastResort) :: TooltipPlan
 end
@@ -1051,6 +1067,9 @@ function EffectsTray.GetCells(): { CellView }
 end
 
 -- /selftest: the tooltip layer's DisplayOrder (it must be above the HUD's).
+-- /selftest: the card's minimum width (logical px).
+EffectsTray.TOOLTIP_MIN_WIDTH = TOOLTIP_MIN_WIDTH
+
 function EffectsTray.GetTooltipDisplayOrder(): number
 	return tooltipGui.DisplayOrder
 end
@@ -1166,6 +1185,9 @@ function EffectsTray.Init(hudHooks: Hooks)
 		-- Wraps at the card's max width less its padding, shrinks to short text.
 		local limit = Instance.new("UISizeConstraint")
 		limit.MaxSize = Vector2.new(TOOLTIP_MAX_WIDTH - 2 * (TOOLTIP_PAD + 2), math.huge)
+		-- Never narrower than the card's minimum less its padding: the text
+		-- shrinks, the width does not (a 34 px wrap was a 532 px tall column).
+		limit.MinSize = Vector2.new(TOOLTIP_MIN_WIDTH - 2 * (TOOLTIP_PAD + 2), 0)
 		limit.Parent = label
 		table.insert(tooltipLimits, limit)
 		return label

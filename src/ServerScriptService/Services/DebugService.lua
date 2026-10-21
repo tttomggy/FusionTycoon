@@ -790,6 +790,11 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 		return
 	end
 	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
+	-- The Multiplier step is skipped by the server when the Pad is already
+	-- bought (a tester's save often has it): the drive needs it at level 0 so
+	-- the step is reached and probed; the level is put back after.
+	local savedMultiplier = PlayerDataService.GetCashMultiplierLevel(player)
+	PlayerDataService.SetCashMultiplierLevel(player, 0)
 	local popups = 0
 	local watch = RemoteEvents.ShopAnalytics.OnServerEvent:Connect(function(sender: Player, payload: unknown)
 		local event = typeof(payload) == "table" and (payload :: any).Event
@@ -894,6 +899,24 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	task.wait(1)
 	watch:Disconnect()
 	result(popups == 0, "tutorial: no shop or deal pop-up while it runs", ("%d shown"):format(popups))
+
+	-- A step the server skips (the Multiplier Pad already bought) is skipped by
+	-- the presenter too: it goes from the Index to the Lab weather, no card or
+	-- banner for the Multiplier (the probe's "caught up" line fails if it waits).
+	local indexStep, multiplierStep, eventsStep = TutorialConfig.IndexOf("index"), TutorialConfig.IndexOf("multiplier"), TutorialConfig.IndexOf("events")
+	if indexStep and multiplierStep and eventsStep then
+		PlayerDataService.SetCashMultiplierLevel(player, 1)
+		TutorialService.DebugSetStep(player, indexStep)
+		PlayerDataService.SyncTycoon(player)
+		tutorialProbe(player, { Kind = "Step", StepIndex = indexStep, StepId = "index" }, result)
+		TutorialService.DebugBackdate(player, 10)
+		TutorialService.Advance(player, indexStep)
+		PlayerDataService.SyncTycoon(player)
+		local skipped = tutorial()
+		result(skipped ~= nil and skipped.Step == eventsStep, "tutorial: the server skips the Multiplier step when the Pad is already bought", ("at step %s"):format(tostring(skipped and skipped.Step)))
+		tutorialProbe(player, { Kind = "Step", StepIndex = eventsStep, StepId = "events" }, result)
+	end
+	PlayerDataService.SetCashMultiplierLevel(player, savedMultiplier)
 
 	TutorialService.DebugSetStep(player, 6)
 	local resumeOk, resumeDetail = PlayerDataService.SelfTestTutorialRoundTrip(player)

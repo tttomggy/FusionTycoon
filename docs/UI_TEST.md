@@ -1749,6 +1749,12 @@ from spawn to the end reading only the banner.**
 - [ ] Leave mid-way (e.g. at Fuse) with `FT_StudioSaves`: rejoining shows
   the same step's banner (after ~1 s); steps already done (claimed,
   upgraded) are skipped; the HUD is the set for that step.
+- [ ] **Phone (iPhone XR emulator), `/tutorial reset`:** play Index ->
+  Multiplier -> Lab weather -> Rebirth -> You're ready by hand: every card has
+  its OK, the banner follows, nothing waits more than a few seconds. Buy the
+  Multiplier Pad during the Index step: the Multiplier card is skipped and the
+  Lab weather card follows. A card that does not show logs `[Tutorial] ... did
+  not show` and the banner goes on.
 - [ ] A Tutorial 1 save (before this PR) in the middle of its 14 steps
   resumes at the nearest new step; one that finished stays finished.
 - [ ] An old save with Rebirth 1+ (or > 20 pulls): no tutorial, everything

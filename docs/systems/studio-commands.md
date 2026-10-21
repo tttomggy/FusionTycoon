@@ -137,6 +137,15 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   counts as a PASS (used for the Bat's two reach lines only, approved by eye).
 - The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
+- **The tutorial drive sets the Multiplier Pad to level 0** (put back after):
+  with the Pad bought the server skips the Multiplier step (`Skip =
+  "MultiplierBought"`, no `TutorialStep = 8`), so the drive would never probe
+  it. A second short run buys the Pad on purpose and checks the server goes
+  Index -> Lab weather and the presenter follows. Every step probe adds "the
+  presenter caught up with the server's step": the step on screen is the
+  server's within `BannerMinSeconds + NiceSeconds + SettleSeconds + CardDelay +
+  2 s` (the presenter's own pacing; 5 s is not reachable with the 3 s minimum
+  banner).
 - The tutorial `multiplier` skip check backdates the step to "now" first (the
   client probe before it takes longer than the 2.5 s skip window).
 
@@ -191,7 +200,10 @@ Most of the 77 were the TEST, not the game:
   tray is a column on the right edge from 35% of the height; on a phone it
   stops 12 px above the jump button (`EffectsTray.JumpRectFor`) and wraps left;
   the tooltip tries left, above-left, below-left, above, below, right, then
-  narrows to 140 px. The old code compared screen-space tray rects with obstacle
+  narrows to 160 px, its minimum width (the label wrap has a MinSize too: a
+  live reading of "34 × 532" was a wrap measured before the card had a width);
+  with no side on screen it goes under the icon, clamped on screen. The old
+  code compared screen-space tray rects with obstacle
   rects shifted by the top-bar inset; both are in one space now.
 - The effects-tray position checks skip in a too-small window like the others.
 

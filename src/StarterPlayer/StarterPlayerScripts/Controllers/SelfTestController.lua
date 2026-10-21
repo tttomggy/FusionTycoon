@@ -1184,6 +1184,7 @@ type ProbeLine = { Ok: boolean, Name: string, Detail: string?, Warn: boolean? }
 local TIMED_REVEAL_WAIT = 3 -- the last step's pop-ins are staggered up to 1.5 s
 
 local PRESENT_WAIT = 30
+local CATCH_UP_SLACK = 2 -- seconds on top of the presenter's own pacing
 
 -- A dim backdrop must have a card with it: asks UIKit which modals dim the
 -- screen without a card on screen (a moment later, since a card that just
@@ -1222,6 +1223,17 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	if not presented() or not step then
 		return { { Ok = false, Name = ("tutorial %s: its banner shows"):format(stepId), Detail = "never presented" } }
 	end
+	-- The presenter follows the server: the server's step moved just before
+	-- this probe, so the step on screen must be this one within the presenter's
+	-- own pacing (the last step's minimum banner time, "Nice!", the pause) plus
+	-- the card's delay and a little slack.
+	local caughtUp = os.clock() - started
+	local allowed = TutorialConfig.BannerMinSeconds + TutorialConfig.NiceSeconds + TutorialConfig.SettleSeconds + (step.CardDelay or 0) + CATCH_UP_SLACK
+	table.insert(lines, {
+		Ok = caughtUp <= allowed,
+		Name = ("tutorial %s: the presenter caught up with the server's step"):format(stepId),
+		Detail = ("%.1f s after the server moved, allowed %.1f s"):format(caughtUp, allowed),
+	})
 	local TutorialExplain = require(UI.TutorialExplain) :: any
 	local TutorialHand = require(UI.TutorialHand) :: any
 	-- The explain card: a step that introduces something opens it first
@@ -2873,12 +2885,17 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				Detail = table.concat(edgeProblems, "; "),
 			})
 			local size = live.Size / live.Scale
+			table.insert(lines, {
+				Ok = size.X >= EffectsTray.TOOLTIP_MIN_WIDTH - 1 and size.Y < view.Y,
+				Name = ("effects tray plan (%s): the Luck tooltip is at least %d px wide and shorter than the screen"):format(label, EffectsTray.TOOLTIP_MIN_WIDTH),
+				Detail = ("card %dx%d"):format(size.X, size.Y),
+			})
 			local circle = EffectsTray.CircleRectFor(plan, 1)
 			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
 			local narrow = false
 			if tip.Overlap > 0 or not tip.OnScreen then
-				-- The live card narrows to 140 px when nothing is clear (taller by the wrap).
-				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(140, size.Y * 1.6))
+				-- The live card narrows to its minimum width when nothing is clear (taller by the wrap).
+				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(EffectsTray.TOOLTIP_MIN_WIDTH, size.Y * 1.6))
 				narrow = true
 			end
 			table.insert(lines, {
