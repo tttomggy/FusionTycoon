@@ -1,0 +1,85 @@
+# /selftest on 7dcb467, 2026-10-21. Run 1 (00:53, game view 1877x100): 297 passed, 4 failed. Run 2 (00:58, 1251x666): 344 passed, 37 failed.
+## Run 1 FAIL/WARN
+  00:53:30.170  [SelfTest] FAIL selftest window: the game view is 1877 x 100, the live-screen checks need at least 1000 x 600 (Studio: enlarge the game window, undock Output / other panels, then run /selftest again)  -  Server - DebugService:1558
+  00:54:16.017  [SelfTest] FAIL tutorial multiplier: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 328x-184, text height 48  -  Server - DebugService:1558
+  00:54:34.449  [SelfTest] WARN combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso | 0.86 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  00:54:34.449  [SelfTest] PASS combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso (WARN)  -  Server - DebugService:1555
+  00:54:34.449  [SelfTest] WARN combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) | peak 1.15 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  00:54:34.449  [SelfTest] PASS combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) (WARN)  -  Server - DebugService:1555
+  00:55:30.947  [SelfTest] FAIL effects tray (desktop, window 1877 × 100): in the bottom-left quarter: Luck at 308,-20, SafeFusion at 420,-20, SpeedBoots at 364,-20  -  Server - DebugService:1558
+  00:55:30.948  [SelfTest] FAIL effects tray (phone, window 1877 × 100): in the bottom-left quarter: Luck at 244,-7, SafeFusion at 333,-7, SpeedBoots at 288,-7  -  Server - DebugService:1558
+  00:55:30.950  [SelfTest] done: 297 passed, 4 failed  -  Server - DebugService:1576
+
+## Run 2 FAIL/WARN (+ tutorial/daily context)
+  00:58:04.992  UIKit.SettleCard: Players.ILIKESIMULATORGG.PlayerGui.Hud.EventInfoCard did not settle in 30 frames  -  Client - UIKit:1319
+  00:58:28.093  [SelfTest] PASS cards centred (DailyReward, desktop live, top 119)  -  Server - DebugService:1555
+  00:58:28.093   ▶ [SelfTest] PASS cards centred (DailyReward, desktop live, top 119) (x2)  -  Server - DebugService:1555
+  00:58:28.094  [SelfTest] PASS cards centred (DailyReward, desktop live, top 119)  -  Server - DebugService:1555
+  00:58:28.094  [SelfTest] PASS cards centred (DailyReward, desktop live, top 119)  -  Server - DebugService:1555
+  00:58:28.094  [SelfTest] PASS cards centred (DailyReward, desktop live, top 119)  -  Server - DebugService:1555
+  00:58:28.094  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.094  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.095  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.095   ▶ [SelfTest] PASS cards centred (DailyReward, phone live, top 209) (x2)  -  Server - DebugService:1555
+  00:58:28.095  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.095  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.095  [SelfTest] PASS cards centred (DailyReward, phone live, top 209)  -  Server - DebugService:1555
+  00:58:28.099  [SelfTest] FAIL deal real path: still blocked by OtherCard with the guards cleared  -  Server - DebugService:1558
+  00:58:28.100  [SelfTest] == 8. auto-display ==  -  Server - DebugService:1143
+  00:58:29.774  [SelfTest] == 9. tutorial ==  -  Server - DebugService:1143
+  00:58:42.157  [SelfTest] FAIL tutorial pull: its explain card opens first (text >= 22 px, drawn): 24 px, drawn 410x76, text height 48  -  Server - DebugService:1558
+  00:58:42.157  [SelfTest] FAIL tutorial pull: the banner takes over after OK  -  Server - DebugService:1558
+  00:58:42.157  [SelfTest] FAIL tutorial pull: the banner reads its instruction in 6 words or fewer: "Nice!" (1 words)  -  Server - DebugService:1558
+  00:58:42.157  [SelfTest] FAIL tutorial pull: the objective bar (width, text size, step counter): 600 px wide, text 36, 11 / 11  -  Server - DebugService:1558
+  00:58:42.158  [Analytics] custom TutorialStep = 3 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:58:45.291  [SelfTest] FAIL a single pull of a Common opens the big card: headline nil, drawn 0x0  -  Server - DebugService:1558
+  00:58:59.740  [Analytics] Source Cash 447412 (TimedReward Daily) · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:58:59.740  [Analytics] custom DailyClaimed = 1 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:15.455  [SelfTest] FAIL tutorial pull2: its banner shows: never presented  -  Server - DebugService:1558
+  00:59:15.456  [Analytics] custom TutorialStep = 4 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:22.572  [Analytics] custom TutorialStep = 5 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:29.709  [Analytics] custom TutorialStep = 6 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:36.720  [Analytics] custom TutorialStep = 7 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:39.956  [Analytics] custom TutorialStep = 8 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:46.773  [Analytics] custom TutorialStep = 9 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:53.305  [Analytics] custom TutorialStep = 10 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  00:59:59.405  [Analytics] custom TutorialStep = 11 · ILIKESIMULATORGG  -  Server - AnalyticsKit:64
+  01:00:00.424  [SelfTest] == 10. combat ==  -  Server - DebugService:1143
+  01:00:02.820  [SelfTest] WARN combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso | 0.86 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  01:00:02.820  [SelfTest] PASS combat Bat: the held weapon reaches 1.5 studs (x height/5) clear of the torso (WARN)  -  Server - DebugService:1555
+  01:00:02.821  [SelfTest] WARN combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) | peak 1.15 studs, needs 1.18 (avatar 3.9 studs tall, x0.79)  -  Server - DebugService:262
+  01:00:02.821  [SelfTest] PASS combat Bat: the hand's peak distance from its held position during the swing is >= 1.5 studs (x height/5) (WARN)  -  Server - DebugService:1555
+  01:00:20.642  [SelfTest] == 11. progression ==  -  Server - DebugService:1143
+  01:00:21.686  [SelfTest] == 12. gacha card ==  -  Server - DebugService:1143
+  01:00:26.536  [SelfTest] FAIL gacha card: it opens fully in one frame (the frame after it opens all 6 tiles are laid out and their % has text height): opened after 182 frames (blocked by: overlays TutorialCard); 0/6 tiles with AbsoluteSize > 0, 6/6 % labels with TextBounds.Y > 0 | Common tile 78x69; Rare tile 78x69; Epic tile 78x69; Legendary tile 78x69; Mythic tile 78x69; Secret tile 78x69  -  Server - DebugService:1558
+  01:00:32.769  [SelfTest] FAIL gacha card (luck as is): with the character on the pad the card is open at UIScale 1: shown false, PopScale 0.850, open false, card 255x166 px, blocked by: overlays TutorialCard  -  Server - DebugService:1558
+  01:00:32.769  [SelfTest] FAIL gacha card (luck as is): all 6 tiles are drawn, each with an orb and a % >= 12 px tall: 0/6 tiles drawn, 0 orbs, 0 % labels with text height, 0 >= 12 px tall  -  Server - DebugService:1558
+  01:00:32.769  [SelfTest] FAIL gacha card (luck as is): every tier's drawn % equals GetGachaRates at the server's luck (x1.72): 0/6 tiles drawn | Common: not drawn (PopRoot hidden); Rare: not drawn (PopRoot hidden); Epic: not drawn (PopRoot hidden); Legendary: not drawn (PopRoot hidden); Mythic: not drawn (PopRoot hidden); Secret: not drawn (PopRoot hidden)  -  Server - DebugService:1558
+  01:00:32.769  [SelfTest] FAIL gacha card (luck as is): the luck pill is drawn exactly when luck is above x1: pill drawn false, luck 1.72  -  Server - DebugService:1558
+  01:00:32.770  [SelfTest] FAIL gacha card (luck as is): an unfound tier is a solid black orb (no ?) and still shows its %: 6 tiles checked | Common dark=false orb=false found=true text="77.6%" solid=true sameSize=true; Rare dark=false orb=false found=true text="18%" solid=true sameSize=true; Epic dark=false orb=false found=true text="3.5%" solid=true sameSize=true; Legendary dark=false orb=false found=true text="0.78%" solid=true sameSize=true; Mythic dark=false orb=false found=true text="0.086%" solid=true sameSize=true; Secret dark=false orb=false found=true text="0.0035%" solid=true sameSize=true  -  Server - DebugService:1558
+  01:00:32.770  [SelfTest] FAIL gacha card (luck as is): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge: no 26 px 'Gacha Pad' title; no (i); no mutation line; no coin + 24 px price  -  Server - DebugService:1558
+  01:00:32.770  [SelfTest] FAIL gacha card (luck as is): it comes back after the panel closes: shown false, PopScale 0.85  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): with the character on the pad the card is open at UIScale 1: shown false, PopScale 0.850, open false, card 255x166 px, blocked by: overlays TutorialCard  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): all 6 tiles are drawn, each with an orb and a % >= 12 px tall: 0/6 tiles drawn, 0 orbs, 0 % labels with text height, 0 >= 12 px tall  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): every tier's drawn % equals GetGachaRates at the server's luck (x5.17): 0/6 tiles drawn | Common: not drawn (PopRoot hidden); Rare: not drawn (PopRoot hidden); Epic: not drawn (PopRoot hidden); Legendary: not drawn (PopRoot hidden); Mythic: not drawn (PopRoot hidden); Secret: not drawn (PopRoot hidden)  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): the luck pill is drawn exactly when luck is above x1: pill drawn false, luck 5.17  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): an unfound tier is a solid black orb (no ?) and still shows its %: 6 tiles checked | Common dark=false orb=false found=true text="75.9%" solid=true sameSize=true; Rare dark=false orb=false found=true text="18%" solid=true sameSize=true; Epic dark=false orb=false found=true text="3.5%" solid=true sameSize=true; Legendary dark=false orb=false found=true text="2.3%" solid=true sameSize=true; Mythic dark=false orb=false found=true text="0.26%" solid=true sameSize=true; Secret dark=false orb=false found=true text="0.010%" solid=true sameSize=true  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge: no 26 px 'Gacha Pad' title; no (i); no mutation line; no coin + 24 px price  -  Server - DebugService:1558
+  01:00:39.252  [SelfTest] FAIL gacha card (luck x3 event): it comes back after the panel closes: shown false, PopScale 0.85  -  Server - DebugService:1558
+  01:00:42.668  [SelfTest] FAIL gacha card: the key bar shows 3 round buttons (E Pull, R x10 bigger in the centre, T Auto), each drawn and >= 44 px: Pull[E] 44x44 visible=false (PopRoot hidden); Multi[R] 52x52 visible=false (PopRoot hidden); Auto[T] 44x44 visible=false (PopRoot hidden) | centre 52.7 px, sides 44.2 / 44.2  -  Server - DebugService:1558
+  01:00:42.668  [SelfTest] FAIL gacha card: with the card open E, R and T are bound (ContextActionService): bound []  -  Server - DebugService:1558
+  01:00:42.668  [SelfTest] FAIL gacha card: text fits (0 labels): 0 labels measured  -  Server - DebugService:1558
+  01:00:48.718  [SelfTest] FAIL gacha card: while it is open the capsule ball is hidden (LocalTransparencyModifier 1 on CapsuleTop / CapsuleBottom / CapsuleBand): CapsuleTop 0, CapsuleBottom 0, CapsuleBand 0  -  Server - DebugService:1558
+  01:00:48.718  [SelfTest] FAIL gacha card: while it is open the pad's GACHA label and your VIP chip are hidden: label Enabled false, VIP chip Enabled true  -  Server - DebugService:1558
+  01:00:48.718  [SelfTest] FAIL gacha card: when it returns the VIP chip is hidden again: VIP chip Enabled true  -  Server - DebugService:1558
+  01:01:07.401  [SelfTest] FAIL gacha card (desktop layout, 1251 x 666 window): 8 studs in front of the pad the card is centred on the pad and covers the capsule ball: 8.0 studs from the pad; flat 0.000 studs, card x 498-753 y 26-301, pad centre x 626, capsule centre 626,270 | the card is not open  -  Server - DebugService:1558
+  01:01:07.401  [SelfTest] FAIL gacha card (desktop layout, 1251 x 666 window): with the camera straight above the pad the card is centred on it: flat 0.000 studs, card x 498-753 y 58-333, pad centre x 626, capsule centre n/a | the card is not open  -  Server - DebugService:1558
+  01:01:11.820  [SelfTest] FAIL gacha card (phone layout, 1251 x 666 window): 8 studs in front of the pad the card is centred on the pad and covers the capsule ball: 8.0 studs from the pad; flat 0.000 studs, card x 524-728 y 81-301, pad centre x 626, capsule centre 626,266 | the card is not open  -  Server - DebugService:1558
+  01:01:11.820  [SelfTest] FAIL gacha card (phone layout, 1251 x 666 window): with the camera straight above the pad the card is centred on it: flat 0.000 studs, card x 524-728 y 113-333, pad centre x 626, capsule centre n/a | the card is not open  -  Server - DebugService:1558
+  01:01:16.333  [SelfTest] FAIL gacha card: walking back to the pad opens it again (shown, UIScale 1): shown false, PopScale 0.850, label Enabled false  -  Server - DebugService:1558
+  01:01:16.333  [SelfTest] FAIL gacha card: walking back to the pad binds E, R and T again: bound []  -  Server - DebugService:1558
+  01:01:29.285  [SelfTest] == 13. effects tray ==  -  Server - DebugService:1143
+  01:01:39.103  [SelfTest] FAIL effects tray (desktop): hovering the Luck icon shows its name, what it does and the time left: overlaps ShopRow  -  Server - DebugService:1558
+  01:01:39.104  [SelfTest] FAIL effects tray (desktop): no overlap with any HUD rect: Luck/BottomRow, SafeFusion/BottomRow, SpeedBoots/BottomRow  -  Server - DebugService:1558
+  01:01:39.104  [SelfTest] FAIL effects tray (phone): hovering the Luck icon shows its name, what it does and the time left: overlaps QuestTracker  -  Server - DebugService:1558
+  01:01:39.106  [SelfTest] done: 344 passed, 37 failed  -  Server - DebugService:1576
