@@ -2775,61 +2775,93 @@ end
 
 -- The effects tray: with a Luck Potion, Speed Boots and Safe Fusion tokens
 -- granted by the server, a luck circle with a timer, a Speed Boots circle
--- with a timer and a Safe Fusion circle with "×N" are up in the BOTTOM-LEFT
--- quarter of the screen, their timers read the live seconds, tap targets are
--- >= 44 px on screen, nothing overlaps a HUD rect, and the old effect pills
--- are gone. Measured at both layouts.
--- The tray's and the tooltip's placement maths against the real HUD rects at
--- three explicit window sizes (the same idea as "cards centred"): the tray
--- touches no HUD rect and the Luck tooltip is on screen, touching none.
--- Phone layout for the 844 x 390 window.
+-- with a timer and a Safe Fusion circle with "×N" are up in a column on the
+-- RIGHT edge of the screen, their timers read the live seconds, tap targets
+-- are >= 44 px on screen, nothing overlaps a HUD rect or the weapon bar, and
+-- the old effect pills are gone. Measured at both layouts.
+-- The tray's and the tooltip's placement maths against the real HUD rects and
+-- the weapon bar at three explicit window sizes in both layouts (the same
+-- idea as "cards centred"): the tray is on the right edge, touches no HUD
+-- rect and stays clear of the phone's jump button; the Luck tooltip is on
+-- screen, touching none. Needs the weapon bar up (/weapons all).
 local EFFECTS_VIEWPORTS = {
-	{ Name = "1251 x 666", Size = Vector2.new(1251, 666), Phone = false },
-	{ Name = "1366 x 768", Size = Vector2.new(1366, 768), Phone = false },
-	{ Name = "844 x 390", Size = Vector2.new(844, 390), Phone = true },
+	{ Name = "1251 x 666", Size = Vector2.new(1251, 666) },
+	{ Name = "1366 x 768", Size = Vector2.new(1366, 768) },
+	{ Name = "844 x 390", Size = Vector2.new(844, 390) },
 }
 
 local function probeEffectsTrayViewports(): { ProbeLine }
 	local EffectsTray = require(UI.EffectsTray) :: any
 	local hud = require(script.Parent.HudController) :: any
+	local combat = require(script.Parent.CombatController) :: any
 	local lines: { ProbeLine } = {}
 	for _, viewport in EFFECTS_VIEWPORTS do
-		UIKit.SetForcedPhone(viewport.Phone)
-		task.wait(0.4)
-		EffectsTray.Refresh()
-		task.wait(0.2)
-		local cellCount = #EffectsTray.GetCells()
-		-- The card's natural size and the scale it is drawn at, from the live card.
-		EffectsTray.TestHover("Luck", true)
-		task.wait(0.2)
-		local live = EffectsTray.GetTooltip()
-		EffectsTray.TestHover("Luck", false)
-		local view = viewport.Size / live.Scale
-		local obstacles = hud.GetObstacleRectsFor(view)
-		local plan = EffectsTray.PlanTrayFor(view, obstacles, cellCount)
-		table.insert(lines, {
-			Ok = cellCount > 0 and #plan.Hits == 0,
-			Name = ("effects tray plan (%s): the %d icons touch no HUD rect"):format(viewport.Name, cellCount),
-			Detail = ("%d px icons, %d per row, shift %d, lift %d, rect %d,%d %dx%d, touches: %s"):format(
-				plan.Circle, plan.PerRow, plan.Shift, plan.Lift, plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y, table.concat(plan.Hits, ", ")
-			),
-		})
-		local size = live.Size / live.Scale
-		local circle = EffectsTray.CircleRectFor(plan, 1)
-		local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
-		local narrow = false
-		if tip.Overlap > 0 or not tip.OnScreen then
-			-- The live card narrows to 140 px when nothing is clear (taller by the wrap).
-			tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(140, size.Y * 1.6))
-			narrow = true
+		for _, phone in { false, true } do
+			UIKit.SetForcedPhone(phone)
+			task.wait(0.4)
+			EffectsTray.Refresh()
+			task.wait(0.2)
+			local label = ("%s, %s"):format(viewport.Name, if phone then "phone" else "desktop")
+			local cellCount = #EffectsTray.GetCells()
+			-- The card's natural size and the scale it is drawn at, from the live card.
+			EffectsTray.TestHover("Luck", true)
+			task.wait(0.2)
+			local live = EffectsTray.GetTooltip()
+			EffectsTray.TestHover("Luck", false)
+			local view = viewport.Size / live.Scale
+			local obstacles = hud.GetObstacleRectsFor(view)
+			local weaponBar = combat.GetBarRectFor(view)
+			if weaponBar then
+				obstacles.WeaponBar = weaponBar
+			end
+			local jump = EffectsTray.JumpRectFor(view, live.Scale, phone)
+			local plan = EffectsTray.PlanTrayFor(view, obstacles, cellCount, jump)
+			table.insert(lines, {
+				Ok = cellCount > 0 and weaponBar ~= nil and #plan.Hits == 0,
+				Name = ("effects tray plan (%s): the %d icons touch no HUD rect, the weapon bar or the jump button"):format(label, cellCount),
+				Detail = ("%d px icons, %d per column, %d columns, rect %d,%d %dx%d, weapon bar %s, touches: %s"):format(
+					plan.Circle, plan.PerColumn, plan.Columns, plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y,
+					if weaponBar then "up" else "NOT showing (/weapons all)", table.concat(plan.Hits, ", ")
+				),
+			})
+			-- On the right edge, clear of the jump button (12 px) and the top bar.
+			local right = plan.Rect.Position.X + plan.Rect.Size.X
+			local edgeProblems: { string } = {}
+			if right < view.X - 20 or right > view.X - 1 then
+				table.insert(edgeProblems, ("right edge at %d of %d"):format(right, view.X))
+			end
+			if plan.Rect.Position.Y < view.Y * 0.3 - 1 then
+				table.insert(edgeProblems, ("starts at y %d (35%% is %d)"):format(plan.Rect.Position.Y, view.Y * 0.35))
+			end
+			if jump then
+				local gapX = math.max(jump.Position.X - right, plan.Rect.Position.X - (jump.Position.X + jump.Size.X))
+				local gapY = jump.Position.Y - (plan.Rect.Position.Y + plan.Rect.Size.Y)
+				if gapX < 12 and gapY < 12 then
+					table.insert(edgeProblems, ("%d px above the jump button (%d,%d %dx%d), want 12"):format(gapY, jump.Position.X, jump.Position.Y, jump.Size.X, jump.Size.Y))
+				end
+			end
+			table.insert(lines, {
+				Ok = #edgeProblems == 0,
+				Name = ("effects tray plan (%s): on the right edge, clear of the jump button"):format(label),
+				Detail = table.concat(edgeProblems, "; "),
+			})
+			local size = live.Size / live.Scale
+			local circle = EffectsTray.CircleRectFor(plan, 1)
+			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
+			local narrow = false
+			if tip.Overlap > 0 or not tip.OnScreen then
+				-- The live card narrows to 140 px when nothing is clear (taller by the wrap).
+				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(140, size.Y * 1.6))
+				narrow = true
+			end
+			table.insert(lines, {
+				Ok = tip.OnScreen and tip.Overlap == 0,
+				Name = ("effects tray plan (%s): the Luck tooltip is on screen and touches no HUD rect"):format(label),
+				Detail = ("%s%s at %d,%d, card %dx%d, on screen %s, touches: %s"):format(
+					tip.Side, if narrow then " (narrow)" else "", tip.Left, tip.Top, size.X, size.Y, tostring(tip.OnScreen), table.concat(tip.Hits, ", ")
+				),
+			})
 		end
-		table.insert(lines, {
-			Ok = tip.OnScreen and tip.Overlap == 0,
-			Name = ("effects tray plan (%s): the Luck tooltip is on screen and touches no HUD rect"):format(viewport.Name),
-			Detail = ("%s%s at %d,%d, card %dx%d, on screen %s, touches: %s"):format(
-				tip.Side, if narrow then " (narrow)" else "", tip.Left, tip.Top, size.X, size.Y, tostring(tip.OnScreen), table.concat(tip.Hits, ", ")
-			),
-		})
 	end
 	return lines
 end
@@ -2863,14 +2895,14 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
 			),
 		})
-		-- Bottom-left quarter of the window, and timers that read the live seconds.
+		-- On the right edge of the window, and timers that read the live seconds.
 		local camera = workspace.CurrentCamera
 		local window = if camera then camera.ViewportSize else Vector2.new(1366, 768)
 		local inset = GuiService:GetGuiInset().Y
 		local outside: { string } = {}
 		for id, entry in byId do
 			local centre = entry.Position + entry.Size / 2 - Vector2.new(0, inset)
-			if centre.X >= window.X / 2 or centre.Y <= window.Y / 2 then
+			if centre.X <= window.X * 0.75 or centre.Y >= window.Y then
 				table.insert(outside, ("%s at %d,%d"):format(id, centre.X, centre.Y))
 			end
 		end
@@ -2878,7 +2910,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if not tooSmall then
 			table.insert(lines, {
 				Ok = next(byId) ~= nil and #outside == 0,
-				Name = ("effects tray (%s, window %d × %d): in the bottom-left quarter"):format(label, window.X, window.Y),
+				Name = ("effects tray (%s, window %d × %d): on the right edge"):format(label, window.X, window.Y),
 				Detail = table.concat(outside, ", "),
 			})
 		end
@@ -2954,7 +2986,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if not tooSmall and (tip.Position.X < -1 or tip.Position.X + tip.Size.X > viewport.X + 1) then
 			table.insert(tipProblems, ("off screen: x %d-%d of %d"):format(tip.Position.X, tip.Position.X + tip.Size.X, viewport.X))
 		end
-		-- Opens to the RIGHT of the icon (or above / left of it when the right is taken).
+		-- Opens to the LEFT of the icon (or above / below it when the left is taken).
 		if not tooSmall and luckCell then
 			local cellTop = luckCell.Position.Y - inset
 			if tip.Position.X < luckCell.Position.X + luckCell.Size.X - 1 and tip.Position.X + tip.Size.X > luckCell.Position.X + 1
@@ -3010,7 +3042,11 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			Detail = ("shown '%s' %s"):format(tapTip.Time, if tapTip.Visible then "visible" else "NOT visible"),
 		})
 		-- No overlap with any HUD rect or the weapon bar.
-		local obstacles = hud.GetObstacleRects()
+		local obstacles: { [string]: any } = hud.GetObstacleRects()
+		local trayWeaponBar = (require(script.Parent.CombatController) :: any).GetBarRect()
+		if trayWeaponBar then
+			obstacles.WeaponBar = trayWeaponBar
+		end
 		local overlaps: { string } = {}
 		for id, view in byId do
 			for name, rect in obstacles do
@@ -3028,7 +3064,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				Ok = #overlaps == 0,
 				Name = ("effects tray (%s): no overlap with any HUD rect"):format(label),
 				Detail = table.concat(overlaps, ", ")
-					.. (if plan then (" | plan %d px icons, %d per row, shift %d, lift %d"):format(plan.Circle, plan.PerRow, plan.Shift, plan.Lift) else ""),
+					.. (if plan then (" | plan %d px icons, %d per column, %d columns"):format(plan.Circle, plan.PerColumn, plan.Columns) else ""),
 			})
 		end
 	end

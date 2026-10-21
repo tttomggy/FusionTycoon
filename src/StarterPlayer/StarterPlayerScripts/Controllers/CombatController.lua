@@ -972,6 +972,18 @@ function CombatController.GetBarRect(): { Position: Vector2, Size: Vector2 }?
 	return { Position = bar.AbsolutePosition + Vector2.new(0, GuiService:GetGuiInset().Y), Size = bar.AbsoluteSize }
 end
 
+-- /selftest: the same rect in logical px as it would sit in a `view` (logical
+-- px) of another size: the bar is centred on the bottom edge. The caller has
+-- forced the layout (phone / desktop) first.
+function CombatController.GetBarRectFor(view: Vector2): { Position: Vector2, Size: Vector2 }?
+	if not screenGui or not screenGui.Enabled or not bar or bar.AbsoluteSize.X <= 0 then
+		return nil
+	end
+	local size = bar.AbsoluteSize / UIKit.EffectiveScale(screenGui)
+	local bottom = if UIKit.IsPhone() then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop
+	return { Position = Vector2.new((view.X - size.X) / 2, view.Y - bottom - size.Y), Size = size }
+end
+
 -- The weapon whose pose is up (track or C0), for /selftest and the re-hold.
 function CombatController.GetHeldPoseWeapon(character: Model): string?
 	return WeaponAnimator.GetHeldWeapon(character) or WeaponPose.GetHeldWeapon(character)

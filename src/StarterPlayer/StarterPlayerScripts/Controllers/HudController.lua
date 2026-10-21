@@ -527,7 +527,7 @@ function HudController.BounceCash()
 	bounce(cashLabel)
 end
 
--- Where an effect's icon is (EffectsTray, bottom left) for a purchase flight:
+-- Where an effect's icon is (EffectsTray, right edge) for a purchase flight:
 -- "Income" | "Luck" | "Server", screen px.
 function HudController.GetEffectTarget(kind: string): Vector2
 	return EffectsTray.GetTarget(kind)
@@ -1073,7 +1073,7 @@ local cashHolder: Frame
 	A big gold "🛒 SHOP" on the left edge, above the LOCK chip (>= 56 px
 	tall), wiggling gently every SHOP_WIGGLE_SECONDS; a red SALE tag only
 	while a real sale is live. The active effects (boost, luck,
-	Overclock, ...) are round icons in UI/EffectsTray, bottom left.
+	Overclock, ...) are round icons in UI/EffectsTray, a column on the right edge.
 	Beside SHOP, the pink "🎁 GIFTS" (GiftsPanel): a green count badge and a
 	bounce while any playtime gift is ready, otherwise a small "next in
 	3:12" pill (hidden once today's gifts are all open).
@@ -1969,7 +1969,7 @@ end
 
 -- /selftest "deal tile": the art (picture or emoji fallback) is drawn, the
 -- ribbon and the timer show the numbers they were given, the tile overlaps
--- no other HUD rect (left column, bottom row), and it is hidden for a
+-- no other HUD rect (left column, bottom row, weapon bar), and it is hidden for a
 -- restricted player, in the tutorial and while carrying. The caller forces
 -- the layout (phone / desktop) first.
 function HudController.SelfTestDealTile(scaleName: string): { string }
@@ -1996,6 +1996,10 @@ function HudController.SelfTestDealTile(scaleName: string): { string }
 	end
 
 	local rects = HudController.GetObstacleRects()
+	local weaponBar = (require(script.Parent.CombatController) :: any).GetBarRect()
+	if weaponBar then
+		rects.WeaponBar = weaponBar
+	end
 	local mine = rects.DealBadge
 	local overlaps: { string } = {}
 	local compared = 0
@@ -2218,7 +2222,15 @@ function HudController.Init()
 
 	applyLayout(UIKit.IsPhone())
 	EffectsTray.Init({
-		GetObstacles = HudController.GetObstacleRects,
+		GetObstacles = function()
+			-- The HUD's rects plus the weapon bar (CombatController requires nothing of ours at load).
+			local rects = HudController.GetObstacleRects()
+			local weaponBar = (require(script.Parent.CombatController) :: any).GetBarRect()
+			if weaponBar then
+				rects.WeaponBar = weaponBar
+			end
+			return rects
+		end,
 		GetBottomRowRect = HudController.GetBottomRowRect,
 		GetDisplayOrder = function()
 			return screenGui.DisplayOrder

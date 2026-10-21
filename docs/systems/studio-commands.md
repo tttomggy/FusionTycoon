@@ -95,7 +95,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   items on the Mock store; cash is given back);
   **13. effects tray**: a Luck Potion, Speed Boots and 2 Safe Fusion tokens
   are granted, the client reports a luck circle with a timer, a Speed Boots
-  circle and a Safe Fusion circle with `×2`, all in the bottom-left quarter of
+  circle and a Safe Fusion circle with `×2`, all on the right edge of
   the window, the Luck and Speed Boots timers reading the live seconds, ≥ 44 px
   tap targets, no HUD overlap at both layouts and no old effect pills; client
   checks also assert every `Plain`, the deal / Starter cards' tile + YOU GET +
@@ -109,7 +109,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   the held-weapon checks scaled by avatar height;
   `/combat box` toggles drawing each melee swing's server hitbox (red,
   0.2 s, that weapon's box size);
-  Polish 12 checks (the tooltip opens right of the icon in its own layer above the HUD, overlapping no HUD rect): **music** (every track loads, plays, a sting ducks it,
+  Polish 12 checks (the tooltip opens left of the icon in its own layer above the HUD, overlapping no HUD rect or the weapon bar): **music** (every track loads, plays, a sting ducks it,
   the toggle stops and resumes it), the **effects tray** cartoon badges and
   tooltips (hover shows name / Plain / time, leave hides, a tap closes after
   3 s), the **unlock card** (Rebirth 0 mentions Rebirth 1), the **QUESTS
@@ -185,9 +185,12 @@ Most of the 77 were the TEST, not the game:
 - "deal real path" names the cards blocking it.
 - The effects tray placement and tooltip are pure functions
   (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
-  `/selftest` runs them against the real HUD rects at 1251 × 666, 1366 × 768 and
-  844 × 390 (`effects tray plan (…)`). The tray goes above the bottom row when
-  it would touch it, the tooltip tries right, above-right, above, left, then
+  `/selftest` runs them against the real HUD rects and the weapon bar
+  (`CombatController.GetBarRectFor`, needs `/weapons all`) at 1251 × 666,
+  1366 × 768 and 844 × 390, in both layouts (`effects tray plan (…)`). The
+  tray is a column on the right edge from 35% of the height; on a phone it
+  stops 12 px above the jump button (`EffectsTray.JumpRectFor`) and wraps left;
+  the tooltip tries left, above-left, below-left, above, below, right, then
   narrows to 140 px. The old code compared screen-space tray rects with obstacle
   rects shifted by the top-bar inset; both are in one space now.
 - The effects-tray position checks skip in a too-small window like the others.

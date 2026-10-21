@@ -1548,19 +1548,19 @@ Heist, the result cards, the celebration):
   worth line, Not now / See deal; on a phone the YOU GET list drops out if
   the card would climb into the top bar). The Starter Pack card (session 2)
   has the same tiles + list.
-- [ ] **Effects tray** (bottom LEFT, Polish 11, restyled Polish 12): `/shop grant LuckPotion`, `/shop grant
+- [ ] **Effects tray** (right edge column, moved from bottom left by the Effects-tray-right pass): `/shop grant LuckPotion`, `/shop grant
   SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
   Magnet: round cartoon sticker badges (60 px, gradient, white rim, an outlined
   glyph and a small animation behind it) with a timer under (m:ss, h:mm:ss past an hour), `×N`
   badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
   pop in on gaining and shrink out at the end, nothing flashes in the last
-  minute. Hover or tap one: a dark tooltip card above it (name, what it
-  does, time left; see Polish 12). 16 px from the left edge,
-  bottom level with the bottom button row, 60 px badges, 4 to a row, more
-  rows stack upward. If it would touch the left column or the bottom row
-  the icons drop to 48 px, then 3 per row; if it still touches (a phone with
-  a tall left column) it sits to the right of the left column, still
-  bottom-aligned. The old pills beside SHOP / GIFTS and in the phone status stack are
+  minute. Hover or tap one: a dark tooltip card to the LEFT of it (else
+  above-left, below-left; name, what it does, time left; see Polish 12).
+  A vertical column on the RIGHT edge, 12 px from it, stacked downward from
+  35% of the screen height, 60 px badges (48 px if needed). With `/weapons all`
+  nothing overlaps the weapon bar. On the phone emulator the column ends 12 px
+  above the Roblox jump button and wraps into a second column to its left when
+  the icons don't fit. The old pills beside SHOP / GIFTS and in the phone status stack are
   gone ("next in" stays). A purchase's flying time lands on its icon. See deal opens the shop at the deal; Not now hides it until the
   next slot. Not in a first session's first 10 min, not over another card,
   not within 60 s of a loss, not while carrying or being stolen from, and
@@ -2082,10 +2082,11 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   headers have an icon chip, a thin rule and clear space above; the
   scrollbar is thin and violet; owned passes dim in place.
 - [ ] `/shop grant LuckPotion`: its round icon and timer appear in the
-  bottom-LEFT corner, 16 px from the left, bottom level with the bottom row;
-  4 per row, more rows upward; on the phone it never covers the left column.
+  right-edge column (since the Effects-tray-right pass; was bottom left), 12 px
+  from the right, from 35% of the screen height down; on the phone it stays
+  above the jump button and never covers the weapon bar.
 - [ ] `/selftest`: "shop bundles", "shop text", "side cards", "Pocket Cash
-  line", the effects-tray lines (bottom-left quarter, live timers) pass.
+  line", the effects-tray lines (right edge, clear of the jump button, weapon bar, live timers) pass.
 
 **Polish 12: weapon sounds, music, bigger melee box, cartoon effect badges, the Mythic quest.**
 
