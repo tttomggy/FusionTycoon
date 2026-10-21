@@ -39,7 +39,7 @@ local AnnouncementController = {}
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local BANNER_WIDTH = 520
+local BANNER_WIDTH = TopStack.WIDEST_WIDTH -- the widest top-centre line
 local BANNER_HEIGHT = 64
 local SMALL_BANNER_TEXT_MAX = 21
 local SMALL_BANNER_TEXT_MIN = 14

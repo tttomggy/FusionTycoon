@@ -50,6 +50,11 @@ export type Item = {
 }
 
 TopStack.CHIP_Y = 12
+-- The widest line any slot draws (logical px, centred): the announcement
+-- banner (AnnouncementController BANNER_WIDTH). The tutorial's objective bar
+-- is wider (600) but the effects tray is hidden while it runs. The effects
+-- tray keeps its row STACK_GAP short of this.
+TopStack.WIDEST_WIDTH = 520
 TopStack.GAP = 8
 TopStack.DEFAULT_SECONDS = 2.5
 TopStack.MAX_QUEUED = 4

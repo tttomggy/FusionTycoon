@@ -2814,19 +2814,21 @@ end
 
 -- The effects tray: with a Luck Potion, Speed Boots and Safe Fusion tokens
 -- granted by the server, a luck circle with a timer, a Speed Boots circle
--- with a timer and a Safe Fusion circle with "×N" are up in a column on the
--- RIGHT edge of the screen, their timers read the live seconds, tap targets
+-- with a timer and a Safe Fusion circle with "×N" are up in one row in the
+-- TOP-RIGHT corner of the screen, their timers read the live seconds, tap targets
 -- are >= 44 px on screen, nothing overlaps a HUD rect or the weapon bar, and
 -- the old effect pills are gone. Measured at both layouts.
 -- The tray's and the tooltip's placement maths against the real HUD rects and
 -- the weapon bar at three explicit window sizes in both layouts (the same
--- idea as "cards centred"): the tray is on the right edge, touches no HUD
--- rect and stays clear of the phone's jump button; the Luck tooltip is on
--- screen, touching none. Needs the weapon bar up (/weapons all).
+-- idea as "cards centred"), with 3 and with 5 effects: the tray is one row
+-- (or right-aligned rows when it wraps) in the top-right quarter below
+-- GetCardTop, touches no HUD rect and is clear of TopStack, the weapon bar
+-- and the phone's jump button; the Luck tooltip is on screen, touching none. Needs the weapon bar up (/weapons all).
 local EFFECTS_VIEWPORTS = {
 	{ Name = "1251 x 666", Size = Vector2.new(1251, 666) },
 	{ Name = "1366 x 768", Size = Vector2.new(1366, 768) },
 	{ Name = "844 x 390", Size = Vector2.new(844, 390) },
+	{ Name = "896 x 414", Size = Vector2.new(896, 414) }, -- iPhone XR landscape
 }
 
 local function probeEffectsTrayViewports(): { ProbeLine }
@@ -2841,7 +2843,6 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 			EffectsTray.Refresh()
 			task.wait(0.2)
 			local label = ("%s, %s"):format(viewport.Name, if phone then "phone" else "desktop")
-			local cellCount = #EffectsTray.GetCells()
 			-- The card's natural size and the scale it is drawn at, from the live card.
 			EffectsTray.TestHover("Luck", true)
 			task.wait(0.2)
@@ -2854,43 +2855,80 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				obstacles.WeaponBar = weaponBar
 			end
 			local jump = EffectsTray.JumpRectFor(view, live.Scale, phone)
-			local plan = EffectsTray.PlanTrayFor(view, obstacles, cellCount, jump)
-			table.insert(lines, {
-				Ok = cellCount > 0 and weaponBar ~= nil and #plan.Hits == 0,
-				Name = ("effects tray plan (%s): the %d icons touch no HUD rect, the weapon bar or the jump button"):format(label, cellCount),
-				Detail = ("%d px icons, %d per column, %d columns, rect %d,%d %dx%d, weapon bar %s, touches: %s"):format(
-					plan.Circle, plan.PerColumn, plan.Columns, plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y,
-					if weaponBar then "up" else "NOT showing (/weapons all)", table.concat(plan.Hits, ", ")
-				),
-			})
-			-- On the right edge, clear of the jump button (12 px) and the top bar.
-			local right = plan.Rect.Position.X + plan.Rect.Size.X
-			local edgeProblems: { string } = {}
-			if right < view.X - 20 or right > view.X - 1 then
-				table.insert(edgeProblems, ("right edge at %d of %d"):format(right, view.X))
-			end
-			if plan.Rect.Position.Y < view.Y * 0.3 - 1 then
-				table.insert(edgeProblems, ("starts at y %d (35%% is %d)"):format(plan.Rect.Position.Y, view.Y * 0.35))
-			end
-			if jump then
-				local gapX = math.max(jump.Position.X - right, plan.Rect.Position.X - (jump.Position.X + jump.Size.X))
-				local gapY = jump.Position.Y - (plan.Rect.Position.Y + plan.Rect.Size.Y)
-				if gapX < 12 and gapY < 12 then
-					table.insert(edgeProblems, ("%d px above the jump button (%d,%d %dx%d), want 12"):format(gapY, jump.Position.X, jump.Position.Y, jump.Size.X, jump.Size.Y))
+			local cardTop = UIKit.GetCardTop()
+			local plan3: any = nil
+			for _, effects in { 3, 5 } do
+				local plan = EffectsTray.PlanTrayFor(view, obstacles, effects, jump, cardTop, phone)
+				if effects == 3 then
+					plan3 = plan
 				end
+				-- Every circle's centre y: one row (±1 px), or right-aligned rows when it wraps.
+				local rowYs: { number } = {}
+				local rightEdges: { number } = {}
+				local rowCounts: { [number]: number } = {}
+				for slot = 1, effects do
+					local circle = EffectsTray.CircleRectFor(plan, slot)
+					local y = math.floor(circle.Position.Y + circle.Size.Y / 2 + 0.5)
+					local found = false
+					for index, known in rowYs do
+						if math.abs(known - y) <= 1 then
+							rowCounts[index] += 1
+							found = true
+						end
+					end
+					if not found then
+						table.insert(rowYs, y)
+						table.insert(rightEdges, circle.Position.X + circle.Size.X)
+						rowCounts[#rowYs] = 1
+					end
+				end
+				local rowProblems: { string } = {}
+				if plan.Rows == 1 and #rowYs ~= 1 then
+					table.insert(rowProblems, ("%d rows, want one"):format(#rowYs))
+				end
+				if #rowYs ~= plan.Rows then
+					table.insert(rowProblems, ("planned %d rows, circles sit on %d"):format(plan.Rows, #rowYs))
+				end
+				for index = 2, #rightEdges do
+					if math.abs(rightEdges[index] - rightEdges[1]) > 1 then
+						table.insert(rowProblems, "rows are not right-aligned")
+						break
+					end
+				end
+				table.insert(lines, {
+					Ok = #rowProblems == 0,
+					Name = ("effects tray plan (%s, %d effects): one row, or right-aligned rows when it wraps"):format(label, effects),
+					Detail = ("%d px icons, %d per row, %d rows%s"):format(plan.Circle, plan.PerRow, plan.Rows, if #rowProblems > 0 then ": " .. table.concat(rowProblems, "; ") else ""),
+				})
+				-- The top-right quarter, below GetCardTop, 8 px from the right edge.
+				local right = plan.Rect.Position.X + plan.Rect.Size.X
+				local placeProblems: { string } = {}
+				if plan.Rect.Position.Y < cardTop - 1 then
+					table.insert(placeProblems, ("starts at y %d, GetCardTop is %d"):format(plan.Rect.Position.Y, cardTop))
+				end
+				if plan.Rect.Position.X + plan.Rect.Size.X / 2 < view.X / 2 or plan.Rect.Position.Y + plan.Rect.Size.Y > view.Y / 2 then
+					table.insert(placeProblems, "not in the top-right quarter")
+				end
+				if phone and (right > view.X - 4 or right < view.X - 12) then
+					table.insert(placeProblems, ("right edge at %d of %d (want 8 px, a cell's 4 px gap included)"):format(right, view.X))
+				end
+				table.insert(lines, {
+					Ok = #placeProblems == 0 and weaponBar ~= nil and #plan.Hits == 0,
+					Name = ("effects tray plan (%s, %d effects): top-right, below GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump button"):format(label, effects),
+					Detail = ("rect %d,%d %dx%d, weapon bar %s, touches: %s%s"):format(
+						plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y,
+						if weaponBar then "up" else "NOT showing (/weapons all)", table.concat(plan.Hits, ", "),
+						if #placeProblems > 0 then " | " .. table.concat(placeProblems, "; ") else ""
+					),
+				})
 			end
-			table.insert(lines, {
-				Ok = #edgeProblems == 0,
-				Name = ("effects tray plan (%s): on the right edge, clear of the jump button"):format(label),
-				Detail = table.concat(edgeProblems, "; "),
-			})
 			local size = live.Size / live.Scale
 			table.insert(lines, {
 				Ok = size.X >= EffectsTray.TOOLTIP_MIN_WIDTH - 1 and size.Y < view.Y,
 				Name = ("effects tray plan (%s): the Luck tooltip is at least %d px wide and shorter than the screen"):format(label, EffectsTray.TOOLTIP_MIN_WIDTH),
 				Detail = ("card %dx%d"):format(size.X, size.Y),
 			})
-			local circle = EffectsTray.CircleRectFor(plan, 1)
+			local circle = EffectsTray.CircleRectFor(plan3, 1)
 			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
 			local narrow = false
 			if tip.Overlap > 0 or not tip.OnScreen then
@@ -2939,14 +2977,14 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
 			),
 		})
-		-- On the right edge of the window, and timers that read the live seconds.
+		-- In the top-right quarter of the window (one row, or right-aligned rows), and timers that read the live seconds.
 		local camera = workspace.CurrentCamera
 		local window = if camera then camera.ViewportSize else Vector2.new(1366, 768)
 		local inset = GuiService:GetGuiInset().Y
 		local outside: { string } = {}
 		for id, entry in byId do
 			local centre = entry.Position + entry.Size / 2 - Vector2.new(0, inset)
-			if centre.X <= window.X * 0.75 or centre.Y >= window.Y then
+			if centre.X <= window.X * 0.5 or centre.Y >= window.Y * 0.5 then
 				table.insert(outside, ("%s at %d,%d"):format(id, centre.X, centre.Y))
 			end
 		end
@@ -2954,7 +2992,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if not tooSmall then
 			table.insert(lines, {
 				Ok = next(byId) ~= nil and #outside == 0,
-				Name = ("effects tray (%s, window %d × %d): on the right edge"):format(label, window.X, window.Y),
+				Name = ("effects tray (%s, window %d × %d): in the top-right quarter"):format(label, window.X, window.Y),
 				Detail = table.concat(outside, ", "),
 			})
 		end
@@ -3108,7 +3146,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				Ok = #overlaps == 0,
 				Name = ("effects tray (%s): no overlap with any HUD rect"):format(label),
 				Detail = table.concat(overlaps, ", ")
-					.. (if plan then (" | plan %d px icons, %d per column, %d columns"):format(plan.Circle, plan.PerColumn, plan.Columns) else ""),
+					.. (if plan then (" | plan %d px icons, %d per row, %d rows"):format(plan.Circle, plan.PerRow, plan.Rows) else ""),
 			})
 		end
 	end

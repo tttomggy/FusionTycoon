@@ -196,10 +196,14 @@ Most of the 77 were the TEST, not the game:
   (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
   `/selftest` runs them against the real HUD rects and the weapon bar
   (`CombatController.GetBarRectFor`, needs `/weapons all`) at 1251 × 666,
-  1366 × 768 and 844 × 390, in both layouts (`effects tray plan (…)`). The
-  tray is a column on the right edge from 35% of the height; on a phone it
-  stops 12 px above the jump button (`EffectsTray.JumpRectFor`) and wraps left;
-  the tooltip tries left, above-left, below-left, above, below, right, then
+  1366 × 768, 844 × 390 and 896 × 414, in both layouts, with 3 and with 5
+  effects (`effects tray plan (…)`). The tray is one row in the top-right
+  corner at `UIKit.GetCardTop()`, right-aligned, 12 px short of
+  `TopStack.WIDEST_WIDTH` (and, on desktop, of the Roblox player list,
+  `PLAYER_LIST_RESERVE` 300 px, not measured); the icons shrink 60 -> 48 px,
+  then wrap into a second right-aligned row; the jump button
+  (`EffectsTray.JumpRectFor`) is still an obstacle;
+  the tooltip tries below, below-left, left, above-left, above, right, then
   narrows to 160 px, its minimum width (the label wrap has a MinSize too: a
   live reading of "34 × 532" was a wrap measured before the card had a width);
   with no side on screen it goes under the icon, clamped on screen. The old
