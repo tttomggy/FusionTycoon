@@ -474,9 +474,10 @@ testable without luck.
     appears above the bottom row.
   - [ ] Rebirthing takes the cash (cash → $0) and the next cost reads $48M.
 - [ ] **Secret meter.** `/rebirths 1`, `/give` yourself 8+ Mythics, open the
-  Fuse panel on the Mythic tab: a "SECRET METER 0 / 4" bar sits under the
+  Fuse panel on the Mythic tab: a "SECRET METER 0 / 12" bar sits under the
   success %. Fail a pair: the bar animates up, the fail card says "Secret
-  meter +2". At full the bar reads "NEXT FUSE IS A SURE SECRET!" in mint, the
+  meter +2"; a failed 6-orb fusion shows "SECRET METER 6 / 12" (two of them
+  fill it). At full the bar reads "NEXT FUSE IS A SURE SECRET!" in mint, the
   % and the count chips read 100%, and the next fuse is a Secret (meter back
   to 0). Rejoin: the meter is where you left it; Rebirth keeps it. Hidden on
   the Mythic tab before Rebirth 1 (the tab is locked).
@@ -1555,21 +1556,25 @@ Heist, the result cards, the celebration):
   worth line, Not now / See deal; on a phone the YOU GET list drops out if
   the card would climb into the top bar). The Starter Pack card (session 2)
   has the same tiles + list.
-- [ ] **Effects tray** (one row, top right; was a right-edge column): `/shop grant LuckPotion`, `/shop grant
+- [ ] **Effects tray** (one row: bottom-left on desktop, top right on a phone): `/shop grant LuckPotion`, `/shop grant
   SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
   Magnet: round cartoon sticker badges (60 px, gradient, white rim, an outlined
   glyph and a small animation behind it) with a timer under (m:ss, h:mm:ss past an hour), `×N`
   badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
   pop in on gaining and shrink out at the end, nothing flashes in the last
-  minute. Hover or tap one: a dark tooltip card BELOW it (else below-left,
-  left; name, what it does, time left; at least 160 px wide; see Polish 12).
-  ONE ROW in the top-right corner at `GetCardTop`, the first effect rightmost,
-  each timer under its own circle, 60 px badges (48 px if needed), 8 px from
-  the right edge (on desktop left of the Roblox player list). The row stops
-  12 px short of the announcement banner's width; with 5 effects on the phone
-  emulator it wraps into a second right-aligned row below, never a column or
-  a zigzag. With `/weapons all` nothing overlaps the weapon bar or the jump
-  button. The old pills beside SHOP / GIFTS and in the phone status stack are
+  minute. Hover or tap one: a dark tooltip card (desktop: ABOVE it, else
+  above-right, right; phone: BELOW it, else below-left, left; name, what it
+  does, time left; at least 160 px wide; see Polish 12).
+  **Desktop:** ONE ROW in the bottom-left corner, left of UPGRADES: the first
+  effect leftmost, the first circle 16 px from the left edge, the timers 16 px
+  from the bottom edge, 60 px badges (48 px if it must), the row ends at least
+  12 px left of the bottom row. If even 48 px does not fit (try a ~1250 px wide
+  window with 5 effects) the row sits directly above the bottom row instead.
+  **Phone:** ONE ROW in the top-right corner at `GetCardTop`, the first effect
+  rightmost, 8 px from the right edge, 12 px short of the announcement banner's
+  width; with 5 effects on the phone emulator it wraps into a second
+  right-aligned row below. Never a column or a zigzag. With `/weapons all`
+  nothing overlaps the weapon bar or the jump button. The old pills beside SHOP / GIFTS and in the phone status stack are
   gone ("next in" stays). A purchase's flying time lands on its icon. See deal opens the shop at the deal; Not now hides it until the
   next slot. Not in a first session's first 10 min, not over another card,
   not within 60 s of a loss, not while carrying or being stolen from, and
@@ -2097,10 +2102,11 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   headers have an icon chip, a thin rule and clear space above; the
   scrollbar is thin and violet; owned passes dim in place.
 - [ ] `/shop grant LuckPotion`: its round icon and timer appear in the
-  top-right row (below the top bar, 8 px from the right); on the phone it
-  never covers the weapon bar or the jump button.
+  bottom-left row beside UPGRADES on desktop; on the phone in the top-right row
+  (below the top bar, 8 px from the right), never covering the weapon bar or
+  the jump button.
 - [ ] `/selftest`: "shop bundles", "shop text", "side cards", "Pocket Cash
-  line", the effects-tray lines (one row top right, clear of TopStack, the jump button, weapon bar, live timers) pass.
+  line", the effects-tray lines (one row: bottom-left on desktop, top right on a phone, clear of the HUD, TopStack, the jump button, weapon bar, live timers) pass.
 
 **Polish 12: weapon sounds, music, bigger melee box, cartoon effect badges, the Mythic quest.**
 
@@ -2159,9 +2165,12 @@ deal running (`/deal slot 4`). Desktop must look exactly as before.
   its old colour with the glyph at 28 px over a 13 px word. The GIFTS count
   badge, QUESTS red "!", SALE tag and the wiggle / bounce are on the cards'
   corners; every card opens the same panel as before.
-- [ ] The deal tile (56 px) and "next in" sit under the grid; the goal card
-  and quest tracker under them. Nothing overlaps; the whole left group stays
-  inside the left 40% of the screen; the top-left 170 x 60 px is clear.
+- [ ] NEXT GOAL is a one-line pill (goal text left, reward right) directly
+  under the cash panel; the grid under that, with the deal tile (56 px) and
+  "next in" beside it (right of the grid). The quest tracker is not shown on a phone (the QUESTS card's
+  red ! covers it). Nothing overlaps; the whole left group stays inside the
+  left 40% of the screen and ends at least 8 px above the bottom edge (iPhone
+  XR emulator: nothing cut off); the top-left 170 x 60 px is clear.
 - [ ] The bottom row is five 56 px icon cards centred under the weapon bar:
   ⬆️ UPGRADE, 🎒 ITEMS, 📖 INDEX, 🔁 REBIRTH, ⚙️ OPTIONS. REBIRTH keeps its
   progress as a thin bar along the card's bottom edge and still glows and
@@ -2173,5 +2182,5 @@ deal running (`/deal slot 4`). Desktop must look exactly as before.
 - [ ] `/selftest`: "phone HUD coverage (844 x 390 / 896 x 414)" prints the
   covered % of the screen and passes at <= 20%; "phone HUD clear of the jump
   button and weapon bar" and "phone HUD icon cards: n cards, each >= 44 px
-  with text >= 13 px" pass; the left-column checks pass; desktop checks are
-  unchanged.
+  with text >= 13 px" pass; the left-column checks (including "hud left
+  column fits the screen") pass; desktop checks are unchanged.

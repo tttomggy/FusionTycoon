@@ -88,7 +88,7 @@ SECRET_FUSION_REBIRTHS = 1  # Mythic -> Secret fusion unlocks at this many rebir
 # Secret pity meter (FusionConfig.SecretPityFull; --pity=0 turns it off): each failed
 # Mythic -> Secret fusion adds its input count; at full the next one succeeds.
 # Not reset by a rebirth.
-SECRET_PITY_FULL = 4
+SECRET_PITY_FULL = 12
 FUSE_SECONDS = 4.0
 PULL_BUDGET_SECONDS = 60  # pull if cost <= this many seconds of income
 # ...and the pulls the cap alone makes affordable (the climbing price is above

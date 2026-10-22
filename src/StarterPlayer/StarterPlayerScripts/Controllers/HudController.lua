@@ -79,10 +79,9 @@ local LAYOUT = {
 		ButtonTextSize = 22,
 	},
 	Phone = {
-		-- Unused on a phone: the goal tracker follows the SHOP and LOCK rows
-		-- in the left column (applyLayout).
+		-- Unused on a phone: the goal pill sits under the cash panel (placeColumnFor).
 		GoalPosition = UDim2.fromOffset(10, 184),
-		GoalWidth = 168,
+		GoalWidth = 232, -- a one-line pill as wide as the slim cash panel (CASH_CARD_PHONE.X)
 		GoalBarHeight = 10,
 		CashPosition = UDim2.fromOffset(10, 76),
 		ButtonSize = Vector2.new(84, 60),
@@ -139,6 +138,17 @@ local goalTextLabel: TextLabel
 local goalBar: Frame
 local goalCountLabel: TextLabel
 local goalPathButton: TextButton? = nil
+local goalPadding: UIPadding
+local goalHeader: Frame
+-- Phone: NEXT GOAL is one line, the goal text and its reward (no caption,
+-- bar or count); the full card is the desktop's.
+local goalPhoneLine: Frame
+local goalPhoneText: TextLabel
+local goalPhoneReward: TextLabel
+local goalPhoneMode = false
+local goalHasCount = false
+local GOAL_PHONE_LINE_HEIGHT = 22
+local GOAL_PHONE_REWARD_WIDTH = 64
 
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
@@ -215,13 +225,14 @@ local function buildGoalTracker()
 	})
 	goalPathButton = pathButton
 
-	UIKit.Padding(body, 12, 14, 12, 14)
+	goalPadding = UIKit.Padding(body, 12, 14, 12, 14)
 	local layout = Instance.new("UIListLayout")
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, 6)
 	layout.Parent = body
 
 	local headerRow = Instance.new("Frame")
+	goalHeader = headerRow
 	headerRow.Name = "Header"
 	headerRow.BackgroundTransparency = 1
 	headerRow.Size = UDim2.new(1, 0, 0, 16)
@@ -284,6 +295,53 @@ local function buildGoalTracker()
 		ZIndex = body.ZIndex + 1,
 		Parent = body,
 	})
+
+	-- The phone's one line: the goal on the left (cut with "…" when long), its
+	-- reward on the right. Hidden on desktop.
+	goalPhoneLine = Instance.new("Frame")
+	goalPhoneLine.Name = "PhoneLine"
+	goalPhoneLine.BackgroundTransparency = 1
+	goalPhoneLine.Size = UDim2.new(1, 0, 0, GOAL_PHONE_LINE_HEIGHT)
+	goalPhoneLine.LayoutOrder = 0
+	goalPhoneLine.Visible = false
+	goalPhoneLine.ZIndex = body.ZIndex + 1
+	goalPhoneLine.Parent = body
+	goalPhoneText = UIKit.Label({
+		Name = "Text",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		Size = UDim2.new(1, -GOAL_PHONE_REWARD_WIDTH, 1, 0),
+		ZIndex = goalPhoneLine.ZIndex,
+		Parent = goalPhoneLine,
+	})
+	goalPhoneText.TextTruncate = Enum.TextTruncate.AtEnd
+	goalPhoneReward = UIKit.Label({
+		Name = "Reward",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		TextColor3 = Colors.GoldLabel,
+		AnchorPoint = Vector2.new(1, 0),
+		Position = UDim2.fromScale(1, 0),
+		Size = UDim2.new(0, GOAL_PHONE_REWARD_WIDTH, 1, 0),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		ZIndex = goalPhoneLine.ZIndex,
+		Parent = goalPhoneLine,
+	})
+end
+
+-- Phone: the one-line pill; desktop: the full card.
+local function applyGoalLayout(isPhone: boolean)
+	goalPhoneMode = isPhone
+	goalHeader.Visible = not isPhone
+	goalTextLabel.Visible = not isPhone
+	goalBar.Visible = not isPhone
+	goalCountLabel.Visible = goalHasCount and not isPhone
+	goalPhoneLine.Visible = isPhone
+	local vertical, horizontal = if isPhone then 6 else 12, if isPhone then 10 else 14
+	goalPadding.PaddingTop = UDim.new(0, vertical)
+	goalPadding.PaddingBottom = UDim.new(0, vertical)
+	goalPadding.PaddingLeft = UDim.new(0, horizontal)
+	goalPadding.PaddingRight = UDim.new(0, horizontal)
 end
 
 export type GoalView = {
@@ -303,17 +361,18 @@ function HudController.SetGoal(goal: GoalView?)
 	goalHolder.Visible = true
 	goalRewardLabel.Text = "+" .. NumberFormat.Money(goal.Reward)
 	goalTextLabel.Text = goal.Text
+	goalPhoneText.Text = goal.Text
+	goalPhoneReward.Text = goalRewardLabel.Text
 	UIKit.SetProgress(goalBar, if goal.Target > 0 then goal.Current / goal.Target else 0, true)
+	goalHasCount = goal.Unit ~= nil
 	if goal.Unit then
-		goalCountLabel.Visible = true
 		goalCountLabel.Text = ("%s / %s %s"):format(
 			NumberFormat.Short(math.min(goal.Current, goal.Target)),
 			NumberFormat.Short(goal.Target),
 			goal.Unit
 		)
-	else
-		goalCountLabel.Visible = false
 	end
+	goalCountLabel.Visible = goalHasCount and not goalPhoneMode
 end
 
 -- Completion flourish: flash the border Goal-coloured and pop the panel.
@@ -1874,7 +1933,8 @@ local function refreshQuestRow()
 		countBadge.BackgroundColor3 = Colors.Panel2
 	end
 	local nearest = QuestsPanel.GetNearest()
-	questTracker.Visible = nearest ~= nil and TycoonController.HasSynced()
+	-- Not on a phone: the QUESTS card's red ! and the panel cover it.
+	questTracker.Visible = not layoutIsPhone and nearest ~= nil and TycoonController.HasSynced()
 	if nearest then
 		questTracker.Text = ("📜 %s · %s / %s"):format(
 			tostring(nearest.Text),
@@ -2069,11 +2129,18 @@ local function placeColumnFor(isPhone: boolean)
 	end
 	cashHolder.Position = cashPosition
 	if isPhone then
-		-- Phone stack: the slim cash panel, the utility grid (3 per row), the
-		-- status stack (deal tile, "next in"), then the goal card. SHOP / QUESTS
-		-- / LOCK rows are empty here (their cards are in the grid).
+		-- Phone stack: the slim cash panel, the one-line NEXT GOAL pill (when
+		-- there is a goal), then the utility grid (3 per row) with the status
+		-- stack (deal tile, "next in") BESIDE it, so the column stays short.
+		-- SHOP / QUESTS / LOCK rows are empty here (their cards are in the
+		-- grid); the quest tracker is hidden.
 		local x = cashPosition.X.Offset
 		local gridTop = cashPosition.Y.Offset + CASH_CARD_PHONE.Y + UITheme.ShadowOffset + PHONE_CARD_GAP
+		goalHolder.Position = UDim2.fromOffset(x, gridTop)
+		if goalHolder.Visible then
+			-- AbsoluteSize is in screen px; the offsets are design px.
+			gridTop += math.ceil(goalHolder.AbsoluteSize.Y / UIKit.EffectiveScale(goalHolder)) + UITheme.ShadowOffset + PHONE_CARD_GAP
+		end
 		local shown = 0
 		for _, child in phoneGrid:GetChildren() do
 			if child:IsA("GuiObject") and child.Visible then
@@ -2083,10 +2150,9 @@ local function placeColumnFor(isPhone: boolean)
 		local columns = math.clamp(shown, 1, PHONE_GRID_COLUMNS)
 		phoneGrid.Size = UDim2.fromOffset(columns * PHONE_CARD + (columns - 1) * PHONE_CARD_GAP, 0)
 		phoneGrid.Position = UDim2.fromOffset(x, gridTop)
-		local top = gridTop
+		local statusX = x
 		if shown > 0 then
-			-- AbsoluteContentSize is in screen px; the offsets are design px.
-			top += math.ceil(phoneGridLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneGrid)) + UITheme.ShadowOffset + PHONE_CARD_GAP
+			statusX += phoneGrid.Size.X.Offset + PHONE_CARD_GAP + UITheme.ShadowOffset
 		end
 		for _, row in { shopRow, questRow, lockRow } do
 			row.Position = phoneGrid.Position
@@ -2095,12 +2161,7 @@ local function placeColumnFor(isPhone: boolean)
 		sizeDealTile(true)
 		dealHolder.Parent = phoneStatus
 		UIKit.PillRoot(giftsNextPill).Parent = phoneStatus
-		phoneStatus.Position = UDim2.fromOffset(x, top)
-		local height = phoneStatusLayout.AbsoluteContentSize.Y / UIKit.EffectiveScale(phoneStatus)
-		if height > 0.5 then
-			top += math.ceil(height) + LOCK_BUTTON_GAP
-		end
-		goalHolder.Position = UDim2.fromOffset(x, top)
+		phoneStatus.Position = UDim2.fromOffset(statusX, gridTop)
 		placeQuestTracker()
 		return
 	end
@@ -2134,6 +2195,10 @@ end
 function applyLayout(isPhone: boolean)
 	layoutIsPhone = isPhone
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	applyGoalLayout(isPhone)
+	if isPhone then
+		questTracker.Visible = false
+	end
 	applyCashLayout(isPhone)
 	parentCards(isPhone)
 	-- Which of the rows / the grid is the live one follows the layout; the
@@ -2157,6 +2222,10 @@ end
 -- of a phone still fails.
 local SELFTEST_PHONE_WIDTH = 844
 local SELFTEST_LEFT_SHARE = 0.4
+-- The test phones' heights (844 x 390 and 896 x 414) and the gap the column
+-- keeps above the bottom edge, in the HUD's design px after the UIScale.
+local SELFTEST_PHONE_HEIGHTS = { 390, 414 }
+local SELFTEST_BOTTOM_MARGIN = 8
 
 -- Shows the deal badge and "next in" with long sample texts, then checks every element of the left group ends inside
 -- the left 40% of the screen. The caller forces the phone layout first.
@@ -2167,6 +2236,17 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	applyDealView({ Icon = "🔥" }, "SelfTest", nil, 23, 5 * 3600 + 59 * 60 + 59, { "Boost", "LuckPotion" })
 	UIKit.SetPillVisible(giftsNextPill, true)
 	giftsNextPill.Text = "next in 59:59"
+	-- Worst case for the height: every card of the grid up, three power-ups.
+	lockHolder.Visible = true
+	helpHolder.Visible = true
+	shopHolder.Visible = true
+	for order, key in QuestConfig.PowerUpOrder do
+		powerButtons[key].Holder.Visible = order <= 3
+	end
+	phoneGrid.Visible = true
+	goalHolder.Visible = true
+	goalPhoneText.Text = "Fuse 5 times to unlock the next orb tier"
+	goalPhoneReward.Text = "+$1.25M"
 	applyLayout(layoutIsPhone)
 	task.wait(0.3)
 
@@ -2207,7 +2287,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		DealBadge = if layoutIsPhone then phoneStatus else dealHolder,
 	}
 	local trackerWas, goalWas = questTracker.Visible, goalHolder.Visible
-	questTracker.Visible = true
+	questTracker.Visible = not layoutIsPhone -- hidden on a phone
 	goalHolder.Visible = true
 	task.wait(0.2)
 	local names: { string } = {}
@@ -2236,11 +2316,43 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		end
 	end
 
+	-- The phone's column must fit the screen: every element's bottom is at
+	-- least SELFTEST_BOTTOM_MARGIN above the bottom edge of both test phones
+	-- (the column is pinned to the top-left, so the window size does not matter).
+	local lowest, lowestName = 0, ""
+	local inset = GuiService:GetGuiInset().Y
+	local columnScale = UIKit.EffectiveScale(screenGui)
+	for name, gui in stacked do
+		if gui.Visible and gui:IsDescendantOf(screenGui) then
+			local bottom = (gui.AbsolutePosition.Y + gui.AbsoluteSize.Y + inset) / columnScale
+			if bottom > lowest then
+				lowest, lowestName = bottom, name
+			end
+		end
+	end
+	local cutOff: { string } = {}
+	for _, height in SELFTEST_PHONE_HEIGHTS do
+		local edge = height / UITheme.PhoneScale - SELFTEST_BOTTOM_MARGIN
+		if lowest > edge then
+			table.insert(cutOff, ("%s ends at %d, past %d on a %d px tall phone"):format(lowestName, math.ceil(lowest), math.floor(edge), height))
+		end
+	end
+
 	questTracker.Visible = trackerWas
 	goalHolder.Visible = goalWas
 	selfTestHold = false
 	refreshShopRow()
+	refreshQuestRow()
+	refreshLockChip()
 	local lines: { string } = {}
+	if layoutIsPhone then
+		table.insert(lines, if #cutOff == 0
+			then ("PASS hud left column fits the screen (%s, lowest element %s ends at %d, 844 x 390 and 896 x 414 allow %d and %d)"):format(
+				scaleName, lowestName, math.ceil(lowest),
+				math.floor(SELFTEST_PHONE_HEIGHTS[1] / UITheme.PhoneScale - SELFTEST_BOTTOM_MARGIN),
+				math.floor(SELFTEST_PHONE_HEIGHTS[2] / UITheme.PhoneScale - SELFTEST_BOTTOM_MARGIN))
+			else ("FAIL hud left column fits the screen (%s): %s"):format(scaleName, table.concat(cutOff, "; ")))
+	end
 	if not layoutIsPhone then
 		-- The 40% rule is the phone's; desktop has the room.
 	elseif #bad > 0 then
@@ -2404,7 +2516,7 @@ function HudController.SelfTestBusy(measure: () -> any): any
 	giftsNextPill.Text = "next in 59:59"
 	local goalWas, trackerWas = goalHolder.Visible, questTracker.Visible
 	goalHolder.Visible = true
-	questTracker.Visible = true
+	questTracker.Visible = not layoutIsPhone -- hidden on a phone
 	lockHolder.Visible = true
 	helpHolder.Visible = true
 	shopHolder.Visible = true
@@ -2679,15 +2791,13 @@ function HudController.Init()
 			placeColumn()
 		end
 	end)
-	-- Desktop: the cash card follows the goal card and the quest tracker.
+	-- Desktop: the cash card follows the goal card and the quest tracker; phone:
+	-- the grid follows the goal pill.
 	for _, signalSource in { goalHolder, questTracker } do
 		signalSource:GetPropertyChangedSignal("Visible"):Connect(placeColumn)
 	end
-	goalHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
-		if not layoutIsPhone then
-			placeColumn()
-		end
-	end)
+	-- Desktop: the cash card follows the goal card; phone: the grid follows the pill.
+	goalHolder:GetPropertyChangedSignal("AbsoluteSize"):Connect(placeColumn)
 
 	RunService.RenderStepped:Connect(onRenderStep)
 	task.spawn(function()

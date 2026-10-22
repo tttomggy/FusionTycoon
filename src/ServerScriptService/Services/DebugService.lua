@@ -984,8 +984,7 @@ local function runSecretPitySelfTest(player: Player, result: (boolean, string, s
 	end
 	FusionService.SelfTestSetRoll(1 - 1e-9)
 
-	-- The charge is the input count; the meter stops at full (with a small
-	-- SecretPityFull a 6-input fail fills it from empty).
+	-- The charge is the input count; the meter stops at full.
 	result(FusionConfig.GetPityCharge(6) == 6 and FusionConfig.GetPityCharge(2) == 2, "secret pity: a 6-input fail charges 6 points, a 2-input fail 2")
 	fuse(mythic, 2)
 	local afterPair = PlayerDataService.GetSecretPity(player)

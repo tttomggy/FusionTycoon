@@ -141,12 +141,16 @@ same `Key` replaces its queued twin, `Valid` skips a stale item at its turn.
 `EventController` (event start) feed it. The welcome splash waits with
 `TopStack.WhenIdle`.
 
-The HUD's left column is one stack too: NEXT GOAL, the quest tracker, then
-the cash card (desktop; it never sits above y 274 and follows the goal card
-and tracker down), SHOP / GIFTS (the timed pills are a row beside GIFTS on
-desktop, a stack on a phone), QUESTS, LOCK, the deal badge.
+The HUD's left column is one stack too. Desktop: NEXT GOAL, the quest tracker,
+then the cash card (it never sits above y 274 and follows the goal card and
+tracker down), SHOP / GIFTS (the timed pills are a row beside GIFTS), QUESTS,
+LOCK, the deal badge. Phone: the slim cash panel, NEXT GOAL as a one-line pill
+(goal text + reward, 232 px wide) directly under it, then the icon grid with
+the deal tile and "next in" stack BESIDE it (so the column stays short); the
+quest tracker is hidden (the QUESTS card's red ! covers it).
 `HudController.SelfTestLeftColumn` checks the rects do not overlap, at both
-layouts.
+layouts, and that on a phone nothing ends within 8 px of the bottom edge of
+844 × 390 or 896 × 414.
 
 
 ## Tutorial 4: pacing, the dim screen, the objective bar

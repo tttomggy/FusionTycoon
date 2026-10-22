@@ -2930,16 +2930,20 @@ end
 
 -- The effects tray: with a Luck Potion, Speed Boots and Safe Fusion tokens
 -- granted by the server, a luck circle with a timer, a Speed Boots circle
--- with a timer and a Safe Fusion circle with "×N" are up in one row in the
--- TOP-RIGHT corner of the screen, their timers read the live seconds, tap targets
--- are >= 44 px on screen, nothing overlaps a HUD rect or the weapon bar, and
--- the old effect pills are gone. Measured at both layouts.
+-- with a timer and a Safe Fusion circle with "×N" are up in one row: in the
+-- BOTTOM-LEFT corner on desktop, the TOP-RIGHT corner on a phone. Their timers
+-- read the live seconds, tap targets are >= 44 px on screen, nothing overlaps
+-- a HUD rect or the weapon bar, and the old effect pills are gone. Measured
+-- at both layouts.
 -- The tray's and the tooltip's placement maths against the real HUD rects and
--- the weapon bar at three explicit window sizes in both layouts (the same
--- idea as "cards centred"), with 3 and with 5 effects: the tray is one row
+-- the weapon bar at four explicit window sizes in both layouts (the same
+-- idea as "cards centred"), with 3 and with 5 effects. Desktop: one
+-- left-aligned row in the bottom-left corner, 16 px from the left and bottom
+-- edges and 12 px short of the bottom row (or, when it cannot fit, directly
+-- above that row), touching no HUD rect or the weapon bar. Phone: one row
 -- (or right-aligned rows when it wraps) in the top-right quarter below
--- GetCardTop, touches no HUD rect and is clear of TopStack, the weapon bar
--- and the phone's jump button; the Luck tooltip is on screen, touching none. Needs the weapon bar up (/weapons all).
+-- GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump
+-- button. The Luck tooltip is on screen, touching none. Needs the weapon bar up (/weapons all).
 local EFFECTS_VIEWPORTS = {
 	{ Name = "1251 x 666", Size = Vector2.new(1251, 666) },
 	{ Name = "1366 x 768", Size = Vector2.new(1366, 768) },
@@ -2999,6 +3003,9 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 					end
 				end
 				local rowProblems: { string } = {}
+				if plan.Corner ~= (if phone then "TopRight" else "BottomLeft") then
+					table.insert(rowProblems, ("planned for the %s corner"):format(plan.Corner))
+				end
 				if plan.Rows == 1 and #rowYs ~= 1 then
 					table.insert(rowProblems, ("%d rows, want one"):format(#rowYs))
 				end
@@ -3007,32 +3014,66 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				end
 				for index = 2, #rightEdges do
 					if math.abs(rightEdges[index] - rightEdges[1]) > 1 then
-						table.insert(rowProblems, "rows are not right-aligned")
+						table.insert(rowProblems, "rows are not aligned")
 						break
 					end
 				end
+				if not phone and plan.Rows ~= 1 then
+					table.insert(rowProblems, ("%d rows on desktop, want one"):format(plan.Rows))
+				end
 				table.insert(lines, {
 					Ok = #rowProblems == 0,
-					Name = ("effects tray plan (%s, %d effects): one row, or right-aligned rows when it wraps"):format(label, effects),
+					Name = ("effects tray plan (%s, %d effects): %s"):format(label,
+						effects, if phone then "one row, or right-aligned rows when it wraps" else "one row"),
 					Detail = ("%d px icons, %d per row, %d rows%s"):format(plan.Circle, plan.PerRow, plan.Rows, if #rowProblems > 0 then ": " .. table.concat(rowProblems, "; ") else ""),
 				})
-				-- The top-right quarter, below GetCardTop, 8 px from the right edge.
 				local right = plan.Rect.Position.X + plan.Rect.Size.X
 				local placeProblems: { string } = {}
-				if plan.Rect.Position.Y < cardTop - 1 then
-					table.insert(placeProblems, ("starts at y %d, GetCardTop is %d"):format(plan.Rect.Position.Y, cardTop))
+				local bottomRow = obstacles.BottomRow
+				if phone then
+					-- The top-right quarter, below GetCardTop, 8 px from the right edge.
+					if plan.Rect.Position.Y < cardTop - 1 then
+						table.insert(placeProblems, ("starts at y %d, GetCardTop is %d"):format(plan.Rect.Position.Y, cardTop))
+					end
+					if plan.Rect.Position.X + plan.Rect.Size.X / 2 < view.X / 2 or plan.Rect.Position.Y + plan.Rect.Size.Y > view.Y / 2 then
+						table.insert(placeProblems, "not in the top-right quarter")
+					end
+					if right > view.X - 4 or right < view.X - 12 then
+						table.insert(placeProblems, ("right edge at %d of %d (want 8 px, a cell's 4 px gap included)"):format(right, view.X))
+					end
+				else
+					-- The bottom-left corner: first circle 16 px from the left edge,
+					-- timers 16 px from the bottom, 12 px short of UPGRADES; or above the row.
+					local first = EffectsTray.CircleRectFor(plan, 1)
+					if math.abs(first.Position.X - 16) > 1 then
+						table.insert(placeProblems, ("first circle %d px from the left edge, want 16"):format(first.Position.X))
+					end
+					if not bottomRow then
+						table.insert(placeProblems, "no BottomRow rect to measure against")
+					elseif plan.Lifted then
+						if plan.Rect.Position.Y + plan.Rect.Size.Y > bottomRow.Position.Y + 1 then
+							table.insert(placeProblems, "lifted row still reaches the bottom row's top")
+						end
+					else
+						if math.abs(view.Y - 16 - (plan.Rect.Position.Y + plan.Rect.Size.Y)) > 1 then
+							table.insert(placeProblems, ("bottom at %d of %d, want 16 px from the edge"):format(plan.Rect.Position.Y + plan.Rect.Size.Y, view.Y))
+						end
+						if right > bottomRow.Position.X - 12 + 1 then
+							table.insert(placeProblems, ("ends at %d, the bottom row starts at %d (want 12 px between)"):format(right, bottomRow.Position.X))
+						end
+					end
 				end
-				if plan.Rect.Position.X + plan.Rect.Size.X / 2 < view.X / 2 or plan.Rect.Position.Y + plan.Rect.Size.Y > view.Y / 2 then
-					table.insert(placeProblems, "not in the top-right quarter")
-				end
-				if phone and (right > view.X - 4 or right < view.X - 12) then
-					table.insert(placeProblems, ("right edge at %d of %d (want 8 px, a cell's 4 px gap included)"):format(right, view.X))
+				if plan.Circle < 44 then
+					table.insert(placeProblems, ("%d px icons, under the 44 px tap size"):format(plan.Circle))
 				end
 				table.insert(lines, {
 					Ok = #placeProblems == 0 and weaponBar ~= nil and #plan.Hits == 0,
-					Name = ("effects tray plan (%s, %d effects): top-right, below GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump button"):format(label, effects),
-					Detail = ("rect %d,%d %dx%d, weapon bar %s, touches: %s%s"):format(
-						plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y,
+					Name = if phone
+						then ("effects tray plan (%s, %d effects): top-right, below GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump button"):format(label, effects)
+						else ("effects tray plan (%s, %d effects): bottom-left, left of UPGRADES (or above it), clear of the left column and the weapon bar"):format(label, effects),
+					Detail = ("rect %d,%d %dx%d, %d px icons%s, weapon bar %s, touches: %s%s"):format(
+						plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y, plan.Circle,
+						if plan.Lifted then ", above the bottom row" else "",
 						if weaponBar then "up" else "NOT showing (/weapons all)", table.concat(plan.Hits, ", "),
 						if #placeProblems > 0 then " | " .. table.concat(placeProblems, "; ") else ""
 					),
@@ -3045,11 +3086,11 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				Detail = ("card %dx%d"):format(size.X, size.Y),
 			})
 			local circle = EffectsTray.CircleRectFor(plan3, 1)
-			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
+			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size, phone)
 			local narrow = false
 			if tip.Overlap > 0 or not tip.OnScreen then
 				-- The live card narrows to its minimum width when nothing is clear (taller by the wrap).
-				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(EffectsTray.TOOLTIP_MIN_WIDTH, size.Y * 1.6))
+				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(EffectsTray.TOOLTIP_MIN_WIDTH, size.Y * 1.6), phone)
 				narrow = true
 			end
 			table.insert(lines, {
@@ -3093,14 +3134,17 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
 			),
 		})
-		-- In the top-right quarter of the window (one row, or right-aligned rows), and timers that read the live seconds.
+		-- In the bottom-left (desktop) / top-right (phone) quarter of the window, and timers that read the live seconds.
 		local camera = workspace.CurrentCamera
 		local window = if camera then camera.ViewportSize else Vector2.new(1366, 768)
 		local inset = GuiService:GetGuiInset().Y
 		local outside: { string } = {}
 		for id, entry in byId do
 			local centre = entry.Position + entry.Size / 2 - Vector2.new(0, inset)
-			if centre.X <= window.X * 0.5 or centre.Y >= window.Y * 0.5 then
+			local inQuarter = if phone
+				then centre.X > window.X * 0.5 and centre.Y < window.Y * 0.5
+				else centre.X < window.X * 0.5 and centre.Y > window.Y * 0.5
+			if not inQuarter then
 				table.insert(outside, ("%s at %d,%d"):format(id, centre.X, centre.Y))
 			end
 		end
@@ -3108,7 +3152,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if not tooSmall then
 			table.insert(lines, {
 				Ok = next(byId) ~= nil and #outside == 0,
-				Name = ("effects tray (%s, window %d × %d): in the top-right quarter"):format(label, window.X, window.Y),
+				Name = ("effects tray (%s, window %d × %d): in the %s quarter"):format(label, window.X, window.Y, if phone then "top-right" else "bottom-left"),
 				Detail = table.concat(outside, ", "),
 			})
 		end

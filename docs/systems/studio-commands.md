@@ -197,13 +197,16 @@ Most of the 77 were the TEST, not the game:
   `/selftest` runs them against the real HUD rects and the weapon bar
   (`CombatController.GetBarRectFor`, needs `/weapons all`) at 1251 × 666,
   1366 × 768, 844 × 390 and 896 × 414, in both layouts, with 3 and with 5
-  effects (`effects tray plan (…)`). The tray is one row in the top-right
-  corner at `UIKit.GetCardTop()`, right-aligned, 12 px short of
-  `TopStack.WIDEST_WIDTH` (and, on desktop, of the Roblox player list,
-  `PLAYER_LIST_RESERVE` 300 px, not measured); the icons shrink 60 -> 48 px,
-  then wrap into a second right-aligned row; the jump button
-  (`EffectsTray.JumpRectFor`) is still an obstacle;
-  the tooltip tries below, below-left, left, above-left, above, right, then
+  effects (`effects tray plan (…)`), per layout. Desktop: one left-aligned row
+  in the bottom-left corner (first circle 16 px from the left edge, timers 16 px
+  from the bottom), ending 12 px short of the bottom row (UPGRADES); the icons
+  shrink 60 -> 48 px, then the row moves directly above the bottom row; it
+  touches no HUD rect (left column, bottom row) or the weapon bar. Phone: one
+  row in the top-right corner at `UIKit.GetCardTop()`, right-aligned, 12 px
+  short of `TopStack.WIDEST_WIDTH`; the icons shrink 60 -> 48 px, then wrap into
+  a second right-aligned row; the jump button (`EffectsTray.JumpRectFor`) is
+  still an obstacle. The tooltip tries (desktop) above, above-right, right,
+  left, below, (phone) below, below-left, left, above-left, above, right, then
   narrows to 160 px, its minimum width (the label wrap has a MinSize too: a
   live reading of "34 × 532" was a wrap measured before the card had a width);
   with no side on screen it goes under the icon, clamped on screen. The old
@@ -216,14 +219,18 @@ Most of the 77 were the TEST, not the game:
 
 `testPhoneHudCoverage` forces the phone layout, builds the busiest HUD
 (`HudController.SelfTestBusy`: SHOP, GIFTS, QUESTS, three power-ups, LOCK and
-its "?", the deal tile, "next in", the goal card, the quest tracker) and at
+its "?", the deal tile, "next in", the goal pill; the quest tracker is hidden on a phone) and at
 844 × 390 and 896 × 414 prints the UNION of all HUD rects as a % of the
 screen (`phone HUD coverage`, limit 20%), checks the HUD is clear of the
 weapon bar (when `/weapons all` is on) and the jump button, and that every icon
 card (`HudController.GetCardViews`) is ≥ 44 px with text ≥ 13 px. Layout
 numbers (logical px, from the constants, no Studio): before the compact
 HUD ≈ 22% (844 × 390) / 20% (896 × 414) with three power-ups up; after ≈ 18% /
-16% (about 20% / 18% with all five).
+16% (about 20% / 18% with all five). `HudController.SelfTestLeftColumn` adds
+"hud left column fits the screen": with the worst-case phone column (every grid
+card, three power-ups, the deal tile, "next in", the one-line goal pill; the
+quest tracker is hidden on a phone) every element's bottom must end at least
+8 px above the bottom edge of both test phones (≤ 479 and ≤ 510 design px).
 
 ## /selftest: Secret pity meter
 

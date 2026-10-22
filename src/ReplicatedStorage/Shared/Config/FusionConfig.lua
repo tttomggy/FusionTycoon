@@ -97,7 +97,7 @@ end
 	(SECRET_PITY_FULL, --pity=N).
 ]]
 FusionConfig.PityTier = "Mythic"
-FusionConfig.SecretPityFull = 4 -- two failed pairs, or any one fail of 4+ inputs; see TycoonConfig's header
+FusionConfig.SecretPityFull = 12 -- six failed pairs, or two failed 6-orb fusions; a long chase on purpose, see TycoonConfig's header
 
 function FusionConfig.HasPity(tier: string): boolean
 	return tier == FusionConfig.PityTier

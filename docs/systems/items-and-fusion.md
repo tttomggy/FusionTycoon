@@ -29,7 +29,7 @@ not bring the first Secret in (see the TycoonConfig header table).
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse Mythics
 at 7–15% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`).
 
-**Secret pity meter** (`FusionConfig.SecretPityFull`, 4; `PlayerData.SecretPity`,
+**Secret pity meter** (`FusionConfig.SecretPityFull`, 12; `PlayerData.SecretPity`,
 saved, in the snapshot, kept through rebirths). A **failed** Mythic → Secret
 fusion adds its input count (`GetPityCharge`: 6 inputs +6, 2 inputs +2; the
 meter stops at full). At full the next Mythic fusion is a sure success
@@ -39,11 +39,13 @@ from the gacha doesn't touch it; other tiers never charge it. `FusionService`
 is the only writer (`PlayerDataService.Get/SetSecretPity`); the fusion result
 carries `Pity`, `PityGained` and `SurePity`. Safe Fusion still charges it (it
 only keeps the orbs). Fuse panel: on the Mythic tab, once Mythic fusion is
-unlocked, a slim "SECRET METER n / 4" bar under the success % (mint fill, 14 px
+unlocked, a slim "SECRET METER n / 12" bar under the success % (mint fill, 14 px
 text); at full it reads "NEXT FUSE IS A SURE SECRET!" and the % and chips show
 100%. The fail card adds "Secret meter +n". Chosen with `tools/econ_sim.py
---pity=N` (the TycoonConfig header table has the sweep): 4 is the only value
-whose first Secret lands in 3–5 h at `--fuse=2` (~4:25); `--fuse=3` stays out of
+--pity=N` (the TycoonConfig header table has the sweep): 12 is a deliberate
+long chase (first Secret ~7:23 at `--fuse=2`; two failed 6-orb fusions or six
+failed pairs fill it). 4 would land in 3–5 h but one failed 4+ orb fusion filled
+it, and Harris wanted Secrets to stay the long chase. `--fuse=3` stays out of
 reach because that player never has spare Mythics (Mythic supply, not odds).
 Odds in this paragraph (7–15%) are unchanged. Any pull or
 successful fusion can roll a **mutation** (`MutationConfig`, ranked by

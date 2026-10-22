@@ -3,12 +3,9 @@
 	EffectsTray
 	-----------
 	The active effects as round cartoon STICKER badges with a timer under
-	each, ONE ROW in the TOP-RIGHT corner (below the Roblox top bar, clear of
-	the weapon bar and the jump button at the bottom). The first effect is the
-	rightmost; new ones are added to its left. When the row would reach
-	TopStack's widest slot the icons shrink (60 -> 48 px), and if they still
-	don't fit it wraps into a SECOND ROW below the first, still right-aligned.
-	Never a column, never a zigzag.
+	each, ONE ROW. Desktop: the BOTTOM-LEFT corner, left of UPGRADES. Phone:
+	the TOP-RIGHT corner (below the Roblox top bar, clear of the weapon bar
+	and the jump button at the bottom). Never a column, never a zigzag.
 
 	  Income boost   💵 green   timer            (Boost / Quick Boost / Cash Burst bank)
 	  Luck           🍀 teal    timer + "×2"     (Luck Potion / Lucky Charm bank)
@@ -35,19 +32,27 @@
 	Effects pop in (0.85 -> 1, 0.15 s) when gained and shrink out when they
 	end.
 
-	Placement: the row's top is UIKit.GetCardTop() (the line the top stack
-	starts on), 8 px from the right edge. Its left edge stops at least 12 px
-	short of TopStack.WIDEST_WIDTH (centred) and, on desktop, short of the
-	Roblox player list (PLAYER_LIST_RESERVE, the leaderstats make it wide). The
-	plan tries one row at 60 px, one row at 48 px (never below, 44 px taps),
-	then 48 px wrapped into rows; the first that touches no HUD rect, the
-	weapon bar or the jump button wins; with none, the least overlap.
+	Placement, DESKTOP: one row, the first effect leftmost, new ones added to
+	its right; the first circle 16 px from the left edge and the timers' bottom
+	16 px from the bottom edge. The row ends at least BOTTOM_ROW_GAP (12 px)
+	left of the HUD bottom row's left edge (UPGRADES). The plan tries 60 px
+	icons, then 48 px (never below, 44 px taps), then 60 and 48 px
+	directly ABOVE the bottom row (still at the left margin, clear of the left
+	column's rects and the weapon bar); with none, the least overlap.
+	Placement, PHONE: the row's top is UIKit.GetCardTop() (the line the top
+	stack starts on), 8 px from the right edge, the first effect rightmost
+	and new ones to its left. Its left edge stops at least 12 px short of
+	TopStack.WIDEST_WIDTH (centred). The plan tries one row at 60 px, one row
+	at 48 px, then 48 px wrapped into right-aligned rows; the first that
+	touches no HUD rect, the weapon bar or the jump button wins; with none,
+	the least overlap.
 	EffectsTray.PlanTrayFor / PlanTooltipFor are that maths on their own
 	(logical px, screen space), so /selftest runs them at 1251 x 666,
-	1366 x 768, 844 x 390 and 896 x 414 with 3 and with 5 effects.
+	1366 x 768, 844 x 390 and 896 x 414 with 3 and with 5 effects, per layout.
 
-	The tooltip tries BELOW the icon, BELOW-LEFT, LEFT, then ABOVE-LEFT, centred
-	ABOVE and RIGHT, each against every HUD rect; none clear ->
+	The tooltip, DESKTOP, tries ABOVE the icon (centred), ABOVE-RIGHT, RIGHT,
+	LEFT, then BELOW. PHONE: BELOW the icon, BELOW-LEFT, LEFT, then ABOVE-LEFT,
+	centred ABOVE and RIGHT. Each is tested against every HUD rect; none clear ->
 	the card narrows to 160 px (its minimum width: the text shrinks, the
 	card never gets narrower), and with still none the one that overlaps
 	least is used; with no side on screen at all it goes under the icon,
@@ -82,12 +87,12 @@ local TIMER_HEIGHT = 18
 local TIMER_GAP = 4
 local CELL_SIDE_GAP = 8
 local ROW_GAP = 6
+local LEFT_MARGIN = 16 -- desktop: the first circle's distance from the left edge...
+local BOTTOM_EDGE = 16 -- ...and the timers' from the bottom edge
+local BOTTOM_ROW_GAP = 12 -- px between the desktop row and the HUD bottom row (UPGRADES)
+local ABOVE_ROW_GAP = 8 -- px between a lifted desktop row and the bottom row's top
 local RIGHT_MARGIN = 4 -- plus the cell's own 4 px side gap: the circle sits 8 px from the edge
 local STACK_GAP = 12 -- px between the row and TopStack's widest slot
--- Desktop: the Roblox player list hangs below the top bar on the right and the
--- leaderstats (Cash, Rebirths) make it ~300 px wide. A phone's is collapsed.
--- Not measured in Studio: raise it if the row touches the list.
-local PLAYER_LIST_RESERVE = 300
 local JUMP_GAP = 12 -- px between the row and the jump button
 local SHRINK_SECONDS = 0.15
 local TICK_SECONDS = 0.25
@@ -133,6 +138,8 @@ type Cell = {
 export type Rect = { Position: Vector2, Size: Vector2 }
 
 export type TrayPlan = {
+	Corner: string, -- "BottomLeft" (desktop) | "TopRight" (phone)
+	Lifted: boolean, -- desktop: the row sits above the bottom row instead of beside it
 	Circle: number, -- icon px
 	PerRow: number, -- icons in a full row
 	Rows: number, -- 1, or more when the row had to wrap
@@ -555,11 +562,71 @@ function EffectsTray.JumpRectFor(view: Vector2, scale: number, phone: boolean): 
 	return { Position = Vector2.new(left, top) / scale, Size = Vector2.new(size, size) / scale }
 end
 
+-- Desktop: one row in the bottom-left corner, or directly above the HUD
+-- bottom row. See the header for the order it tries.
+local function planBottomLeft(view: Vector2, obstacles: { [string]: Rect }, cellCount: number): TrayPlan
+	local blocked: { [string]: Rect } = table.clone(obstacles)
+	local bottomRow = obstacles.BottomRow
+	if bottomRow then
+		-- The row stays BOTTOM_ROW_GAP short of UPGRADES.
+		blocked.BottomRow = {
+			Position = bottomRow.Position - Vector2.new(BOTTOM_ROW_GAP, 0),
+			Size = bottomRow.Size + Vector2.new(BOTTOM_ROW_GAP, 0),
+		}
+	end
+	local best: TrayPlan? = nil
+	local bestScore = math.huge
+	local function consider(circle: number, lift: number): TrayPlan?
+		local width = cellCount * cellWidth(circle)
+		local height = cellHeight(circle)
+		local rect: Rect = {
+			Position = Vector2.new(LEFT_MARGIN - CELL_SIDE_GAP / 2, view.Y - BOTTOM_EDGE - lift - height),
+			Size = Vector2.new(width, height),
+		}
+		local hits, area = touching(rect, blocked)
+		-- Off the screen counts as a heavy overlap.
+		if rect.Position.X + width > view.X or rect.Position.Y < 0 then
+			area += 1e6
+		end
+		local plan: TrayPlan = {
+			Corner = "BottomLeft",
+			Lifted = lift > 0,
+			Circle = circle,
+			PerRow = cellCount,
+			Rows = 1,
+			Top = rect.Position.Y,
+			Rect = rect,
+			Hits = hits,
+		}
+		if area < bestScore then
+			best, bestScore = plan, area
+		end
+		return if area == 0 then plan else nil
+	end
+	-- 1. In the corner: each icon size. 2. Above the bottom row's top edge.
+	local lifts = { 0 }
+	if bottomRow then
+		table.insert(lifts, view.Y - BOTTOM_EDGE - bottomRow.Position.Y + ABOVE_ROW_GAP)
+	end
+	for _, lift in lifts do
+		for _, circle in FITS do
+			local plan = consider(circle, lift)
+			if plan then
+				return plan
+			end
+		end
+	end
+	return best :: TrayPlan
+end
+
 -- Where the tray goes for `count` cells in a `view` (logical px): see the
 -- header for the order it tries. `jump` is JumpRectFor's rect (nil: none),
 -- `top` the row's y (UIKit.GetCardTop), `phone` the layout.
 function EffectsTray.PlanTrayFor(view: Vector2, obstacles: { [string]: Rect }, count: number, jump: Rect?, top: number, phone: boolean): TrayPlan
 	local cellCount = math.max(1, count)
+	if not phone then
+		return planBottomLeft(view, obstacles, cellCount)
+	end
 	local blocked: { [string]: Rect } = table.clone(obstacles)
 	if jump then
 		blocked.JumpButton = {
@@ -573,10 +640,7 @@ function EffectsTray.PlanTrayFor(view: Vector2, obstacles: { [string]: Rect }, c
 		Position = Vector2.new((view.X - TopStack.WIDEST_WIDTH) / 2, 0),
 		Size = Vector2.new(TopStack.WIDEST_WIDTH + STACK_GAP, top + 2 * cellHeight(FITS[1]) + ROW_GAP),
 	}
-	local right = view.X - RIGHT_MARGIN - (if phone then 0 else PLAYER_LIST_RESERVE)
-	if not phone then
-		blocked.PlayerList = { Position = Vector2.new(right, 0), Size = Vector2.new(PLAYER_LIST_RESERVE + RIGHT_MARGIN, view.Y) }
-	end
+	local right = view.X - RIGHT_MARGIN
 	local stackRight = blocked.TopStack.Position.X + blocked.TopStack.Size.X
 	local best: TrayPlan? = nil
 	local bestScore = math.huge
@@ -595,7 +659,7 @@ function EffectsTray.PlanTrayFor(view: Vector2, obstacles: { [string]: Rect }, c
 		if rect.Position.X < 0 or rect.Position.Y + height > view.Y then
 			area += 1e6
 		end
-		local plan: TrayPlan = { Circle = circle, PerRow = perRow, Rows = rows, Top = top, Rect = rect, Hits = hits }
+		local plan: TrayPlan = { Corner = "TopRight", Lifted = false, Circle = circle, PerRow = perRow, Rows = rows, Top = top, Rect = rect, Hits = hits }
 		if area < bestScore then
 			best, bestScore = plan, area
 		end
@@ -615,12 +679,15 @@ function EffectsTray.PlanTrayFor(view: Vector2, obstacles: { [string]: Rect }, c
 	return best :: TrayPlan
 end
 
--- The circle of the tray's `slot`-th cell (1 = the rightmost of the first row,
--- then left, then the next row below).
+-- The circle of the tray's `slot`-th cell (1 = the leftmost on desktop, the
+-- rightmost on a phone; then along the row, then the next row below).
 function EffectsTray.CircleRectFor(plan: TrayPlan, slot: number): Rect
 	local row = (slot - 1) // plan.PerRow
 	local column = (slot - 1) % plan.PerRow
-	local cellLeft = plan.Rect.Position.X + plan.Rect.Size.X - (column + 1) * cellWidth(plan.Circle)
+	-- Desktop: the first effect is the leftmost; phone: the rightmost.
+	local cellLeft = if plan.Corner == "BottomLeft"
+		then plan.Rect.Position.X + column * cellWidth(plan.Circle)
+		else plan.Rect.Position.X + plan.Rect.Size.X - (column + 1) * cellWidth(plan.Circle)
 	return {
 		Position = Vector2.new(
 			cellLeft + (cellWidth(plan.Circle) - plan.Circle) / 2,
@@ -630,14 +697,16 @@ function EffectsTray.CircleRectFor(plan: TrayPlan, slot: number): Rect
 	}
 end
 
--- Candidates, first that is on screen and clears every HUD rect wins (the
--- tray is a row in the top-right corner):
--- 1. BELOW the icon (under its timer), centred; 2. BELOW-LEFT: under the cell,
--- pushed left; 3. LEFT of the icon, its arrow pointing right; 4. ABOVE-LEFT:
--- over the icon, pushed left; 5. ABOVE, centred; 6. RIGHT of it.
+-- Candidates, first that is on screen and clears every HUD rect wins.
+-- Phone (the tray is a row in the top-right corner): 1. BELOW the icon (under
+-- its timer), centred; 2. BELOW-LEFT: under the cell, pushed left; 3. LEFT of
+-- the icon, its arrow pointing right; 4. ABOVE-LEFT: over the icon, pushed
+-- left; 5. ABOVE, centred; 6. RIGHT of it.
+-- Desktop (bottom-left corner): 1. ABOVE, centred; 2. ABOVE-RIGHT: over the
+-- icon, pushed right; 3. RIGHT of it; 4. LEFT; 5. BELOW.
 -- None clear: the on-screen one that overlaps least (the caller narrows
 -- the card first).
-function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }, circle: Rect, size: Vector2): TooltipPlan
+function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }, circle: Rect, size: Vector2, phone: boolean): TooltipPlan
 	-- A card is never narrower than TOOLTIP_MIN_WIDTH (a 34 px reading was a
 	-- wrap measured before the card had a width; it planned a 532 px column).
 	local width, height = math.max(size.X, TOOLTIP_MIN_WIDTH), size.Y
@@ -652,14 +721,22 @@ function EffectsTray.PlanTooltipFor(view: Vector2, obstacles: { [string]: Rect }
 	local function clampX(left: number): number
 		return math.clamp(left, TOOLTIP_EDGE, math.max(TOOLTIP_EDGE, view.X - width - TOOLTIP_EDGE))
 	end
-	local candidates = {
-		{ Side = "Below", Left = clampX(centreX - width / 2), Top = belowTop },
-		{ Side = "Below", Left = clampX(circle.Position.X + 24 - width), Top = belowTop },
-		{ Side = "Left", Left = circle.Position.X - TOOLTIP_GAP - TOOLTIP_ARROW / 2 - width, Top = sideTop },
-		{ Side = "Above", Left = clampX(circle.Position.X + 24 - width), Top = aboveBottom - height },
-		{ Side = "Above", Left = clampX(centreX - width / 2), Top = aboveBottom - height },
-		{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = sideTop },
-	}
+	local candidates: { { Side: string, Left: number, Top: number } } = if phone
+		then {
+			{ Side = "Below", Left = clampX(centreX - width / 2), Top = belowTop },
+			{ Side = "Below", Left = clampX(circle.Position.X + 24 - width), Top = belowTop },
+			{ Side = "Left", Left = circle.Position.X - TOOLTIP_GAP - TOOLTIP_ARROW / 2 - width, Top = sideTop },
+			{ Side = "Above", Left = clampX(circle.Position.X + 24 - width), Top = aboveBottom - height },
+			{ Side = "Above", Left = clampX(centreX - width / 2), Top = aboveBottom - height },
+			{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = sideTop },
+		}
+		else {
+			{ Side = "Above", Left = clampX(centreX - width / 2), Top = aboveBottom - height },
+			{ Side = "Above", Left = clampX(circle.Position.X - 24), Top = aboveBottom - height },
+			{ Side = "Right", Left = rightEdge + TOOLTIP_GAP + TOOLTIP_ARROW / 2, Top = sideTop },
+			{ Side = "Left", Left = circle.Position.X - TOOLTIP_GAP - TOOLTIP_ARROW / 2 - width, Top = sideTop },
+			{ Side = "Below", Left = clampX(centreX - width / 2), Top = belowTop },
+		}
 	local chosen: TooltipPlan? = nil
 	local fallback: TooltipPlan? = nil
 	local lastResort: TooltipPlan? = nil
@@ -729,7 +806,7 @@ local function placeTooltip()
 			obstacles[name] = { Position = rect.Position / scale, Size = rect.Size / scale }
 		end
 	end
-	local plan = EffectsTray.PlanTooltipFor(view, obstacles, circle, size)
+	local plan = EffectsTray.PlanTooltipFor(view, obstacles, circle, size, UIKit.IsPhone())
 	if plan.Overlap > 0 and tooltipMax > TOOLTIP_MIN_WIDTH then
 		-- Nothing is clear at full width: narrow the card (it re-plans next frame).
 		setTooltipMax(TOOLTIP_MIN_WIDTH)
@@ -967,6 +1044,7 @@ local function place()
 	local jump = EffectsTray.JumpRectFor(view, scale, phone)
 	local plan = EffectsTray.PlanTrayFor(view, obstacles, count, jump, UIKit.GetCardTop(), phone)
 	local circle, perRow = plan.Circle, plan.PerRow
+	local bottomLeft = plan.Corner == "BottomLeft"
 	lastPlan = plan
 	fitSize, fitPerRow = circle, perRow
 	for _, cell in cells do
@@ -978,7 +1056,16 @@ local function place()
 	gridLayout.CellSize = UDim2.fromOffset(cellWidth(circle), cellHeight(circle))
 	gridLayout.CellPadding = UDim2.fromOffset(0, ROW_GAP)
 	tray.Size = UDim2.fromOffset(plan.Rect.Size.X, plan.Rect.Size.Y)
-	tray.Position = UDim2.new(1, -(view.X - plan.Rect.Position.X - plan.Rect.Size.X), 0, plan.Top)
+	-- Desktop: the first effect is the leftmost; phone: the rightmost.
+	gridLayout.StartCorner = if bottomLeft then Enum.StartCorner.TopLeft else Enum.StartCorner.TopRight
+	gridLayout.HorizontalAlignment = if bottomLeft then Enum.HorizontalAlignment.Left else Enum.HorizontalAlignment.Right
+	if bottomLeft then
+		tray.AnchorPoint = Vector2.new(0, 0)
+		tray.Position = UDim2.fromOffset(plan.Rect.Position.X, plan.Top)
+	else
+		tray.AnchorPoint = Vector2.new(1, 0)
+		tray.Position = UDim2.new(1, -(view.X - plan.Rect.Position.X - plan.Rect.Size.X), 0, plan.Top)
+	end
 end
 
 --[[ Refresh -------------------------------------------------------------------------- ]]
@@ -1034,6 +1121,12 @@ function EffectsTray.GetTarget(id: string): Vector2
 	local scale = UIKit.EffectiveScale(tray)
 	local view = viewportSize()
 	local circle = fitSize
+	if lastPlan and lastPlan.Corner == "BottomLeft" or not lastPlan and not UIKit.IsPhone() then
+		-- Desktop: the first slot is the leftmost one.
+		local left = if lastPlan then lastPlan.Rect.Position.X else LEFT_MARGIN - CELL_SIDE_GAP / 2
+		local top = if lastPlan then lastPlan.Top else view.Y / scale - BOTTOM_EDGE - cellHeight(circle)
+		return Vector2.new((left + cellWidth(circle) / 2) * scale, (top + circle / 2) * scale)
+	end
 	local top = if lastPlan then lastPlan.Top else UIKit.GetCardTop()
 	local right = if lastPlan then lastPlan.Rect.Position.X + lastPlan.Rect.Size.X else view.X / scale - RIGHT_MARGIN
 	return Vector2.new((right - cellWidth(circle) / 2) * scale, (top + circle / 2) * scale)
