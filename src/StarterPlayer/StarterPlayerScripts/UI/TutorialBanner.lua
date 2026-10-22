@@ -20,6 +20,12 @@
 	(Complete: a green ✓ and the word pops, then it slides out; the
 	controller slides the next one in 0.4 s later).
 
+	A centred card (the event info card, a result card, the pull grid, a
+	purchase celebration) and the bar never overlap: the bar slides out while
+	one is up and back in when it closes (`covered`). The card band starts
+	where the bar does, so a tall card (a phone's) would sit under it;
+	panels (UIKit.Modal) are above the bar's layer and need nothing.
+
 	The welcome splash after the claim ("WELCOME TO YOUR LAB!" + the lab's
 	name, centred, fading by itself after TutorialConfig.WelcomeSeconds, no
 	button).
@@ -34,12 +40,14 @@
 	  GetText() / GetBaseText() / IsShown() / GetFrame()   /selftest
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local UIKit = require(script.Parent.UIKit)
 local TopStack = require(script.Parent.TopStack)
+local EventInfoCard = require(script.Parent.EventInfoCard)
 
 local TutorialBanner = {}
 
@@ -72,6 +80,7 @@ local distanceText = ""
 local subText = ""
 local stepText = ""
 local completing = false
+local covered = false -- a centred card is up: the bar steps aside
 local token = 0
 local skipHandler: (() -> ())? = nil
 
@@ -156,6 +165,21 @@ local function slideTo(target: number, seconds: number, direction: Enum.EasingDi
 	end)
 end
 
+-- The overlays that are centred cards living under the bar's layer.
+local CARD_OVERLAYS = { "ResultCard", "MultiPull", "PurchaseCelebration" }
+
+local function cardUp(): boolean
+	if EventInfoCard.IsOpen() then
+		return true
+	end
+	for _, name in CARD_OVERLAYS do
+		if UIKit.IsOverlayNamed(name) then
+			return true
+		end
+	end
+	return false
+end
+
 local function popPulse(from: number)
 	pulse.Scale = from
 	TweenService:Create(pulse, TweenInfo.new(0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = 1 }):Play()
@@ -177,7 +201,7 @@ function TutorialBanner.Show(text: string, sub: string?, icon: string?, step: nu
 	if not shown then
 		slideValue.Value = 1
 		shown = true
-		slideTo(0, SLIDE_SECONDS, Enum.EasingDirection.Out)
+		slideTo(if covered then 1 else 0, SLIDE_SECONDS, Enum.EasingDirection.Out)
 	end
 	apply()
 	popPulse(PULSE_SCALE)
@@ -255,6 +279,11 @@ end
 
 function TutorialBanner.IsShown(): boolean
 	return shown and holder.Visible
+end
+
+-- A centred card is up, so the bar is slid out (or sliding).
+function TutorialBanner.IsCovered(): boolean
+	return covered
 end
 
 -- Words in the instruction (/selftest: at most 6).
@@ -348,6 +377,16 @@ function TutorialBanner.Init()
 	slideValue = Instance.new("NumberValue")
 	slideValue.Value = 1
 	slideValue.Changed:Connect(apply)
+	RunService.Heartbeat:Connect(function()
+		local up = cardUp()
+		if up == covered then
+			return
+		end
+		covered = up
+		if shown then
+			slideTo(if up then 1 else 0, if up then OUT_SECONDS else SLIDE_SECONDS, if up then Enum.EasingDirection.In else Enum.EasingDirection.Out)
+		end
+	end)
 
 	holder = Instance.new("Frame")
 	holder.Name = "ObjectiveBar"

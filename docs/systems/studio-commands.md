@@ -202,18 +202,24 @@ Most of the 77 were the TEST, not the game:
 - The effects tray placement and tooltip are pure functions
   (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
   `/selftest` runs them against the real HUD rects and the weapon bar
-  (`CombatController.GetBarRectFor`, needs `/weapons all`) at 1251 × 666,
-  1366 × 768, 844 × 390 and 896 × 414, in both layouts, with 3 and with 5
-  effects (`effects tray plan (…)`), per layout. Desktop: one left-aligned row
-  in the bottom-left corner (first circle 16 px from the left edge, timers 16 px
-  from the bottom), ending 12 px short of the bottom row (UPGRADES); the icons
-  shrink 60 -> 48 px, then the row moves directly above the bottom row; it
-  touches no HUD rect (left column, bottom row) or the weapon bar. Phone: one
+  (`CombatController.GetBarRectFor`, needs `/weapons all`) with 3 and with 5
+  effects (`effects tray plan (…)`), per layout: desktop at 1251 × 666,
+  1366 × 768 and 1920 × 1080; tablets (the desktop layout WITH the jump
+  button, `UIKit.JumpRectFor`) at 1024 × 768, 1180 × 820 and 1366 × 1024;
+  phone at 844 × 390 and 896 × 414. A desktop plan never runs under 500 px tall
+  (that is the phone layout). Desktop and tablet: one row in the bottom-RIGHT
+  corner (the first effect rightmost, its circle 16 px from the right edge,
+  timers 16 px from the bottom), starting 12 px right of the bottom row's ⚙; the
+  icons shrink 60 -> 48 px, then the row moves directly above the bottom row's
+  right end (and above the jump button on a tablet); it touches no HUD rect or
+  the weapon bar, and the jump button is one more rect (12 px of air).
+  `jump button (…): the bottom row and the weapon bar are 12 px clear of it`
+  checks the tablet cases (the HUD slides them left: `UIKit.JumpShiftFor`). Phone: one
   row in the top-right corner at `UIKit.GetCardTop()`, right-aligned, 12 px
   short of `TopStack.WIDEST_WIDTH`; the icons shrink 60 -> 48 px, then wrap into
-  a second right-aligned row; the jump button (`EffectsTray.JumpRectFor`) is
-  still an obstacle. The tooltip tries (desktop) above, above-right, right,
-  left, below, (phone) below, below-left, left, above-left, above, right, then
+  a second right-aligned row; the jump button is still an obstacle. The
+  tooltip (which also stays off the jump button) tries (desktop) above,
+  above-left, left, right, below, (phone) below, below-left, left, above-left, above, right, then
   narrows to 160 px, its minimum width (the label wrap has a MinSize too: a
   live reading of "34 × 532" was a wrap measured before the card had a width);
   with no side on screen it goes under the icon, clamped on screen. The old
@@ -261,3 +267,15 @@ section made is removed after and the tester's rebirths and meter put back.
   now says why (no plot, no ClaimButton, save not loaded).
 - The effects-tray probe has its own 30 s timeout (`SELFTEST_EFFECTS_TIMEOUT`); a
   probe that errors on the client reports `probe <Kind> errored on the client`.
+- `cards centred` also runs `FuseAllSummary` (every tier gained and used up: 10
+  chips, the worst case): the pure plan at the 3 sizes (`ResultController.
+  PlanFuseAllFor`, OK button inside the band) and the live card (centred in the
+  band, OK fully inside it, its measured height = the plan's).
+- `tutorial bar vs card (…)`: with the objective bar up (the events step) and
+  the event info card open, the bar is out of the way (`TutorialBanner` slides
+  it out while a centred card is up) and back after it closes; phone and
+  desktop. Only when no real tutorial owns the bar.
+- `event guidance: …` runs `EventController.PlanGuidance`: Night / Void Moon
+  point at the machine only with a fusable pair (and say why), Rainbow Storm at
+  the pad only with an affordable pull, nothing while the tutorial runs or
+  within 30 s of it.

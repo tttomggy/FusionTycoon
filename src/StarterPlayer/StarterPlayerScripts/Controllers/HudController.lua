@@ -637,6 +637,19 @@ function HudController.GetBottomRowRect(): { Position: Vector2, Size: Vector2 }?
 	return nil
 end
 
+-- /selftest: the smallest side (screen px) of a visible bottom-row button.
+function HudController.GetBottomRowMinTap(): number
+	local smallest = math.huge
+	if buttonRow then
+		for _, child in buttonRow:GetChildren() do
+			if child:IsA("GuiObject") and child.Visible and child.AbsoluteSize.X > 0 then
+				smallest = math.min(smallest, child.AbsoluteSize.X, child.AbsoluteSize.Y)
+			end
+		end
+	end
+	return smallest
+end
+
 -- The $/s line counts up from `from` to the real income with a green flash.
 function HudController.CountUpIncome(from: number)
 	incomeCountFrom = from
@@ -979,6 +992,28 @@ local function buildButtonRow()
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, BUTTON_GAP)
 	layout.Parent = buttonRow
+end
+
+-- A tablet draws Roblox's jump button bottom-right, where a desktop-width
+-- bottom row reaches on a 1024 px screen: the row slides left until it is
+-- UIKit.JUMP_GAP clear of it (UIKit.JumpShiftFor; 0 on a phone, desktop and
+-- any screen wide enough). Re-run when the row's size or the viewport changes.
+local function clearJumpButton()
+	local camera = Workspace.CurrentCamera
+	if not buttonRow or not camera or buttonRow.AbsoluteSize.X <= 0 then
+		return
+	end
+	local scale = UIKit.EffectiveScale(screenGui)
+	local view = camera.ViewportSize / scale
+	local size = buttonRow.AbsoluteSize / scale
+	local natural = {
+		Position = Vector2.new((view.X - size.X) / 2, view.Y - (BOTTOM_MARGIN + UITheme.ShadowOffset) - size.Y),
+		Size = size,
+	}
+	local shift = UIKit.JumpShiftFor(view, natural, scale, UIKit.JumpButtonShowing())
+	if buttonRow.Position.X.Offset ~= shift then
+		buttonRow.Position = UDim2.new(0.5, shift, 1, -(BOTTOM_MARGIN + UITheme.ShadowOffset))
+	end
 end
 
 --[[ REBIRTH button (bottom bar) -------------------------------------------------
@@ -2194,6 +2229,7 @@ end
 
 function applyLayout(isPhone: boolean)
 	layoutIsPhone = isPhone
+	task.defer(clearJumpButton)
 	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
 	applyGoalLayout(isPhone)
 	if isPhone then
@@ -2414,7 +2450,7 @@ end
 -- UIScale) as they would sit in a `view` (logical px) of another size: the
 -- left column is pinned to the top-left, the bottom row is centred on the
 -- bottom edge. The caller has forced the layout (phone / desktop) first.
-function HudController.GetObstacleRectsFor(view: Vector2): { [string]: ScreenRect }
+function HudController.GetObstacleRectsFor(view: Vector2, jumpPresent: boolean?): { [string]: ScreenRect }
 	local rects: { [string]: ScreenRect } = {}
 	local scale = UIKit.EffectiveScale(screenGui)
 	for name, rect in HudController.GetObstacleRects() do
@@ -2422,6 +2458,9 @@ function HudController.GetObstacleRectsFor(view: Vector2): { [string]: ScreenRec
 		local size = rect.Size / scale
 		if name == "BottomRow" then
 			position = Vector2.new((view.X - size.X) / 2, view.Y - (BOTTOM_MARGIN + UITheme.ShadowOffset) - size.Y)
+			-- A tablet's jump button pushes it left.
+			local shift = UIKit.JumpShiftFor(view, { Position = position, Size = size }, scale, if jumpPresent == nil then UIKit.JumpButtonShowing() else jumpPresent)
+			position += Vector2.new(shift, 0)
 		end
 		rects[name] = { Position = position, Size = size }
 	end
@@ -2763,6 +2802,16 @@ function HudController.Init()
 	HowToHeistPanel.Init()
 
 	applyLayout(UIKit.IsPhone())
+	buttonRow:GetPropertyChangedSignal("AbsoluteSize"):Connect(clearJumpButton)
+	local function watchViewport()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(clearJumpButton)
+		end
+		clearJumpButton()
+	end
+	watchViewport()
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 	EffectsTray.Init({
 		GetObstacles = function()
 			-- The HUD's rects plus the weapon bar (CombatController requires nothing of ours at load).

@@ -1065,6 +1065,17 @@ end
 --[[ Fuse All summary card ---------------------------------------------------------- ]]
 
 local FUSE_ALL_CARD_WIDTH = 400
+-- The card's design heights (px), for the pure plan below and the builder.
+local FUSE_ALL_PAD = 18 -- top and bottom padding
+local FUSE_ALL_GAP = 8 -- between the card's rows
+local FUSE_ALL_HEADER = 16 + 48 + 20 -- "FUSE ALL", "40 fusions", "n upgraded · m failed"
+local FUSE_ALL_CHIP = 34
+local FUSE_ALL_CHIP_GAP = 4
+local FUSE_ALL_BEST = 56
+local FUSE_ALL_BUTTONS = 52 + UITheme.ShadowOffset
+-- Chip rows (two chips each) the card shows: a long list is cut with a
+-- "+N more" chip. A phone's band is ~317 px of the 487 it has, so 3 rows there.
+local FUSE_ALL_MAX_ROWS = { Desktop = 5, Phone = 3 }
 local LEGENDARY_RANK = ItemConfig.Tiers.Legendary
 
 local function tierRank(tier: string): number
@@ -1083,6 +1094,68 @@ local function sortedTiers(counts: { [string]: number }): { string }
 		return tierRank(a) > tierRank(b)
 	end)
 	return tiers
+end
+
+type FuseAllChip = { Tier: string, Text: string, Color: Color3 }
+
+-- Gains first (highest tier first), then what was used up.
+local function fuseAllChips(result: any): { FuseAllChip }
+	local chips: { FuseAllChip } = {}
+	local gained = if typeof(result.Gained) == "table" then result.Gained else {}
+	for _, tier in sortedTiers(gained) do
+		table.insert(chips, { Tier = tier, Text = ("+%d %s"):format(gained[tier], tier:upper()), Color = UITheme.GetTierLight(tier) })
+	end
+	local consumed = if typeof(result.Consumed) == "table" then result.Consumed else {}
+	for _, tier in sortedTiers(consumed) do
+		table.insert(chips, { Tier = tier, Text = ("−%d %s"):format(consumed[tier], tier:upper()), Color = Colors.Muted })
+	end
+	return chips
+end
+
+export type FuseAllPlan = {
+	Shown: number, -- chips drawn (a "+N more" chip is the last of them when More > 0)
+	More: number, -- chips cut
+	Rows: number,
+	Height: number, -- the card's design height (px, shadow not included)
+	OkBottom: number, -- the OK button's bottom, px below the card's top
+}
+
+-- The card's height from its content, on its own (logical px), so /selftest
+-- can run it at any screen size.
+function ResultController.PlanFuseAllFor(chips: number, hasBest: boolean, phone: boolean): FuseAllPlan
+	local maxRows = if phone then FUSE_ALL_MAX_ROWS.Phone else FUSE_ALL_MAX_ROWS.Desktop
+	local rows = math.ceil(chips / 2)
+	local shown, more = chips, 0
+	if rows > maxRows then
+		rows = maxRows
+		shown = maxRows * 2 - 1
+		more = chips - shown
+	end
+	local grid = if rows > 0 then rows * FUSE_ALL_CHIP + (rows - 1) * FUSE_ALL_CHIP_GAP else 0
+	-- label, count, sub line, [chips], [best], buttons: one gap between each.
+	local items = 3 + (if rows > 0 then 1 else 0) + (if hasBest then 1 else 0) + 1
+	local height = 2 * FUSE_ALL_PAD + FUSE_ALL_HEADER + grid + (if hasBest then FUSE_ALL_BEST else 0) + FUSE_ALL_BUTTONS + FUSE_ALL_GAP * (items - 1)
+	return { Shown = shown, More = more, Rows = rows, Height = height, OkBottom = height - FUSE_ALL_PAD - UITheme.ShadowOffset }
+end
+
+-- The worst case for the card: every tier gained and used up, a best item.
+function ResultController.WorstFuseAllResult(): any
+	local gained, consumed = {}, {}
+	for tier, rank in ItemConfig.Tiers do
+		if rank > 1 then
+			gained[tier] = 2
+		end
+		consumed[tier] = 4
+	end
+	consumed.Secret = nil -- nothing fuses past Secret
+	local secret = ItemConfig.GetItemsByTier("Secret")[1]
+	return {
+		Count = 40,
+		Upgraded = 12,
+		Gained = gained,
+		Consumed = consumed,
+		Best = { Uid = "selftest-best", ItemId = if secret then secret.Id else "", Tier = "Secret" },
+	}
 end
 
 local function addChip(parent: Instance, tier: string, text: string, color: Color3, order: number, z: number)
@@ -1123,8 +1196,8 @@ local function showFuseAllCard(result: any)
 	local body, holder = UIKit.Panel({
 		Name = "FuseAllSummary",
 		Parent = screenGui,
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, UIKit.GetCardTop()),
 		Size = UDim2.fromOffset(FUSE_ALL_CARD_WIDTH, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Gradient = { { 0, Colors.FuseAllTop }, { 0.4, Colors.Panel }, { 1, Colors.Panel } },
@@ -1133,13 +1206,15 @@ local function showFuseAllCard(result: any)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	-- Placed by UIKit.FitHeight in the card band (see place() below).
+	holder:SetAttribute("CardPlaced", true)
 	UIKit.SetOverlay("ResultCard", true)
 	local z = body.ZIndex + 1
-	UIKit.Padding(body, 18, 20, 18, 20)
+	UIKit.Padding(body, FUSE_ALL_PAD, 20, FUSE_ALL_PAD, 20)
 	local layout = Instance.new("UIListLayout")
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-	layout.Padding = UDim.new(0, 8)
+	layout.Padding = UDim.new(0, FUSE_ALL_GAP)
 	layout.Parent = body
 
 	local count = result.Count :: number
@@ -1189,24 +1264,35 @@ local function showFuseAllCard(result: any)
 	grid.ZIndex = z
 	grid.Parent = body
 	local gridLayout = Instance.new("UIGridLayout")
-	gridLayout.CellSize = UDim2.new(0.5, -4, 0, 34)
-	gridLayout.CellPadding = UDim2.fromOffset(8, 4)
+	gridLayout.CellSize = UDim2.new(0.5, -4, 0, FUSE_ALL_CHIP)
+	gridLayout.CellPadding = UDim2.fromOffset(8, FUSE_ALL_CHIP_GAP)
 	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	gridLayout.Parent = grid
 
-	local order = 0
-	local gained = if typeof(result.Gained) == "table" then result.Gained else {}
-	for _, tier in sortedTiers(gained) do
-		order += 1
-		addChip(grid, tier, ("+%d %s"):format(gained[tier], tier:upper()), UITheme.GetTierLight(tier), order, z)
-	end
-	local consumed = if typeof(result.Consumed) == "table" then result.Consumed else {}
-	for _, tier in sortedTiers(consumed) do
-		order += 1
-		addChip(grid, tier, ("−%d %s"):format(consumed[tier], tier:upper()), Colors.Muted, order, z)
+	local best = result.Best
+	local chips = fuseAllChips(result)
+	local plan = ResultController.PlanFuseAllFor(#chips, typeof(best) == "table" and typeof(best.Tier) == "string", UIKit.IsPhone())
+	for order = 1, plan.Shown do
+		local chip = chips[order]
+		if plan.More > 0 and order == plan.Shown then
+			-- A long list is cut here: the rest is a count, not more rows.
+			UIKit.Label({
+				Name = "More",
+				Text = ("+%d more"):format(#chips - plan.Shown + 1),
+				Font = Fonts.BodyHeavy,
+				TextSize = 14,
+				TextColor3 = Colors.Muted,
+				TextXAlignment = Enum.TextXAlignment.Center,
+				LayoutOrder = order,
+				ZIndex = z,
+				Parent = grid,
+			})
+		else
+			addChip(grid, chip.Tier, chip.Text, chip.Color, order, z)
+		end
 	end
 
-	local best = result.Best
+
 	if typeof(best) == "table" and typeof(best.Tier) == "string" then
 		local row = UIKit.Panel({
 			Name = "Best",
@@ -1273,12 +1359,42 @@ local function showFuseAllCard(result: any)
 		OnClick = closeBigCard,
 	})
 
-	-- Taller than a phone screen (the event card is 500 px): shrink to fit.
-	UIKit.FitHeightSettled(holder, holder.Size.Y.Offset)
+	-- Centred in the card band, shrunk to fit it (never past it). The height is
+	-- MEASURED (the card sizes itself to its rows): the body's, not the
+	-- holder's, which counts the 5 px shadow child too and FitHeight adds it.
+	local function place()
+		if not holder.Parent or not holder.Visible then
+			return
+		end
+		local height = math.round(body.AbsoluteSize.Y / UIKit.EffectiveScale(holder))
+		if height >= 1 then
+			UIKit.FitHeight(holder, height)
+		end
+	end
+	local function settle()
+		UIKit.SettleCard(holder, place)
+	end
+	place()
+	settle()
+	-- Only kicks the settle loop; a change the loop itself causes is ignored.
+	holder:GetPropertyChangedSignal("AbsoluteSize"):Connect(function()
+		if holder:GetAttribute("Settling") ~= true then
+			settle()
+		end
+	end)
+	local layoutConnection = UIKit.LayoutChanged:Connect(settle)
+	holder.Destroying:Once(function()
+		layoutConnection:Disconnect()
+	end)
 	UIKit.PopIn(holder)
 	if typeof(best) == "table" and tierRank(best.Tier) >= LEGENDARY_RANK then
 		RevealEffects.ShakeCamera(MYTHIC_SHAKE_MAGNITUDE, MYTHIC_SHAKE_SECONDS)
 	end
+end
+
+-- /selftest: the Fuse All card for `result`, as FuseAllResolved would open it.
+function ResultController.SelfTestShowFuseAll(result: any)
+	showFuseAllCard(result)
 end
 
 local function onFuseAllResolved(result: any)

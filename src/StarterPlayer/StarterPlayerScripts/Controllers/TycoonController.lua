@@ -38,6 +38,9 @@ local tipsSeen: { [string]: boolean } = {}
 -- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
 export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Replay: boolean, ReplayHint: boolean }
 local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
+-- os.clock() when this client watched the tutorial finish (nil: it was not
+-- running when the player joined, or it is running again after a reset).
+local tutorialDoneAt: number? = nil
 -- Earned weapon ids (snapshot Weapons; CombatService grants them).
 local weapons: { string } = {}
 -- Quests (QuestService's status), power-up counts and armed power-ups.
@@ -248,6 +251,23 @@ end
 -- and one-time tips wait (TutorialController holds them).
 function TycoonController.IsTutorialActive(): boolean
 	return hasSynced and not tutorial.Done
+end
+
+-- Can the player pay for a Gacha pull right now (a free tutorial pull or
+-- the cash for the next one)? Drives the Rainbow Storm pointer.
+function TycoonController.CanAffordPull(): boolean
+	if tutorial.FreePulls > 0 then
+		return true
+	end
+	return TycoonController.GetCash() >= TycoonConfig.GetGachaPullCost(TycoonController.GetGachaPulls(), TycoonController.GetSteadyIncomePerSecond())
+end
+
+-- Seconds since the tutorial ended in front of this player; math.huge when
+-- it was already over at the join (and while it is running: use
+-- IsTutorialActive for that).
+function TycoonController.GetSecondsSinceTutorialDone(): number
+	local doneAt = tutorialDoneAt
+	return if doneAt then os.clock() - doneAt else math.huge
 end
 
 function TycoonController.HasSeenTip(id: string): boolean
@@ -571,6 +591,14 @@ local function onSyncTycoon(snapshot: any)
 	end
 	local rawTutorial = snapshot.Tutorial
 	if typeof(rawTutorial) == "table" then
+		local wasActive = hasSynced and not tutorial.Done
+		if rawTutorial.Done == true then
+			if wasActive then
+				tutorialDoneAt = os.clock()
+			end
+		else
+			tutorialDoneAt = nil
+		end
 		tutorial = {
 			Step = if typeof(rawTutorial.Step) == "number" then rawTutorial.Step else 0,
 			Done = rawTutorial.Done == true,

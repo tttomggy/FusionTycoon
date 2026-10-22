@@ -1069,6 +1069,69 @@ function UIKit.IsPhone(): boolean
 	return viewportHeight() < UITheme.PhoneHeightThreshold
 end
 
+--[[ Roblox's jump button ------------------------------------------------------------
+	A touch screen draws the jump button bottom-right (TouchJump: 70 px at 20 px
+	from the bottom on a small screen, 120 px higher up on a larger one; 1.5 x
+	its size less 10 from the right). A phone gets it, and so does a tablet
+	(an iPad is >= 500 px tall: desktop HUD layout, still touch). Everything
+	the HUD puts bottom-right (the effects tray, its tooltips) treats its rect
+	as an obstacle, and the bottom row / weapon bar slide left to clear it
+	(JumpShiftFor). The *For functions are pure (logical px in `view`) so
+	/selftest can run any screen size.
+]]
+UIKit.JUMP_GAP = 12 -- px kept between the jump button and the HUD
+
+type JumpRect = { Position: Vector2, Size: Vector2 }
+
+-- The jump button as a rect in `view` (logical px; `scale` = logical -> screen
+-- px). nil when `present` is false (no touch controls).
+function UIKit.JumpRectFor(view: Vector2, scale: number, present: boolean): JumpRect?
+	if not present then
+		return nil
+	end
+	local small = math.min(view.X, view.Y) * scale < 500
+	local size = if small then 70 else 120
+	local bottomGap = if small then 20 else size * 1.75 - size
+	local left = view.X * scale - (size * 1.5 - 10)
+	local top = view.Y * scale - size - bottomGap
+	return { Position = Vector2.new(left, top) / scale, Size = Vector2.new(size, size) / scale }
+end
+
+-- Is the jump button on screen right now? A phone layout always counts (so
+-- does Studio's forced phone); a desktop layout only on a touch screen whose
+-- TouchGui shows a jump button (a touch laptop on mouse and keyboard has none).
+function UIKit.JumpButtonShowing(): boolean
+	if UIKit.IsPhone() then
+		return true
+	end
+	if not UserInputService.TouchEnabled then
+		return false
+	end
+	local playerGui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
+	local touchGui = if playerGui then playerGui:FindFirstChild("TouchGui") else nil
+	if touchGui and touchGui:IsA("ScreenGui") and not touchGui.Enabled then
+		return false
+	end
+	return true
+end
+
+-- How far (logical px, <= 0) a bottom bar `rect` must slide left to clear the
+-- jump button by JUMP_GAP: 0 when it is not in the way (above or left of it),
+-- never past the screen's left edge (8 px short of it).
+function UIKit.JumpShiftFor(view: Vector2, rect: JumpRect, scale: number, present: boolean): number
+	local jump = UIKit.JumpRectFor(view, scale, present)
+	if not jump then
+		return 0
+	end
+	local gap = UIKit.JUMP_GAP
+	local overlapsY = rect.Position.Y < jump.Position.Y + jump.Size.Y + gap and rect.Position.Y + rect.Size.Y > jump.Position.Y - gap
+	local right = rect.Position.X + rect.Size.X
+	if not overlapsY or right + gap <= jump.Position.X or rect.Position.X >= jump.Position.X + jump.Size.X + gap then
+		return 0
+	end
+	return math.min(0, math.max(jump.Position.X - gap - right, 8 - rect.Position.X))
+end
+
 --[[ Card placement -------------------------------------------------------------------
 	Every UIKit.Modal and centred card lives in the BAND between the Roblox
 	top bar (GetCardTop) and the HUD's bottom button row (GetCardBottom),

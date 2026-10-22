@@ -258,6 +258,8 @@ local function lockedText(weapon: CombatConfig.Weapon): string
 	return if weapon.UnlockRebirth then ("R%d"):format(weapon.UnlockRebirth) else "Quest"
 end
 
+local clearJumpButton: () -> ()
+
 local function rebuildBar()
 	for _, child in bar:GetChildren() do
 		if not child:IsA("UIListLayout") then
@@ -395,6 +397,25 @@ local function rebuildBar()
 		})
 	end
 	bar.Position = UDim2.new(0.5, 0, 1, -(if phone then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop))
+	task.defer(clearJumpButton)
+end
+
+-- A tablet's jump button (bottom-right) pushes the bar left, as the HUD's
+-- bottom row (UIKit.JumpShiftFor; 0 when nothing is in the way). Re-run when
+-- the bar is rebuilt, resized, shown or the viewport changes.
+function clearJumpButton()
+	local camera = Workspace.CurrentCamera
+	if not camera or not bar or bar.AbsoluteSize.X <= 0 then
+		return
+	end
+	local scale = UIKit.EffectiveScale(screenGui)
+	local view = camera.ViewportSize / scale
+	local size = bar.AbsoluteSize / scale
+	local bottom = if UIKit.IsPhone() then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop
+	local shift = UIKit.JumpShiftFor(view, { Position = Vector2.new((view.X - size.X) / 2, view.Y - bottom - size.Y), Size = size }, scale, UIKit.JumpButtonShowing())
+	if bar.Position.X.Offset ~= shift then
+		bar.Position = UDim2.new(0.5, shift, 1, -bottom)
+	end
 end
 
 local function setSlotDim(slot: Slot, dim: number)
@@ -975,13 +996,17 @@ end
 -- /selftest: the same rect in logical px as it would sit in a `view` (logical
 -- px) of another size: the bar is centred on the bottom edge. The caller has
 -- forced the layout (phone / desktop) first.
-function CombatController.GetBarRectFor(view: Vector2): { Position: Vector2, Size: Vector2 }?
+function CombatController.GetBarRectFor(view: Vector2, jumpPresent: boolean?): { Position: Vector2, Size: Vector2 }?
 	if not screenGui or not screenGui.Enabled or not bar or bar.AbsoluteSize.X <= 0 then
 		return nil
 	end
-	local size = bar.AbsoluteSize / UIKit.EffectiveScale(screenGui)
+	local scale = UIKit.EffectiveScale(screenGui)
+	local size = bar.AbsoluteSize / scale
 	local bottom = if UIKit.IsPhone() then BAR_BOTTOM.Phone else BAR_BOTTOM.Desktop
-	return { Position = Vector2.new((view.X - size.X) / 2, view.Y - bottom - size.Y), Size = size }
+	local natural = { Position = Vector2.new((view.X - size.X) / 2, view.Y - bottom - size.Y), Size = size }
+	-- A tablet's jump button pushes it left.
+	local shift = UIKit.JumpShiftFor(view, natural, scale, if jumpPresent == nil then UIKit.JumpButtonShowing() else jumpPresent)
+	return { Position = natural.Position + Vector2.new(shift, 0), Size = size }
 end
 
 -- The weapon whose pose is up (track or C0), for /selftest and the re-hold.
@@ -1135,6 +1160,16 @@ function CombatController.Init()
 	end)
 	UIKit.LayoutChanged:Connect(rebuildBar)
 	rebuildBar()
+	bar:GetPropertyChangedSignal("AbsoluteSize"):Connect(clearJumpButton)
+	screenGui:GetPropertyChangedSignal("Enabled"):Connect(clearJumpButton)
+	local function watchViewport()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(clearJumpButton)
+		end
+	end
+	watchViewport()
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 	refreshBar()
 
 	UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)

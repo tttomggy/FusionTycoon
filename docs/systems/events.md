@@ -91,4 +91,14 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     Storm → your Gacha Pad (then the machine once you're on it), Night /
     Void Moon → your machine, Meteor Shower → the nearest crater, Golden
     Rain → the nearest street coin. Station pills: "🌈 MUTATIONS ×5 · PULL
-    NOW" on your pad, "🌙 FUSE NOW" on your machine.
+    NOW" on your pad, "🌙 NIGHT: FUSIONS MUTATE MORE · FUSE NOW" ("🌑 VOID
+    MOON: …") on your machine. **The pointer rule** (`EventController.
+    PlanGuidance`, re-run every `GUIDE_SECONDS`): Night / Void Moon point only
+    when there is something to fuse (`FusionController.HasFusablePair`: two
+    unmutated, not-carried items of one fusable tier), Rainbow Storm only when
+    a pull is affordable (`TycoonController.CanAffordPull`: a free pull or the
+    cash); a pill goes away when its condition stops. Nothing points while the
+    tutorial runs or until 30 s after it ends
+    (`TycoonController.GetSecondsSinceTutorialDone`: only counted when the
+    player watched it end; a returning player has no wait). Meteor Shower and
+    Golden Rain are unchanged.

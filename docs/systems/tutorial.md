@@ -222,6 +222,17 @@ is the pure slot math; with the bar empty the chip keeps y 12 beside the top
 bar, so `/selftest` orders the **occupied** slots (plan at both layouts with
 all four, live slots on the real stack) instead of the raw Ys.
 
+**The bar and a centred card never overlap.** The card band starts where the
+objective bar does (`GetCardTop`), so a tall card (a phone's event info card)
+sat under the bar, which is on a higher layer (60) than the HUD-layer cards
+and was drawn over its title. The rule, one for every case:
+`TutorialBanner` **slides the bar out while a centred card is up** (the event
+info card, or a `ResultCard` / `MultiPull` / `PurchaseCelebration` overlay)
+and back in when it closes (`covered`; the objective slot keeps its height, so
+the chip and announcements below do not jump). Panels (`UIKit.Modal`) are above
+the bar's layer and need nothing. `/selftest` ("tutorial bar vs card") opens
+the event card over the bar at both layouts.
+
 **The giant LOCKED bar and lock disc** were the heist's world billboards
 (the gate sign and the lock icon, sized in studs) seen from the gate: 160 px
 and 230 px on a 1080p screen. They now carry `DistanceLowerLimit =

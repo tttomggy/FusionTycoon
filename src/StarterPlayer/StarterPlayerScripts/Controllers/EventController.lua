@@ -64,6 +64,7 @@ local AnnouncementController = require(script.Parent.AnnouncementController)
 local ResultController = require(script.Parent.ResultController)
 local ToastController = require(script.Parent.ToastController)
 local TycoonController = require(script.Parent.TycoonController)
+local FusionController = require(script.Parent.FusionController)
 local GoalMarkerController = require(script.Parent.GoalMarkerController)
 local EventInfoCard = require(script.Parent.Parent.UI.EventInfoCard)
 
@@ -1130,6 +1131,22 @@ local function streetCoin(child: Instance): BasePart?
 	return if child:IsA("BasePart") and child:GetAttribute("Collected") ~= true then child else nil
 end
 
+-- Wide enough for "🌙 NIGHT: FUSIONS MUTATE MORE · FUSE NOW".
+local PILL_WIDTH = 480
+
+-- No event pointer or station pill until this long after the tutorial ends,
+-- so its last step is not followed by a new arrow.
+local GUIDE_AFTER_TUTORIAL_SECONDS = 30
+
+-- Takes a station's pill away (the thing it asked for is no longer possible).
+local function removeStationPill(id: string, station: Instance)
+	local folder = EventState.GetObjectsFolder(id)
+	local anchor = if folder then folder:FindFirstChild("StationPill_" .. station.Name) else nil
+	if anchor then
+		anchor:Destroy()
+	end
+end
+
 -- A pill over one of your own stations, in the event's folder (so the
 -- event's end removes it).
 local function ensureStationPill(id: string, station: Instance, text: string)
@@ -1145,7 +1162,7 @@ local function ensureStationPill(id: string, station: Instance, text: string)
 	local gui = Instance.new("BillboardGui")
 	gui.Name = "EventPill"
 	gui.Adornee = anchor
-	gui.Size = UDim2.fromOffset(320, 40)
+	gui.Size = UDim2.fromOffset(PILL_WIDTH, 40)
 	gui.LightInfluence = 0
 	gui.AlwaysOnTop = false
 	gui.MaxDistance = EVENT_PILL_MAX_DISTANCE
@@ -1205,6 +1222,49 @@ local function refreshSurgeChips()
 	end
 end
 
+export type GuidanceState = {
+	CanFuse: boolean, -- two unmutated, not-carried items of one fusable tier
+	CanPull: boolean, -- a free pull or the cash for the next one
+	Quiet: boolean, -- the tutorial runs, or ended less than GUIDE_AFTER_TUTORIAL_SECONDS ago
+	OnPad: boolean, -- standing on the Gacha pad
+}
+
+export type Guidance = {
+	PillStation: string?, -- "Pad" | "Machine": the station that carries a pill
+	PillText: string?,
+	Target: string?, -- "Pad" | "Machine": where the pointer goes (nil: no pointer)
+	Text: string, -- the pointer's label
+}
+
+-- What the active event points at, and why, from what the player can DO right
+-- now (a pull they can pay for, a pair they can fuse) and not before the
+-- tutorial is long over. Pure (/selftest runs it): refreshGuidance turns the
+-- stations into instances.
+function EventController.PlanGuidance(id: string?, strength: number?, state: GuidanceState): Guidance
+	local plan: Guidance = { Text = "" }
+	if id == "RainbowStorm" then
+		if state.Quiet or not state.CanPull then
+			return plan
+		end
+		local odds = EventConfig.GetMutationOddsMultiplier(id, strength or 1, "Diamond", "Pull")
+		plan.PillStation = "Pad"
+		plan.PillText = ("🌈 MUTATIONS ×%d · PULL NOW"):format(odds)
+		if state.OnPad and state.CanFuse then
+			plan.Target, plan.Text = "Machine", "THEN FUSE"
+		else
+			plan.Target, plan.Text = "Pad", "PULL HERE"
+		end
+	elseif id == "Night" or id == "VoidMoon" then
+		if state.Quiet or not state.CanFuse then
+			return plan
+		end
+		plan.PillStation = "Machine"
+		plan.PillText = if id == "Night" then "🌙 NIGHT: FUSIONS MUTATE MORE · FUSE NOW" else "🌑 VOID MOON: FUSIONS MUTATE MORE · FUSE NOW"
+		plan.Target, plan.Text = "Machine", "FUSE NOW"
+	end
+	return plan
+end
+
 refreshGuidance = function()
 	local id, strength = EventState.GetActive()
 	if id == "PowerSurge" then
@@ -1215,26 +1275,30 @@ refreshGuidance = function()
 	local target: Instance? = nil
 	local text = ""
 	local root = myRoot()
-	if id == "RainbowStorm" then
+	if id == "RainbowStorm" or id == "Night" or id == "VoidMoon" then
 		local pad = GoalMarkerController.ResolvePlotTarget("GachaStation")
 		local machine = GoalMarkerController.ResolvePlotTarget("FusionMachine")
-		if pad then
-			local odds = EventConfig.GetMutationOddsMultiplier(id, strength, "Diamond", "Pull")
-			ensureStationPill(id, pad, ("🌈 MUTATIONS ×%d · PULL NOW"):format(odds))
-		end
 		local padCenter = if pad then boundsOf(pad) else nil
-		local onPad = padCenter ~= nil and root ~= nil and flatDistance(padCenter.Position, root.Position) <= ON_PAD_RADIUS
-		if onPad and machine then
-			target, text = machine, "THEN FUSE"
-		else
-			target, text = pad, "PULL HERE"
+		local plan = EventController.PlanGuidance(id, strength, {
+			CanFuse = FusionController.HasFusablePair(),
+			CanPull = TycoonController.CanAffordPull(),
+			Quiet = TycoonController.IsTutorialActive()
+				or TycoonController.GetSecondsSinceTutorialDone() < GUIDE_AFTER_TUTORIAL_SECONDS,
+			OnPad = padCenter ~= nil and root ~= nil and flatDistance(padCenter.Position, root.Position) <= ON_PAD_RADIUS,
+		})
+		local stations: { [string]: Instance? } = { Pad = pad, Machine = machine }
+		-- A pill stays only while what it asks for is possible.
+		for name, station in stations do
+			if station then
+				if plan.PillStation == name and plan.PillText then
+					ensureStationPill(id, station, plan.PillText)
+				else
+					removeStationPill(id, station)
+				end
+			end
 		end
-	elseif id == "Night" or id == "VoidMoon" then
-		local machine = GoalMarkerController.ResolvePlotTarget("FusionMachine")
-		if machine then
-			ensureStationPill(id, machine, "🌙 FUSE NOW")
-		end
-		target, text = machine, "FUSE NOW"
+		target = if plan.Target then stations[plan.Target] else nil
+		text = plan.Text
 	elseif id == "MeteorShower" then
 		target, text = nearestIn(id, nil, craterCore), "GRAB THE CORE"
 	elseif id == "GoldenRain" then

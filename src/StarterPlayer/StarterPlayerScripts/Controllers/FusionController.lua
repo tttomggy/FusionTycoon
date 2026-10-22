@@ -4,6 +4,7 @@ local Workspace = game:GetService("Workspace")
 
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local InventoryController = require(script.Parent.InventoryController)
@@ -60,6 +61,18 @@ function FusionController.GetAutoFill(tier: string, count: number?): { string }
 		table.insert(uids, item.Uid)
 	end
 	return uids
+end
+
+-- Is there something to fuse: two unmutated, not-carried items of one tier
+-- this player can fuse (the machine's rebirth gate included)?
+function FusionController.HasFusablePair(): boolean
+	local rebirths = TycoonController.GetRebirths()
+	for tier in ItemConfig.Tiers do
+		if FusionConfig.CanFuseTierFor(tier, rebirths) and #FusionController.GetAutoFill(tier, 2) >= 2 then
+			return true
+		end
+	end
+	return false
 end
 
 function FusionController.IsRequestPending(): boolean

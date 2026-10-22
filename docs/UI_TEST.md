@@ -1558,20 +1558,30 @@ Heist, the result cards, the celebration):
   worth line, Not now / See deal; on a phone the YOU GET list drops out if
   the card would climb into the top bar). The Starter Pack card (session 2)
   has the same tiles + list.
-- [ ] **Effects tray** (one row: bottom-left on desktop, top right on a phone): `/shop grant LuckPotion`, `/shop grant
+- [ ] **Effects tray** (one row: bottom-RIGHT on desktop and tablet, top right on a phone): `/shop grant LuckPotion`, `/shop grant
   SafeFusion5`, `/powerup SpeedBoots 1` + use it, arm a Fusion Spark / Coin
   Magnet: round cartoon sticker badges (60 px, gradient, white rim, an outlined
   glyph and a small animation behind it) with a timer under (m:ss, h:mm:ss past an hour), `×N`
   badges for Safe Fusion / Luck / Fusion Spark, `READY` for Coin Magnet. They
   pop in on gaining and shrink out at the end, nothing flashes in the last
   minute. Hover or tap one: a dark tooltip card (desktop: ABOVE it, else
-  above-right, right; phone: BELOW it, else below-left, left; name, what it
+  above-left, left; phone: BELOW it, else below-left, left; name, what it
   does, time left; at least 160 px wide; see Polish 12).
-  **Desktop:** ONE ROW in the bottom-left corner, left of UPGRADES: the first
-  effect leftmost, the first circle 16 px from the left edge, the timers 16 px
-  from the bottom edge, 60 px badges (48 px if it must), the row ends at least
-  12 px left of the bottom row. If even 48 px does not fit (try a ~1250 px wide
-  window with 5 effects) the row sits directly above the bottom row instead.
+  **Desktop:** ONE ROW in the bottom-RIGHT corner, right of the ⚙ button: the
+  first effect rightmost (new ones go to its left), its circle 16 px from the
+  right edge, the timers 16 px from the bottom edge, 60 px badges (48 px if it
+  must), the row starts at least 12 px right of the bottom row. If even 48 px
+  does not fit (try a ~1250 px wide window with 5 effects) the row sits directly
+  above the bottom row's right end instead, right-aligned. The left column
+  (cash card, deal tile, LOCK row) is never in its way.
+  **Tablet (iPad: 1024 x 768, 1180 x 820, 1366 x 1024; the desktop layout with
+  Roblox's jump button bottom-right):** the tray treats the jump button as a HUD
+  rect: when the corner is taken it sits ABOVE the jump button, right-aligned;
+  the bottom row and the weapon bar slide left on their own to stay 12 px clear
+  of it (1024 px wide: the row is pushed ~78 px left). Studio's device emulator
+  (Test > Device) has iPad presets: pick one in landscape (1024 x 768 or
+  1180 x 820; the exact names depend on your Studio version) and `TouchEnabled`
+  is on, so the jump button shows.
   **Phone:** ONE ROW in the top-right corner at `GetCardTop`, the first effect
   rightmost, 8 px from the right edge, 12 px short of the announcement banner's
   width; with 5 effects on the phone emulator it wraps into a second
@@ -2186,3 +2196,42 @@ deal running (`/deal slot 4`). Desktop must look exactly as before.
   button and weapon bar" and "phone HUD icon cards: n cards, each >= 44 px
   with text >= 13 px" pass; the left-column checks (including "hud left
   column fits the screen") pass; desktop checks are unchanged.
+
+## 44. Tray bottom-right, tablets, Fuse All card, bar vs card, event pointers
+
+**Desktop (1920 × 1080, then a ~1250 px wide window)**
+
+- [ ] The effects tray is ONE row in the bottom-RIGHT corner, right of the ⚙
+  button, never in the left column. 3 effects: beside the ⚙ at 60 px (48 px in
+  a ~1250 px window); 5 effects in a narrow window: directly above the bottom
+  row's right end. `/shop grant LuckPotion` etc. to fill it. Hover: the tooltip
+  opens ABOVE the icon (above-left, then left, when that is taken).
+- [ ] Fuse All with a long result (`/give` a spread of tiers, fuse all): the
+  summary card is centred in the card band, **OK fully visible** above the
+  bottom row; no "did not settle" warning in Output.
+
+**iPhone XR emulator (896 × 414)**
+
+- [ ] The Fuse All card fits: shrunk to the band, OK inside it, 3 rows of chips
+  at most ("+N more" when cut).
+- [ ] `/tutorial reset`, the weather step: the objective bar slides out while
+  the event card is open, so the card's title and first lines are fully
+  visible; it slides back when you tap "OK, got it".
+
+**iPad emulator (Studio: Test > Device > iPad; 1180 × 820 and 1024 × 768)**
+
+- [ ] The tray clears the jump button (bottom-right): above it, right-aligned,
+  when the corner is taken. The bottom row and the weapon bar (`/weapons all`)
+  clear the jump button (at 1024 wide the row is pushed left). Every tap target
+  is ≥ 44 px.
+
+**After the tutorial**
+
+- [ ] No FUSE NOW / PULL NOW pill or arrow for the first 30 s after the
+  tutorial ends. During Night / Void Moon (`/event Night`) with no pair of
+  unmutated same-tier items: no pointer; with a pair: the pill reads "🌙 NIGHT:
+  FUSIONS MUTATE MORE · FUSE NOW" and the arrow points at the machine. Rainbow
+  Storm: the pad pointer only while you can afford a pull.
+- [ ] `/selftest`: `effects tray plan` lines for every desktop, tablet and phone
+  size, `jump button (…)`, `cards centred (FuseAllSummary …)`, `tutorial bar vs
+  card (…)` and `event guidance: …` all PASS (apart from the small-window line).

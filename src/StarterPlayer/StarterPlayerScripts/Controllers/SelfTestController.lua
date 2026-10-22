@@ -243,6 +243,47 @@ local function fakeFusionResult(): any
 	}
 end
 
+-- Event guidance (EventController.PlanGuidance, the maths refreshGuidance
+-- runs): Night / Void Moon point at the Fusion Machine only when there is a
+-- pair to fuse, and say why; Rainbow Storm points at the pad only when a pull
+-- is affordable; nothing points while the tutorial runs or within 30 s of it.
+local function testEventGuidance(): { string }
+	local EventController = require(script.Parent.EventController) :: any
+	local lines: { string } = {}
+	local function state(overrides: any): any
+		local base = { CanFuse = false, CanPull = false, Quiet = false, OnPad = false }
+		for key, value in overrides do
+			base[key] = value
+		end
+		return base
+	end
+	local function check(name: string, ok: boolean, detail: string)
+		table.insert(lines, ("%s event guidance: %s%s"):format(if ok then "PASS" else "FAIL", name, if ok then "" else " | " .. detail))
+	end
+	for _, night in { "Night", "VoidMoon" } do
+		local none = EventController.PlanGuidance(night, 1, state({}))
+		check(night .. " with nothing to fuse shows no pointer and no pill", none.Target == nil and none.PillText == nil, ("target %s pill %s"):format(tostring(none.Target), tostring(none.PillText)))
+		local pair = EventController.PlanGuidance(night, 1, state({ CanFuse = true }))
+		check(night .. " with a fusable pair points at the machine and says why",
+			pair.Target == "Machine" and pair.Text == "FUSE NOW" and pair.PillStation == "Machine"
+				and pair.PillText ~= nil and pair.PillText:find("FUSIONS MUTATE MORE", 1, true) ~= nil and pair.PillText:find("FUSE NOW", 1, true) ~= nil,
+			("target %s text '%s' pill '%s'"):format(tostring(pair.Target), pair.Text, tostring(pair.PillText)))
+		local quiet = EventController.PlanGuidance(night, 1, state({ CanFuse = true, Quiet = true }))
+		check(night .. " is silent while the tutorial runs / just ended", quiet.Target == nil and quiet.PillText == nil, ("target %s"):format(tostring(quiet.Target)))
+	end
+	local broke = EventController.PlanGuidance("RainbowStorm", 1, state({ CanFuse = true }))
+	check("Rainbow Storm with no pull affordable shows no pointer", broke.Target == nil and broke.PillText == nil, ("target %s"):format(tostring(broke.Target)))
+	local pull = EventController.PlanGuidance("RainbowStorm", 1, state({ CanPull = true }))
+	check("Rainbow Storm with a pull affordable points at the pad", pull.Target == "Pad" and pull.Text == "PULL HERE" and pull.PillText ~= nil and pull.PillText:find("PULL NOW", 1, true) ~= nil, ("target %s '%s'"):format(tostring(pull.Target), pull.Text))
+	local then_ = EventController.PlanGuidance("RainbowStorm", 1, state({ CanPull = true, CanFuse = true, OnPad = true }))
+	check("Rainbow Storm on the pad with a pair says THEN FUSE", then_.Target == "Machine" and then_.Text == "THEN FUSE", ("target %s '%s'"):format(tostring(then_.Target), then_.Text))
+	local padNoPair = EventController.PlanGuidance("RainbowStorm", 1, state({ CanPull = true, OnPad = true }))
+	check("Rainbow Storm on the pad with nothing to fuse keeps pointing at the pad", padNoPair.Target == "Pad", ("target %s"):format(tostring(padNoPair.Target)))
+	local other = EventController.PlanGuidance("GoldenRain", 1, state({ CanFuse = true, CanPull = true }))
+	check("other events add no station pointer", other.Target == nil and other.PillText == nil, ("target %s"):format(tostring(other.Target)))
+	return lines
+end
+
 -- Every successful single fusion opens the big card whatever the reveal rule
 -- says, with no top banner; Fuse All / Auto-Fuse keep the rule.
 local function testFusionCard(): { string }
@@ -304,6 +345,32 @@ local function testCardMath(): { string }
 			checked += 1
 			if why then
 				table.insert(failures, ("card %d px %s"):format(height, why))
+			end
+		end
+		-- The Fuse All card with every tier gained and used up (its worst case):
+		-- placed like the rest, its OK button inside the band.
+		do
+			local ResultController = require(script.Parent.ResultController) :: any
+			local worst = ResultController.WorstFuseAllResult()
+			local chips = 0
+			for _, counts in { worst.Gained, worst.Consumed } do
+				for _, n in counts do
+					if n > 0 then
+						chips += 1
+					end
+				end
+			end
+			local fuse = ResultController.PlanFuseAllFor(chips, true, viewport.Phone)
+			local visual = fuse.Height + UITheme.ShadowOffset
+			local top, fit = UIKit.PlanCardFor(visual, view.Y, viewport.Phone)
+			local why = UIKit.CheckCardPlacement(top, visual * fit, view.Y, viewport.Phone)
+			local okBottom = top + fuse.OkBottom * fit
+			local bandBottom = view.Y - UIKit.GetCardBottomFor(viewport.Phone)
+			checked += 1
+			if why then
+				table.insert(failures, ("FuseAllSummary (%d chips, %d rows, %d px) %s"):format(chips, fuse.Rows, fuse.Height, why))
+			elseif okBottom > bandBottom + 0.5 then
+				table.insert(failures, ("FuseAllSummary OK button ends at %d, the band ends at %d"):format(okBottom, bandBottom))
 			end
 		end
 		if #failures > 0 then
@@ -428,18 +495,96 @@ local function testPlacedCards(): { string }
 				result.CloseCards()
 				task.wait(0.3)
 			end
+			-- The Fuse All card, every tier gained and used up: in the band, its OK
+			-- button fully inside it, and as tall as PlanFuseAllFor says.
+			result.CloseCards()
+			task.wait(0.3)
+			local worst = result.WorstFuseAllResult()
+			result.SelfTestShowFuseAll(worst)
+			task.wait(0.4)
+			if measurePlacedCards(label .. " fuse all") == 0 then
+				table.insert(cardLines, ("FAIL cards centred (FuseAllSummary, %s live): the card is not up"):format(label))
+			end
+			local fuseCard = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("FuseAllSummary", true)
+			local okButton = if fuseCard then fuseCard:FindFirstChild("Ok", true) else nil
+			if fuseCard and okButton and okButton:IsA("GuiObject") then
+				local view = UIKit.GetLogicalViewport()
+				local scaleNow = screenScale(okButton)
+				local okTop, okHeight = visibleRect(okButton, nil, scaleNow)
+				local bandTop, bandBottom = UIKit.GetCardTop(), view.Y - UIKit.GetCardBottom()
+				local fuseBody = fuseCard:FindFirstChild("Body")
+				local chips = 0
+				for _, counts in { worst.Gained, worst.Consumed } do
+					for _, n in counts do
+						if n > 0 then
+							chips += 1
+						end
+					end
+				end
+				local planned = result.PlanFuseAllFor(chips, true, UIKit.IsPhone())
+				local measured = if fuseBody and fuseBody:IsA("GuiObject")
+					then fuseBody.AbsoluteSize.Y / (scaleNow * (tonumber((fuseCard :: GuiObject):GetAttribute("FitScale")) or 1))
+					else 0
+				local problems: { string } = {}
+				if okTop < bandTop - 0.5 or okTop + okHeight > bandBottom + 0.5 then
+					table.insert(problems, ("OK button %d..%d, band %d..%d"):format(okTop, okTop + okHeight, bandTop, bandBottom))
+				end
+				if math.abs(measured - planned.Height) > 2 then
+					table.insert(problems, ("card is %d px tall, PlanFuseAllFor says %d"):format(measured, planned.Height))
+				end
+				table.insert(cardLines, if #problems > 0
+					then cardFailures(("FuseAllSummary, %s live"):format(label), problems)
+					else ("PASS cards centred (FuseAllSummary OK button inside the band, %s live, %d px card)"):format(label, planned.Height))
+			else
+				table.insert(cardLines, ("FAIL cards centred (FuseAllSummary, %s live): no OK button"):format(label))
+			end
+			result.CloseCards()
+			task.wait(0.3)
 			local hud = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("Hud")
 			if hud then
 				-- Both the NEXT-event card and a RUNNING one (Night), with the
 				-- tutorial's OK row off and on.
+				-- The tutorial's objective bar is up (the events step): the bar and the
+				-- card never overlap, the bar steps aside while the card is open and
+				-- comes back after. Only when no real tutorial owns the bar.
+				local TutorialBanner = require(UI.TutorialBanner) :: any
+				local ownBar = not TutorialBanner.IsShown()
+				if ownBar then
+					TutorialBanner.Show("Lab weather!", "Every 15 min. Tap it to see what to do", "🌦", 9, 11)
+					task.wait(0.6)
+				end
 				for _, now in { false, true } do
 					for _, okRow in { false, true } do
+						local variant = ("%s %s%s"):format(label, if now then "running" else "next", if okRow then " +OK" else "")
 						eventInfo.SetTutorialOk(okRow)
 						eventInfo.Show(hud, if now then "Night" else "GoldenRain", now)
-						measurePlacedCards(("%s %s%s"):format(label, if now then "running" else "next", if okRow then " +OK" else ""))
+						measurePlacedCards(variant)
+						task.wait(0.5) -- the bar slides out
+						local card = eventInfo.GetFrame()
+						if TutorialBanner.IsShown() and card then
+							local bar = TutorialBanner.GetFrame()
+							local barTop, barHeight = visibleRect(bar, nil, screenScale(bar))
+							local cardTop, cardHeight = visibleRect(card, card:FindFirstChild("Shadow") :: GuiObject?, screenScale(card))
+							-- Clear when the bar is above the card (the bar's bottom + 8 px) or off the screen.
+							local clear = barTop + barHeight + 8 <= cardTop or barTop + barHeight <= 0 or barTop >= cardTop + cardHeight
+							table.insert(cardLines, if clear
+								then ("PASS tutorial bar vs card (%s): bar y %d..%d, card y %d..%d, covered %s"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight, tostring(TutorialBanner.IsCovered()))
+								else ("FAIL tutorial bar vs card (%s): the objective bar (y %d..%d) overlaps the card (y %d..%d)"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight))
+						end
 						eventInfo.Hide()
-						task.wait(0.1)
+						task.wait(0.6)
+						if TutorialBanner.IsShown() then
+							local bar = TutorialBanner.GetFrame()
+							local barTop = visibleRect(bar, nil, screenScale(bar))
+							table.insert(cardLines, if barTop >= UIKit.GetCardTop() - 1 and not TutorialBanner.IsCovered()
+								then ("PASS tutorial bar vs card (%s): the bar is back after the card closes"):format(variant)
+								else ("FAIL tutorial bar vs card (%s): the bar is still out after the card closed (y %d)"):format(variant, barTop))
+						end
 					end
+				end
+				if ownBar then
+					TutorialBanner.Hide()
+					task.wait(0.4)
 				end
 				eventInfo.SetTutorialOk(false)
 			end
@@ -2931,25 +3076,45 @@ end
 -- The effects tray: with a Luck Potion, Speed Boots and Safe Fusion tokens
 -- granted by the server, a luck circle with a timer, a Speed Boots circle
 -- with a timer and a Safe Fusion circle with "×N" are up in one row: in the
--- BOTTOM-LEFT corner on desktop, the TOP-RIGHT corner on a phone. Their timers
+-- BOTTOM-RIGHT corner on desktop, the TOP-RIGHT corner on a phone. Their timers
 -- read the live seconds, tap targets are >= 44 px on screen, nothing overlaps
 -- a HUD rect or the weapon bar, and the old effect pills are gone. Measured
 -- at both layouts.
 -- The tray's and the tooltip's placement maths against the real HUD rects and
--- the weapon bar at four explicit window sizes in both layouts (the same
--- idea as "cards centred"), with 3 and with 5 effects. Desktop: one
--- left-aligned row in the bottom-left corner, 16 px from the left and bottom
--- edges and 12 px short of the bottom row (or, when it cannot fit, directly
--- above that row), touching no HUD rect or the weapon bar. Phone: one row
--- (or right-aligned rows when it wraps) in the top-right quarter below
--- GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump
--- button. The Luck tooltip is on screen, touching none. Needs the weapon bar up (/weapons all).
+-- the weapon bar at explicit window sizes (the same idea as "cards centred"),
+-- with 3 and with 5 effects. Desktop (1251 x 666, 1366 x 768, 1920 x 1080):
+-- one right-aligned row in the bottom-right corner, 16 px from the right and
+-- bottom edges and 12 px right of the bottom row's ⚙ (or, when it cannot fit,
+-- directly above that row), touching no HUD rect or the weapon bar. Tablet
+-- (1024 x 768, 1180 x 820, 1366 x 1024: the desktop layout WITH Roblox's jump
+-- button): the same, with the jump rect an obstacle (the row sits above it
+-- when the corner is taken), and the bottom row and weapon bar clear of it.
+-- Phone (844 x 390, 896 x 414): one row (or right-aligned rows when it wraps)
+-- in the top-right quarter below GetCardTop, clear of TopStack, the HUD, the
+-- weapon bar and the jump button. A desktop plan never runs under 500 px tall
+-- (the game is the phone layout there). The Luck tooltip is on screen,
+-- touching none. Needs the weapon bar up (/weapons all).
 local EFFECTS_VIEWPORTS = {
-	{ Name = "1251 x 666", Size = Vector2.new(1251, 666) },
-	{ Name = "1366 x 768", Size = Vector2.new(1366, 768) },
-	{ Name = "844 x 390", Size = Vector2.new(844, 390) },
-	{ Name = "896 x 414", Size = Vector2.new(896, 414) }, -- iPhone XR landscape
+	{ Name = "1251 x 666", Size = Vector2.new(1251, 666), Layout = "desktop" },
+	{ Name = "1366 x 768", Size = Vector2.new(1366, 768), Layout = "desktop" },
+	{ Name = "1920 x 1080", Size = Vector2.new(1920, 1080), Layout = "desktop" },
+	{ Name = "1024 x 768", Size = Vector2.new(1024, 768), Layout = "tablet" }, -- iPad
+	{ Name = "1180 x 820", Size = Vector2.new(1180, 820), Layout = "tablet" },
+	{ Name = "1366 x 1024", Size = Vector2.new(1366, 1024), Layout = "tablet" },
+	{ Name = "844 x 390", Size = Vector2.new(844, 390), Layout = "phone" },
+	{ Name = "896 x 414", Size = Vector2.new(896, 414), Layout = "phone" }, -- iPhone XR landscape
 }
+
+local function rectsOverlap(a: { Position: Vector2, Size: Vector2 }, b: { Position: Vector2, Size: Vector2 }): boolean
+	local ox = math.min(a.Position.X + a.Size.X, b.Position.X + b.Size.X) - math.max(a.Position.X, b.Position.X)
+	local oy = math.min(a.Position.Y + a.Size.Y, b.Position.Y + b.Size.Y) - math.max(a.Position.Y, b.Position.Y)
+	return ox > 1 and oy > 1
+end
+
+-- `rect` grown by `gap` px all round (the jump button's air).
+local function grown(rect: { Position: Vector2, Size: Vector2 }, gap: number): { Position: Vector2, Size: Vector2 }
+	return { Position = rect.Position - Vector2.new(gap, gap), Size = rect.Size + Vector2.new(2 * gap, 2 * gap) }
+end
 
 local function probeEffectsTrayViewports(): { ProbeLine }
 	local EffectsTray = require(UI.EffectsTray) :: any
@@ -2957,25 +3122,60 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 	local combat = require(script.Parent.CombatController) :: any
 	local lines: { ProbeLine } = {}
 	for _, viewport in EFFECTS_VIEWPORTS do
-		for _, phone in { false, true } do
+		local phone = viewport.Layout == "phone"
+		local touch = viewport.Layout ~= "desktop" -- the jump button is on screen
+		do
 			UIKit.SetForcedPhone(phone)
 			task.wait(0.4)
 			EffectsTray.Refresh()
 			task.wait(0.2)
-			local label = ("%s, %s"):format(viewport.Name, if phone then "phone" else "desktop")
+			local label = ("%s, %s"):format(viewport.Name, viewport.Layout)
 			-- The card's natural size and the scale it is drawn at, from the live card.
 			EffectsTray.TestHover("Luck", true)
 			task.wait(0.2)
 			local live = EffectsTray.GetTooltip()
 			EffectsTray.TestHover("Luck", false)
 			local view = viewport.Size / live.Scale
-			local obstacles = hud.GetObstacleRectsFor(view)
-			local weaponBar = combat.GetBarRectFor(view)
+			local obstacles = hud.GetObstacleRectsFor(view, touch)
+			local weaponBar = combat.GetBarRectFor(view, touch)
 			if weaponBar then
 				obstacles.WeaponBar = weaponBar
 			end
-			local jump = EffectsTray.JumpRectFor(view, live.Scale, phone)
+			local jump = EffectsTray.JumpRectFor(view, live.Scale, touch)
 			local cardTop = UIKit.GetCardTop()
+			if jump then
+				-- The bottom row and the weapon bar clear the jump button (JUMP_GAP of air).
+				local clearJump: { string } = {}
+				local airy = grown(jump, UIKit.JUMP_GAP)
+				for _, name in { "BottomRow", "WeaponBar" } do
+					local rect = obstacles[name]
+					if rect and rectsOverlap(rect, airy) then
+						table.insert(clearJump, ("%s at %d,%d %dx%d"):format(name, rect.Position.X, rect.Position.Y, rect.Size.X, rect.Size.Y))
+					end
+				end
+				if not obstacles.BottomRow then
+					table.insert(clearJump, "no BottomRow rect")
+				elseif obstacles.BottomRow.Position.X < 0 then
+					table.insert(clearJump, "bottom row pushed off the left edge")
+				end
+				table.insert(lines, {
+					Ok = #clearJump == 0,
+					Name = ("jump button (%s): the bottom row and the weapon bar are %d px clear of it"):format(label, UIKit.JUMP_GAP),
+					Detail = ("jump %d,%d %dx%d | bottom row %s%s"):format(
+						jump.Position.X, jump.Position.Y, jump.Size.X, jump.Size.Y,
+						if obstacles.BottomRow then ("%d..%d"):format(obstacles.BottomRow.Position.X, obstacles.BottomRow.Position.X + obstacles.BottomRow.Size.X) else "missing",
+						if #clearJump > 0 then " | " .. table.concat(clearJump, "; ") else ""),
+				})
+			end
+			if viewport.Layout == "tablet" then
+				-- A finger: every bottom-row button is a 44 px tap or more on a tablet.
+				local smallest = hud.GetBottomRowMinTap()
+				table.insert(lines, {
+					Ok = smallest >= UITheme.MinTapSize,
+					Name = ("tablet (%s): every bottom-row button is at least %d px"):format(label, UITheme.MinTapSize),
+					Detail = ("smallest %d px"):format(smallest),
+				})
+			end
 			local plan3: any = nil
 			for _, effects in { 3, 5 } do
 				local plan = EffectsTray.PlanTrayFor(view, obstacles, effects, jump, cardTop, phone)
@@ -3003,7 +3203,7 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 					end
 				end
 				local rowProblems: { string } = {}
-				if plan.Corner ~= (if phone then "TopRight" else "BottomLeft") then
+				if plan.Corner ~= (if phone then "TopRight" else "BottomRight") then
 					table.insert(rowProblems, ("planned for the %s corner"):format(plan.Corner))
 				end
 				if plan.Rows == 1 and #rowYs ~= 1 then
@@ -3042,11 +3242,12 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 						table.insert(placeProblems, ("right edge at %d of %d (want 8 px, a cell's 4 px gap included)"):format(right, view.X))
 					end
 				else
-					-- The bottom-left corner: first circle 16 px from the left edge,
-					-- timers 16 px from the bottom, 12 px short of UPGRADES; or above the row.
+					-- The bottom-right corner: the rightmost circle 16 px from the right
+					-- edge, timers 16 px from the bottom, 12 px right of the bottom row's
+					-- ⚙; or above the bottom row (and the jump button), right-aligned.
 					local first = EffectsTray.CircleRectFor(plan, 1)
-					if math.abs(first.Position.X - 16) > 1 then
-						table.insert(placeProblems, ("first circle %d px from the left edge, want 16"):format(first.Position.X))
+					if math.abs(view.X - 16 - (first.Position.X + first.Size.X)) > 1 then
+						table.insert(placeProblems, ("first circle ends %d px from the right edge, want 16"):format(view.X - (first.Position.X + first.Size.X)))
 					end
 					if not bottomRow then
 						table.insert(placeProblems, "no BottomRow rect to measure against")
@@ -3054,12 +3255,15 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 						if plan.Rect.Position.Y + plan.Rect.Size.Y > bottomRow.Position.Y + 1 then
 							table.insert(placeProblems, "lifted row still reaches the bottom row's top")
 						end
+						if jump and plan.Rect.Position.Y + plan.Rect.Size.Y > jump.Position.Y - UIKit.JUMP_GAP + 1 and plan.Rect.Position.X < jump.Position.X + jump.Size.X then
+							table.insert(placeProblems, "lifted row is not above the jump button")
+						end
 					else
 						if math.abs(view.Y - 16 - (plan.Rect.Position.Y + plan.Rect.Size.Y)) > 1 then
 							table.insert(placeProblems, ("bottom at %d of %d, want 16 px from the edge"):format(plan.Rect.Position.Y + plan.Rect.Size.Y, view.Y))
 						end
-						if right > bottomRow.Position.X - 12 + 1 then
-							table.insert(placeProblems, ("ends at %d, the bottom row starts at %d (want 12 px between)"):format(right, bottomRow.Position.X))
+						if plan.Rect.Position.X < bottomRow.Position.X + bottomRow.Size.X + 12 - 1 then
+							table.insert(placeProblems, ("starts at %d, the bottom row ends at %d (want 12 px between)"):format(plan.Rect.Position.X, bottomRow.Position.X + bottomRow.Size.X))
 						end
 					end
 				end
@@ -3070,10 +3274,10 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 					Ok = #placeProblems == 0 and weaponBar ~= nil and #plan.Hits == 0,
 					Name = if phone
 						then ("effects tray plan (%s, %d effects): top-right, below GetCardTop, clear of TopStack, the HUD, the weapon bar and the jump button"):format(label, effects)
-						else ("effects tray plan (%s, %d effects): bottom-left, left of UPGRADES (or above it), clear of the left column and the weapon bar"):format(label, effects),
+						else ("effects tray plan (%s, %d effects): bottom-right, right of the ⚙ (or above it%s), clear of the weapon bar"):format(label, effects, if jump then " and the jump button" else ""),
 					Detail = ("rect %d,%d %dx%d, %d px icons%s, weapon bar %s, touches: %s%s"):format(
 						plan.Rect.Position.X, plan.Rect.Position.Y, plan.Rect.Size.X, plan.Rect.Size.Y, plan.Circle,
-						if plan.Lifted then ", above the bottom row" else "",
+						if plan.Lifted then ", lifted" else "",
 						if weaponBar then "up" else "NOT showing (/weapons all)", table.concat(plan.Hits, ", "),
 						if #placeProblems > 0 then " | " .. table.concat(placeProblems, "; ") else ""
 					),
@@ -3086,16 +3290,21 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				Detail = ("card %dx%d"):format(size.X, size.Y),
 			})
 			local circle = EffectsTray.CircleRectFor(plan3, 1)
-			local tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, size, phone)
+			-- The tooltip also stays off the jump button.
+			local tipObstacles: { [string]: any } = table.clone(obstacles)
+			if jump then
+				tipObstacles.JumpButton = jump
+			end
+			local tip = EffectsTray.PlanTooltipFor(view, tipObstacles, circle, size, phone)
 			local narrow = false
 			if tip.Overlap > 0 or not tip.OnScreen then
 				-- The live card narrows to its minimum width when nothing is clear (taller by the wrap).
-				tip = EffectsTray.PlanTooltipFor(view, obstacles, circle, Vector2.new(EffectsTray.TOOLTIP_MIN_WIDTH, size.Y * 1.6), phone)
+				tip = EffectsTray.PlanTooltipFor(view, tipObstacles, circle, Vector2.new(EffectsTray.TOOLTIP_MIN_WIDTH, size.Y * 1.6), phone)
 				narrow = true
 			end
 			table.insert(lines, {
 				Ok = tip.OnScreen and tip.Overlap == 0,
-				Name = ("effects tray plan (%s): the Luck tooltip is on screen and touches no HUD rect"):format(label),
+				Name = ("effects tray plan (%s): the Luck tooltip is on screen and touches no HUD rect%s"):format(label, if jump then " or the jump button" else ""),
 				Detail = ("%s%s at %d,%d, card %dx%d, on screen %s, touches: %s"):format(
 					tip.Side, if narrow then " (narrow)" else "", tip.Left, tip.Top, size.X, size.Y, tostring(tip.OnScreen), table.concat(tip.Hits, ", ")
 				),
@@ -3134,7 +3343,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 				if safe then ("timer '%s' badge '%s'"):format(safe.Timer, tostring(safe.Badge)) else "missing"
 			),
 		})
-		-- In the bottom-left (desktop) / top-right (phone) quarter of the window, and timers that read the live seconds.
+		-- In the bottom-right (desktop) / top-right (phone) quarter of the window, and timers that read the live seconds.
 		local camera = workspace.CurrentCamera
 		local window = if camera then camera.ViewportSize else Vector2.new(1366, 768)
 		local inset = GuiService:GetGuiInset().Y
@@ -3143,7 +3352,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 			local centre = entry.Position + entry.Size / 2 - Vector2.new(0, inset)
 			local inQuarter = if phone
 				then centre.X > window.X * 0.5 and centre.Y < window.Y * 0.5
-				else centre.X < window.X * 0.5 and centre.Y > window.Y * 0.5
+				else centre.X > window.X * 0.5 and centre.Y > window.Y * 0.5
 			if not inQuarter then
 				table.insert(outside, ("%s at %d,%d"):format(id, centre.X, centre.Y))
 			end
@@ -3152,7 +3361,7 @@ local function probeEffectsTray(tokens: number): { ProbeLine }
 		if not tooSmall then
 			table.insert(lines, {
 				Ok = next(byId) ~= nil and #outside == 0,
-				Name = ("effects tray (%s, window %d × %d): in the %s quarter"):format(label, window.X, window.Y, if phone then "top-right" else "bottom-left"),
+				Name = ("effects tray (%s, window %d × %d): in the %s quarter"):format(label, window.X, window.Y, if phone then "top-right" else "bottom-right"),
 				Detail = table.concat(outside, ", "),
 			})
 		end
@@ -3623,6 +3832,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testFusionCard() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testEventGuidance() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testHudOrder() do

@@ -94,7 +94,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   SettingsPanel (the ⚙ button: reveal-card rules, sound and music volume),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
                   deal side cards), DealParts (part tiles + YOU GET list),
-                  EffectsTray (active effects as cartoon badges + tooltips; bottom-left row on desktop, top-right on a phone),
+                  EffectsTray (active effects as cartoon badges + tooltips; bottom-right row on desktop and tablet, top-right on a phone),
                   PurchaseCelebration (the reveal after a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),
