@@ -86,7 +86,7 @@ export type DailyView = {
 	LastDay: number,
 }
 local daily: DailyView = { CanClaim = false, Day = 1, Streak = 0, Skips = 1, UsesSkip = false, Resets = false, LastDay = 0 }
--- Today's playtime gifts (snapshot Gifts); play time counts on locally
+-- This visit's playtime gifts (snapshot Gifts); play time counts on locally
 -- from the moment the snapshot arrived.
 local giftPlaySeconds = 0
 local giftReceivedAt = os.clock()
@@ -410,7 +410,7 @@ function TycoonController.GetShop(): ShopView
 	return shop
 end
 
--- Today's play time (seconds, counting on between snapshots) and the
+-- This visit's play time (seconds, counting on between snapshots) and the
 -- claimed gift indices.
 function TycoonController.GetGiftPlaySeconds(): number
 	return giftPlaySeconds + (os.clock() - giftReceivedAt)

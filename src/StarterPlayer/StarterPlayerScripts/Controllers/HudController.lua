@@ -1397,7 +1397,7 @@ end
 	Overclock, ...) are round icons in UI/EffectsTray, a column on the right edge.
 	Beside SHOP, the pink "🎁 GIFTS" (GiftsPanel): a green count badge and a
 	bounce while any playtime gift is ready, otherwise a small "next in
-	3:12" pill (hidden once today's gifts are all open).
+	3:12" pill (hidden once this visit's gifts are all open).
 ]]
 local SHOP_BUTTON_SIZE = Vector2.new(132, 56)
 -- Room for the SALE tag (it pokes 8 px past SHOP's right edge) beside the

@@ -28,14 +28,21 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
 - **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
-  / 15 / 25 / 40 / 60 minutes played in a UTC day, summed across sessions
+  / 15 / 25 / 40 / 60 minutes played **in this visit**: every visit starts
+  fresh (0 s, nothing claimed), leaving loses the unclaimed ones
   (5 min income / 1 free pull / ×2 income 10 min / 15 min income / ×2
   luck 10 min / an item Rare 60, Epic 35, Legendary 5).
-  `PlayerData.Gifts = { UtcDay, PlaySeconds, Claimed }`, ticked once a
-  second on the server while in game (a new UTC day starts a fresh set).
-  Remote `ClaimGift { Index }` (server checks play time and claimed) →
+  The visit's `{ PlaySeconds, Claimed }` lives in `RewardService` memory only
+  (created on join, dropped on leave, nothing saved; `PlayerData.Gifts` is
+  gone and an old save's table is ignored), ticked once a second on the
+  server while the player's data is loaded; the snapshot and the fuzz
+  fingerprint read it through `PlayerDataService.SetGiftStateProvider`. The
+  daily reward is unchanged (once per UTC day).
+  Remote `ClaimGift { Index }` (server checks this visit's play time and
+  claimed) →
   `GiftResult`. HUD: the pink "🎁 GIFTS" button right of SHOP (green ready
   badge + bounce, else a "next in 3:12" pill); `UI/GiftsPanel` (3 × 2
   boxes: claimed dim ✓ / ready green glow "OPEN!" / locked "25 min" with a
-  bar, and a daily-reward strip on top). The client counts play time on
+  bar, a "This visit: 29:45" line, the footer "Gifts restart every time you
+  join. Stay to open them all!" and a daily-reward strip on top). The client counts play time on
   from the snapshot (`TycoonController.GetGiftPlaySeconds`).

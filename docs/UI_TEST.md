@@ -1184,10 +1184,11 @@ published place.
   At 5:00 the pill goes, a green "1" badge appears and the button bounces.
 - [ ] **Panel.** GIFTS opens the panel: the daily strip on top ("📅 Daily
   reward ready · Day N" + OPEN, which closes this and opens the daily
-  card; once claimed "next in 7:12:03" to 00:00 UTC), "Played today:
+  card; once claimed "next in 7:12:03" to 00:00 UTC), "This visit:
   5:02", six boxes: ready = green with a pulsing glow and "OPEN!",
   locked = "10 min" etc. with a thin progress bar, claimed = dim with ✓.
-  Footer: "Rare 60% · Epic 35% · Legendary 5%".
+  Footer: "Gifts restart every time you join. Stay to open them all! Last
+  gift: Rare 60% · Epic 35% · Legendary 5%".
 - [ ] **Every gift.** `/gifts time 60` (all six ready, badge 6). Open each:
   5 min: the box shows "💰 +$X" for a moment then ✓; 10 min: the panel
   closes and the "🎁 GIFT · FREE PULL" card shows one pull; 15 min: ×2
@@ -1198,9 +1199,10 @@ published place.
 - [ ] **Server checks.** `/gifts time 7`: only the first gift is ready; a
   forged `ClaimGift { Index = 3 }` (command bar) is refused "Not open
   yet"; a second claim of gift 1 is refused "Already opened".
-- [ ] **Sums across sessions.** With `FT_StudioSaves`: play 6 min, leave,
-  rejoin: "Played today" carries on from ~6:00 and gift 1 is still ready
-  (or still claimed). `/gifts reset` locks them all again.
+- [ ] **Every visit starts fresh.** `/gifts time 6`, claim the 5-min gift,
+  then stop and Play again: the panel shows "This visit: 0:0x" and the 5-min
+  gift is locked again and claimable again after 5 min. `/gifts reset`
+  starts the visit again. The daily reward still waits for 00:00 UTC.
 - [ ] **Phone.** Device emulator: SHOP and GIFTS fit beside the cash card
   without covering the top-centre event chip; the panel's boxes stay 3 per
   row and each is easy to tap.

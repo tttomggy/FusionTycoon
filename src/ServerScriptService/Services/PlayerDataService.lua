@@ -41,7 +41,6 @@ local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
-local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
@@ -154,8 +153,6 @@ export type PlayerData = {
 	Quests: QuestState,
 	-- The daily reward streak (DailyConfig; RewardService claims it).
 	Daily: DailyConfig.State,
-	-- Today's playtime gifts (GiftConfig; RewardService ticks and claims).
-	Gifts: GiftConfig.State,
 	-- The highest base income ($/s, no timed boosts) this save has reached:
 	-- the street's BEST INCOME board (LeaderboardService).
 	BestIncome: number,
@@ -222,7 +219,7 @@ export type TycoonSnapshot = {
 	-- The daily reward: what the next claim gives (DailyConfig.GetStatus at
 	-- the server's UTC day) and the cycle day of the last claim.
 	Daily: DailyConfig.Status & { LastDay: number },
-	-- Today's playtime gifts (GiftConfig): the client counts PlaySeconds on
+	-- This visit's playtime gifts (GiftConfig; not saved, RewardService owns them): the client counts PlaySeconds on
 	-- from when the snapshot arrived.
 	Gifts: { PlaySeconds: number, Claimed: { number } },
 }
@@ -389,7 +386,6 @@ local DEFAULT_DATA: PlayerData = {
 		ReplayHint = false,
 	},
 	Daily = DailyConfig.Default(),
-	Gifts = GiftConfig.Default(-1),
 	BestIncome = 0,
 	FreePulls = 0,
 	Funnel = {},
@@ -416,7 +412,23 @@ local state: State = {
 	connections = {},
 }
 
+-- This visit's playtime gifts are RewardService's, in memory only (nothing is
+-- saved). It registers itself here in :Start() so the snapshot and the fuzz
+-- fingerprint can read them without requiring it.
+type GiftState = { PlaySeconds: number, Claimed: { number } }
+local giftStateOf: ((Player) -> GiftState)? = nil
+
+local function giftState(player: Player): GiftState
+	local provider = giftStateOf
+	return if provider then provider(player) else { PlaySeconds = 0, Claimed = {} }
+end
+
 local PlayerDataService = {}
+
+function PlayerDataService.SetGiftStateProvider(provider: (Player) -> GiftState)
+	giftStateOf = provider
+end
+
 
 PlayerDataService.Name = "PlayerDataService"
 
@@ -664,7 +676,7 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.BestIncome) == "number" and raw.BestIncome == raw.BestIncome and raw.BestIncome >= 0 then
 		data.BestIncome = raw.BestIncome
 	end
-	data.Gifts = GiftConfig.Sanitize(raw.Gifts, RewardConfig.GetUtcDay(os.time()))
+	-- An old save's Gifts table is ignored: the playtime gifts restart every visit.
 	-- Version 1 is the first FT_Live_1 format; later versions migrate here
 	-- (raw.Version < DATA_VERSION) before the stamp below.
 	data.Version = DATA_VERSION
@@ -740,6 +752,20 @@ local function canonical(value: any, skip: { [string]: boolean }?): string
 		return ("%.17g"):format(value)
 	end
 	return kind .. ":" .. tostring(value)
+end
+
+-- /selftest: an old save with a Gifts table (the daily-sum format) loads with
+-- no error and the table is ignored; a save never writes one. Returns
+-- (loaded, ignored, written).
+function PlayerDataService.SelfTestOldGifts(): (boolean, boolean, boolean)
+	local raw: any = deepCopy(toDisk(DEFAULT_DATA))
+	raw.Gifts = { UtcDay = RewardConfig.GetUtcDay(os.time()), PlaySeconds = 9999, Claimed = { 1, 2, 3 } }
+	local ok, data = pcall(reconcile, raw)
+	if not ok then
+		return false, false, false
+	end
+	local loaded = data :: any
+	return true, loaded.Gifts == nil, (toDisk(loaded) :: any).Gifts ~= nil
 end
 
 -- Disk -> session -> disk must be lossless: toDisk(data), reconcile it back,
@@ -826,7 +852,7 @@ function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
 end
 
 -- Everything a bad remote must NOT change (cash is checked separately: the
--- income tick only ever raises it). Gifts.PlaySeconds and Boosts tick.
+-- income tick only ever raises it). The visit's gift play time and Boosts tick.
 function PlayerDataService.SelfTestFingerprint(player: Player): string
 	local data = state.sessionCache[player.UserId]
 	if not data then
@@ -844,7 +870,7 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		Settings = data.Settings,
 		Tips = data.Tips,
 		Daily = data.Daily,
-		GiftsClaimed = data.Gifts.Claimed,
+		GiftsClaimed = giftState(player).Claimed,
 		SafeFusionTokens = data.SafeFusionTokens,
 		Receipts = data.Receipts,
 		Index = data.Index,
@@ -1959,8 +1985,8 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		},
 		Daily = dailySnapshot(data),
 		Gifts = {
-			PlaySeconds = if data then data.Gifts.PlaySeconds else 0,
-			Claimed = if data then table.clone(data.Gifts.Claimed) else {},
+			PlaySeconds = giftState(player).PlaySeconds,
+			Claimed = table.clone(giftState(player).Claimed),
 		},
 	}
 end

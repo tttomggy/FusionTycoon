@@ -54,6 +54,7 @@ type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 type FusionServiceModule = typeof(require(script.Parent.FusionService))
 type CombatServiceModule = typeof(require(script.Parent.CombatService))
 type QuestServiceModule = typeof(require(script.Parent.QuestService))
+type RewardServiceModule = typeof(require(script.Parent.RewardService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -77,6 +78,7 @@ local TycoonService: TycoonServiceModule
 local FusionService: FusionServiceModule
 local CombatService: CombatServiceModule
 local QuestService: QuestServiceModule
+local RewardService: RewardServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -179,8 +181,8 @@ local DEAL_COMMAND = "/deal"
 -- the free skip, miss 2+ = back to Day 1);
 -- "/daily reset" starts a fresh streak.
 local DAILY_COMMAND = "/daily"
--- "/gifts time 24" sets today's play time to 24 min (the playtime gifts);
--- "/gifts reset" also re-locks every gift.
+-- "/gifts time 24" sets THIS VISIT's play time to 24 min (the playtime gifts);
+-- "/gifts reset" starts the visit again (0 s, every gift locked and unclaimed).
 local GIFTS_COMMAND = "/gifts"
 
 --[[ /selftest ------------------------------------------------------------------
@@ -930,6 +932,50 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	end
 end
 
+-- The playtime gifts restart every visit: a fresh join is 0 s with no claims,
+-- a claim before its minutes is refused, a rejoin (RewardService.SelfTestRejoin
+-- drops and re-creates the visit's state) is 0 s again with gift 1 claimable
+-- again, and an old save's Gifts table loads and is ignored. The cash a claim
+-- pays is taken back and the tester's play time put back.
+local function runGiftSessionSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local first = GiftConfig.Gifts[1]
+	local savedSeconds = RewardService.GetGiftState(player).PlaySeconds
+	local savedClaimed = table.clone(RewardService.GetGiftState(player).Claimed)
+	local cashStart = PlayerDataService.GetCash(player)
+
+	RewardService.SelfTestRejoin(player)
+	local fresh = RewardService.GetGiftState(player)
+	result(fresh.PlaySeconds < 2 and #fresh.Claimed == 0, "gifts: a fresh join is 0 s with nothing claimed", ("%.1f s, %d claimed"):format(fresh.PlaySeconds, #fresh.Claimed))
+
+	local early = RewardService.SelfTestClaimGift(player, 1)
+	result(early == "NotYet" and #RewardService.GetGiftState(player).Claimed == 0, "gifts: a claim before its minutes is refused", early)
+
+	RewardService.SetGiftSeconds(player, first.Minutes * 60 + 1)
+	local granted = RewardService.SelfTestClaimGift(player, 1)
+	local again = RewardService.SelfTestClaimGift(player, 1)
+	result(granted == "Granted" and again == "Claimed", "gifts: gift 1 claims once at its minutes, then reads claimed", ("%s, then %s"):format(granted, again))
+
+	RewardService.SelfTestRejoin(player)
+	local rejoined = RewardService.GetGiftState(player)
+	result(rejoined.PlaySeconds < 2 and #rejoined.Claimed == 0, "gifts: after a rejoin the time is 0 s again and nothing is claimed", ("%.1f s, %d claimed"):format(rejoined.PlaySeconds, #rejoined.Claimed))
+	RewardService.SetGiftSeconds(player, first.Minutes * 60 + 1)
+	local regranted = RewardService.SelfTestClaimGift(player, 1)
+	result(regranted == "Granted", "gifts: after a rejoin gift 1 can be claimed again", regranted)
+
+	local loaded, ignored, written = PlayerDataService.SelfTestOldGifts()
+	result(loaded and ignored and not written, "gifts: an old save with a Gifts table loads without error and is ignored (never written back)", ("loaded %s, ignored %s, written %s"):format(tostring(loaded), tostring(ignored), tostring(written)))
+
+	-- Put it back: the cash two claims paid, the play time and claims.
+	local gained = PlayerDataService.GetCash(player) - cashStart
+	if gained > 0 then
+		PlayerDataService.SpendCash(player, gained)
+	end
+	local current = RewardService.GetGiftState(player)
+	current.PlaySeconds = savedSeconds
+	current.Claimed = savedClaimed
+	PlayerDataService.SyncTycoon(player)
+end
+
 -- The Secret pity meter (FusionConfig.SecretPityFull): fail charges, the
 -- sure success at full, the cap, the save and rebirth round trips, the Fuse
 -- panel's bar and 100% on the real client. Mythics are given and everything
@@ -1647,8 +1693,8 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	if fuzzData then
 		savedDaily = table.clone(fuzzData.Daily)
 		DailyConfig.Apply(fuzzData.Daily, RewardConfig.GetUtcDay(os.time()))
-		savedPlaySeconds = fuzzData.Gifts.PlaySeconds
-		fuzzData.Gifts.PlaySeconds = 0
+		savedPlaySeconds = RewardService.GetGiftState(player).PlaySeconds
+		RewardService.SetGiftSeconds(player, 0)
 	end
 	local before = PlayerDataService.SelfTestFingerprint(player)
 	local cashBefore = PlayerDataService.GetCash(player)
@@ -1669,7 +1715,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 				(fuzzData.Daily :: any)[key] = value
 			end
 		end
-		fuzzData.Gifts.PlaySeconds += savedPlaySeconds
+		RewardService.SetGiftSeconds(player, RewardService.GetGiftState(player).PlaySeconds + savedPlaySeconds)
 	end
 	if not fuzzReport then
 		result(false, "remote fuzz", "no report from the client")
@@ -1733,6 +1779,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
 		runSecretPitySelfTest(player, result)
+		runGiftSessionSelfTest(player, result)
 		-- Claiming "Fuse a Mythic" there granted the Slap Glove: the real
 		-- "You got the Slap Glove!" card is up now. Close it (and its queue)
 		-- so section 12 starts on a bare screen.
@@ -2053,21 +2100,20 @@ local function onPlayerChatted(player: Player, message: string)
 		end
 		local verb, rawNumber = argument:match("^(%S+)%s*(%S*)$")
 		local minutes = tonumber(rawNumber)
-		local today = RewardConfig.GetUtcDay(os.time())
 		if verb == "time" and minutes then
-			data.Gifts.UtcDay = today
-			data.Gifts.PlaySeconds = math.max(0, minutes * 60)
+			RewardService.SetGiftSeconds(player, minutes * 60)
 		elseif verb == "reset" then
-			data.Gifts = GiftConfig.Default(today)
+			RewardService.ResetGifts(player)
 		else
 			warn("DebugService: /gifts time <minutes> | /gifts reset")
 			return
 		end
 		PlayerDataService.SyncTycoon(player)
-		print(("DebugService: %s gifts -> %d s played, %d ready"):format(
+		local gifts = RewardService.GetGiftState(player)
+		print(("DebugService: %s gifts -> %d s this visit, %d ready"):format(
 			player.Name,
-			math.floor(data.Gifts.PlaySeconds),
-			GiftConfig.CountReady(data.Gifts.PlaySeconds, data.Gifts.Claimed)
+			math.floor(gifts.PlaySeconds),
+			GiftConfig.CountReady(gifts.PlaySeconds, gifts.Claimed)
 		))
 	elseif command == SHOP_COMMAND then
 		local verb, rawKey = argument:match("^(%S+)%s*(%S*)$")
@@ -2174,6 +2220,7 @@ function DebugService:Start()
 	FusionService = require(script.Parent.FusionService)
 	CombatService = require(script.Parent.CombatService)
 	QuestService = require(script.Parent.QuestService)
+	RewardService = require(script.Parent.RewardService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
 		local applied: { [number]: boolean } = {}

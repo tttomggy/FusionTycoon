@@ -26,6 +26,11 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   saved), unless ServerScriptService has the attribute `FT_StudioSaves =
   true` (and API access), which uses the separate store `FT_StudioTest_1`
   to test persistence. PedestalDisplays are stored with string keys on disk.
+- **Playtime gifts are not saved.** `PlayerData.Gifts` (`{ UtcDay,
+  PlaySeconds, Claimed }`, the old per-UTC-day sum) is gone: `toDisk` does not
+  write it and `reconcile` ignores an old save's table with no error
+  (`PlayerDataService.SelfTestOldGifts`). The visit's state is
+  `RewardService`'s (see rewards.md).
 - **`SecretPity`** (number, default 0): the Secret pity meter
   (`FusionConfig.SecretPityFull`; failed Mythic fusions fill it, see
   items-and-fusion.md). Saved with the profile (`toDisk` copies it,

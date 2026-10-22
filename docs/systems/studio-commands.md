@@ -35,7 +35,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `/daily day <1-7>` (your next daily claim is that day, claimable now),
   `/daily miss <days>` (as if you missed that many days: 1 = the free
   skip, 2+ = back to Day 1), `/daily reset`, `/gifts time <minutes>`
-  (today's play time), `/gifts reset`,
+  (this visit's play time), `/gifts reset` (starts the visit again),
   `/wipe` (fails your active steals first). **`/trailer`** (admins, live
   servers too; AdminService → S→C `TrailerStart { Shot?, Stop? }`):
   TrailerController plays the ~30 s video-thumbnail cinematic on that
@@ -165,8 +165,15 @@ Most of the 77 were the TEST, not the game:
   (`TutorialExplain.GetReadTimes`), not a race against `task.wait`.
 - Auto pull test: passive income is paused (`TycoonService.SelfTestFreezeIncome`)
   and cash set to exactly two cycles, or a rich save paid for 90 pulls.
-- The remote fuzz parks the daily claim and the gift clock first (a junk
+- The remote fuzz parks the daily claim and the visit's gift clock first (a junk
   `ClaimDaily` is a real claim after 00:00 UTC).
+- Section 11 also runs `runGiftSessionSelfTest`: a fresh join is 0 s with no
+  claims; a claim before its minutes is refused (`NotYet`); gift 1 claims once
+  at 5 min then reads `Claimed`; after `RewardService.SelfTestRejoin` (drops
+  and re-creates the visit's state) the time is 0 s again and gift 1 can be
+  claimed again; an old save with a `Gifts` table loads and is ignored and
+  never written back. The cash the claims paid and the tester's play time are
+  put back.
 - A failing weapon line prints `rig weapon …, tracks […*=playing]` and
   `trace:` (the last hold / release decisions of `CombatController`).
 - The gacha card and the (i) panel also redraw on `AdminLuck` / `EventId`

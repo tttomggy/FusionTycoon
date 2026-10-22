@@ -51,7 +51,7 @@ local REMOTE_EVENT_NAMES = {
 	"SelfTestReport", -- client -> server: Studio /selftest only; the client half's results (ignored outside Studio)
 	"ClaimDaily", -- client -> server: no payload (RewardService decides the day and the reward)
 	"DailyResult", -- server -> client: { Result = "Granted" | "Refused", Day?, Streak?, UsedSkip?, Kind?, Lines?, Reason? } (the daily card's reveal)
-	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks today's play time and that it isn't claimed)
+	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks this visit's play time and that it isn't claimed)
 	"GiftResult", -- server -> client: { Result = "Granted" | "Refused", Index?, Kind?, Lines?, Reason? } (the Gifts panel's reveal)
 	"ShopAnnouncement", -- server -> all: { Kind = "Overclock", PlayerName, Seconds } (the Server Overclock banner)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)

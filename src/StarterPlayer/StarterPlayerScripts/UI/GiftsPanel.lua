@@ -2,7 +2,7 @@
 --[[
 	GiftsPanel
 	----------
-	The HUD GIFTS button's panel (UIKit.Modal): today's six playtime gifts
+	The HUD GIFTS button's panel (UIKit.Modal): this visit's six playtime gifts
 	(GiftConfig) as boxes, 3 × 2:
 
 	  claimed  dim, a green ✓
@@ -226,7 +226,7 @@ local function refresh(force: boolean?)
 	end
 	local playSeconds = TycoonController.GetGiftPlaySeconds()
 	local claimed = TycoonController.GetClaimedGifts()
-	playLabel.Text = ("Played today: %s"):format(EventState.FormatTimer(playSeconds))
+	playLabel.Text = ("This visit: %s"):format(EventState.FormatTimer(playSeconds))
 
 	local daily = TycoonController.GetDaily()
 	local canDaily = DailyController.CanClaim()
@@ -273,7 +273,7 @@ local function build(): UIKit.Modal
 		HeaderTop = Colors.GiftsTop,
 		OnClose = stopGlows,
 	})
-	created.Subtitle.Text = "Free gifts for playing today"
+	created.Subtitle.Text = "Free gifts for staying"
 	created.Subtitle.Visible = true
 	local content = created.Content
 	local z = content.ZIndex + 1
@@ -369,7 +369,7 @@ local function build(): UIKit.Modal
 	local itemGift = GiftConfig.Gifts[#GiftConfig.Gifts].Reward
 	UIKit.Label({
 		Name = "Footer",
-		Text = ("Gifts reset at 00:00 UTC; time adds up across visits. Last gift: %s"):format(
+		Text = ("Gifts restart every time you join. Stay to open them all! Last gift: %s"):format(
 			if itemGift.Odds then RewardConfig.FormatOdds(itemGift.Odds) else ""
 		),
 		Font = Fonts.Body,

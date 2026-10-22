@@ -11,10 +11,11 @@
 	  The claim is recorded and the reward granted with no yield between,
 	  so a double tap finds the day already claimed. DailyResult answers.
 
-	  ClaimGift { Index } (C→S): the gift must be open by today's play time
-	  (PlayerData.Gifts.PlaySeconds, ticked here once a second while the
-	  player is in game; a new UTC day starts a fresh set) and not claimed.
-	  GiftResult answers.
+	  ClaimGift { Index } (C→S): the gift must be open by THIS VISIT's play
+	  time and not claimed this visit. The visit's state (play seconds, claims)
+	  lives in this service's memory only: created on join, dropped on leave,
+	  ticked here once a second while the player's data is loaded. Nothing is
+	  saved; every visit starts at 0 with nothing claimed. GiftResult answers.
 
 	Free pulls and reward items go through TycoonService.GrantFreePulls /
 	GrantRewardItem (the real pull path and reveal). Region-restricted
@@ -48,6 +49,8 @@ type State = {
 	rng: Random,
 	-- Seconds since the last play-time tick.
 	tickElapsed: number,
+	-- Each player's playtime gifts for THIS visit (dropped on leave).
+	gifts: { [number]: GiftConfig.State },
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -57,6 +60,7 @@ local state: State = {
 	lastRequest = {},
 	rng = Random.new(),
 	tickElapsed = 0,
+	gifts = {},
 }
 
 local DEBOUNCE_SECONDS = 0.5
@@ -172,14 +176,15 @@ end
 
 --[[ Playtime gifts ------------------------------------------------------- ]]
 
--- Today's gifts for `data`, rolled over to a fresh set on a new UTC day.
--- Returns true if it rolled over.
-local function rollGiftDay(data: any, today: number): boolean
-	if data.Gifts.UtcDay ~= today then
-		data.Gifts = GiftConfig.Default(today)
-		return true
+-- The player's gifts for this visit (created on join; made here if the
+-- first call beats PlayerAdded).
+local function giftState(player: Player): GiftConfig.State
+	local gifts = state.gifts[player.UserId]
+	if not gifts then
+		gifts = GiftConfig.Fresh()
+		state.gifts[player.UserId] = gifts
 	end
-	return false
+	return gifts
 end
 
 local function onPlayTick(dt: number)
@@ -189,16 +194,10 @@ local function onPlayTick(dt: number)
 	end
 	local elapsed = state.tickElapsed
 	state.tickElapsed = 0
-	local today = RewardConfig.GetUtcDay(os.time())
 	for _, player in Players:GetPlayers() do
-		local data = PlayerDataService.GetData(player)
-		if data then
-			local rolled = rollGiftDay(data, today)
-			data.Gifts.PlaySeconds += elapsed
-			if rolled then
-				-- A new day: the client's gift clock starts again.
-				PlayerDataService.SyncTycoon(player)
-			end
+		if PlayerDataService.GetData(player) then
+			local gifts = giftState(player)
+			gifts.PlaySeconds += elapsed
 		end
 	end
 end
@@ -207,34 +206,32 @@ local function refuseGift(player: Player, index: number?, reason: string)
 	RemoteEvents.GiftResult:FireClient(player, { Result = "Refused", Index = index, Reason = reason })
 end
 
-local function onClaimGift(player: Player, payload: unknown)
-	if debounced(player) then
-		return
-	end
+-- The claim itself. Returns "Granted" or why not ("Invalid" when the payload
+-- is junk: no reply, as before).
+local function claimGift(player: Player, payload: unknown): string
 	local rawIndex = if typeof(payload) == "table" then (payload :: any).Index else nil
 	if typeof(rawIndex) ~= "number" or not GiftConfig.Gifts[rawIndex] then
-		return
+		return "Invalid"
 	end
 	local index = rawIndex :: number
 	local data = PlayerDataService.GetData(player)
 	if not data then
 		refuseGift(player, index, "NotLoaded")
-		return
+		return "NotLoaded"
 	end
-	rollGiftDay(data, RewardConfig.GetUtcDay(os.time()))
-	local gifts = data.Gifts
+	local gifts = giftState(player)
 	if GiftConfig.IsClaimed(gifts.Claimed, index) then
 		refuseGift(player, index, "Claimed")
-		return
+		return "Claimed"
 	end
 	if not GiftConfig.IsReady(gifts.PlaySeconds, gifts.Claimed, index) then
 		refuseGift(player, index, "NotYet")
-		return
+		return "NotYet"
 	end
 	local reward = GiftConfig.Gifts[index].Reward
 	if not canGrant(player, reward) then
 		refuseGift(player, index, "NotReady")
-		return
+		return "NotReady"
 	end
 	-- Record, then grant: no yield between.
 	table.insert(gifts.Claimed, index)
@@ -251,6 +248,47 @@ local function onClaimGift(player: Player, payload: unknown)
 		Kind = reward.Kind,
 		Lines = lines,
 	})
+	return "Granted"
+end
+
+local function onClaimGift(player: Player, payload: unknown)
+	if debounced(player) then
+		return
+	end
+	claimGift(player, payload)
+end
+
+--[[ Public API ----------------------------------------------------------- ]]
+
+-- The visit's playtime gifts ({ PlaySeconds, Claimed }); the live table.
+function RewardService.GetGiftState(player: Player): GiftConfig.State
+	return giftState(player)
+end
+
+-- /gifts time <min>: sets this visit's play time.
+function RewardService.SetGiftSeconds(player: Player, seconds: number)
+	giftState(player).PlaySeconds = math.max(0, seconds)
+end
+
+-- /gifts reset: this visit starts again (0 s, nothing claimed).
+function RewardService.ResetGifts(player: Player)
+	state.gifts[player.UserId] = GiftConfig.Fresh()
+end
+
+-- /selftest: drops the visit's state and makes it again, as leaving and
+-- joining would, and syncs the client.
+function RewardService.SelfTestRejoin(player: Player)
+	state.gifts[player.UserId] = nil
+	state.lastRequest[player.UserId] = nil
+	state.gifts[player.UserId] = GiftConfig.Fresh()
+	PlayerDataService.SyncTycoon(player)
+end
+
+-- /selftest: a ClaimGift { Index } with the rate limit out of the way;
+-- returns "Granted", "NotYet", "Claimed", ...
+function RewardService.SelfTestClaimGift(player: Player, index: number): string
+	state.lastRequest[player.UserId] = nil
+	return claimGift(player, { Index = index })
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]
@@ -258,8 +296,13 @@ end
 function RewardService:Init()
 	table.insert(state.connections, RemoteEvents.ClaimDaily.OnServerEvent:Connect(onClaimDaily))
 	table.insert(state.connections, RemoteEvents.ClaimGift.OnServerEvent:Connect(onClaimGift))
+	-- Every visit starts fresh: a new state on join, dropped on leave.
+	table.insert(state.connections, Players.PlayerAdded:Connect(function(player: Player)
+		state.gifts[player.UserId] = GiftConfig.Fresh()
+	end))
 	table.insert(state.connections, Players.PlayerRemoving:Connect(function(player: Player)
 		state.lastRequest[player.UserId] = nil
+		state.gifts[player.UserId] = nil
 	end))
 	table.insert(state.connections, RunService.Heartbeat:Connect(function(dt: number)
 		-- Nothing to tick until Start has resolved PlayerDataService.
@@ -272,6 +315,8 @@ end
 function RewardService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	TycoonService = require(script.Parent.TycoonService)
+	-- The snapshot and the fuzz fingerprint read the visit's gifts through this.
+	PlayerDataService.SetGiftStateProvider(giftState)
 end
 
 function RewardService:Stop()
@@ -280,6 +325,7 @@ function RewardService:Stop()
 	end
 	table.clear(state.connections)
 	table.clear(state.lastRequest)
+	table.clear(state.gifts)
 end
 
 return RewardService
