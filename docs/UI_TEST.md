@@ -2224,6 +2224,10 @@ deal running (`/deal slot 4`). Desktop must look exactly as before.
   when the corner is taken. The bottom row and the weapon bar (`/weapons all`)
   clear the jump button (at 1024 wide the row is pushed left). Every tap target
   is ≥ 44 px.
+- [ ] The jump button is reserved on ANY touch device, shown or not: click
+  around with the mouse (Roblox hides the button), then tap (it comes back).
+  The effects stay put above the jump button and the bottom buttons, tray and
+  weapon bar never move.
 
 **After the tutorial**
 

@@ -3176,6 +3176,56 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 					Detail = ("smallest %d px"):format(smallest),
 				})
 			end
+			if viewport.Name == "1180 x 820" then
+				-- Roblox shows and hides the jump button with the last input; the
+				-- HUD reserves its place on any touch device regardless, so toggling
+				-- TouchGui moves neither the tray, the bottom row nor the weapon bar.
+				local playerGui = localPlayer:WaitForChild("PlayerGui")
+				local touchGui = playerGui:FindFirstChild("TouchGui")
+				local fake: ScreenGui? = nil
+				if not touchGui then
+					local made = Instance.new("ScreenGui")
+					made.Name = "TouchGui"
+					made.Parent = playerGui
+					fake = made
+					touchGui = made
+				end
+				local function snapshot(): { Vector2 }
+					EffectsTray.Refresh()
+					task.wait(0.3)
+					local out: { Vector2 } = {}
+					local row = hud.GetBottomRowRect()
+					local bar = combat.GetBarRect()
+					local plan = EffectsTray.GetPlan()
+					for _, rect in { row, bar, if plan then plan.Rect else nil } do
+						table.insert(out, if rect then rect.Position else Vector2.zero)
+						table.insert(out, if rect then rect.Size else Vector2.zero)
+					end
+					table.insert(out, Vector2.new(if UIKit.JumpButtonShowing() then 1 else 0, 0))
+					return out
+				end
+				local gui = touchGui :: ScreenGui
+				local was = gui.Enabled
+				gui.Enabled = true
+				local shown = snapshot()
+				gui.Enabled = false
+				local hidden = snapshot()
+				gui.Enabled = was
+				if fake then
+					fake:Destroy()
+				end
+				local moved: { string } = {}
+				for index, a in shown do
+					if (a - hidden[index]).Magnitude > 0 then
+						table.insert(moved, ("#%d %s -> %s"):format(index, tostring(a), tostring(hidden[index])))
+					end
+				end
+				table.insert(lines, {
+					Ok = #moved == 0 and UIKit.JumpPresentFor(false, true) and UIKit.JumpPresentFor(true, false) and not UIKit.JumpPresentFor(false, false),
+					Name = ("jump button (%s): showing or hiding it moves neither the tray, the bottom row nor the weapon bar"):format(label),
+					Detail = if #moved == 0 then "same rects, +-0 px" else table.concat(moved, "; "),
+				})
+			end
 			local plan3: any = nil
 			for _, effects in { 3, 5 } do
 				local plan = EffectsTray.PlanTrayFor(view, obstacles, effects, jump, cardTop, phone)

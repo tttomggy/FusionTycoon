@@ -1097,22 +1097,19 @@ function UIKit.JumpRectFor(view: Vector2, scale: number, present: boolean): Jump
 	return { Position = Vector2.new(left, top) / scale, Size = Vector2.new(size, size) / scale }
 end
 
--- Is the jump button on screen right now? A phone layout always counts (so
--- does Studio's forced phone); a desktop layout only on a touch screen whose
--- TouchGui shows a jump button (a touch laptop on mouse and keyboard has none).
+-- Does the HUD reserve the jump button's place? Pure: a phone layout always,
+-- a desktop layout on any touch device (a tablet). Roblox hides the button
+-- while the last input was the mouse or keyboard and brings it back on touch;
+-- the HUD must NOT follow that (the tray and the bottom row would bounce), so
+-- it never reads TouchGui.
+function UIKit.JumpPresentFor(phone: boolean, touchEnabled: boolean): boolean
+	return phone or touchEnabled
+end
+
+-- JumpPresentFor for this device and layout; changes only with a layout
+-- change (UIKit.LayoutChanged / a viewport resize), never with the button.
 function UIKit.JumpButtonShowing(): boolean
-	if UIKit.IsPhone() then
-		return true
-	end
-	if not UserInputService.TouchEnabled then
-		return false
-	end
-	local playerGui = Players.LocalPlayer:FindFirstChildOfClass("PlayerGui")
-	local touchGui = if playerGui then playerGui:FindFirstChild("TouchGui") else nil
-	if touchGui and touchGui:IsA("ScreenGui") and not touchGui.Enabled then
-		return false
-	end
-	return true
+	return UIKit.JumpPresentFor(UIKit.IsPhone(), UserInputService.TouchEnabled)
 end
 
 -- How far (logical px, <= 0) a bottom bar `rect` must slide left to clear the
