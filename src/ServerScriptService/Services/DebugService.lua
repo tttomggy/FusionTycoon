@@ -1524,7 +1524,19 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		TycoonService.SetAutoPull(player, true)
 		local autoStarted = os.clock()
 		while TycoonService.IsAutoPulling(player) and os.clock() - autoStarted < 40 do
-			task.wait(0.25)
+			task.wait(0.1)
+			-- Cycle 1's items land on the pedestals and raise the steady income,
+			-- which the price cap follows: refund cycle 2 at the price now (the
+			-- game's pricing stays as it is; only the test's cash is re-set).
+			if #TycoonService.GetAutoPullLog(player) == 1 then
+				local price = TycoonConfig.GetGachaMultiPullCost(PlayerDataService.GetGachaPulls(player), TycoonConfig.MultiPullCount, PlayerDataService.GetSteadyIncomePerSecond(player))
+				local want = price + math.floor(price * 0.02)
+				local have = PlayerDataService.GetCash(player)
+				if have ~= want then
+					PlayerDataService.SpendCash(player, have)
+					PlayerDataService.AddCash(player, want)
+				end
+			end
 		end
 		local autoStop = TycoonService.GetAutoPullStop(player)
 		local autoLog = TycoonService.GetAutoPullLog(player)

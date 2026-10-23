@@ -3471,14 +3471,16 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				end
 				local moved: { string } = {}
 				for index, a in shown do
-					if (a - hidden[index]).Magnitude > 0 then
+					-- ±1 px: a rect may land on a neighbouring pixel, but nothing visibly moves.
+					local d = a - hidden[index]
+					if math.abs(d.X) > 1 or math.abs(d.Y) > 1 then
 						table.insert(moved, ("#%d %s -> %s"):format(index, tostring(a), tostring(hidden[index])))
 					end
 				end
 				table.insert(lines, {
 					Ok = #moved == 0 and UIKit.JumpPresentFor(false, true) and UIKit.JumpPresentFor(true, false) and not UIKit.JumpPresentFor(false, false),
 					Name = ("jump button (%s): showing or hiding it moves neither the tray, the bottom row nor the weapon bar"):format(label),
-					Detail = if #moved == 0 then "same rects, +-0 px" else table.concat(moved, "; "),
+					Detail = if #moved == 0 then "same rects, within 1 px" else table.concat(moved, "; "),
 				})
 			end
 			local plan3: any = nil

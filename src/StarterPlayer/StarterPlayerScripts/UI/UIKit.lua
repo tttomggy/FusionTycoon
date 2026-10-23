@@ -1126,7 +1126,8 @@ function UIKit.JumpShiftFor(view: Vector2, rect: JumpRect, scale: number, presen
 	if not overlapsY or right + gap <= jump.Position.X or rect.Position.X >= jump.Position.X + jump.Size.X + gap then
 		return 0
 	end
-	return math.min(0, math.max(jump.Position.X - gap - right, 8 - rect.Position.X))
+	-- Whole pixels: a fractional offset lands the bar on a half pixel and blurs its text.
+	return math.floor(math.min(0, math.max(jump.Position.X - gap - right, 8 - rect.Position.X)) + 0.5)
 end
 
 --[[ Card placement -------------------------------------------------------------------

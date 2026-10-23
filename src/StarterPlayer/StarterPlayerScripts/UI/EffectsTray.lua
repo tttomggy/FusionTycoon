@@ -1072,7 +1072,8 @@ local function place()
 	tray.Size = UDim2.fromOffset(plan.Rect.Size.X, plan.Rect.Size.Y)
 	-- The first effect is the rightmost, in the corner; new ones go to its left.
 	tray.AnchorPoint = Vector2.new(1, 0)
-	tray.Position = UDim2.new(1, -(view.X - plan.Rect.Position.X - plan.Rect.Size.X), 0, plan.Top)
+	-- Whole pixels, so the tray does not sit on a half pixel (blurred text).
+	tray.Position = UDim2.new(1, -math.floor(view.X - plan.Rect.Position.X - plan.Rect.Size.X + 0.5), 0, math.floor(plan.Top + 0.5))
 end
 
 --[[ Refresh -------------------------------------------------------------------------- ]]
