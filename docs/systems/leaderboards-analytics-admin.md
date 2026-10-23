@@ -27,7 +27,8 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   gift cash (TimedReward); upgrades (a MAX is ONE event), pulls, the pad,
   rebirth. `Custom`: ShopOpened, OfferShown / OfferAccepted /
   OfferDismissed (client → remote `ShopAnalytics`, whitelisted,
-  rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
+  rate-limited), NotifyOptInShown / NotifyOptInClosed (client → remote
+  `NotifyOptInAnalytics`, whitelisted, rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
   StealStarted / StealDelivered / StealSaved, QuestClaimed (id),
   PowerUpUsed (key). Never call AnalyticsService
   directly.

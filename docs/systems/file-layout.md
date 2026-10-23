@@ -83,7 +83,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   EventController (event banners, sky, FX, HUD chip, Event
                   Boards), AdminController (admin panel + broadcasts),
                   ShopController, DailyController (when the daily card
-                  opens, ClaimDaily)…
+                  opens, ClaimDaily), NotifyOptInController (the Roblox
+                  notification opt-in ask after the daily reveal)…
     Effects/      RevealEffects, WeaponPose, WeaponFx (weapon feel)
     UI/           WeaponViewport (turning weapon model in a ViewportFrame),
                   UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/

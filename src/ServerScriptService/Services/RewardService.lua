@@ -36,6 +36,7 @@ local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
+local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 
 --[[ Types ---------------------------------------------------------------- ]]
 
@@ -291,9 +292,28 @@ function RewardService.SelfTestClaimGift(player: Player, index: number): string
 	return claimGift(player, { Index = index })
 end
 
+-- NotifyOptInAnalytics { Event } (C→S): the client's Roblox notification
+-- opt-in prompt showed / closed (NotifyOptInController). Analytics only.
+local NOTIFY_OPT_IN_EVENTS: { [string]: string } = {
+	Shown = "NotifyOptInShown",
+	Closed = "NotifyOptInClosed",
+}
+
+local function onNotifyOptInAnalytics(player: Player, payload: unknown)
+	if typeof(payload) ~= "table" or not RemoteGuard.Allow(player, "NotifyOptIn", 0.5, 2) then
+		return
+	end
+	local event = (payload :: any).Event
+	local name = if typeof(event) == "string" then NOTIFY_OPT_IN_EVENTS[event] else nil
+	if name then
+		AnalyticsKit.Custom(player, name)
+	end
+end
+
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function RewardService:Init()
+	table.insert(state.connections, RemoteEvents.NotifyOptInAnalytics.OnServerEvent:Connect(onNotifyOptInAnalytics))
 	table.insert(state.connections, RemoteEvents.ClaimDaily.OnServerEvent:Connect(onClaimDaily))
 	table.insert(state.connections, RemoteEvents.ClaimGift.OnServerEvent:Connect(onClaimGift))
 	-- Every visit starts fresh: a new state on join, dropped on leave.

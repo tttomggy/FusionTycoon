@@ -27,6 +27,22 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   today gold glowing "TODAY", Day 7 purple),
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
+- **Notify opt-in** (`NotifyOptInController`, client only): once per session,
+  right after the daily card closes from a granted claim (`DailyCard`'s
+  `OnRevealClosed` handler), it calls Roblox's
+  `ExperienceNotificationService:PromptOptIn()`. The modal text is Roblox's;
+  we show no card of ours. Guards: no tutorial; no UIKit overlay or shop side
+  card (waits up to 20 s, then gives up for the session); no failed fusion or
+  purchase prompt in the last second; not `/selftest`-suppressed
+  (`SelfTestSuppress`, set by `clearScreen`); and `CanPromptOptInAsync()` in a
+  `pcall` must return true (Roblox enforces under-13, already opted in and the
+  30-day cooldown; we save nothing). Logs `NotifyOptInShown` /
+  `NotifyOptInClosed` (`OptInPromptClosed`) through remote
+  `NotifyOptInAnalytics { Event = "Shown" | "Closed" }` → `RewardService` →
+  `AnalyticsKit.Custom` (`RemoteGuard.Allow`, whitelisted). `/selftest` swaps
+  a stub in with `SetServiceForTest(stub, tutorialProbe)` (tutorial active →
+  not called; bare screen → once, a second close still once; erroring
+  `CanPromptOptInAsync` → not called, no error) and restores the real service.
 - **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
   / 15 / 25 / 40 / 60 minutes played **in this visit**: every visit starts
   fresh (0 s, nothing claimed), leaving loses the unclaimed ones

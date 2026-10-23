@@ -86,6 +86,7 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { OwnerUserId = otherUserId, PedestalIndex = NAN } },
 		},
 		RequestShopPurchase = { {}, { "x" }, { { Key = 5 } }, { { Key = "NoSuchProduct" } }, { { Key = BIG_STRING } } },
+		NotifyOptInAnalytics = { {}, { "x" }, { { Event = "Nope" } }, { { Event = 5 } }, { { Event = BIG_STRING } } },
 		ShopAnalytics = { {}, { { Event = "Nope" } }, { { Event = "ShopOpened", Key = "NoSuchProduct" } }, { { Event = 5 } } },
 		ClaimGift = { {}, { "x" }, { { Index = 0 } }, { { Index = 99 } }, { { Index = "1" } } },
 		SetSetting = {
@@ -1859,7 +1860,8 @@ end
 -- explain card, the daily reward, the event info, a shop side card, a result
 -- card, a queued weapon-unlock card) and returns what it found open, then what
 -- is still registered after closing. `suppressDaily` (true / false / nil to
--- leave it) keeps the daily reward from opening by itself during a section.
+-- leave it) keeps the daily reward from opening by itself during a section
+-- (and the notification opt-in from prompting).
 local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 	local TutorialCards = require(UI.TutorialCards) :: any
 	local TutorialExplain = require(UI.TutorialExplain) :: any
@@ -1870,6 +1872,7 @@ local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 	local CombatController = require(script.Parent.CombatController) :: any
 	if suppressDaily ~= nil then
 		(require(script.Parent.DailyController) :: any).SelfTestSuppress(suppressDaily)
+		(require(script.Parent.NotifyOptInController) :: any).SelfTestSuppress(suppressDaily)
 	end
 	local found = UIKit.GetOpenOverlays()
 	if EventInfoCard.IsOpen() then
@@ -4115,6 +4118,62 @@ local function probeTutorial(payload: any)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", ProbeId = payload.ProbeId, Lines = lines, Data = reportData })
 end
 
+-- NotifyOptInController with a stub Roblox service: nothing while the tutorial
+-- runs, one ask when the reveal closes on a bare screen (a second close in the
+-- same session adds none), and a service that errors costs no client error.
+local function testNotifyOptIn(): { string }
+	local controller = require(script.Parent.NotifyOptInController) :: any
+	local DailyController = require(script.Parent.DailyController) :: any
+	local lines: { string } = {}
+	local calls = 0
+	local canErrors = false
+	local stub = {
+		CanPromptOptInAsync = function(): boolean
+			if canErrors then
+				error("selftest: CanPromptOptInAsync failed")
+			end
+			return true
+		end,
+		PromptOptIn = function()
+			calls += 1
+		end,
+	}
+	local function closeReveal(): number
+		local before = calls
+		controller.OnDailyRevealClosed()
+		-- The settle delay plus a margin; a guard that holds never calls.
+		task.wait(1.4)
+		return calls - before
+	end
+	local function add(ok: boolean, name: string)
+		table.insert(lines, (if ok then "PASS " else "FAIL ") .. name)
+	end
+	local ok, err = pcall(function()
+		clearScreen(true)
+		controller.SelfTestSuppress(false)
+		local tutorial = true
+		controller.SetServiceForTest(stub, function()
+			return tutorial
+		end)
+		add(closeReveal() == 0, "notify opt-in: not asked while the tutorial is active")
+		tutorial = false
+		add(closeReveal() == 1, "notify opt-in: asked once when the reveal closes on a bare screen")
+		add(closeReveal() == 0, "notify opt-in: a second reveal close in the same session asks no more")
+		canErrors = true
+		controller.SetServiceForTest(stub, function()
+			return false
+		end)
+		add(closeReveal() == 0, "notify opt-in: a CanPromptOptInAsync error asks nothing and throws nothing")
+	end)
+	controller.SetServiceForTest(nil, nil)
+	controller.SelfTestSuppress(true)
+	DailyController.SelfTestSuppress(true)
+	if not ok then
+		add(false, "notify opt-in section errored: " .. tostring(err))
+	end
+	return lines
+end
+
 local function run(payload: any)
 	if running then
 		return
@@ -4258,6 +4317,9 @@ local function run(payload: any)
 		end
 	end
 	for _, line in testUnlockCard() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testNotifyOptIn() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testMusic() do

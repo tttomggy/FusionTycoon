@@ -51,6 +51,7 @@ local REMOTE_EVENT_NAMES = {
 	"SelfTestReport", -- client -> server: Studio /selftest only; the client half's results (ignored outside Studio)
 	"ClaimDaily", -- client -> server: no payload (RewardService decides the day and the reward)
 	"DailyResult", -- server -> client: { Result = "Granted" | "Refused", Day?, Streak?, UsedSkip?, Kind?, Lines?, Reason? } (the daily card's reveal)
+	"NotifyOptInAnalytics", -- client -> server: { Event = "Shown" | "Closed" } the Roblox notification opt-in prompt showed / was closed (analytics only; whitelisted, rate-limited)
 	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks this visit's play time and that it isn't claimed)
 	"GiftResult", -- server -> client: { Result = "Granted" | "Refused", Index?, Kind?, Lines?, Reason? } (the Gifts panel's reveal)
 	"ShopAnnouncement", -- server -> all: { Kind = "Overclock", PlayerName, Seconds } (the Server Overclock banner)

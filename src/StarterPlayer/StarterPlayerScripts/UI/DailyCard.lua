@@ -54,6 +54,7 @@ export type View = {
 export type Handlers = {
 	OnClaim: () -> (),
 	BaseIncome: () -> number, -- $/s without timed boosts (a cash day's amount)
+	OnRevealClosed: (() -> ())?, -- the card closed after a granted claim (the reveal was seen)
 }
 
 local modal: UIKit.Modal? = nil
@@ -252,7 +253,14 @@ local function build()
 		MaxSize = CARD_SIZE,
 		FitContent = true,
 		HeaderTop = Colors.DailyTop,
-		OnClose = stopGlow,
+		OnClose = function()
+			stopGlow()
+			local current = handlers
+			if claimed and current and current.OnRevealClosed then
+				claimed = false
+				current.OnRevealClosed()
+			end
+		end,
 	})
 	created.Subtitle.Text = "A new reward every UTC day"
 	created.Subtitle.Visible = true

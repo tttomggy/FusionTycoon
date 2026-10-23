@@ -32,9 +32,10 @@ update: [⚡] Power Surge, [🌙] Void Moon, [☄️] meteors, [🛡️] a heist
 "OUT NOW: …" as the first line of the description.
 
 **What to watch** (Analytics):
-- Thumbnail Performance: QPTR together with playtime per play. High QPTR with
-  short playtime means the image oversells.
-- Home Recommendations: play-through rate and first-play bounce.
+- Thumbnail Performance: play-through rate (PTR) together with playtime per
+  play. High PTR with short playtime means the image oversells.
+- Home Recommendations: PTR and first-play bounce rate (<60 s and 61-180 s),
+  both measured only for players who came from Home recommendations.
 - Keep the winning thumbnail in every later test. Add 1–2 new images per update
   and don't touch the set between updates.
 

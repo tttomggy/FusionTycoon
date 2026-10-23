@@ -81,7 +81,8 @@ cycle's cards closed, send the next ×10),
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
-`ShopAnalytics` (C→S `{ Event, Key? }`, analytics only), `ClaimDaily`
+`ShopAnalytics` (C→S `{ Event, Key? }`, analytics only),
+`NotifyOptInAnalytics` (C→S `{ Event = "Shown" | "Closed" }`, analytics only), `ClaimDaily`
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
 `GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
 only),

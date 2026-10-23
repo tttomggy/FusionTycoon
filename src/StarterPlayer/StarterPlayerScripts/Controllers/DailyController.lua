@@ -11,6 +11,8 @@
 	    is never stacked on another card.
 	  * DailyController.Open() reopens it (the Gifts panel's daily row).
 	  * DailyResult: Granted plays the reveal; Refused toasts.
+	  * Closing the card after a granted claim hands over to
+	    NotifyOptInController (the Roblox notification opt-in ask).
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -18,6 +20,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
 local ShopController = require(script.Parent.ShopController)
+local NotifyOptInController = require(script.Parent.NotifyOptInController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
 local ShopCards = require(script.Parent.Parent.UI.ShopCards)
 local DailyCard = require(script.Parent.Parent.UI.DailyCard)
@@ -118,6 +121,7 @@ function DailyController.Init()
 	DailyCard.Init({
 		OnClaim = claim,
 		BaseIncome = ShopController.GetBaseIncome,
+		OnRevealClosed = NotifyOptInController.OnDailyRevealClosed,
 	})
 	RemoteEvents.DailyResult.OnClientEvent:Connect(onDailyResult)
 	TycoonController.TycoonChanged:Connect(tryAutoOpen)
