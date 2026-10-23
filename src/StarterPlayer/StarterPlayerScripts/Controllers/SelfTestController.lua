@@ -4105,6 +4105,7 @@ local function run(payload: any)
 		table.insert(dealKeys, DealConfig.GetDealForSlot(slot))
 	end
 
+	local modalError = UIKit.SelfTestModal()
 	local hoverLines = testHover("before")
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.
@@ -4122,6 +4123,9 @@ local function run(payload: any)
 		for _, line in textFitLines do
 			table.insert(panelLines, line)
 		end
+	end
+	if modalError then
+		table.insert(panelLines, "FAIL UIKit.Modal builds: " .. modalError)
 	end
 	for _, line in hoverLines do
 		table.insert(panelLines, line)

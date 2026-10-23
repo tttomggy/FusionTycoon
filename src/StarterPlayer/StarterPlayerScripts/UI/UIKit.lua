@@ -1837,7 +1837,8 @@ function UIKit.Modal(props: ModalProps): Modal
 
 	-- The title (and, on a phone big panel, the panel's HeaderSlot beside it)
 	-- sits in a row that stops short of the ✕ / ? buttons. Desktop: the row's
-	-- layout is off and the title keeps its own size and position.
+	-- layout is unparented (layouts have no Enabled) and the title keeps its
+	-- own size and position.
 	local titleRow = Instance.new("Frame")
 	titleRow.Name = "TitleRow"
 	titleRow.BackgroundTransparency = 1
@@ -1849,8 +1850,6 @@ function UIKit.Modal(props: ModalProps): Modal
 	titleLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	titleLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	titleLayout.Padding = UDim.new(0, 12)
-	titleLayout.Enabled = false
-	titleLayout.Parent = titleRow
 
 	local title = UIKit.Label({
 		Name = "Title",
@@ -1924,7 +1923,7 @@ function UIKit.Modal(props: ModalProps): Modal
 		padding.PaddingBottom = UDim.new(0, pad)
 		padding.PaddingLeft = UDim.new(0, pad)
 		padding.PaddingRight = UDim.new(0, pad)
-		titleLayout.Enabled = compact
+		titleLayout.Parent = if compact then titleRow else nil
 		headerSlot.Visible = compact
 		if compact then
 			titleRow.Size = UDim2.new(1, -(tap + 8 + helpReserve), 1, 0)
@@ -2041,6 +2040,45 @@ function UIKit.Modal(props: ModalProps): Modal
 		end,
 	}
 	return modal
+end
+
+-- /selftest start: builds a throwaway Modal (plain and big panel) in pcall and
+-- returns the error text, so a crash inside Modal is a FAIL line instead of a
+-- silent blank HUD. Leaves no gui, spec or probe behind.
+function UIKit.SelfTestModal(): string?
+	for _, big in { false, true } do
+		local before = #modalSpecs
+		local built: Modal?
+		local ok, err = pcall(function()
+			built = UIKit.Modal({
+				Name = "SelfTestModal",
+				Title = "Self test",
+				DisplayOrder = 1,
+				MaxSize = Vector2.new(400, 300),
+				HeaderTop = Colors.Panel,
+				BigPanel = big,
+			})
+			if built then
+				built.Chrome()
+			end
+		end)
+		if built then
+			local gui = built.Gui
+			dimProbes[gui] = nil
+			local at = table.find(modalGuis, gui)
+			if at then
+				table.remove(modalGuis, at)
+			end
+			gui:Destroy()
+		end
+		while #modalSpecs > before do
+			table.remove(modalSpecs)
+		end
+		if not ok then
+			return (if big then "big panel: " else "") .. tostring(err)
+		end
+	end
+	return nil
 end
 
 -- Escapes text for safe use inside a RichText label.
