@@ -114,6 +114,7 @@ type Slot = {
 }
 
 local screenGui: ScreenGui
+local phoneHidden = false -- a phone big panel is open (UIKit.SetPhoneHudHandler)
 local bar: Frame
 local slots: { Slot } = {}
 local lastLocalSwing: { [string]: number } = {}
@@ -431,7 +432,7 @@ end
 local function refreshBar()
 	-- No bar before Rebirth 1 (nobody can hit you, you can't hit anyone) and
 	-- none while the tutorial runs: its action button owns that space.
-	screenGui.Enabled = TycoonController.GetRebirths() >= 1 and not TycoonController.IsTutorialActive()
+	screenGui.Enabled = TycoonController.GetRebirths() >= 1 and not TycoonController.IsTutorialActive() and not phoneHidden
 	if not screenGui.Enabled then
 		return
 	end
@@ -1128,6 +1129,14 @@ function CombatController.PlayPose(weaponId: string): boolean
 	end
 	performFor(localPlayer, weapon)
 	return true
+end
+
+-- A phone big panel hides the weapon bar while it is open (HudController.SetPhoneHudHidden).
+function CombatController.SetPhoneHidden(hidden: boolean)
+	phoneHidden = hidden
+	if screenGui then
+		refreshBar()
+	end
 end
 
 function CombatController.Init()

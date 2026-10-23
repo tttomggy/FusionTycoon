@@ -1429,6 +1429,7 @@ local function build()
 		DisplayOrder = 141,
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.ShopTop,
+		BigPanel = true,
 	})
 	modal.Title.TextColor3 = Colors.GoldLabel
 	modal.Title.TextSize = 34
@@ -1480,7 +1481,8 @@ local function build()
 	chipLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	chipLayout.Parent = chipBar
 
-	-- The one page.
+	-- The one page. (Phone: the chip bar moves up into the header's slot and
+	-- the page takes all the height under the header; see placeChips.)
 	scroller = Instance.new("ScrollingFrame")
 	scroller.Name = "Scroll"
 	scroller.BackgroundTransparency = 1
@@ -1525,6 +1527,21 @@ local function build()
 	tail.Parent = scroller
 
 	scroller:GetPropertyChangedSignal("CanvasPosition"):Connect(onScrolled)
+	local function placeChips()
+		if UIKit.IsPhone() then
+			chipBar.Parent = modal.HeaderSlot
+			chipBar.Size = UDim2.fromScale(1, 1)
+			scroller.Position = UDim2.new()
+			scroller.Size = UDim2.fromScale(1, 1)
+		else
+			chipBar.Parent = content
+			chipBar.Size = UDim2.new(1, 0, 0, CHIP_BAR_HEIGHT)
+			scroller.Position = UDim2.fromOffset(0, CHIP_BAR_HEIGHT + 6)
+			scroller.Size = UDim2.new(1, 0, 1, -(CHIP_BAR_HEIGHT + 6))
+		end
+	end
+	placeChips()
+	UIKit.LayoutChanged:Connect(placeChips)
 	-- A phone switch or a resize can change the column counts.
 	local function relayout()
 		if modal.IsOpen() then

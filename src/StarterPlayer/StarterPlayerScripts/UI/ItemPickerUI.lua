@@ -67,6 +67,8 @@ local BROWSE_TITLE = "YOUR ITEMS"
 
 local modal: UIKit.Modal? = nil
 local chipsRow: Frame
+local chipsLayout: UIListLayout
+local chipsScroll: ScrollingFrame -- phone: the chips scroll sideways inside the header slot
 local grid: ScrollingFrame
 local gridLayout: UIGridLayout
 local footer: Frame
@@ -275,10 +277,10 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 		Name = "Tier",
 		Text = card.Tier:upper(),
 		Font = Fonts.BodyHeavy,
-		TextSize = 11,
+		TextSize = 13,
 		TextColor3 = UITheme.GetTierLight(card.Tier),
-		Position = UDim2.fromOffset(6, 122),
-		Size = UDim2.new(1, -12, 0, 14),
+		Position = UDim2.fromOffset(6, 121),
+		Size = UDim2.new(1, -12, 0, 16),
 		TextXAlignment = Enum.TextXAlignment.Center,
 		ZIndex = z,
 		Parent = body,
@@ -287,7 +289,7 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 		Name = "Earn",
 		Text = NumberFormat.Money(earnRate(card)) .. "/s",
 		Font = Fonts.Body,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.Cash,
 		Position = UDim2.fromOffset(6, 140),
 		Size = UDim2.new(1, -12, 0, 16),
@@ -335,8 +337,8 @@ local function buildCard(card: Card, order: number, selectable: boolean)
 			Color = Colors.Cash,
 			TextColor3 = Colors.Ink,
 			Font = Fonts.BodyHeavy,
-			TextSize = 10,
-			Height = 18,
+			TextSize = 13,
+			Height = 20,
 			Position = UDim2.fromOffset(6, 6),
 			ZIndex = z + 2,
 		})
@@ -497,6 +499,7 @@ local function build()
 		DisplayOrder = 150,
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.InventoryTop,
+		BigPanel = true,
 	})
 	modal = built
 	local content = built.Content
@@ -507,13 +510,24 @@ local function build()
 	chipsRow.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize - 8)
 	chipsRow.ZIndex = 5
 	chipsRow.Parent = content
-	local chipsLayout = Instance.new("UIListLayout")
+	chipsLayout = Instance.new("UIListLayout")
 	chipsLayout.FillDirection = Enum.FillDirection.Horizontal
 	chipsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 	chipsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	chipsLayout.Padding = UDim.new(0, 8)
 	chipsLayout.Wraps = true
 	chipsLayout.Parent = chipsRow
+
+	chipsScroll = Instance.new("ScrollingFrame")
+	chipsScroll.Name = "ChipScroll"
+	chipsScroll.BackgroundTransparency = 1
+	chipsScroll.BorderSizePixel = 0
+	chipsScroll.Size = UDim2.fromScale(1, 1)
+	chipsScroll.ScrollingDirection = Enum.ScrollingDirection.X
+	chipsScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
+	chipsScroll.CanvasSize = UDim2.new()
+	chipsScroll.ScrollBarThickness = 0
+	chipsScroll.ZIndex = 5
 
 	grid = Instance.new("ScrollingFrame")
 	grid.Name = "Grid"
@@ -596,9 +610,29 @@ local function build()
 	})
 end
 
+-- Phone (big panel): the filter chips sit in the compact header, sideways-
+-- scrolling, and the grid starts at the top of the content.
+local function placeChips(isPhone: boolean)
+	local m = modal :: UIKit.Modal
+	if isPhone then
+		chipsScroll.Parent = m.HeaderSlot
+		chipsRow.Parent = chipsScroll
+		chipsRow.AutomaticSize = Enum.AutomaticSize.X
+		chipsRow.Size = UDim2.fromScale(0, 1)
+		chipsLayout.Wraps = false
+	else
+		chipsRow.Parent = m.Content
+		chipsScroll.Parent = nil
+		chipsRow.AutomaticSize = Enum.AutomaticSize.None
+		chipsRow.Size = UDim2.new(1, 0, 0, UITheme.MinTapSize - 8)
+		chipsLayout.Wraps = true
+	end
+end
+
 local function layoutFor(pedestalMode: boolean, isPhone: boolean)
-	local columns = if isPhone then 3 else 4
-	local gridTop = UITheme.MinTapSize - 8 + 12
+	placeChips(isPhone)
+	local columns = 4
+	local gridTop = if isPhone then 0 else UITheme.MinTapSize - 8 + 12
 	local footerSpace = if pedestalMode then FOOTER_HEIGHT + UITheme.SmallShadowOffset + 10 else 0
 	grid.Position = UDim2.fromOffset(0, gridTop)
 	grid.Size = UDim2.new(1, 0, 1, -(gridTop + footerSpace))

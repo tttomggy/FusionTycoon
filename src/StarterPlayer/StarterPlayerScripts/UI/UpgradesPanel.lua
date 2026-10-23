@@ -37,6 +37,13 @@ local MAX_SIZE = Vector2.new(600, 620)
 local ROW_HEIGHT = 84
 local ROW_GAP = 10
 local FOOTER_HEIGHT = 56
+-- Phone (big panel, compact header): tabs live in the header, the intro line is
+-- gone and the footer is one slim line, so 3+ rows of >= 64 px fit at 844 x 390.
+local ROW_HEIGHT_PHONE = 72
+local ROW_GAP_PHONE = 6
+local FOOTER_HEIGHT_PHONE = 34
+local FOOTER_GAP_PHONE = 6
+local PHONE_CASH_WIDTH = 110
 local BUTTON_SIZE = Vector2.new(120, 52)
 local MAX_BUTTON_SIZE = Vector2.new(104, 52)
 local MAX_BUTTON_GAP = 8
@@ -60,6 +67,7 @@ type Row = {
 	LevelPill: TextLabel,
 	Detail: TextLabel,
 	Progress: Frame,
+	TitleRow: Frame,
 	Button: TextButton,
 	MaxButton: TextButton,
 	MaxHolder: Frame,
@@ -73,6 +81,15 @@ local introIncomeLabel: TextLabel
 local rows: { [string]: Row } = {}
 local maxAllButton: TextButton
 local maxAllHolder: Frame
+local introLabel: TextLabel
+local tabsFrame: Frame
+local pillsFrame: Frame
+local listFrame: ScrollingFrame
+local listLayout: UIListLayout
+local footerHolder: Frame
+local footerBody: Frame
+local footerHint: TextLabel
+local hintFlex: UIFlexItem
 local lastRefresh = -math.huge
 local refreshQueued = false
 
@@ -394,8 +411,8 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		Color = tierColor(generator.Tier),
 		TextColor3 = Colors.Ink,
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
-		Height = 20,
+		TextSize = 13,
+		Height = 22,
 		LayoutOrder = 2,
 		ZIndex = z,
 	})
@@ -431,6 +448,7 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		Text = "",
 		SubText = "UPGRADE",
 		TextSize = 17,
+		SubTextSize = 13,
 		Size = UDim2.fromOffset(BUTTON_SIZE.X, BUTTON_SIZE.Y),
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -14, 0.5, -2),
@@ -448,6 +466,7 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		Text = "MAX",
 		SubText = "",
 		TextSize = 16,
+		SubTextSize = 13,
 		Size = UDim2.fromOffset(MAX_BUTTON_SIZE.X, MAX_BUTTON_SIZE.Y),
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -(14 + BUTTON_SIZE.X + MAX_BUTTON_GAP), 0.5, -2),
@@ -468,6 +487,7 @@ local function buildRow(parent: Instance, generator: TycoonConfig.GeneratorDef, 
 		LevelPill = levelPill,
 		Detail = detail,
 		Progress = progress,
+		TitleRow = titleRow,
 		Button = button,
 		MaxButton = maxButton,
 		MaxHolder = maxHolder,
@@ -478,7 +498,7 @@ end
 -- One line under the title saying what generators do, with their total
 -- income (multiplier included) on the right.
 local function buildIntro(parent: Instance)
-	UIKit.Label({
+	introLabel = UIKit.Label({
 		Name = "Intro",
 		Text = "Generators earn every second. They're the machines along the left wall of your lab.",
 		Font = Fonts.Body,
@@ -506,6 +526,7 @@ end
 
 local function buildTabs(parent: Instance)
 	local tabs = Instance.new("Frame")
+	tabsFrame = tabs
 	tabs.Name = "Tabs"
 	tabs.BackgroundTransparency = 1
 	tabs.Position = UDim2.fromOffset(0, TABS_TOP)
@@ -516,6 +537,7 @@ local function buildTabs(parent: Instance)
 	local pills = Instance.new("Frame")
 	pills.BackgroundTransparency = 1
 	pills.Size = UDim2.new(1, -150, 1, 0)
+	pillsFrame = pills
 	pills.ZIndex = 5
 	pills.Parent = tabs
 	local layout = Instance.new("UIListLayout")
@@ -571,7 +593,7 @@ local function buildTabs(parent: Instance)
 end
 
 local function buildFooter(parent: Instance)
-	local body = UIKit.Panel({
+	local body, holder = UIKit.Panel({
 		Name = "Footer",
 		Parent = parent,
 		AnchorPoint = Vector2.new(0, 1),
@@ -582,6 +604,8 @@ local function buildFooter(parent: Instance)
 		ShadowOffset = UITheme.SmallShadowOffset,
 		ZIndex = 5,
 	})
+	footerHolder = holder
+	footerBody = body
 	UIKit.Padding(body, 0, 14, 0, 14)
 	local layout = Instance.new("UIListLayout")
 	layout.FillDirection = Enum.FillDirection.Horizontal
@@ -601,7 +625,7 @@ local function buildFooter(parent: Instance)
 		LayoutOrder = 1,
 		ZIndex = body.ZIndex + 1,
 	})
-	UIKit.Label({
+	footerHint = UIKit.Label({
 		Name = "Hint",
 		Text = ("All income multiplier · raise it at the %s in your base"):format(
 			UIKit.Colored("purple pad", Colors.VioletLight)
@@ -616,6 +640,66 @@ local function buildFooter(parent: Instance)
 		ZIndex = body.ZIndex + 1,
 		Parent = body,
 	})
+	hintFlex = Instance.new("UIFlexItem")
+	hintFlex.FlexMode = Enum.UIFlexMode.None
+	hintFlex.Parent = footerHint
+end
+
+-- Desktop and phone differ in where the tabs, the intro, the income and the
+-- footer live and how tall the rows are (see the constants above).
+local function applyLayout()
+	local phone = UIKit.IsPhone()
+	introLabel.Visible = not phone
+	if phone then
+		tabsFrame.Parent = modal.HeaderSlot
+		tabsFrame.Position = UDim2.new()
+		tabsFrame.Size = UDim2.fromScale(1, 1)
+		pillsFrame.Size = UDim2.new(1, -PHONE_CASH_WIDTH, 1, 0)
+		cashLabel.Size = UDim2.new(0, PHONE_CASH_WIDTH, 1, 0)
+		cashLabel.TextSize = 20
+		introIncomeLabel.Parent = footerBody
+		introIncomeLabel.AnchorPoint = Vector2.zero
+		introIncomeLabel.Position = UDim2.new()
+		introIncomeLabel.Size = UDim2.fromOffset(PHONE_CASH_WIDTH, 24)
+		introIncomeLabel.TextSize = 16
+		introIncomeLabel.TextXAlignment = Enum.TextXAlignment.Right
+		introIncomeLabel.LayoutOrder = 3
+		footerHolder.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT_PHONE)
+		footerHint.Size = UDim2.fromScale(0, 1)
+		footerHint.Text = ("Raise it at the %s in your base"):format(UIKit.Colored("purple pad", Colors.VioletLight))
+		hintFlex.FlexMode = Enum.UIFlexMode.Fill
+		listFrame.Position = UDim2.new()
+		listFrame.Size = UDim2.new(1, 0, 1, -(FOOTER_HEIGHT_PHONE + UITheme.SmallShadowOffset + FOOTER_GAP_PHONE))
+		listLayout.Padding = UDim.new(0, ROW_GAP_PHONE)
+	else
+		tabsFrame.Parent = modal.Content
+		tabsFrame.Position = UDim2.fromOffset(0, TABS_TOP)
+		tabsFrame.Size = UDim2.new(1, 0, 0, 34)
+		pillsFrame.Size = UDim2.new(1, -150, 1, 0)
+		cashLabel.Size = UDim2.new(0, 150, 1, 0)
+		cashLabel.TextSize = 22
+		introIncomeLabel.Parent = modal.Content
+		introIncomeLabel.AnchorPoint = Vector2.new(1, 0)
+		introIncomeLabel.Position = UDim2.fromScale(1, 0)
+		introIncomeLabel.Size = UDim2.new(0, INTRO_INCOME_WIDTH, 0, INTRO_HEIGHT)
+		introIncomeLabel.TextSize = 18
+		introIncomeLabel.TextXAlignment = Enum.TextXAlignment.Right
+		footerHolder.Size = UDim2.new(1, 0, 0, FOOTER_HEIGHT)
+		footerHint.Size = UDim2.new(1, -150, 1, 0)
+		footerHint.Text = ("All income multiplier · raise it at the %s in your base"):format(
+			UIKit.Colored("purple pad", Colors.VioletLight)
+		)
+		hintFlex.FlexMode = Enum.UIFlexMode.None
+		listFrame.Position = UDim2.fromOffset(0, LIST_TOP)
+		listFrame.Size = UDim2.new(1, 0, 1, -(LIST_TOP + FOOTER_HEIGHT + UITheme.SmallShadowOffset + 12))
+		listLayout.Padding = UDim.new(0, ROW_GAP)
+	end
+	for _, row in rows do
+		row.Holder.Size = UDim2.new(1, -8, 0, if phone then ROW_HEIGHT_PHONE else ROW_HEIGHT)
+		row.TitleRow.Position = UDim2.fromOffset(94, if phone then 8 else 12)
+		row.Detail.Position = UDim2.fromOffset(94, if phone then 36 else 40)
+		row.Progress.Position = UDim2.fromOffset(94, if phone then 56 else 62)
+	end
 end
 
 local function build()
@@ -625,6 +709,7 @@ local function build()
 		DisplayOrder = 140,
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.PanelTop,
+		BigPanel = true,
 	})
 	UIKit.AddHelpButton(modal, function()
 		TutorialCards.ShowTopic("Upgrades")
@@ -635,6 +720,7 @@ local function build()
 	buildTabs(content)
 
 	local list = Instance.new("ScrollingFrame")
+	listFrame = list
 	list.Name = "List"
 	list.Position = UDim2.fromOffset(0, LIST_TOP)
 	list.Size = UDim2.new(1, 0, 1, -(LIST_TOP + FOOTER_HEIGHT + UITheme.SmallShadowOffset + 12))
@@ -650,6 +736,7 @@ local function build()
 	UIKit.Padding(list, 3, 4, 8, 3)
 
 	local layout = Instance.new("UIListLayout")
+	listLayout = layout
 	layout.Padding = UDim.new(0, ROW_GAP)
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = list
@@ -664,6 +751,7 @@ local function build()
 		Text = "⚡ MAX ALL",
 		SubText = "",
 		TextSize = 18,
+		SubTextSize = 13,
 		Size = UDim2.new(1, -8, 0, MAX_ALL_HEIGHT),
 		LayoutOrder = #TycoonConfig.Generators + 1,
 		ShadowOffset = UITheme.SmallShadowOffset,
@@ -672,6 +760,8 @@ local function build()
 	})
 
 	buildFooter(content)
+	applyLayout()
+	UIKit.LayoutChanged:Connect(applyLayout)
 end
 
 --[[ Public -------------------------------------------------------------------- ]]
@@ -709,6 +799,31 @@ function UpgradesPanel.Refresh()
 			refresh()
 		end
 	end)
+end
+
+-- /selftest: how many generator rows the phone list shows WHOLE in a content
+-- area `contentHeight` tall (logical px; UIKit.PhoneContentHeightFor).
+function UpgradesPanel.SelfTestPhoneRows(contentHeight: number): number
+	local listHeight = contentHeight - (FOOTER_HEIGHT_PHONE + UITheme.SmallShadowOffset + FOOTER_GAP_PHONE)
+	local usable = listHeight - 3 - 8 -- the list's padding above and below
+	return math.max(0, math.floor((usable + ROW_GAP_PHONE) / (ROW_HEIGHT_PHONE + ROW_GAP_PHONE)))
+end
+
+-- /selftest: the live row, as built (logical px) at the current layout.
+function UpgradesPanel.SelfTestMetrics(): { RowHeight: number, NameSize: number, ButtonHeight: number, MaxButtonHeight: number }?
+	for _, generator in TycoonConfig.Generators do
+		local row = rows[generator.Id]
+		if row then
+			local scale = UIKit.EffectiveScale(row.Holder)
+			return {
+				RowHeight = row.Holder.AbsoluteSize.Y / scale,
+				NameSize = row.Name.TextSize,
+				ButtonHeight = row.Button.AbsoluteSize.Y / scale,
+				MaxButtonHeight = row.MaxButton.AbsoluteSize.Y / scale,
+			}
+		end
+	end
+	return nil
 end
 
 -- `_hud` is accepted for compatibility with the HUD's call; the panel has

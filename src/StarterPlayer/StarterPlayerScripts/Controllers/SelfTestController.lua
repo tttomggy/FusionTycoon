@@ -219,6 +219,7 @@ local CARD_VIEWPORTS = {
 	{ Name = "1920x1080", Size = Vector2.new(1920, 1080), Phone = false },
 	{ Name = "1366x768", Size = Vector2.new(1366, 768), Phone = false },
 	{ Name = "844x390 phone", Size = Vector2.new(844, 390), Phone = true },
+	{ Name = "896x414 phone", Size = Vector2.new(896, 414), Phone = true },
 }
 -- Holder heights of the fixed-size centred cards (result cards, the
 -- celebration, the event info card), a spread from short to taller than
@@ -328,14 +329,17 @@ local function testCardMath(): { string }
 		local failures: { string } = {}
 		local checked = 0
 		for _, spec in UIKit.GetModalSpecs() do
-			local plan = UIKit.PlanModalFor(spec.MaxSize, spec.FitContent, view, viewport.Phone)
+			local plan = UIKit.PlanModalFor(spec.MaxSize, spec.FitContent, view, viewport.Phone, spec.BigPanel)
 			-- The panel + shadow sits MODAL_MARGIN inside the root all round.
 			local top = plan.Top + margin * plan.Fit
 			local height = plan.Visual - 2 * margin * plan.Fit
-			local why = UIKit.CheckCardPlacement(top, height, view.Y, viewport.Phone)
+			local why = UIKit.CheckCardPlacement(top, height, view.Y, viewport.Phone, spec.BigPanel)
 			checked += 1
 			if why then
 				table.insert(failures, ("%s %s"):format(spec.Name, why))
+			elseif viewport.Phone and spec.BigPanel and top + height > view.Y - UIKit.PANEL_BOTTOM_GAP + 0.5 then
+				-- A phone big panel hides the HUD: it may run down to 8 px above the bottom, no further.
+				table.insert(failures, ("%s ends at %d, past %d"):format(spec.Name, top + height, view.Y - UIKit.PANEL_BOTTOM_GAP))
 			end
 		end
 		for _, height in CARD_HEIGHTS do
@@ -427,7 +431,13 @@ local function measureOpenModals(label: string)
 		if panel and body and body:IsA("GuiObject") then
 			local shadow = panel:FindFirstChild("Shadow") :: GuiObject?
 			local top, height = visibleRect(body, shadow, screenScale(body))
-			local why = UIKit.CheckCardPlacement(top, height, view.Y, UIKit.IsPhone())
+			local big = false
+			for _, spec in UIKit.GetModalSpecs() do
+				if spec.Name == gui.Name then
+					big = spec.BigPanel
+				end
+			end
+			local why = UIKit.CheckCardPlacement(top, height, view.Y, UIKit.IsPhone(), big)
 			table.insert(
 				cardLines,
 				if why
@@ -742,6 +752,174 @@ local function testPanels(): { string }
 	end
 	UIKit.SetForcedPhone(nil)
 	return lines
+end
+
+--[[ Phone big panels -----------------------------------------------------------
+	Upgrades, Shop, Items, Fuse, Index, Gifts, Quests, Rebirth, Settings on the
+	phone layout (UIKit.Modal BigPanel): the HUD (Hud, WeaponBar, EffectsTray)
+	is hidden while one is open and back after; the panel ends at least 8 px
+	above the screen bottom; the header is one row <= 56 px; every text is
+	>= 13 px; and Upgrades shows >= 3 whole rows of >= 64 px (name >= 18 px,
+	buttons >= 44 px) at 844 x 390 and 896 x 414. The live part runs at this
+	window's size with the phone layout forced; the row count runs the real
+	plan at the two phone sizes. ]]
+local PHONE_TEST_VIEWS = { Vector2.new(844, 390), Vector2.new(896, 414) }
+local MIN_PANEL_TEXT = 13
+local MAX_PHONE_HEADER = 56
+local MIN_UPGRADE_ROWS = 3
+local MIN_ROW_HEIGHT = 64
+local MIN_ROW_NAME = 18
+
+local function hudGuisEnabled(): { string }
+	local playerGui = localPlayer:WaitForChild("PlayerGui")
+	local shown: { string } = {}
+	for _, name in { "Hud", "WeaponBar", "EffectsTray" } do
+		local gui = playerGui:FindFirstChild(name)
+		-- The weapon bar is off anyway before Rebirth 1 (the caller only
+		-- counts guis that were on before the panel opened).
+		if gui and gui:IsA("ScreenGui") and gui.Enabled then
+			table.insert(shown, name)
+		end
+	end
+	return shown
+end
+
+local function testPhonePanels(): { string }
+	local lines: { string } = {}
+	local playerGui = localPlayer:WaitForChild("PlayerGui")
+	local specs: { PanelSpec } = {}
+	for _, spec in panelSpecs() do
+		if spec.Name ~= "HowToHeistPanel" then
+			table.insert(specs, spec)
+		end
+	end
+	local quests = require(UI.QuestsPanel) :: any
+	table.insert(specs, { Name = "Quests", Open = quests.Open, Close = quests.Close })
+	local picker = require(UI.ItemPickerUI) :: any
+	local hud = require(script.Parent.HudController) :: any
+	table.insert(specs, { Name = "ItemPickerUI", Open = hud.OpenInventory, Close = picker.Close })
+
+	UIKit.SetForcedPhone(true)
+	task.wait(0.3)
+	local before = hudGuisEnabled()
+	for _, spec in specs do
+		local problems: { string } = {}
+		-- The Gifts modal's ScreenGui is called "Gifts"; the others match the spec.
+		local guiName = if spec.Name == "GiftsPanel" then "Gifts" else spec.Name
+		local ok, err = pcall(function()
+			spec.Open()
+			task.wait(0.6)
+			local isBig = false
+			for _, modalSpec in UIKit.GetModalSpecs() do
+				if modalSpec.Name == guiName then
+					isBig = modalSpec.BigPanel
+				end
+			end
+			local gui = playerGui:FindFirstChild(guiName)
+			local root = gui and gui:FindFirstChild("Root")
+			local panel = root and root:FindFirstChild("Panel")
+			local body = panel and panel:FindFirstChild("Body")
+			if not isBig or not gui or not body or not body:IsA("GuiObject") then
+				error("not a BigPanel modal")
+			end
+			-- The HUD is hidden while the panel is open.
+			if not UIKit.IsPhoneHudHidden() then
+				table.insert(problems, "UIKit says the HUD is still shown")
+			end
+			for _, name in hudGuisEnabled() do
+				table.insert(problems, name .. " is still enabled")
+			end
+			-- Ends at least 8 px above the bottom of the screen.
+			local view = UIKit.GetLogicalViewport()
+			local top, height = visibleRect(body, panel:FindFirstChild("Shadow") :: GuiObject?, screenScale(body))
+			if top + height > view.Y - UIKit.PANEL_BOTTOM_GAP + 0.5 then
+				table.insert(problems, ("ends at %d, the screen ends at %d (8 px gap)"):format(top + height, view.Y))
+			end
+			-- One compact header row.
+			local header = body:FindFirstChild("Header")
+			if header and header:IsA("GuiObject") then
+				local headerHeight = header.AbsoluteSize.Y / UIKit.EffectiveScale(header)
+				if headerHeight > MAX_PHONE_HEADER + 0.5 then
+					table.insert(problems, ("header is %d px tall, max %d"):format(headerHeight, MAX_PHONE_HEADER))
+				end
+			else
+				table.insert(problems, "no header")
+			end
+			-- Nothing smaller than 13 px (scaled text is capped by its own constraint).
+			local small: { string } = {}
+			for _, text in (gui :: ScreenGui):GetDescendants() do
+				if (text:IsA("TextLabel") or text:IsA("TextButton")) and text.Text ~= "" and not text.TextScaled and text.TextSize < MIN_PANEL_TEXT and shownOnScreen(text, gui :: ScreenGui) then
+					local short = text:GetFullName():gsub("^.*%.Root%.", "")
+					table.insert(small, ("%s %d px"):format(short, text.TextSize))
+				end
+			end
+			if #small > 0 then
+				table.insert(problems, "text under 13 px: " .. table.concat(small, ", "))
+			end
+			-- Upgrades: the row and its buttons, as built.
+			if spec.Name == "UpgradesPanel" then
+				local metrics = (require(UI.UpgradesPanel) :: any).SelfTestMetrics()
+				if not metrics then
+					table.insert(problems, "no generator row")
+				else
+					if metrics.RowHeight < MIN_ROW_HEIGHT - 0.5 then
+						table.insert(problems, ("row is %d px tall, min %d"):format(metrics.RowHeight, MIN_ROW_HEIGHT))
+					end
+					if metrics.NameSize < MIN_ROW_NAME then
+						table.insert(problems, ("row name is %d px, min %d"):format(metrics.NameSize, MIN_ROW_NAME))
+					end
+					if metrics.ButtonHeight < UITheme.MinTapSize - 0.5 or metrics.MaxButtonHeight < UITheme.MinTapSize - 0.5 then
+						table.insert(problems, ("buttons are %d / %d px tall, min %d"):format(metrics.ButtonHeight, metrics.MaxButtonHeight, UITheme.MinTapSize))
+					end
+				end
+			end
+		end)
+		spec.Close()
+		task.wait(0.5)
+		if not ok then
+			table.insert(problems, tostring(err))
+		end
+		-- And the HUD is back after it closes.
+		if UIKit.IsPhoneHudHidden() then
+			table.insert(problems, "UIKit says the HUD is still hidden after close")
+		end
+		local after = hudGuisEnabled()
+		if #after ~= #before then
+			table.insert(problems, ("HUD guis on after close: %s, before: %s"):format(table.concat(after, ","), table.concat(before, ",")))
+		end
+		table.insert(lines, if #problems > 0
+			then ("FAIL phone panel %s: %s"):format(spec.Name, table.concat(problems, "; "))
+			else ("PASS phone panel %s (HUD hidden and restored, <= viewport - 8, header <= 56, text >= 13)"):format(spec.Name))
+	end
+	UIKit.SetForcedPhone(nil)
+	task.wait(0.3)
+
+	-- Upgrades shows >= 3 whole rows at the two phone sizes (the real plan).
+	local upgrades = require(UI.UpgradesPanel) :: any
+	for _, size in PHONE_TEST_VIEWS do
+		local view = size / UITheme.PhoneScale
+		local rows = -1
+		for _, modalSpec in UIKit.GetModalSpecs() do
+			if modalSpec.Name == "UpgradesPanel" then
+				local plan = UIKit.PlanModalFor(modalSpec.MaxSize, modalSpec.FitContent, view, true, true)
+				rows = upgrades.SelfTestPhoneRows(UIKit.PhoneContentHeightFor(plan))
+			end
+		end
+		table.insert(lines, if rows >= MIN_UPGRADE_ROWS
+			then ("PASS phone panel Upgrades rows (%dx%d: %d whole rows)"):format(size.X, size.Y, rows)
+			else ("FAIL phone panel Upgrades rows (%dx%d): %d whole rows, need %d"):format(size.X, size.Y, rows, MIN_UPGRADE_ROWS))
+	end
+	return lines
+end
+
+-- The game must open in landscape on a phone: the client sets
+-- PlayerGui.ScreenOrientation to LandscapeSensor at boot (Bootstrap).
+local function testOrientation(): { string }
+	local orientation = localPlayer:WaitForChild("PlayerGui").ScreenOrientation
+	if orientation == Enum.ScreenOrientation.LandscapeSensor then
+		return { "PASS orientation: PlayerGui.ScreenOrientation is LandscapeSensor" }
+	end
+	return { ("FAIL orientation: PlayerGui.ScreenOrientation is %s, not LandscapeSensor"):format(orientation.Name) }
 end
 
 -- The HUD's ScreenGuis: every open card must draw over them, dim
@@ -2705,9 +2883,11 @@ local function probeGachaButtons(): { ProbeLine }
 			table.insert(parts, ("%s[%s] %dx%d visible=%s%s"):format(entry.Id, expected[entry.Id] or "?", size.X, size.Y, tostring(problem == nil), if problem then " (" .. problem .. ")" else ""))
 			if problem == nil then
 				drawn += 1
-				-- A phone shrinks the billboard by its UIScale; the tap target is
-				-- measured at that scale.
-				if size.X < 43.5 or size.Y < 43.5 then
+				-- A phone shrinks the billboard by its UIScale (GachaBoardController.PhoneScaleFor,
+				-- ~0.56 at 844 x 390); the tap target there is the whole key holder behind
+				-- the circle, measured at that scale.
+				local tap = if UIKit.IsPhone() then (entry.Holder :: GuiObject).AbsoluteSize else size
+				if tap.X < 43.5 or tap.Y < 43.5 then
 					small += 1
 				end
 			end
@@ -2863,6 +3043,72 @@ local function probeGachaApproach(phone: boolean): { ProbeLine }
 	}
 end
 
+-- Where a world point lands on a screen of `size` px seen through `camera`'s
+-- pose and field of view (Roblox's FieldOfView is vertical): the window can't be
+-- resized from a script, so the phone sizes are projected by hand.
+local function projectFor(camera: Camera, world: Vector3, size: Vector2): Vector2?
+	local rel = camera.CFrame:PointToObjectSpace(world)
+	if rel.Z >= 0 then
+		return nil
+	end
+	local tanHalf = math.tan(math.rad(camera.FieldOfView) / 2)
+	local ndcY = (rel.Y / -rel.Z) / tanHalf
+	local ndcX = (rel.X / -rel.Z) / (tanHalf * size.X / size.Y)
+	return Vector2.new((ndcX * 0.5 + 0.5) * size.X, (0.5 - ndcY * 0.5) * size.Y)
+end
+
+-- The gacha card on a phone `size` px big, character on the pad, default
+-- camera: its whole rect (title to key bar) is on screen, below TopStack's chip
+-- row and above the weapon bar (or the HUD's bottom row before Rebirth 1), and
+-- the % text is still >= 12 px on screen.
+local MIN_PERCENT_PX = 12
+local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLine
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local TopStack = require(UI.TopStack) :: any
+	local combat = require(script.Parent.CombatController) :: any
+	local G = PlotLayout.Gacha
+	local name = ("gacha card (phone %dx%d): standing on the pad the whole card is on screen, under the event chip row and over the weapon bar, %% text >= %d px"):format(size.X, size.Y, MIN_PERCENT_PX)
+	local view = size / UITheme.PhoneScale
+	local scale = Board.PhoneScaleFor(view)
+	local anchor = card.Anchor :: Attachment
+	-- The billboard sits 2 studs toward the camera (StudsOffset 0, 0, 2).
+	local point = projectFor(camera, anchor.WorldPosition - camera.CFrame.LookVector * 2, size)
+	if not point then
+		return { Ok = false, Name = name, Detail = "the anchor is behind the camera" }
+	end
+	local full = Vector2.new(G.CardPx.X, G.TopPadPx + G.CardPx.Y + G.ButtonRowPx)
+	local width, height = full.X * scale, full.Y * scale
+	local left, right, top, bottom = point.X - width / 2, point.X + width / 2, point.Y - height, point.Y
+	-- TopStack's lowest slot with the event chip up: its Announce line's y (logical) x 0.8.
+	local stackBottom = TopStack.PlanFor(UIKit.GetCardTopFor(true), 0, 44, 0).Announce * UITheme.PhoneScale
+	local barRect = combat.GetBarRectFor(view, false)
+	local floorLogical = if barRect then barRect.Position.Y else view.Y - UIKit.GetCardBottomFor(true)
+	local floorPx = floorLogical * UITheme.PhoneScale
+	local problems: { string } = {}
+	if left < 0 or right > size.X then
+		table.insert(problems, ("x %.0f..%.0f is off the %d px width"):format(left, right, size.X))
+	end
+	if top < stackBottom - 0.5 then
+		table.insert(problems, ("top %.0f is above the stack's bottom %.0f"):format(top, stackBottom))
+	end
+	if bottom > floorPx + 0.5 or bottom > size.Y then
+		table.insert(problems, ("bottom %.0f is below the %s at %.0f"):format(bottom, if barRect then "weapon bar" else "bottom row", floorPx))
+	end
+	local percentPx = 0
+	for _, tile in card.Tiles do
+		percentPx = (tile.Percent :: TextLabel).TextSize * scale
+		break
+	end
+	if percentPx < MIN_PERCENT_PX - 0.05 then
+		table.insert(problems, ("the %% text is %.1f px"):format(percentPx))
+	end
+	return {
+		Ok = #problems == 0,
+		Name = name,
+		Detail = ("scale %.3f, card x %.0f..%.0f y %.0f..%.0f, stack bottom %.0f, %s top %.0f, %% %.1f px%s"):format(scale, left, right, top, bottom, stackBottom, if barRect then "weapon bar" else "bottom row", floorPx, percentPx, if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+	}
+end
+
 -- On the pad: the anchor (the Attachment's world position) NEVER changes: not
 -- over 4 camera yaws at a fixed zoom, not over the zoom range (6 / 12.5 / 40
 -- studs), and no billboard offset is ever written.
@@ -2901,16 +3147,25 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 		waitFrames(8)
 		check(("zoom %.1f"):format(studs))
 	end
-	camera.CameraType = savedType
-	camera.CFrame = savedCFrame
-	UIKit.SetForcedPhone(nil)
-	return {
+	local lines: { ProbeLine } = {
 		{
 			Ok = #moved == 0,
 			Name = ("gacha card (%s): the anchor never changes while the camera turns (4 yaws) or zooms (6 / 12.5 / 40 studs)"):format(layout),
 			Detail = ("anchor %s%s"):format(tostring(want), if #moved > 0 then " | changed: " .. table.concat(moved, "; ") else ""),
 		},
 	}
+	if phone then
+		-- Standing on the pad at the default camera, at the two test phones.
+		defaultCamera(camera, root, back, 12.5, 0)
+		waitFrames(6)
+		for _, size in PHONE_TEST_VIEWS do
+			table.insert(lines, gachaPhoneFit(card, camera, size))
+		end
+	end
+	camera.CameraType = savedType
+	camera.CFrame = savedCFrame
+	UIKit.SetForcedPhone(nil)
+	return lines
 end
 
 -- What the open card covers steps aside: the pad's small GACHA label is off
@@ -3889,6 +4144,14 @@ local function run(payload: any)
 	end
 	for _, line in testHudOrder() do
 		table.insert(panelLines, line)
+	end
+	for _, line in testOrientation() do
+		table.insert(panelLines, line)
+	end
+	if not tooSmall then
+		for _, line in testPhonePanels() do
+			table.insert(panelLines, line)
+		end
 	end
 	for _, line in testHudLeftColumn() do
 		table.insert(panelLines, line)

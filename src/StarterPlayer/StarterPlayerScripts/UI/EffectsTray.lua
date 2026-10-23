@@ -182,6 +182,7 @@ local screenGui: ScreenGui
 -- (the tray's own layer is below it, so a tooltip over the HUD's left column
 -- was drawn under it).
 local tooltipGui: ScreenGui
+local phoneHidden = false -- a phone big panel is open (UIKit.SetPhoneHudHandler)
 local tray: Frame
 local gridLayout: UIGridLayout
 local tooltip: Frame
@@ -1077,7 +1078,7 @@ end
 --[[ Refresh -------------------------------------------------------------------------- ]]
 
 local function refresh()
-	local hidden = TycoonController.IsTutorialActive() or not TycoonController.HasSynced()
+	local hidden = TycoonController.IsTutorialActive() or not TycoonController.HasSynced() or phoneHidden
 	screenGui.Enabled = not hidden
 	tooltipGui.Enabled = not hidden
 	local states: { [string]: EffectState } = {}
@@ -1236,6 +1237,14 @@ end
 -- /selftest: forces a refresh now (tests don't wait for the next tick).
 function EffectsTray.Refresh()
 	refresh()
+end
+
+-- A phone big panel hides the tray while it is open (HudController.SetPhoneHudHidden).
+function EffectsTray.SetPhoneHidden(hidden: boolean)
+	phoneHidden = hidden
+	if screenGui then
+		refresh()
+	end
 end
 
 function EffectsTray.Init(hudHooks: Hooks)

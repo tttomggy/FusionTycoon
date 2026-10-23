@@ -2770,8 +2770,19 @@ local function registerGate()
 	})
 end
 
+-- While a phone big panel (UIKit.Modal BigPanel) is open the HUD is hidden:
+-- the Hud gui (left column, bottom row), the weapon bar and the effects tray.
+-- UIKit calls this from Modal open / close; nothing else should.
+function HudController.SetPhoneHudHidden(hidden: boolean)
+	screenGui.Enabled = not hidden
+	EffectsTray.SetPhoneHidden(hidden)
+	local combat = require(script.Parent.CombatController) :: any
+	combat.SetPhoneHidden(hidden)
+end
+
 function HudController.Init()
 	screenGui = UIKit.Screen("Hud", 40)
+	UIKit.SetPhoneHudHandler(HudController.SetPhoneHudHidden)
 
 	buildGoalTracker()
 	cashHolder = buildCashCard()

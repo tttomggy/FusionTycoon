@@ -75,7 +75,11 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   zoom 6 / 12.5 / 40; the GACHA label
   and your VIP chip are hidden while it is open and the chip is back when it
   closes (each for the desktop and phone HUD layout via `UIKit.SetForcedPhone`;
-  the window itself can't be resized from a script);
+  the window itself can't be resized from a script); on the phone layout the card's
+  scale is `GachaBoardController.PhoneScaleFor(logical viewport)` (0.55..1.0), and
+  with the character on the pad at the default camera the whole card, projected by
+  hand for 844 × 390 and 896 × 414, is on screen under TopStack's chip row and over
+  the weapon bar, its % text ≥ 12 px on screen;
   tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
   event, the luck pill, solid black (no "?") orbs, the (i) panel sums; all 6 cells drawn
   with a % ≥ 12 px tall; the PS99 face (white paper + light rim, the 26 px title
@@ -84,7 +88,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   matches the pull cost or `FREE` centred on the bottom edge); no `ViewportFrame`, no `CanvasGroup`, only
   `PopScale` besides the phone's `PhoneScale`, no `GachaBoard`;
   a modal (the (i) panel) hides the card and it comes back; the key bar's 3
-  round buttons (E / R / T, R bigger, captions `Pull` / `×10` / `Auto ×10`) each ≥ 44 px (sides 56 design px on the phone layout), drawn, and E / R / T bound through
+  round buttons (E / R / T, R bigger, captions `Pull` / `×10` / `Auto ×10`) each ≥ 44 px (sides 56 design px on the phone layout; there the tap target is the key's whole holder), drawn, and E / R / T bound through
   `ContextActionService` (unbound 25 studs away, bound again back on the pad);
   text fits;
   server side: `RequestGachaPull` from 25 studs is refused (TooFar) and costs
@@ -244,6 +248,24 @@ HUD ≈ 22% (844 × 390) / 20% (896 × 414) with three power-ups up; after ≈ 1
 card, three power-ups, the deal tile, "next in", the one-line goal pill; the
 quest tracker is hidden on a phone) every element's bottom must end at least
 8 px above the bottom edge of both test phones (≤ 479 and ≤ 510 design px).
+
+## /selftest: phone big panels and the landscape lock
+
+`testOrientation`: `PlayerGui.ScreenOrientation` is `LandscapeSensor` (set by
+`Bootstrap.client.lua` at boot; `StarterGui.ScreenOrientation` is also in
+`default.project.json`).
+
+`testPhonePanels` forces the phone layout and opens each `BigPanel` modal
+(Upgrades, Shop, Settings, Index, Gifts, Rebirth, Fuse, Quests, Items): the
+HUD (`Hud`, `WeaponBar`, `EffectsTray`) is disabled while it is open
+(`UIKit.IsPhoneHudHidden`) and back after it closes; the panel + shadow ends
+at least `UIKit.PANEL_BOTTOM_GAP` (8) px above the screen bottom; the header
+is ≤ 56 px; no visible fixed-size text is under 13 px; Upgrades' first row is
+≥ 64 px with a name ≥ 18 px and buttons ≥ 44 px. Then, with the real plan
+(`PlanModalFor(..., bigPanel)`, `UIKit.PhoneContentHeightFor`), Upgrades shows
+≥ 3 WHOLE rows at 844 × 390 and 896 × 414 (`UpgradesPanel.SelfTestPhoneRows`).
+"cards centred" runs the band maths for big panels with the 8 px bottom, at
+1920 × 1080, 1366 × 768, 844 × 390 and 896 × 414.
 
 ## /selftest: Secret pity meter
 

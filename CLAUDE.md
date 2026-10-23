@@ -155,7 +155,10 @@ When you change a system, update its doc (not this file) unless a rule here chan
   `FitContent` modals (Fuse, Daily, Rebirth, How to Heist, welcome-back)
   keep their design height and shrink as a whole; centred result cards do
   the same through `UIKit.FitHeight`. Every modal's DisplayOrder is above
-  the HUD's (`/selftest` checks it).
+  the HUD's (`/selftest` checks it). **Phone exception:** on the phone layout
+  a `BigPanel` modal (Upgrades, Shop, Items, Fuse, Index, Gifts, Quests,
+  Rebirth, Settings) hides the HUD and uses the band down to 8 px above the
+  screen bottom (`GetCardBottomFor(phone, bigPanel)`), with a one-row header.
 - Money/multipliers always go through `NumberFormat.Money`/`.Multiplier`.
 - **A dim backdrop only exists with a visible card** (`UIKit.Modal` closes it if no card is on screen 0.5 s after opening; a re-opened card must cancel its PopOut fade, as `PopIn` does).
 - World labels: `AlwaysOnTop = false`, `LightInfluence = 0`, a MaxDistance; a stud-sized billboard people stand next to needs a `DistanceLowerLimit` (the gate sign / lock).

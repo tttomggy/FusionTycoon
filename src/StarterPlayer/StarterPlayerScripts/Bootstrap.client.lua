@@ -1,5 +1,11 @@
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Controllers = script.Parent.Controllers
+
+-- Landscape on every device, set before anything is built. The place file's
+-- StarterGui carries the same value (default.project.json); this wins over an
+-- old place file that doesn't, so a phone never opens the game in portrait.
+Players.LocalPlayer:WaitForChild("PlayerGui").ScreenOrientation = Enum.ScreenOrientation.LandscapeSensor
 
 -- Preload every sound slot (SoundConfig); a bad id warns once, then is silent.
 require(ReplicatedStorage.Shared.Modules.SoundKit).Preload()

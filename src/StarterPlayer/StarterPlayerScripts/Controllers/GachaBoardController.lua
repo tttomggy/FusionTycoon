@@ -5,8 +5,9 @@
 	The Gacha odds CARD: a pixel-sized BillboardGui ADORNED TO YOUR GACHA PAD,
 	floating right over it and opening as you walk up, like a Pet Simulator 99
 	egg card. A 300 x 204 px card plus a 72 px E / R / T row, the same size
-	at any zoom (0.8 on a phone via one UIScale). This is the final
-	placement: not docked, not following the camera.
+	at any zoom. On a phone one UIScale shrinks the whole card until it fits
+	between TopStack's chip row and the pad (PhoneScaleFor, 0.55..1.0). This is
+	the final placement: not docked, not following the camera.
 
 	Why the earlier in-world tries failed: they were sized in studs (huge up
 	close) and sat "above your head" while you stand ON the pad (off the top
@@ -41,7 +42,8 @@
 	    text and colours (the %s, each tier's lock state, luck, the event, the
 	    chips, the price), never rebuilds. 2D orbs (UIKit.TierOrb), no
 	    ViewportFrame, no CanvasGroup, no TextScaled. One UIScale for the pop
-	    (PopScale) plus the phone's PhoneScale (0.8) when UIKit.IsPhone().
+	    (PopScale) plus the phone's PhoneScale (PhoneScaleFor, from the logical
+	    viewport) when UIKit.IsPhone().
 
 	The card (design px) copies Pet Sim 99's egg card: a 300 x 196 WHITE card
 	(UITheme CardPaper, a soft diagonal, a 3 px light blue-grey rim, 18 px
@@ -59,7 +61,8 @@
 
 	THE KEY BAR, 10 px under the card: round solid-blue buttons with a white
 	rim and a soft ink shadow, [E] Pull, [R] x10 (bigger, 62 px), [T] Auto x10
-	(sides 52 px, 56 on a phone so they stay >= 44 px at the 0.8); the key
+	(sides 52 px, 56 on a phone; a key's tap target is its whole 84 x 80 holder,
+	>= 44 px on screen down to the phone scale's 0.55 floor); the key
 	letter inside, a white caption under each (T turns green and reads
 	"Auto x10 ON" while Auto pull runs: a x10 pull per cycle). It does
 	NOT use ProximityPrompt UI: the pad's prompts are off (this controller also
@@ -957,8 +960,8 @@ local function unbindKeys()
 	end
 end
 
--- The circles' sizes: the centre (R) 62, the sides 52, or 56 on a phone so the
--- tap target stays >= 44 px after the 0.8 scale.
+-- The circles' sizes: the centre (R) 62, the sides 52, or 56 on a phone. The tap
+-- target is the key's whole holder (see buildKeyBar), not the circle.
 local function applyButtonSizes()
 	local side = if UIKit.IsPhone() then SIDE_BUTTON_PHONE else SIDE_BUTTON
 	for _, spec in KEYS do
@@ -984,6 +987,20 @@ local function buildKeyBar(root: Instance): Frame
 	for index, spec in KEYS do
 		local holder = frame(row, spec.Id .. "Key", UDim2.new(0.5, (index - 2) * BUTTON_SPACING, 0, 0), UDim2.fromOffset(BUTTON_SPACING - 2, ROW_HEIGHT - KEY_BAR_GAP))
 		holder.AnchorPoint = Vector2.new(0.5, 0)
+		-- The tap target is the whole holder (84 x 80), not just the circle: on a
+		-- phone the card is scaled down to ~0.56 and the circle alone would be
+		-- ~32 px; the holder stays >= 44 px at PhoneScaleMin.
+		local hit = Instance.new("TextButton")
+		hit.Name = "Hit"
+		hit.BackgroundTransparency = 1
+		hit.Text = ""
+		hit.AutoButtonColor = false
+		hit.Size = UDim2.fromScale(1, 1)
+		hit.Parent = holder
+		hit.Activated:Connect(function()
+			UIKit.SelectFeedback(holder)
+			runKey(spec.Id)
+		end)
 		-- A soft ink shadow a few px below the circle.
 		local shadow = frame(holder, "Shadow", UDim2.new(0.5, 0, 0, centreY + 3), UDim2.fromOffset(SIDE_BUTTON, SIDE_BUTTON), Colors.Ink)
 		shadow.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -1134,17 +1151,33 @@ end
 
 --[[ Anchor ---------------------------------------------------------------------- ]]
 
--- The phone's sizing UIScale (0.8), set once and on LayoutChanged. Scaled
--- about the card's bottom line, so the anchor does not move.
+-- The phone's sizing UIScale: ONE factor for the whole card, from the logical
+-- viewport `view` (UIKit.GetLogicalViewport) and the card's size. The card is
+-- a pixel-size billboard, so on a phone it must shrink until the whole card
+-- (title to key bar, FULL_SIZE.Y tall) fits between TopStack's chip row and
+-- the pad's anchor, which sits at G.PhoneAnchorY of the screen height when you
+-- stand on the pad at the default camera. In screen px (logical x PhoneScale);
+-- clamped to G.PhoneScaleMin..G.PhoneScaleMax. Pure: /selftest runs it at
+-- 844 x 390 and 896 x 414.
+function GachaBoardController.PhoneScaleFor(view: Vector2): number
+	local room = (G.PhoneAnchorY * view.Y - G.PhoneTopReservePx) * UITheme.PhoneScale
+	return math.clamp(room / FULL_SIZE.Y, G.PhoneScaleMin, G.PhoneScaleMax)
+end
+
+-- Set on build, on LayoutChanged and on every viewport resize. Scaled about
+-- the card's bottom line, so the anchor does not move.
 local function applyPhoneScale(view: CardView)
 	local existing = view.Root:FindFirstChild("PhoneScale")
 	if UIKit.IsPhone() then
-		if not existing then
-			local scale = Instance.new("UIScale")
+		local scale: UIScale
+		if existing and existing:IsA("UIScale") then
+			scale = existing
+		else
+			scale = Instance.new("UIScale")
 			scale.Name = "PhoneScale"
-			scale.Scale = UITheme.PhoneScale
 			scale.Parent = view.Root
 		end
+		scale.Scale = GachaBoardController.PhoneScaleFor(UIKit.GetLogicalViewport())
 	elseif existing then
 		existing:Destroy()
 	end
@@ -1516,11 +1549,22 @@ function GachaBoardController.Init()
 	end
 	RunService.RenderStepped:Connect(stepFrame)
 	-- The phone's 0.8 follows the HUD layout; the anchor itself never changes.
-	UIKit.LayoutChanged:Connect(function()
+	local function rescale()
 		if card then
 			applyPhoneScale(card)
 		end
-	end)
+	end
+	UIKit.LayoutChanged:Connect(rescale)
+	-- The phone's card scale follows the viewport (a rotation, a resize).
+	local function watchViewport()
+		local camera = Workspace.CurrentCamera
+		if camera then
+			camera:GetPropertyChangedSignal("ViewportSize"):Connect(rescale)
+		end
+		rescale()
+	end
+	watchViewport()
+	Workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(watchViewport)
 	task.spawn(function()
 		while true do
 			task.wait(0.5)

@@ -115,7 +115,7 @@ local function statCard(parent: Instance, title: string, order: number): TextLab
 		Name = "Title",
 		Text = title,
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.RebirthLabel,
 		Size = UDim2.new(1, 0, 0, 16),
 		TextXAlignment = Enum.TextXAlignment.Center,
@@ -145,7 +145,7 @@ local function infoLines(parent: Instance, name: string, order: number, heading:
 		Name = "Heading",
 		Text = heading,
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = headingColor,
 		Size = UDim2.new(1, 0, 0, 16),
 		Parent = frame,
@@ -337,6 +337,7 @@ local function build()
 		MaxSize = MAX_SIZE,
 		FitContent = true,
 		HeaderTop = Colors.RebirthBannerLeft,
+		BigPanel = true,
 	})
 	UIKit.AddHelpButton(modal, function()
 		TutorialCards.ShowTopic("Rebirth")

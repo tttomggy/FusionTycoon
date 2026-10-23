@@ -362,6 +362,15 @@ PlotLayout.Gacha = {
 	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
 	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
 	PopFromScale = 0.85,
+	-- PHONE size (GachaBoardController.PhoneScaleFor): the whole card (title to key bar)
+	-- must fit between the top of the screen's stack and the pad's anchor. At the default
+	-- camera, standing on the pad, the anchor projects to ~64% of the screen height; 60%
+	-- is the safe figure. The card's top must clear TopStack's chip row: CHIP_Y 12 + the
+	-- 44 px event chip + GAP 8 = 64 logical px (x PhoneScale on screen).
+	PhoneAnchorY = 0.6,
+	PhoneTopReservePx = 64,
+	PhoneScaleMin = 0.55, -- keeps the % text (22 px) >= 12 px
+	PhoneScaleMax = 1.0,
 }
 
 --[[ Pad faces (stations + machine floor) -------------------------------------

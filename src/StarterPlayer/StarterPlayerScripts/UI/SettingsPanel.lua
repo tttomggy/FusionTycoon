@@ -395,6 +395,7 @@ local function build()
 		DisplayOrder = 143,
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.PanelTop,
+		BigPanel = true,
 	})
 	local content = modal.Content
 	list = Instance.new("ScrollingFrame")

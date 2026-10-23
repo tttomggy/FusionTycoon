@@ -2239,3 +2239,45 @@ deal running (`/deal slot 4`). Desktop must look exactly as before.
 - [ ] `/selftest`: `effects tray plan` lines for every desktop, tablet and phone
   size, `jump button (…)`, `cards centred (FuseAllSummary …)`, `tutorial bar vs
   card (…)` and `event guidance: …` all PASS (apart from the small-window line).
+
+## 45. Phone, live game (landscape lock, gacha card scale, big panels)
+
+**Landscape (Device emulator: iPhone XR, and Harris's real phone after
+publishing)**
+
+- [ ] The game starts in landscape (no portrait on join). The Roblox top bar no
+  longer overlaps the event chip or the objective bar.
+- [ ] `/selftest`: `orientation: PlayerGui.ScreenOrientation is LandscapeSensor`.
+
+**Gacha card (iPhone XR 896 × 414, and 844 × 390)**
+
+- [ ] Stand on the Gacha Pad at the default camera and zoom: the WHOLE card
+  (title, 6 orbs with %, mutation line, price, E / R / T) is on screen, under
+  the event chip row and over the weapon bar (`/weapons all`). No tilting the
+  camera up. Desktop is unchanged (full size).
+- [ ] E, R and T are easy to hit (the tap area is the whole key, not just the
+  small circle).
+- [ ] `/selftest gacha`: `gacha card (phone 844x390)` and `(phone 896x414)` PASS.
+
+**Big panels on a phone (iPhone XR)**
+
+- [ ] Open UPGRADES, SHOP, ITEMS, FUSE, INDEX, GIFTS, QUESTS, REBIRTH, SETTINGS:
+  the left column, the bottom row, the weapon bar and the effects tray are gone
+  while the panel is open and come back the moment it closes (also when
+  closed by tapping the dim backdrop).
+- [ ] The panel runs from just under the Roblox top bar to ~8 px above the
+  bottom of the screen and is nearly as wide as the screen.
+- [ ] The header is one row: the title on the left, the tabs / chips in the same
+  row (Upgrades' Generators / Boosts tabs and cash, the Shop chips, Index's tier
+  tabs and the "+N% income" pill, the Items filter chips), the ? and the ✕ on
+  the right. No subtitle line.
+- [ ] UPGRADES shows 3+ whole generator rows (name, $/s, MAX and UPGRADE
+  buttons); the multiplier footer is one slim line with the generator income.
+- [ ] SHOP shows whole cards (Featured banner at least), the chips scroll
+  sideways in the header and jump to their sections.
+- [ ] Small centred cards (big reveal, Fuse All, daily, event info, welcome
+  back, tutorial cards) are unchanged: the HUD stays, the band stops above the
+  bottom row.
+- [ ] `/selftest`: `phone panel <name>` PASS for all nine, `phone panel Upgrades
+  rows` PASS at both sizes, `cards centred (… phone)` PASS at 844 × 390 and
+  896 × 414.

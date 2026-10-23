@@ -272,6 +272,7 @@ local function build(): UIKit.Modal
 		MaxSize = PANEL_SIZE,
 		HeaderTop = Colors.GiftsTop,
 		OnClose = stopGlows,
+		BigPanel = true,
 	})
 	created.Subtitle.Text = "Free gifts for staying"
 	created.Subtitle.Visible = true
@@ -373,7 +374,7 @@ local function build(): UIKit.Modal
 			if itemGift.Odds then RewardConfig.FormatOdds(itemGift.Odds) else ""
 		),
 		Font = Fonts.Body,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.Faint,
 		TextWrapped = true,
 		AutomaticSize = Enum.AutomaticSize.Y,

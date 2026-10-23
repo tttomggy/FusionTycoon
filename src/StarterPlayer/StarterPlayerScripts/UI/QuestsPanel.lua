@@ -153,11 +153,11 @@ local function questRow(view: any, order: number)
 		Name = "Count",
 		Text = ("%s / %s"):format(NumberFormat.Short(progress), NumberFormat.Short(target)),
 		Font = Fonts.Body,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.Muted,
 		AnchorPoint = Vector2.new(1, 1),
-		Position = UDim2.new(1, -(BUTTON_WIDTH + 8), 1, 2),
-		Size = UDim2.fromOffset(58, 14),
+		Position = UDim2.new(1, -(BUTTON_WIDTH + 8), 1, 3),
+		Size = UDim2.fromOffset(62, 16),
 		TextXAlignment = Enum.TextXAlignment.Right,
 		ZIndex = z,
 		Parent = body,
@@ -349,6 +349,7 @@ local function build(): UIKit.Modal
 		DisplayOrder = DISPLAY_ORDER,
 		MaxSize = PANEL_SIZE,
 		HeaderTop = Colors.QuestsTop,
+		BigPanel = true,
 	})
 	created.Subtitle.Text = "Finish quests for free power-ups"
 	created.Subtitle.Visible = true

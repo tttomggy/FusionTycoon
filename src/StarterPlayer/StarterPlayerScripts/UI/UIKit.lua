@@ -1143,6 +1143,12 @@ end
 
 	The *For functions take the viewport and phone flag explicitly, so
 	/selftest can check the real placement at any screen size.
+
+	BIG PANELS on a phone (Modal BigPanel: Upgrades, Shop, Items, Fuse, Index,
+	Gifts, Quests, Rebirth, Settings) are the exception: the HUD hides while
+	one is open (SetPhoneHudHandler), so the band runs down to
+	PANEL_BOTTOM_GAP (8) px above the screen bottom, and the header is one
+	compact row (title, the panel's tabs / chips in Modal.HeaderSlot, ✕).
 ]]
 UIKit.TOP_BAR_HEIGHT = 58 -- the Roblox top bar (IgnoreGuiInset guis)
 UIKit.CARD_TOP_GAP = 8
@@ -1177,22 +1183,28 @@ function UIKit.GetCardTop(): number
 	return UIKit.GetCardTopFor(UIKit.IsPhone())
 end
 
--- Logical px a card leaves free at the bottom (the HUD button row).
-function UIKit.GetCardBottomFor(phone: boolean): number
+UIKit.PANEL_BOTTOM_GAP = 8 -- a phone big panel stops this far above the screen bottom
+
+-- Logical px a card leaves free at the bottom (the HUD button row). A phone
+-- big panel hides the HUD, so it only keeps PANEL_BOTTOM_GAP.
+function UIKit.GetCardBottomFor(phone: boolean, bigPanel: boolean?): number
+	if phone and bigPanel then
+		return UIKit.PANEL_BOTTOM_GAP
+	end
 	return if phone then UIKit.BOTTOM_BAR_RESERVE.Phone else UIKit.BOTTOM_BAR_RESERVE.Desktop
 end
 
-function UIKit.GetCardBottom(): number
-	return UIKit.GetCardBottomFor(UIKit.IsPhone())
+function UIKit.GetCardBottom(bigPanel: boolean?): number
+	return UIKit.GetCardBottomFor(UIKit.IsPhone(), bigPanel)
 end
 
 -- Logical y for the top of a card `visualHeight` px tall (what you see,
 -- after its fit scale) on a viewport `viewY` logical px tall: centred in
 -- the band, so a short card on a full-screen desktop sits mid-screen; a
 -- card that fills the band starts at its top.
-function UIKit.GetCardYFor(visualHeight: number, viewY: number, phone: boolean): number
+function UIKit.GetCardYFor(visualHeight: number, viewY: number, phone: boolean, bigPanel: boolean?): number
 	local top = UIKit.GetCardTopFor(phone)
-	local band = viewY - top - UIKit.GetCardBottomFor(phone)
+	local band = viewY - top - UIKit.GetCardBottomFor(phone, bigPanel)
 	return top + math.max(0, (band - visualHeight) / 2)
 end
 
@@ -1203,9 +1215,9 @@ end
 -- /selftest's rule for a placed card (logical px): nil = it passes, else
 -- why not. Fits the band: its centre within 2 px of the band's centre and
 -- inside the band. Taller: starts at the band's top.
-function UIKit.CheckCardPlacement(top: number, height: number, viewY: number, phone: boolean): string?
+function UIKit.CheckCardPlacement(top: number, height: number, viewY: number, phone: boolean, bigPanel: boolean?): string?
 	local bandTop = UIKit.GetCardTopFor(phone)
-	local bandBottom = viewY - UIKit.GetCardBottomFor(phone)
+	local bandBottom = viewY - UIKit.GetCardBottomFor(phone, bigPanel)
 	if height > bandBottom - bandTop + 0.5 then
 		if math.abs(top - bandTop) > 1 then
 			return ("taller than the band but starts at %d, not %d"):format(math.floor(top), bandTop)
@@ -1395,6 +1407,39 @@ end
 -- Re-placed on every viewport change (UIKit.Modal registers here).
 local cardPlacers: { () -> () } = {}
 
+--[[ Phone HUD hiding ------------------------------------------------------------------
+	While a BigPanel modal is open on the phone layout the HUD (left column,
+	bottom row, weapon bar, effects tray) is hidden, from this one place:
+	Modal.open / close and every layout change call syncPhoneHud, and
+	HudController registers the handler that does the hiding.
+]]
+local bigPanelsOpen: { [string]: boolean } = {}
+local phoneHudHandler: ((boolean) -> ())? = nil
+local phoneHudHidden = false
+
+local function syncPhoneHud()
+	local hide = UIKit.IsPhone() and next(bigPanelsOpen) ~= nil
+	if hide == phoneHudHidden then
+		return
+	end
+	phoneHudHidden = hide
+	if phoneHudHandler then
+		phoneHudHandler(hide)
+	end
+end
+
+function UIKit.SetPhoneHudHandler(handler: (boolean) -> ())
+	phoneHudHandler = handler
+	if phoneHudHidden then
+		handler(true)
+	end
+end
+
+-- Is the HUD hidden for a phone big panel right now? (/selftest)
+function UIKit.IsPhoneHudHidden(): boolean
+	return phoneHudHidden
+end
+
 local layoutChanged = Instance.new("BindableEvent")
 -- Fires (isPhone) whenever the viewport crosses the phone threshold.
 UIKit.LayoutChanged = layoutChanged.Event
@@ -1410,6 +1455,7 @@ local function refreshLayout()
 	for _, place in cardPlacers do
 		task.spawn(place)
 	end
+	syncPhoneHud()
 	if isPhone ~= lastIsPhone then
 		lastIsPhone = isPhone
 		layoutChanged:Fire(isPhone)
@@ -1489,7 +1535,8 @@ function UIKit.AddHelpButton(modal: Modal, onClick: () -> ()): Frame
 		OnClick = onClick,
 		ZIndex = modal.Header.ZIndex,
 	})
-	modal.Title.Size = UDim2.new(1, -(60 + size + 8), 0, 34)
+	modal.Header:SetAttribute("HasHelp", true)
+	modal.Chrome()
 	modal.Subtitle.Size = UDim2.new(1, -(60 + size + 8), 0, 16)
 	return holder
 end
@@ -1583,6 +1630,11 @@ export type ModalProps = {
 	-- Fixed layout (no scrolling): keep the design height and shrink the
 	-- whole card to fit instead of squashing it.
 	FitContent: boolean?,
+	-- A big panel (Upgrades, Shop, Items, Fuse, Index, Gifts, Quests, Rebirth,
+	-- Settings). On the phone layout it hides the HUD, runs down to
+	-- PANEL_BOTTOM_GAP above the screen bottom, is wider, and has the compact
+	-- one-row header (title, HeaderSlot, ✕). Desktop is unchanged.
+	BigPanel: boolean?,
 }
 
 export type Modal = {
@@ -1593,6 +1645,12 @@ export type Modal = {
 	Header: Frame,
 	Title: TextLabel,
 	Subtitle: TextLabel,
+	-- Phone big panel header: the space between the title and the ✕ / ?
+	-- buttons, for the panel's tabs / chips (hidden on desktop, where they
+	-- keep their own row in Content). Build into it when IsCompact().
+	HeaderSlot: Frame,
+	IsCompact: () -> boolean,
+	Chrome: () -> (), -- re-applies the header / padding for the current layout
 	Open: () -> (),
 	Close: () -> (),
 	IsOpen: () -> boolean,
@@ -1615,6 +1673,11 @@ local modalGuis: { ScreenGui } = {}
 -- root centres what you see.
 local MODAL_CHROME = Vector2.new(MODAL_MARGIN * 2, MODAL_MARGIN * 2 + UITheme.ShadowOffset)
 
+UIKit.PHONE_PANEL_MAX_WIDTH = 780 -- a phone big panel may be wider than its desktop MaxSize
+UIKit.PHONE_HEADER_HEIGHT = 48 -- the compact header row (<= 56)
+UIKit.PHONE_PANEL_PADDING = 10
+local PHONE_CONTENT_TOP = UIKit.PHONE_HEADER_HEIGHT + 6
+
 export type ModalPlan = {
 	RootHeight: number, -- the root's Size.Y offset (before the size cap)
 	Visual: number, -- what you see (logical px, after the cap and the fit)
@@ -1625,21 +1688,29 @@ export type ModalPlan = {
 -- Where a modal with `maxSize` goes on a `view` (logical px) viewport.
 -- placeRoot uses it, and /selftest runs it at 1920x1080, 1366x768 and the
 -- phone size.
-function UIKit.PlanModalFor(maxSize: Vector2, fitContent: boolean, view: Vector2, phone: boolean): ModalPlan
+function UIKit.PlanModalFor(maxSize: Vector2, fitContent: boolean, view: Vector2, phone: boolean, bigPanel: boolean?): ModalPlan
 	local top = UIKit.GetCardTopFor(phone)
-	local available = math.max(120, view.Y - top - UIKit.GetCardBottomFor(phone))
+	local available = math.max(120, view.Y - top - UIKit.GetCardBottomFor(phone, bigPanel))
 	if fitContent then
 		-- Its layout needs its design height: keep it, shrink to fit.
 		local design = math.min(maxSize.Y + MODAL_CHROME.Y, view.Y * 0.9)
 		local fit = math.clamp(available / design, 0.5, 1)
-		return { RootHeight = design, Visual = design * fit, Top = UIKit.GetCardYFor(design * fit, view.Y, phone), Fit = fit }
+		return { RootHeight = design, Visual = design * fit, Top = UIKit.GetCardYFor(design * fit, view.Y, phone, bigPanel), Fit = fit }
 	end
 	-- The UISizeConstraint caps the root at MaxSize + chrome.
 	local visual = math.min(available, maxSize.Y + MODAL_CHROME.Y)
-	return { RootHeight = available, Visual = visual, Top = UIKit.GetCardYFor(visual, view.Y, phone), Fit = 1 }
+	return { RootHeight = available, Visual = visual, Top = UIKit.GetCardYFor(visual, view.Y, phone, bigPanel), Fit = 1 }
 end
 
-export type ModalSpec = { Name: string, MaxSize: Vector2, FitContent: boolean }
+-- The content height (below the compact header) of a phone big panel placed
+-- by `plan` (a panel that is not FitContent): the plan's visible height less
+-- the root's chrome, the panel padding and the header. /selftest uses it to
+-- count how many rows a list shows at 844 x 390 and 896 x 414.
+function UIKit.PhoneContentHeightFor(plan: ModalPlan): number
+	return plan.Visual - MODAL_CHROME.Y - 2 * UIKit.PHONE_PANEL_PADDING - PHONE_CONTENT_TOP
+end
+
+export type ModalSpec = { Name: string, MaxSize: Vector2, FitContent: boolean, BigPanel: boolean }
 local modalSpecs: { ModalSpec } = {}
 
 -- Every modal built so far (/selftest's "cards centred" math check).
@@ -1718,24 +1789,32 @@ function UIKit.Modal(props: ModalProps): Modal
 	root.BackgroundTransparency = 1
 	root.ZIndex = 2
 	root.Parent = gui
-	table.insert(modalSpecs, { Name = props.Name, MaxSize = props.MaxSize, FitContent = props.FitContent == true })
+	local bigPanel = props.BigPanel == true
+	table.insert(modalSpecs, { Name = props.Name, MaxSize = props.MaxSize, FitContent = props.FitContent == true, BigPanel = bigPanel })
+	local constraint = Instance.new("UISizeConstraint")
+	constraint.MaxSize = props.MaxSize + MODAL_CHROME
+	constraint.Parent = root
+	local chromeApplier: () -> () = function() end
 	local function placeRoot()
 		local view = UIKit.GetLogicalViewport()
-		local plan = UIKit.PlanModalFor(props.MaxSize, props.FitContent == true, view, UIKit.IsPhone())
+		local phone = UIKit.IsPhone()
+		local plan = UIKit.PlanModalFor(props.MaxSize, props.FitContent == true, view, phone, bigPanel)
 		local fit = plan.Fit
-		local width = math.min(view.X * 0.92, props.MaxSize.X + MODAL_CHROME.X)
-		root.Size = UDim2.new(0.92, 0, 0, plan.RootHeight)
+		-- A phone big panel takes nearly the whole width.
+		local wide = bigPanel and phone
+		local widthScale = if wide then 0.97 else 0.92
+		local maxWidth = if wide then math.max(props.MaxSize.X, UIKit.PHONE_PANEL_MAX_WIDTH) else props.MaxSize.X
+		constraint.MaxSize = Vector2.new(maxWidth + MODAL_CHROME.X, props.MaxSize.Y + MODAL_CHROME.Y)
+		local width = math.min(view.X * widthScale, maxWidth + MODAL_CHROME.X)
+		root.Size = UDim2.new(widthScale, 0, 0, plan.RootHeight)
 		root.Position = UDim2.new(0.5, UIKit.GetCardShift(width * fit), 0, plan.Top)
 		root:SetAttribute("FitScale", fit)
 		if gui.Enabled then
 			getPopScale(root).Scale = fit
 		end
+		chromeApplier()
 	end
-	placeRoot()
 	table.insert(cardPlacers, placeRoot)
-	local constraint = Instance.new("UISizeConstraint")
-	constraint.MaxSize = props.MaxSize + MODAL_CHROME
-	constraint.Parent = root
 
 	local body = UIKit.Panel({
 		Name = "Panel",
@@ -1746,7 +1825,7 @@ function UIKit.Modal(props: ModalProps): Modal
 		StrokeThickness = UITheme.Stroke.Modal,
 		ZIndex = 2,
 	})
-	UIKit.Padding(body, 16)
+	local padding = UIKit.Padding(body, 16)
 
 	local header = Instance.new("Frame")
 	header.Name = "Header"
@@ -1755,17 +1834,46 @@ function UIKit.Modal(props: ModalProps): Modal
 	header.ZIndex = body.ZIndex + 1
 	header.Parent = body
 
+	-- The title (and, on a phone big panel, the panel's HeaderSlot beside it)
+	-- sits in a row that stops short of the ✕ / ? buttons. Desktop: the row's
+	-- layout is off and the title keeps its own size and position.
+	local titleRow = Instance.new("Frame")
+	titleRow.Name = "TitleRow"
+	titleRow.BackgroundTransparency = 1
+	titleRow.Size = UDim2.fromScale(1, 1)
+	titleRow.ZIndex = header.ZIndex
+	titleRow.Parent = header
+	local titleLayout = Instance.new("UIListLayout")
+	titleLayout.FillDirection = Enum.FillDirection.Horizontal
+	titleLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	titleLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	titleLayout.Padding = UDim.new(0, 12)
+	titleLayout.Enabled = false
+	titleLayout.Parent = titleRow
+
 	local title = UIKit.Label({
 		Name = "Title",
 		Text = props.Title,
 		Font = Fonts.Display,
 		TextSize = 32,
 		Size = UDim2.new(1, -60, 0, 34),
+		LayoutOrder = 1,
 		ZIndex = header.ZIndex,
 		Stroke = UITheme.Stroke.Text,
-		Parent = header,
+		Parent = titleRow,
 	})
 	UIKit.FitText(title, 32, 18)
+	local headerSlot = Instance.new("Frame")
+	headerSlot.Name = "HeaderSlot"
+	headerSlot.BackgroundTransparency = 1
+	headerSlot.Size = UDim2.fromScale(0, 1)
+	headerSlot.LayoutOrder = 2
+	headerSlot.ZIndex = header.ZIndex
+	headerSlot.Visible = false
+	headerSlot.Parent = titleRow
+	local slotFlex = Instance.new("UIFlexItem")
+	slotFlex.FlexMode = Enum.UIFlexMode.Fill
+	slotFlex.Parent = headerSlot
 	local subtitle = UIKit.Label({
 		Name = "Subtitle",
 		Font = Fonts.Body,
@@ -1777,6 +1885,20 @@ function UIKit.Modal(props: ModalProps): Modal
 		Visible = false,
 		Parent = header,
 	})
+	-- A phone big panel drops the subtitle line (the compact header is one row);
+	-- what the panel asked for is remembered and comes back on the desktop layout.
+	local compactNow = false
+	local subtitleWanted = false
+	subtitle:GetPropertyChangedSignal("Visible"):Connect(function()
+		if compactNow then
+			if subtitle.Visible then
+				subtitleWanted = true
+				subtitle.Visible = false
+			end
+		else
+			subtitleWanted = subtitle.Visible
+		end
+	end)
 
 	local content = Instance.new("Frame")
 	content.Name = "Content"
@@ -1790,6 +1912,43 @@ function UIKit.Modal(props: ModalProps): Modal
 	local modal: Modal
 	local openToken = 0
 
+	-- Header, padding and content top for the current layout (see BigPanel).
+	local function applyChrome()
+		local compact = bigPanel and UIKit.IsPhone()
+		compactNow = compact
+		local tap = UITheme.MinTapSize
+		local helpReserve = if header:GetAttribute("HasHelp") == true then tap + 8 else 0
+		local pad = if compact then UIKit.PHONE_PANEL_PADDING else 16
+		padding.PaddingTop = UDim.new(0, pad)
+		padding.PaddingBottom = UDim.new(0, pad)
+		padding.PaddingLeft = UDim.new(0, pad)
+		padding.PaddingRight = UDim.new(0, pad)
+		titleLayout.Enabled = compact
+		headerSlot.Visible = compact
+		if compact then
+			titleRow.Size = UDim2.new(1, -(tap + 8 + helpReserve), 1, 0)
+			title.TextScaled = false
+			title.TextWrapped = false
+			title.TextSize = 24
+			title.AutomaticSize = Enum.AutomaticSize.X
+			title.Size = UDim2.fromOffset(0, 34)
+			subtitle.Visible = false
+		else
+			subtitle.Visible = subtitleWanted
+			titleRow.Size = UDim2.fromScale(1, 1)
+			title.AutomaticSize = Enum.AutomaticSize.None
+			title.TextScaled = true
+			title.TextWrapped = true
+			title.Size = UDim2.new(1, -(60 + helpReserve), 0, 34)
+		end
+		local contentTop = if compact then PHONE_CONTENT_TOP else 58
+		content.Position = UDim2.fromOffset(0, contentTop)
+		content.Size = UDim2.new(1, 0, 1, -contentTop)
+	end
+	chromeApplier = applyChrome
+	applyChrome()
+	placeRoot()
+
 	dimProbes[gui] = function(): boolean
 		return backdrop.BackgroundTransparency < BACKDROP_DIM_LIMIT and not cardOnScreen(gui, root)
 	end
@@ -1801,6 +1960,10 @@ function UIKit.Modal(props: ModalProps): Modal
 		isOpen = false
 		openToken += 1
 		UIKit.SetOverlay(props.Name, false)
+		if bigPanel then
+			bigPanelsOpen[props.Name] = nil
+			syncPhoneHud()
+		end
 		local tween = UIKit.PopOut(root)
 		TweenService:Create(backdrop, POP_OUT_INFO, { BackgroundTransparency = 1 }):Play()
 		tween.Completed:Once(function()
@@ -1817,6 +1980,10 @@ function UIKit.Modal(props: ModalProps): Modal
 		isOpen = true
 		placeRoot()
 		UIKit.SetOverlay(props.Name, true)
+		if bigPanel then
+			bigPanelsOpen[props.Name] = true
+			syncPhoneHud()
+		end
 		gui.Enabled = true
 		backdrop.BackgroundTransparency = 1
 		TweenService:Create(backdrop, POP_IN_INFO, { BackgroundTransparency = 0.45 }):Play()
@@ -1861,6 +2028,11 @@ function UIKit.Modal(props: ModalProps): Modal
 		Header = header,
 		Title = title,
 		Subtitle = subtitle,
+		HeaderSlot = headerSlot,
+		IsCompact = function()
+			return compactNow
+		end,
+		Chrome = applyChrome,
 		Open = open,
 		Close = close,
 		IsOpen = function()

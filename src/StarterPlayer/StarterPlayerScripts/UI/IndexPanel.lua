@@ -55,6 +55,9 @@ local Fonts = UITheme.Fonts
 -- scroll.
 local MAX_SIZE = Vector2.new(720, 600)
 local TAB_SIZE = Vector2.new(140, 62)
+-- Phone (big panel): the tier tabs sit in the compact header, 44 px tall.
+local PHONE_TAB_SIZE = Vector2.new(118, 44)
+local PHONE_BONUS_RESERVE = 128 -- the header's "+N% income" pill (auto width) and a gap
 local TAB_GAP = 8
 local HEADING_HEIGHT = 20
 local NAME_COLUMN = 0.27 -- of the row width
@@ -78,6 +81,10 @@ type Tab = { Button: TextButton, Name: TextLabel, Count: TextLabel, Goal: TextLa
 
 local modal: UIKit.Modal
 local bonusPill: TextLabel
+local tabsFrame: ScrollingFrame
+local tabsPadding: UIPadding
+local headings: Frame
+local infoStrip: Frame
 local page: ScrollingFrame
 local infoTitle: TextLabel
 local infoLine: TextLabel
@@ -446,7 +453,7 @@ local function refresh(force: boolean?)
 		tab.Goal.Text = if have >= total
 			then "★ " .. percent(IndexConfig.BonusPerCompletedTier)
 			else ("%s at %d"):format(percent(IndexConfig.BonusPerCompletedTier), total)
-		tab.Goal.Visible = selected
+		tab.Goal.Visible = selected and not UIKit.IsPhone() -- the header pill carries the bonus on a phone
 		UIKit.SetProgress(tab.Bar, if total > 0 then have / total else 0)
 		-- The active pill is the UPGRADES green (the name keeps its tier
 		-- colour); the rest stay the muted panel colour.
@@ -505,7 +512,7 @@ local function buildTab(parent: Instance, tier: string, order: number, z: number
 	local goal = UIKit.Label({
 		Name = "Goal",
 		Font = Fonts.BodyHeavy,
-		TextSize = 12,
+		TextSize = 13,
 		TextColor3 = Colors.Text,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, -10, 0, 27),
@@ -533,6 +540,52 @@ local function buildTab(parent: Instance, tier: string, order: number, z: number
 	tabs[tier] = { Button = button, Name = name, Count = count, Goal = goal, Bar = bar, Stroke = stroke }
 end
 
+-- Desktop: tabs, then the column headings, then the rows. Phone (big panel):
+-- the tier tabs move up into the compact header's slot (44 px tall, the goal
+-- text dropped), the bonus pill sits in the header row, and the headings and
+-- rows start at the top of the content.
+local function applyLayout()
+	local phone = UIKit.IsPhone()
+	local tabSize = if phone then PHONE_TAB_SIZE else TAB_SIZE
+	if phone then
+		tabsFrame.Parent = modal.HeaderSlot
+		tabsFrame.Size = UDim2.new(1, -PHONE_BONUS_RESERVE, 1, 0) -- leaves the bonus pill's place at the right
+		tabsFrame.ScrollBarThickness = 0
+		tabsPadding.PaddingTop = UDim.new(0, 2)
+		tabsPadding.PaddingBottom = UDim.new(0, 0)
+	else
+		tabsFrame.Parent = modal.Content
+		tabsFrame.Size = UDim2.new(1, 0, 0, TAB_SIZE.Y + 14)
+		tabsFrame.ScrollBarThickness = 4
+		tabsPadding.PaddingTop = UDim.new(0, 3)
+		tabsPadding.PaddingBottom = UDim.new(0, 8)
+	end
+	for _, tab in tabs do
+		tab.Button.Size = UDim2.fromOffset(tabSize.X, tabSize.Y)
+		tab.Name.Position = UDim2.fromOffset(if phone then 8 else 10, if phone then 2 else 6)
+		tab.Name.Size = UDim2.new(1, if phone then -16 else -20, 0, if phone then 18 else 20)
+		tab.Name.TextSize = if phone then 15 else 16
+		tab.Count.Position = UDim2.fromOffset(if phone then 8 else 10, if phone then 19 else 27)
+		tab.Count.Size = UDim2.new(1, if phone then -16 else -10, 0, 16)
+		tab.Bar.Position = if phone then UDim2.new(0, 8, 1, -10) else UDim2.new(0, 10, 1, -14)
+		tab.Bar.Size = UDim2.new(1, if phone then -16 else -20, 0, if phone then 6 else 8)
+	end
+	local headerY = if phone then 0 else TAB_SIZE.Y + 18
+	headings.Position = UDim2.fromOffset(GLOW_SPREAD, headerY)
+	for _, child in headings:GetChildren() do
+		if child:IsA("TextLabel") then
+			local variant = child.Name:gsub("Heading$", "")
+			local icon = EVENT_ICON[variant]
+			child.TextSize = if phone then 13 else 11
+			child.Text = (if icon and not phone then icon .. " " else "") .. variant:upper()
+		end
+	end
+	local pageY = headerY + HEADING_HEIGHT + 2
+	page.Position = UDim2.fromOffset(0, pageY)
+	page.Size = UDim2.new(1, 0, 1, -(pageY + INFO_HEIGHT + 8))
+	UIKit.PillRoot(bonusPill).Position = UDim2.new(1, -(UITheme.MinTapSize * 2 + 20), 0, if phone then 10 else 6)
+end
+
 local function build()
 	modal = UIKit.Modal({
 		Name = "IndexPanel",
@@ -541,6 +594,7 @@ local function build()
 		MaxSize = MAX_SIZE,
 		HeaderTop = Colors.PanelTop,
 		OnClose = stopRainbow,
+		BigPanel = true,
 	})
 	UIKit.AddHelpButton(modal, function()
 		TutorialCards.ShowTopic("Index")
@@ -568,7 +622,7 @@ local function build()
 	local z = content.ZIndex
 
 	-- Tier tabs.
-	local tabsFrame = Instance.new("ScrollingFrame")
+	tabsFrame = Instance.new("ScrollingFrame")
 	tabsFrame.Name = "Tabs"
 	tabsFrame.BackgroundTransparency = 1
 	tabsFrame.BorderSizePixel = 0
@@ -580,7 +634,7 @@ local function build()
 	tabsFrame.ScrollBarImageColor3 = Colors.Faint
 	tabsFrame.ZIndex = z
 	tabsFrame.Parent = content
-	UIKit.Padding(tabsFrame, 3, 4, 8, 3)
+	tabsPadding = UIKit.Padding(tabsFrame, 3, 4, 8, 3)
 	local tabLayout = Instance.new("UIListLayout")
 	tabLayout.FillDirection = Enum.FillDirection.Horizontal
 	tabLayout.Padding = UDim.new(0, TAB_GAP)
@@ -593,7 +647,7 @@ local function build()
 	-- Column headings, inset like the row cards so they line up with the
 	-- orb columns.
 	local headerY = TAB_SIZE.Y + 18
-	local headings = Instance.new("Frame")
+	headings = Instance.new("Frame")
 	headings.Name = "Headings"
 	headings.BackgroundTransparency = 1
 	headings.Position = UDim2.fromOffset(GLOW_SPREAD, headerY)
@@ -640,6 +694,7 @@ local function build()
 
 	-- The info strip.
 	local strip = Instance.new("Frame")
+	infoStrip = strip
 	strip.Name = "InfoStrip"
 	strip.AnchorPoint = Vector2.new(0, 1)
 	strip.Position = UDim2.fromScale(0, 1)
@@ -688,9 +743,11 @@ local function build()
 		Parent = strip,
 	})
 
+	applyLayout()
 	UIKit.LayoutChanged:Connect(function()
+		applyLayout()
 		if modal.IsOpen() then
-			refresh()
+			refresh(true)
 		end
 	end)
 end
