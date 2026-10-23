@@ -91,6 +91,13 @@ in front of it and see the card over it).
   300 × 196 card + the 90 px E / R / T row; 0.8 on a phone through one
   `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5) so it grows
   upward from the anchor (the captions' bottom edge is on it).
+  **Phone variant** (`applyVariant`, `PlotLayout.Gacha.Phone*`): not the desktop
+  card shrunk evenly. No mutation line (the (i) panel has it); the %, the pills,
+  the (i) mark and the key captions are 24-26 px so they read >= 13 px at
+  `PhoneScaleMin`; the (i) hit area is 84 px (>= 44 after the scale); the
+  billboard is 300 × `GachaBoardController.PhoneFullHeight` (50 + 184 + 98).
+  Captions on a phone: Pull / ×10 / Auto (Auto ON). `/selftest` measures every
+  text and the hit area at 844 × 390 and 896 × 414.
   `StudsOffsetWorldSpace` stays zero; `StudsOffset` is (0, 0, 2) (camera-relative
   +Z = toward the camera, so the card draws in front of the 1.3-radius ball with
   `AlwaysOnTop` off). Neither is written again.

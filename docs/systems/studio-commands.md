@@ -218,7 +218,7 @@ Most of the 77 were the TEST, not the game:
   right end (and above the jump button on a tablet); it touches no HUD rect or
   the weapon bar, and the jump button is one more rect (12 px of air).
   `jump button (…): the bottom row and the weapon bar are 12 px clear of it`
-  checks the tablet cases (the HUD slides them left: `UIKit.JumpShiftFor`). The jump rect is reserved on any touch device (`UIKit.JumpPresentFor`: phone layout or `TouchEnabled`), never read from TouchGui, so Roblox hiding the button after mouse input moves nothing; the 1180 × 820 case toggles `TouchGui` and checks the tray, bottom row and weapon bar rects are identical. Phone: one
+  checks the tablet cases (the HUD slides them left: `UIKit.JumpShiftFor`). The jump rect is reserved on any touch device (`UIKit.JumpPresentFor`: phone layout or `TouchEnabled`), never read from TouchGui, so Roblox hiding the button after mouse input moves nothing; the 1180 × 820 case toggles `TouchGui` and checks the tray, bottom row and weapon bar rects are identical. The bottom row's rect is its size AT REST (`HudController` `restRowRect`): the Upgrades / Rebirth holders pulse with a UIScale and the AutomaticSize row breathed 1-3 px with them. Phone: one
   row in the top-right corner at `UIKit.GetCardTop()`, right-aligned, 12 px
   short of `TopStack.WIDEST_WIDTH`; the icons shrink 60 -> 48 px, then wrap into
   a second right-aligned row; the jump button is still an obstacle. The

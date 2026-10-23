@@ -205,7 +205,14 @@ type CardView = {
 	Card: Frame, -- the 300 x 196 white card
 	KeyBar: Frame, -- the E / R / T row under the card
 	Tiles: { [string]: TileView },
-	MutationLine: TextLabel, -- one line: each mutation's pull % in its colour
+	MutationLine: TextLabel, -- one line: each mutation's pull % in its colour (desktop only)
+	Phone: boolean, -- the phone variant is applied (see applyVariant)
+	Title: TextLabel,
+	Pills: Frame,
+	EventRow: Frame,
+	PriceRow: Frame,
+	InfoHit: TextButton,
+	InfoMark: TextLabel,
 	LuckPill: TextLabel,
 	EventPill: TextLabel,
 	Price: TextLabel,
@@ -296,8 +303,8 @@ local function priceText(inputs: Inputs): string
 	return NumberFormat.Money(inputs.Cost)
 end
 
-local function luckText(luck: number): string
-	return ("🍀 Luck ×%s"):format(NumberFormat.Multiplier(luck):sub(2))
+local function luckText(luck: number, short: boolean): string
+	return ((if short then "🍀×%s" else "🍀 Luck ×%s")):format(NumberFormat.Multiplier(luck):sub(2))
 end
 
 --[[ Building the card (once) ----------------------------------------------------------- ]]
@@ -396,7 +403,7 @@ local function buildContent(view: CardView, card: Frame)
 	paper.Parent = card
 
 	-- Title: half above the card's top edge, left at x 10.
-	label(card, {
+	view.Title = label(card, {
 		Name = "Title",
 		Text = "Gacha Pad",
 		Font = Fonts.Display,
@@ -412,6 +419,7 @@ local function buildContent(view: CardView, card: Frame)
 	local pills = frame(card, "Pills", UDim2.fromOffset(10 + TITLE_WIDTH, 0), UDim2.fromOffset(CARD.X - 10 - TITLE_WIDTH - 38, 20))
 	pills.AnchorPoint = Vector2.new(0, 0.5)
 	pills.ZIndex = 8
+	view.Pills = pills
 	local pillLayout = Instance.new("UIListLayout")
 	pillLayout.FillDirection = Enum.FillDirection.Horizontal
 	pillLayout.Padding = UDim.new(0, 4)
@@ -420,6 +428,7 @@ local function buildContent(view: CardView, card: Frame)
 	pillLayout.Parent = pills
 	local eventRow = frame(card, "EventRow", UDim2.fromOffset(10, -TOP_PAD + 2), UDim2.fromOffset(CARD.X - 20, 20))
 	eventRow.ZIndex = 8
+	view.EventRow = eventRow
 	local eventLayout = Instance.new("UIListLayout")
 	eventLayout.FillDirection = Enum.FillDirection.Horizontal
 	eventLayout.VerticalAlignment = Enum.VerticalAlignment.Center
@@ -443,7 +452,7 @@ local function buildContent(view: CardView, card: Frame)
 	info.Parent = card
 	UIKit.Corner(info, 999)
 	UIKit.Stroke(info, 3, Colors.White)
-	label(info, {
+	view.InfoMark = label(info, {
 		Name = "Mark",
 		Text = "i",
 		Font = Fonts.Display,
@@ -463,6 +472,7 @@ local function buildContent(view: CardView, card: Frame)
 	infoHit.Text = ""
 	infoHit.ZIndex = 10
 	infoHit.Parent = card
+	view.InfoHit = infoHit
 	infoHit.Activated:Connect(function()
 		GachaBoardController.OpenPanel()
 	end)
@@ -500,6 +510,7 @@ local function buildContent(view: CardView, card: Frame)
 	priceRow.AnchorPoint = Vector2.new(1, 0.5)
 	priceRow.AutomaticSize = Enum.AutomaticSize.X
 	priceRow.ZIndex = 8
+	view.PriceRow = priceRow
 	local priceLayout = Instance.new("UIListLayout")
 	priceLayout.FillDirection = Enum.FillDirection.Horizontal
 	priceLayout.Padding = UDim.new(0, 4)
@@ -540,7 +551,8 @@ local function updateContent(view: CardView)
 	for _, row in rows.Tiers do
 		local tile = view.Tiles[row.Tier]
 		if tile then
-			local size = if #row.Text <= 6 then PERCENT_SIZE else PERCENT_SIZE - 3
+			local base = if view.Phone then G.PhoneTextPx else PERCENT_SIZE
+			local size = if #row.Text <= 6 then base else base - 3
 			for _, text in { tile.Percent, tile.Outline } do
 				text.Text = row.Text
 				text.TextSize = size
@@ -562,7 +574,7 @@ local function updateContent(view: CardView)
 	view.MutationLine.Text = table.concat(parts, "  ")
 	view.MutationLine.TextSize = if #parts > 4 then 10 else 12
 	view.Price.Text = priceText(inputs)
-	view.LuckPill.Text = luckText(inputs.Luck)
+	view.LuckPill.Text = luckText(inputs.Luck, view.Phone)
 	UIKit.SetPillVisible(view.LuckPill, inputs.Luck > 1.0001)
 	local eventId = oddsEvent(rows, inputs.Luck)
 	if eventId then
@@ -843,8 +855,13 @@ local KEYS: { KeySpec } = {
 }
 
 local function captionFor(spec: KeySpec): string
-	if spec.Id == "Auto" and autoOn then
-		return "Auto ×10 ON"
+	-- The phone's captions are 24 px (13 px after the scale): "Auto ×10" would not fit under its key.
+	local phone = UIKit.IsPhone()
+	if spec.Id == "Auto" then
+		if phone then
+			return if autoOn then "Auto ON" else "Auto"
+		end
+		return if autoOn then "Auto ×10 ON" else spec.Caption
 	end
 	return spec.Caption
 end
@@ -1154,19 +1171,74 @@ end
 -- The phone's sizing UIScale: ONE factor for the whole card, from the logical
 -- viewport `view` (UIKit.GetLogicalViewport) and the card's size. The card is
 -- a pixel-size billboard, so on a phone it must shrink until the whole card
--- (title to key bar, FULL_SIZE.Y tall) fits between TopStack's chip row and
+-- (title to key bar, PhoneFullHeight tall) fits between TopStack's chip row and
 -- the pad's anchor, which sits at G.PhoneAnchorY of the screen height when you
 -- stand on the pad at the default camera. In screen px (logical x PhoneScale);
 -- clamped to G.PhoneScaleMin..G.PhoneScaleMax. Pure: /selftest runs it at
 -- 844 x 390 and 896 x 414.
 function GachaBoardController.PhoneScaleFor(view: Vector2): number
 	local room = (G.PhoneAnchorY * view.Y - G.PhoneTopReservePx) * UITheme.PhoneScale
-	return math.clamp(room / FULL_SIZE.Y, G.PhoneScaleMin, G.PhoneScaleMax)
+	return math.clamp(room / GachaBoardController.PhoneFullHeight, G.PhoneScaleMin, G.PhoneScaleMax)
 end
+
+-- The phone variant: not the desktop card shrunk evenly (its 11-12 px lines
+-- fall to ~6 px) but a card laid out for the scale. No mutation line (the
+-- (i) panel has it), the %, the pills, the (i) mark and the price big enough
+-- to read >= 13 px after the scale, a taller pill row, a card 12 px shorter
+-- and an (i) hit area >= 44 px after the scale. Positions and sizes only: it
+-- runs on every layout change and creates nothing.
+local function applyVariant(view: CardView)
+	local phone = UIKit.IsPhone()
+	view.Phone = phone
+	local topPad = if phone then G.PhoneTopPadPx else TOP_PAD
+	local cardHeight = if phone then G.PhoneCardHeightPx else CARD.Y
+	local textPx = if phone then G.PhoneTextPx else PERCENT_SIZE
+	local pillHeight = if phone then G.PhonePillHeightPx else 20
+	local pillTextPx = if phone then G.PhoneTextPx else 11
+	local rowHeight = if phone then G.PhoneButtonRowPx else ROW_HEIGHT
+	view.Billboard.Size = UDim2.fromOffset(CARD.X, topPad + cardHeight + rowHeight)
+	view.Card.Position = UDim2.fromOffset(0, topPad)
+	view.Card.Size = UDim2.fromOffset(CARD.X, cardHeight)
+	view.KeyBar.Position = UDim2.fromOffset(0, topPad + cardHeight + KEY_BAR_GAP)
+	view.KeyBar.Size = UDim2.fromOffset(CARD.X, rowHeight - KEY_BAR_GAP)
+	for _, button in buttons do
+		button.Holder.Size = UDim2.fromOffset(BUTTON_SPACING - 2, rowHeight - KEY_BAR_GAP)
+		button.Caption.TextSize = if phone then 24 else 14
+		button.Caption.Size = UDim2.new(1, 0, 0, if phone then 24 else 16)
+	end
+	refreshButtons()
+	view.EventRow.Position = UDim2.fromOffset(10, -topPad + 2)
+	view.EventRow.Size = UDim2.fromOffset(CARD.X - 20, pillHeight)
+	view.Pills.Size = UDim2.fromOffset(CARD.X - 10 - TITLE_WIDTH - 38, pillHeight)
+	for _, pill in { view.EventPill, view.LuckPill } do
+		pill.TextSize = pillTextPx
+		UIKit.PillRoot(pill).Size = UDim2.fromOffset(0, if phone then G.PhonePillHeightPx else (if pill == view.EventPill then 20 else 18))
+	end
+	view.MutationLine.Visible = not phone
+	view.MutationLine.Position = UDim2.fromOffset(12, cardHeight - 4)
+	view.PriceRow.Position = UDim2.fromOffset(CARD.X - 10, cardHeight)
+	view.PriceRow.Size = UDim2.fromOffset(0, if phone then 34 else 30)
+	view.Price.TextSize = if phone then G.PhonePriceTextPx else 24
+	view.Price.Size = UDim2.fromOffset(0, if phone then 34 else 30)
+	view.InfoMark.TextSize = if phone then G.PhoneTextPx else 22
+	local hit = if phone then G.PhoneInfoHitPx else INFO_HIT
+	view.InfoHit.Size = UDim2.fromOffset(hit, hit)
+	-- Inside the billboard's right edge, or the part past it takes no taps.
+	view.InfoHit.Position = UDim2.fromOffset(if phone then CARD.X - hit / 2 else CARD.X - 6 - INFO_SIZE / 2, 0)
+	for _, tile in view.Tiles do
+		for _, text in { tile.Percent, tile.Outline } do
+			text.Size = UDim2.new(1, 0, 0, textPx + 4)
+		end
+	end
+	updateContent(view)
+end
+
+GachaBoardController.PhoneFullHeight = G.PhoneTopPadPx + G.PhoneCardHeightPx + G.PhoneButtonRowPx
 
 -- Set on build, on LayoutChanged and on every viewport resize. Scaled about
 -- the card's bottom line, so the anchor does not move.
 local function applyPhoneScale(view: CardView)
+	applyVariant(view)
 	local existing = view.Root:FindFirstChild("PhoneScale")
 	if UIKit.IsPhone() then
 		local scale: UIScale
@@ -1294,6 +1366,13 @@ local function buildCard(pad: BasePart)
 		KeyBar = keyBar,
 		Tiles = {},
 		MutationLine = nil :: any,
+		Phone = false,
+		Title = nil :: any,
+		Pills = nil :: any,
+		EventRow = nil :: any,
+		PriceRow = nil :: any,
+		InfoHit = nil :: any,
+		InfoMark = nil :: any,
 		LuckPill = nil :: any,
 		EventPill = nil :: any,
 		Price = nil :: any,
@@ -1434,7 +1513,7 @@ end
 -- Your card (nil before your pad exists): the gui, its pieces, and the
 -- state the pop logic is in. Every UI check reads the instance tree from
 -- Gui down.
-function GachaBoardController.GetCard(): { Billboard: BillboardGui, Anchor: Attachment, Pad: BasePart, Root: Frame, PopRoot: Frame, Card: Frame, Pop: UIScale, Open: boolean, Shown: boolean, Label: Instance?, UpStuds: number, VipHidden: boolean }?
+function GachaBoardController.GetCard(): { Billboard: BillboardGui, Anchor: Attachment, Pad: BasePart, Root: Frame, PopRoot: Frame, Card: Frame, Pop: UIScale, Open: boolean, Shown: boolean, Label: Instance?, UpStuds: number, VipHidden: boolean, Tiles: { [string]: TileView }, MutationLine: TextLabel, InfoHit: TextButton, Phone: boolean }?
 	local view = card
 	if not view then
 		return nil
@@ -1455,6 +1534,10 @@ function GachaBoardController.GetCard(): { Billboard: BillboardGui, Anchor: Atta
 		Anchor = view.Anchor,
 		UpStuds = view.UpStuds,
 		VipHidden = view.VipTag ~= nil,
+		Tiles = view.Tiles,
+		MutationLine = view.MutationLine,
+		InfoHit = view.InfoHit,
+		Phone = view.Phone,
 	}
 end
 

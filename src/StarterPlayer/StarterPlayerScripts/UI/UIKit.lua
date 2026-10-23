@@ -1494,6 +1494,12 @@ function UIKit.Screen(name: string, displayOrder: number): ScreenGui
 	scale.Scale = if UIKit.IsPhone() then UITheme.PhoneScale else 1
 	scale.Parent = gui
 	table.insert(scales, scale)
+	gui.Destroying:Once(function()
+		local at = table.find(scales, scale)
+		if at then
+			table.remove(scales, at)
+		end
+	end)
 
 	gui.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
 	return gui
@@ -1791,12 +1797,17 @@ function UIKit.Modal(props: ModalProps): Modal
 	root.ZIndex = 2
 	root.Parent = gui
 	local bigPanel = props.BigPanel == true
-	table.insert(modalSpecs, { Name = props.Name, MaxSize = props.MaxSize, FitContent = props.FitContent == true, BigPanel = bigPanel })
+	local spec: ModalSpec = { Name = props.Name, MaxSize = props.MaxSize, FitContent = props.FitContent == true, BigPanel = bigPanel }
+	table.insert(modalSpecs, spec)
 	local constraint = Instance.new("UISizeConstraint")
 	constraint.MaxSize = props.MaxSize + MODAL_CHROME
 	constraint.Parent = root
 	local chromeApplier: () -> () = function() end
 	local function placeRoot()
+		-- A destroyed Modal (its children are locked) is never re-placed.
+		if not gui.Parent then
+			return
+		end
 		local view = UIKit.GetLogicalViewport()
 		local phone = UIKit.IsPhone()
 		local plan = UIKit.PlanModalFor(props.MaxSize, props.FitContent == true, view, phone, bigPanel)
@@ -1816,6 +1827,23 @@ function UIKit.Modal(props: ModalProps): Modal
 		chromeApplier()
 	end
 	table.insert(cardPlacers, placeRoot)
+	-- Everything the Modal registered module-wide goes when its gui does.
+	gui.Destroying:Once(function()
+		local placer = table.find(cardPlacers, placeRoot)
+		if placer then
+			table.remove(cardPlacers, placer)
+		end
+		local guiAt = table.find(modalGuis, gui)
+		if guiAt then
+			table.remove(modalGuis, guiAt)
+		end
+		local specAt = table.find(modalSpecs, spec)
+		if specAt then
+			table.remove(modalSpecs, specAt)
+		end
+		dimProbes[gui] = nil
+		bigPanelsOpen[props.Name] = nil
+	end)
 
 	local body = UIKit.Panel({
 		Name = "Panel",
@@ -2047,7 +2075,6 @@ end
 -- silent blank HUD. Leaves no gui, spec or probe behind.
 function UIKit.SelfTestModal(): string?
 	for _, big in { false, true } do
-		local before = #modalSpecs
 		local built: Modal?
 		local ok, err = pcall(function()
 			built = UIKit.Modal({
@@ -2063,16 +2090,7 @@ function UIKit.SelfTestModal(): string?
 			end
 		end)
 		if built then
-			local gui = built.Gui
-			dimProbes[gui] = nil
-			local at = table.find(modalGuis, gui)
-			if at then
-				table.remove(modalGuis, at)
-			end
-			gui:Destroy()
-		end
-		while #modalSpecs > before do
-			table.remove(modalSpecs)
+			built.Gui:Destroy()
 		end
 		if not ok then
 			return (if big then "big panel: " else "") .. tostring(err)

@@ -1261,9 +1261,16 @@ local function testSkippedLines(): { string }
 	end
 	local lines: { string } = {}
 	for _, phone in { false, true } do
+		local label = if phone then "phone" else "desktop"
+		local view = workspace.CurrentCamera.ViewportSize
+		if not phone and (view.Y < UITheme.PhoneHeightThreshold or view.X < 1024) then
+			-- The desktop plan never runs in a window this small (the live HUD would be the
+			-- phone's): its left column is wider than the room beside the centred lines.
+			table.insert(lines, ("PASS skipped lines (desktop): skipped, the %dx%d window is too small for the desktop plan (needs 1024 wide and %d tall)"):format(view.X, view.Y, UITheme.PhoneHeightThreshold))
+			continue
+		end
 		UIKit.SetForcedPhone(phone)
 		task.wait(0.2)
-		local label = if phone then "phone" else "desktop"
 		local ok, err = pcall(function()
 			local items = {}
 			for index = 1, 3 do
@@ -2604,8 +2611,9 @@ local function probeGachaCard(serverLuck: number, label: string, serverCost: num
 	if gui.Adornee ~= anchor or anchor.Name ~= "GachaCardAnchor" or anchor.Parent ~= pad then
 		table.insert(billboardBad, ("Adornee is %s, not the GachaCardAnchor on the pad"):format(tostring(gui.Adornee)))
 	end
-	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= G.TopPadPx + G.CardPx.Y + G.ButtonRowPx then
-		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, G.TopPadPx + G.CardPx.Y + G.ButtonRowPx))
+	local wantHeight = if card.Phone then require(script.Parent.GachaBoardController).PhoneFullHeight else G.TopPadPx + G.CardPx.Y + G.ButtonRowPx
+	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= wantHeight then
+		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, wantHeight))
 	end
 	if gui.SizeOffset ~= Vector2.new(0, 0.5) then
 		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5)"):format(tostring(gui.SizeOffset)))
@@ -2742,7 +2750,12 @@ local function probeGachaCard(serverLuck: number, label: string, serverCost: num
 	end
 	local line = cardFrame:FindFirstChild("MutationLine")
 	local rows = FusionConfig.GetGachaOddsRows(serverLuck, require(ReplicatedStorage.Shared.Modules.EventState).GetOddsEvent())
-	if not (line and line:IsA("TextLabel") and drawnProblem(line, gui) == nil and line.RichText and line.TextSize <= 12) then
+	if card.Phone then
+		-- The phone variant drops the coloured line: the (i) panel carries the mutation odds.
+		if not (line and line:IsA("TextLabel")) or line.Visible then
+			table.insert(styleBad, "the phone card still shows the mutation line")
+		end
+	elseif not (line and line:IsA("TextLabel") and drawnProblem(line, gui) == nil and line.RichText and line.TextSize <= 12) then
 		table.insert(styleBad, "no mutation line")
 	else
 		for _, row in rows.Mutations do
@@ -2759,8 +2772,8 @@ local function probeGachaCard(serverLuck: number, label: string, serverCost: num
 	end
 	local price = cardFrame:FindFirstChild("Price", true)
 	local coin = cardFrame:FindFirstChild("Coin", true)
-	if not (price and price:IsA("TextLabel") and coin and coin:IsA("GuiObject") and drawnProblem(price, gui) == nil and drawnProblem(coin, gui) == nil and price.TextSize == 24) then
-		table.insert(styleBad, "no coin + 24 px price")
+	if not (price and price:IsA("TextLabel") and coin and coin:IsA("GuiObject") and drawnProblem(price, gui) == nil and drawnProblem(coin, gui) == nil and price.TextSize == (if card.Phone then G.PhonePriceTextPx else 24)) then
+		table.insert(styleBad, ("no coin + %d px price"):format(if card.Phone then G.PhonePriceTextPx else 24))
 	else
 		local free = TycoonController.GetTutorial().FreePulls > 0
 		local wantPrice = if free then "FREE" else require(ReplicatedStorage.Shared.Modules.NumberFormat).Money(require(ReplicatedStorage.Shared.Config.TycoonConfig).GetGachaPullCost(TycoonController.GetGachaPulls(), TycoonController.GetSteadyIncomePerSecond()))
@@ -2774,8 +2787,8 @@ local function probeGachaCard(serverLuck: number, label: string, serverCost: num
 	end
 	table.insert(lines, {
 		Ok = #styleBad == 0,
-		Name = ("gacha card (%s): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line, coin + price on the bottom edge"):format(label),
-		Detail = if #styleBad > 0 then table.concat(styleBad, "; ") else ("%d cells, price %q, mutation line %q"):format(cells, if price and price:IsA("TextLabel") then price.Text else "?", if line and line:IsA("TextLabel") then line.Text:gsub("<[^>]+>", "") else "?"),
+		Name = ("gacha card (%s): the PS99 face: white paper, title and (i) on the top edge, 6 bare orb cells, one coloured mutation line (desktop only), coin + price on the bottom edge"):format(label),
+		Detail = if #styleBad > 0 then table.concat(styleBad, "; ") else ("%d cells, price %q, mutation line %q"):format(cells, if price and price:IsA("TextLabel") then price.Text else "?", if card.Phone then "(hidden on phone)" elseif line and line:IsA("TextLabel") then line.Text:gsub("<[^>]+>", "") else "?"),
 	})
 
 	-- The card's price is the server's charge: the server sent what it would
@@ -2862,7 +2875,8 @@ local function probeGachaButtons(): { ProbeLine }
 	local parts: { string } = {}
 	local drawn, small = 0, 0
 	local expected = { Pull = "E", Multi = "R", Auto = "T" }
-	local captions = { Pull = "Pull", Multi = "×10", Auto = if Board.IsAutoOn() then "Auto ×10 ON" else "Auto ×10" }
+	local autoWord = if card.Phone then "Auto" else "Auto ×10"
+	local captions = { Pull = "Pull", Multi = "×10", Auto = if Board.IsAutoOn() then autoWord .. " ON" else autoWord }
 	local captionBad: { string } = {}
 	local sides, centre = {}, 0
 	if bar then
@@ -3060,8 +3074,8 @@ end
 -- The gacha card on a phone `size` px big, character on the pad, default
 -- camera: its whole rect (title to key bar) is on screen, below TopStack's chip
 -- row and above the weapon bar (or the HUD's bottom row before Rebirth 1), and
--- the % text is still >= 12 px on screen.
-local MIN_PERCENT_PX = 12
+-- the % text is still >= 13 px on screen.
+local MIN_PERCENT_PX = PlotLayout.Gacha.PhoneMinTextPx
 local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLine
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local TopStack = require(UI.TopStack) :: any
@@ -3076,7 +3090,7 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 	if not point then
 		return { Ok = false, Name = name, Detail = "the anchor is behind the camera" }
 	end
-	local full = Vector2.new(G.CardPx.X, G.TopPadPx + G.CardPx.Y + G.ButtonRowPx)
+	local full = Vector2.new(G.CardPx.X, Board.PhoneFullHeight)
 	local width, height = full.X * scale, full.Y * scale
 	local left, right, top, bottom = point.X - width / 2, point.X + width / 2, point.Y - height, point.Y
 	-- TopStack's lowest slot with the event chip up: its Announce line's y (logical) x 0.8.
@@ -3095,9 +3109,14 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 		table.insert(problems, ("bottom %.0f is below the %s at %.0f"):format(bottom, if barRect then "weapon bar" else "bottom row", floorPx))
 	end
 	local percentPx = 0
-	for _, tile in card.Tiles do
-		percentPx = (tile.Percent :: TextLabel).TextSize * scale
-		break
+	local tiles = card.Tiles
+	if typeof(tiles) ~= "table" or next(tiles) == nil then
+		table.insert(problems, "card not built: the card has no Tiles to measure")
+	else
+		for _, tile in tiles do
+			percentPx = (tile.Percent :: TextLabel).TextSize * scale
+			break
+		end
 	end
 	if percentPx < MIN_PERCENT_PX - 0.05 then
 		table.insert(problems, ("the %% text is %.1f px"):format(percentPx))
@@ -3106,6 +3125,40 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 		Ok = #problems == 0,
 		Name = name,
 		Detail = ("scale %.3f, card x %.0f..%.0f y %.0f..%.0f, stack bottom %.0f, %s top %.0f, %% %.1f px%s"):format(scale, left, right, top, bottom, stackBottom, if barRect then "weapon bar" else "bottom row", floorPx, percentPx, if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+	}
+end
+
+-- The phone variant at a phone `size`: every text drawn on the card (the face,
+-- the pills, the key bar) is >= 13 px on screen, and the (i) hit area >= 44 px.
+-- Measured as design size x PhoneScaleFor(size): the variant's sizes are
+-- constants, so the two test sizes need not be the live window.
+local function gachaPhoneText(card: any, size: Vector2): ProbeLine
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local name = ("gacha card (phone %dx%d): every text on the card is >= %d px after the scale, the (i) hit area >= 44 px"):format(size.X, size.Y, MIN_PERCENT_PX)
+	if not card.Phone then
+		return { Ok = false, Name = name, Detail = "the phone variant is not applied (card.Phone is false)" }
+	end
+	local scale = Board.PhoneScaleFor(size / UITheme.PhoneScale)
+	local gui = card.Billboard :: BillboardGui
+	local small: { string } = {}
+	local checked = 0
+	for _, object in gui:GetDescendants() do
+		if (object:IsA("TextLabel") or object:IsA("TextButton")) and object.Text ~= "" and drawnProblem(object, gui) == nil then
+			checked += 1
+			local px = object.TextSize * scale
+			if px < MIN_PERCENT_PX - 0.05 then
+				table.insert(small, ("%s %q %.1f px"):format(object.Name, object.Text:sub(1, 12), px))
+			end
+		end
+	end
+	local hitPx = (card.InfoHit :: GuiObject).Size.X.Offset * scale
+	if hitPx < UITheme.MinTapSize - 0.05 then
+		table.insert(small, ("the (i) hit area is %.1f px"):format(hitPx))
+	end
+	return {
+		Ok = #small == 0 and checked > 0,
+		Name = name,
+		Detail = ("scale %.3f, %d texts, (i) hit %.1f px%s"):format(scale, checked, hitPx, if #small > 0 then " | " .. table.concat(small, "; ") else ""),
 	}
 end
 
@@ -3160,6 +3213,7 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 		waitFrames(6)
 		for _, size in PHONE_TEST_VIEWS do
 			table.insert(lines, gachaPhoneFit(card, camera, size))
+			table.insert(lines, gachaPhoneText(card, size))
 		end
 	end
 	camera.CameraType = savedType
@@ -3470,11 +3524,12 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 					fake:Destroy()
 				end
 				local moved: { string } = {}
+				local SNAPSHOT_NAMES = { "bottom row position", "bottom row size", "weapon bar position", "weapon bar size", "effects tray position", "effects tray size", "jump button showing" }
 				for index, a in shown do
 					-- ±1 px: a rect may land on a neighbouring pixel, but nothing visibly moves.
 					local d = a - hidden[index]
 					if math.abs(d.X) > 1 or math.abs(d.Y) > 1 then
-						table.insert(moved, ("#%d %s -> %s"):format(index, tostring(a), tostring(hidden[index])))
+						table.insert(moved, ("%s %s -> %s"):format(SNAPSHOT_NAMES[index] or ("#" .. index), tostring(a), tostring(hidden[index])))
 					end
 				end
 				table.insert(lines, {
@@ -4106,6 +4161,13 @@ local function run(payload: any)
 	end
 
 	local modalError = UIKit.SelfTestModal()
+	-- The destroyed throwaway must stay out of every layout change: phone, desktop,
+	-- then back to the real window (an error here lands in "no client errors").
+	for _, forced in { true, false } do
+		UIKit.SetForcedPhone(forced)
+		task.wait(0.2)
+	end
+	UIKit.SetForcedPhone(nil)
 	local hoverLines = testHover("before")
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.

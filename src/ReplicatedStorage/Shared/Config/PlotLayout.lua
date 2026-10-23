@@ -369,8 +369,21 @@ PlotLayout.Gacha = {
 	-- 44 px event chip + GAP 8 = 64 logical px (x PhoneScale on screen).
 	PhoneAnchorY = 0.6,
 	PhoneTopReservePx = 64,
-	PhoneScaleMin = 0.55, -- keeps the % text (22 px) >= 12 px
+	PhoneScaleMin = 0.55, -- keeps the phone variant's text (25 px) >= 13 px
 	PhoneScaleMax = 1.0,
+	-- The PHONE variant of the card (design px, before PhoneScaleFor): no mutation
+	-- line (the (i) panel has it), every text >= PhoneTextPx so it reads >= 13 px at
+	-- PhoneScaleMin, the (i) hit area >= 44 px after the scale, a taller event/luck
+	-- pill row (TopPad), 24 px key captions (ButtonRow) and a card 12 px shorter
+	-- (CardHeight) to pay for them.
+	PhoneTopPadPx = 50,
+	PhoneCardHeightPx = 184,
+	PhoneButtonRowPx = 98, -- 10 gap + the 62 px R circle + a 24 px caption (13 px after the scale)
+	PhoneTextPx = 25, -- the %, the pills, the (i) mark
+	PhonePriceTextPx = 26,
+	PhonePillHeightPx = 32,
+	PhoneInfoHitPx = 84, -- x 0.55 = 46 px
+	PhoneMinTextPx = 13, -- after the scale: what /selftest demands of every text on the card
 }
 
 --[[ Pad faces (stations + machine floor) -------------------------------------

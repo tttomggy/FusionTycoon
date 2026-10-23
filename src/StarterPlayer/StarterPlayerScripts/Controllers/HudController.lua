@@ -629,10 +629,36 @@ function HudController.PopEffect(kind: string)
 	EffectsTray.Pop(kind)
 end
 
+-- The bottom row's rect (screen px) with its buttons at rest. The row is
+-- AutomaticSize and the Upgrades / Rebirth holders pulse with a UIScale, so its
+-- live size breathed by up to ~2 px; the tray and the jump shift planned
+-- against that moved 1-3 px with the pulse. The row is centred and
+-- bottom-anchored: it grows about its bottom centre.
+local function restRowRect(): (Vector2, Vector2)
+	local live = buttonRow.AbsoluteSize
+	local width, height = live.X, 0
+	for _, child in buttonRow:GetChildren() do
+		if child:IsA("GuiObject") and child.Visible then
+			local pulse = 1
+			for _, scaler in child:GetChildren() do
+				if scaler:IsA("UIScale") then
+					pulse *= scaler.Scale
+				end
+			end
+			local rest = child.AbsoluteSize / pulse
+			width += rest.X - child.AbsoluteSize.X
+			height = math.max(height, rest.Y)
+		end
+	end
+	local size = Vector2.new(width, height)
+	return buttonRow.AbsolutePosition + Vector2.new((live.X - size.X) / 2, live.Y - size.Y), size
+end
+
 -- The HUD bottom row's rect (AbsolutePosition space), for the effects tray.
 function HudController.GetBottomRowRect(): { Position: Vector2, Size: Vector2 }?
 	if buttonRow and buttonRow.Visible and buttonRow.AbsoluteSize.X > 0 then
-		return { Position = buttonRow.AbsolutePosition, Size = buttonRow.AbsoluteSize }
+		local position, size = restRowRect()
+		return { Position = position, Size = size }
 	end
 	return nil
 end
@@ -1005,7 +1031,8 @@ local function clearJumpButton()
 	end
 	local scale = UIKit.EffectiveScale(screenGui)
 	local view = camera.ViewportSize / scale
-	local size = buttonRow.AbsoluteSize / scale
+	local _, restSize = restRowRect()
+	local size = restSize / scale
 	local natural = {
 		Position = Vector2.new((view.X - size.X) / 2, view.Y - (BOTTOM_MARGIN + UITheme.ShadowOffset) - size.Y),
 		Size = size,
@@ -2440,7 +2467,12 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 	local rects: { [string]: ScreenRect } = {}
 	for name, gui in parts do
 		if isShown(gui) and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
-			rects[name] = { Position = gui.AbsolutePosition + Vector2.new(0, inset), Size = gui.AbsoluteSize }
+			if gui == buttonRow then
+				local position, size = restRowRect()
+				rects[name] = { Position = position + Vector2.new(0, inset), Size = size }
+			else
+				rects[name] = { Position = gui.AbsolutePosition + Vector2.new(0, inset), Size = gui.AbsoluteSize }
+			end
 		end
 	end
 	return rects
