@@ -187,7 +187,8 @@ local function showBigCard(info: BigCardInfo)
 			sunburstConnection:Disconnect()
 			sunburstConnection = nil
 		end
-		(bigHolder :: Frame):Destroy()
+		local staleHolder = bigHolder :: Frame
+		staleHolder:Destroy()
 		bigHolder = nil
 	end
 
@@ -410,7 +411,8 @@ local function showEventMutationCard(item: any, newIndex: boolean, added: string
 			sunburstConnection:Disconnect()
 			sunburstConnection = nil
 		end
-		(bigHolder :: Frame):Destroy()
+		local staleHolder = bigHolder :: Frame
+		staleHolder:Destroy()
 		bigHolder = nil
 	end
 	local events: { string } = item.EventMutations or {}
@@ -816,7 +818,8 @@ local function showRebirthCard(rebirths: number)
 			sunburstConnection:Disconnect()
 			sunburstConnection = nil
 		end
-		(bigHolder :: Frame):Destroy()
+		local staleHolder = bigHolder :: Frame
+		staleHolder:Destroy()
 		bigHolder = nil
 	end
 
@@ -941,7 +944,8 @@ local function showHeistCard(title: string, titleColor: Color3, caption: string,
 			sunburstConnection:Disconnect()
 			sunburstConnection = nil
 		end
-		(bigHolder :: Frame):Destroy()
+		local staleHolder = bigHolder :: Frame
+		staleHolder:Destroy()
 		bigHolder = nil
 	end
 	local body, holder = UIKit.Panel({
@@ -1189,7 +1193,8 @@ local function showFuseAllCard(result: any)
 			sunburstConnection:Disconnect()
 			sunburstConnection = nil
 		end
-		(bigHolder :: Frame):Destroy()
+		local staleHolder = bigHolder :: Frame
+		staleHolder:Destroy()
 		bigHolder = nil
 	end
 

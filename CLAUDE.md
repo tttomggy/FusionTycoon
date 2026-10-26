@@ -315,6 +315,8 @@ checks that no footprints overlap and everything sits inside the walls.
 - A line starting with `(` directly after a statement ending in an expression is
   parsed as a call spanning both lines. Route casts through a local
   (`local x = y :: T`) instead of inline `(y :: T).Field = …`.
+- Studio may accept code the live client rejects (ambiguous `(` syntax). A file that
+  doesn't parse kills Bootstrap: run the parser before every push.
 
 ## Working style
 

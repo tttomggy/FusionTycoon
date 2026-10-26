@@ -547,7 +547,8 @@ function UIKit.SetSelectedFill(gui: GuiObject, selected: boolean, unselected: Co
 		created.Name = "SelectFill"
 		gradient = created
 	end
-	(gradient :: UIGradient).Enabled = selected
+	local fill = gradient :: UIGradient
+	fill.Enabled = selected
 	gui.BackgroundColor3 = if selected then Colors.White else (unselected or Colors.Panel3)
 end
 
@@ -1572,7 +1573,8 @@ function UIKit.SetOpacity(root: Instance, opacity: number)
 					base = (instance :: any)[entry.Prop]
 					instance:SetAttribute(key, base)
 				end
-				(instance :: any)[entry.Prop] = 1 - (1 - base) * opacity
+				local target = instance :: any
+				target[entry.Prop] = 1 - (1 - base) * opacity
 			end
 		end
 	end

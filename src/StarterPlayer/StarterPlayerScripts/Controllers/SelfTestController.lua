@@ -1871,8 +1871,10 @@ local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 	local ResultController = require(script.Parent.ResultController) :: any
 	local CombatController = require(script.Parent.CombatController) :: any
 	if suppressDaily ~= nil then
-		(require(script.Parent.DailyController) :: any).SelfTestSuppress(suppressDaily)
-		(require(script.Parent.NotifyOptInController) :: any).SelfTestSuppress(suppressDaily)
+		local DailyController = require(script.Parent.DailyController) :: any
+		local NotifyOptInController = require(script.Parent.NotifyOptInController) :: any
+		DailyController.SelfTestSuppress(suppressDaily)
+		NotifyOptInController.SelfTestSuppress(suppressDaily)
 	end
 	local found = UIKit.GetOpenOverlays()
 	if EventInfoCard.IsOpen() then

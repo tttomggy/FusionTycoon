@@ -1,6 +1,40 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Controllers = script.Parent.Controllers
+local UI = script.Parent.UI
+
+-- One controller failing to load or Init must never leave the player with no
+-- HUD: every require and every Init runs behind xpcall, warns with the
+-- traceback, and the boot carries on with the next one.
+local function failed(name: string, err: any)
+	warn(("[Bootstrap] %s failed: %s"):format(name, tostring(err)))
+end
+
+local function safeRequire(name: string, container: Instance): any?
+	local ok, result = xpcall(function()
+		local module = container:FindFirstChild(name)
+		assert(module and module:IsA("ModuleScript"), "no ModuleScript named " .. name)
+		return require(module)
+	end, debug.traceback)
+	if not ok then
+		failed(name, result)
+		return nil
+	end
+	return result
+end
+
+local function safeInit(name: string, module: any?)
+	if module == nil then
+		return
+	end
+	local ok, err = xpcall(function()
+		module.Init()
+	end, debug.traceback)
+	if not ok then
+		failed(name, err)
+	end
+end
 
 -- Landscape on every device, set before anything is built. The place file's
 -- StarterGui carries the same value (default.project.json); this wins over an
@@ -8,76 +42,85 @@ local Controllers = script.Parent.Controllers
 Players.LocalPlayer:WaitForChild("PlayerGui").ScreenOrientation = Enum.ScreenOrientation.LandscapeSensor
 
 -- Preload every sound slot (SoundConfig); a bad id warns once, then is silent.
-require(ReplicatedStorage.Shared.Modules.SoundKit).Preload()
+local SoundKit = safeRequire("SoundKit", ReplicatedStorage.Shared.Modules)
+if SoundKit then
+	local ok, err = xpcall(SoundKit.Preload, debug.traceback)
+	if not ok then
+		failed("SoundKit.Preload", err)
+	end
+end
 
-local InventoryController = require(Controllers.InventoryController)
-local FusionController = require(Controllers.FusionController)
-local TycoonController = require(Controllers.TycoonController)
-local ItemController = require(Controllers.ItemController)
-local AnnouncementController = require(Controllers.AnnouncementController)
-local HudController = require(Controllers.HudController)
-local ToastController = require(Controllers.ToastController)
-local ResultController = require(Controllers.ResultController)
-local WorldLabelController = require(Controllers.WorldLabelController)
-local WorldAnimationController = require(Controllers.WorldAnimationController)
-local GoalMarkerController = require(Controllers.GoalMarkerController)
-local BeltController = require(Controllers.BeltController)
-local GeneratorController = require(Controllers.GeneratorController)
-local FactoryController = require(Controllers.FactoryController)
-local HeistController = require(Controllers.HeistController)
-local EventController = require(Controllers.EventController)
-local AdminController = require(Controllers.AdminController)
-local ShopController = require(Controllers.ShopController)
-local DailyController = require(Controllers.DailyController)
-local NotifyOptInController = require(Controllers.NotifyOptInController)
-local SelfTestController = require(Controllers.SelfTestController)
-local TrailerController = require(Controllers.TrailerController)
-local TutorialController = require(Controllers.TutorialController)
-local CombatController = require(Controllers.CombatController)
-local JumpPadController = require(Controllers.JumpPadController)
-local MusicController = require(Controllers.MusicController)
-local GachaBoardController = require(Controllers.GachaBoardController)
-local HudGate = require(script.Parent.UI.HudGate)
-local TopStack = require(script.Parent.UI.TopStack)
+local InventoryController = safeRequire("InventoryController", Controllers)
+local FusionController = safeRequire("FusionController", Controllers)
+local TycoonController = safeRequire("TycoonController", Controllers)
+local ItemController = safeRequire("ItemController", Controllers)
+local AnnouncementController = safeRequire("AnnouncementController", Controllers)
+local HudController = safeRequire("HudController", Controllers)
+local ToastController = safeRequire("ToastController", Controllers)
+local ResultController = safeRequire("ResultController", Controllers)
+local WorldLabelController = safeRequire("WorldLabelController", Controllers)
+local WorldAnimationController = safeRequire("WorldAnimationController", Controllers)
+local GoalMarkerController = safeRequire("GoalMarkerController", Controllers)
+local BeltController = safeRequire("BeltController", Controllers)
+local GeneratorController = safeRequire("GeneratorController", Controllers)
+local FactoryController = safeRequire("FactoryController", Controllers)
+local HeistController = safeRequire("HeistController", Controllers)
+local EventController = safeRequire("EventController", Controllers)
+local AdminController = safeRequire("AdminController", Controllers)
+local ShopController = safeRequire("ShopController", Controllers)
+local DailyController = safeRequire("DailyController", Controllers)
+local NotifyOptInController = safeRequire("NotifyOptInController", Controllers)
+local TutorialController = safeRequire("TutorialController", Controllers)
+local CombatController = safeRequire("CombatController", Controllers)
+local JumpPadController = safeRequire("JumpPadController", Controllers)
+local MusicController = safeRequire("MusicController", Controllers)
+local GachaBoardController = safeRequire("GachaBoardController", Controllers)
+local HudGate = safeRequire("HudGate", UI)
+local TopStack = safeRequire("TopStack", UI)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
-InventoryController.Init()
-TycoonController.Init()
-ToastController.Init()
-TopStack.Init() -- the top-centre slots + the announcement queue
-AnnouncementController.Init()
-HudController.Init()
-ResultController.Init()
-WorldAnimationController.Init()
-GoalMarkerController.Init()
-BeltController.Init()
-GeneratorController.Init()
-HeistController.Init()
-EventController.Init()
-AdminController.Init()
-ShopController.Init()
-DailyController.Init()
-NotifyOptInController.Init() -- the notification opt-in ask after the daily reveal
-SelfTestController.Init() -- Studio /selftest only
-TrailerController.Init() -- /trailer (admins; client-only cinematic)
-TutorialController.Init() -- the first-time tutorial (banner, dotted path, hand)
-HudGate.Init() -- the progressive HUD: what a new player sees builds up with the tutorial
-CombatController.Init() -- weapons: the bar, swings, ragdoll, hit effects
-MusicController.Init() -- the background playlist (Settings -> Music)
-JumpPadController.Init() -- the 2nd floor's jump pads launch your own character
-GachaBoardController.Init() -- the Gacha odds card that pops up above your pad (+ its E / R / ? buttons)
+safeInit("InventoryController", InventoryController)
+safeInit("TycoonController", TycoonController)
+safeInit("ToastController", ToastController)
+safeInit("TopStack", TopStack) -- the top-centre slots + the announcement queue
+safeInit("AnnouncementController", AnnouncementController)
+safeInit("HudController", HudController)
+safeInit("ResultController", ResultController)
+safeInit("WorldAnimationController", WorldAnimationController)
+safeInit("GoalMarkerController", GoalMarkerController)
+safeInit("BeltController", BeltController)
+safeInit("GeneratorController", GeneratorController)
+safeInit("HeistController", HeistController)
+safeInit("EventController", EventController)
+safeInit("AdminController", AdminController)
+safeInit("ShopController", ShopController)
+safeInit("DailyController", DailyController)
+safeInit("NotifyOptInController", NotifyOptInController) -- the notification opt-in ask after the daily reveal
+safeInit("TutorialController", TutorialController) -- the first-time tutorial (banner, dotted path, hand)
+safeInit("HudGate", HudGate) -- the progressive HUD: what a new player sees builds up with the tutorial
+safeInit("CombatController", CombatController) -- weapons: the bar, swings, ragdoll, hit effects
+safeInit("MusicController", MusicController) -- the background playlist (Settings -> Music)
+safeInit("JumpPadController", JumpPadController) -- the 2nd floor's jump pads launch your own character
+safeInit("GachaBoardController", GachaBoardController) -- the Gacha odds card above your pad (+ its E / R / ? buttons)
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.
-task.spawn(FusionController.Init)
+task.spawn(safeInit, "FusionController", FusionController)
 
 -- Waits for the server's plots folder before hiding other players'
 -- owner-only labels.
-task.spawn(WorldLabelController.Init)
+task.spawn(safeInit, "WorldLabelController", WorldLabelController)
 
 -- Also waits for the plots folder, then animates every nearby factory line.
-task.spawn(FactoryController.Init)
+task.spawn(safeInit, "FactoryController", FactoryController)
 
 -- ItemController answers the locked pedestal spots' Unlock prompt.
-task.spawn(ItemController.Init)
+task.spawn(safeInit, "ItemController", ItemController)
+
+-- Last, after every gameplay controller: they can never block the HUD.
+-- /selftest is Studio-only, so the live client does not even load its file.
+if RunService:IsStudio() then
+	safeInit("SelfTestController", safeRequire("SelfTestController", Controllers))
+end
+safeInit("TrailerController", safeRequire("TrailerController", Controllers)) -- /trailer (admins; client-only cinematic)
