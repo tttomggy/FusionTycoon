@@ -364,12 +364,15 @@ PlotLayout.Gacha = {
 	PopFromScale = 0.85,
 	-- PHONE size (GachaBoardController.PhoneScaleFor): the whole card (title to key bar)
 	-- must fit between the top of the screen's stack and the pad's anchor. At the default
-	-- camera, standing on the pad, the anchor projects to ~64% of the screen height; 60%
-	-- is the safe figure. The card's top must clear TopStack's chip row: CHIP_Y 12 + the
-	-- 44 px event chip + GAP 8 = 64 logical px (x PhoneScale on screen).
-	PhoneAnchorY = 0.6,
+	-- camera, standing on the pad, the anchor projects to ~59.5% of the screen height at
+	-- 844x390 / 896x414 (measured by /selftest); 59% is the safe figure. The card's top
+	-- must clear TopStack's chip row: CHIP_Y 12 + the 44 px event chip + GAP 8 = 64
+	-- logical px (x PhoneScale on screen), rounded UP to a whole px, plus
+	-- PhoneTopGapPx of air (screen px): top = ceil(64 x 0.8) + 4 = 56.
+	PhoneAnchorY = 0.59,
 	PhoneTopReservePx = 64,
-	PhoneScaleMin = 0.55, -- keeps the phone variant's text (25 px) >= 13 px
+	PhoneTopGapPx = 4,
+	PhoneScaleMin = 0.52, -- keeps the phone variant's text (25 px) >= 13 px
 	PhoneScaleMax = 1.0,
 	-- The PHONE variant of the card (design px, before PhoneScaleFor): no mutation
 	-- line (the (i) panel has it), every text >= PhoneTextPx so it reads >= 13 px at
@@ -378,11 +381,13 @@ PlotLayout.Gacha = {
 	-- (CardHeight) to pay for them.
 	PhoneTopPadPx = 50,
 	PhoneCardHeightPx = 184,
-	PhoneButtonRowPx = 98, -- 10 gap + the 62 px R circle + a 24 px caption (13 px after the scale)
+	PhoneButtonRowPx = 99, -- 10 gap + the 62 px R circle + a 25 px caption (13 px after the scale)
+	PhoneCaptionPx = 25, -- x 0.52 = 13 px
+	PhoneButtonSpacingPx = 90, -- the key holders are 88 wide: >= 44 px after the scale
 	PhoneTextPx = 25, -- the %, the pills, the (i) mark
 	PhonePriceTextPx = 26,
 	PhonePillHeightPx = 32,
-	PhoneInfoHitPx = 84, -- x 0.55 = 46 px
+	PhoneInfoHitPx = 88, -- x 0.52 = 46 px
 	PhoneMinTextPx = 13, -- after the scale: what /selftest demands of every text on the card
 }
 

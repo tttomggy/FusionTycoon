@@ -93,9 +93,14 @@ in front of it and see the card over it).
   upward from the anchor (the captions' bottom edge is on it).
   **Phone variant** (`applyVariant`, `PlotLayout.Gacha.Phone*`): not the desktop
   card shrunk evenly. No mutation line (the (i) panel has it); the %, the pills,
-  the (i) mark and the key captions are 24-26 px so they read >= 13 px at
-  `PhoneScaleMin`; the (i) hit area is 84 px (>= 44 after the scale); the
-  billboard is 300 × `GachaBoardController.PhoneFullHeight` (50 + 184 + 98).
+  the (i) mark and the key captions are 25-26 px so they read >= 13 px at
+  `PhoneScaleMin` (0.52); the (i) hit area is 88 px and each key's holder 88 wide
+  (`PhoneButtonSpacingPx` 90), both >= 44 after the scale; the billboard is 300 ×
+  `GachaBoardController.PhoneFullHeight` (50 + 184 + 99). `PhoneScaleFor` puts the
+  card's top at `ceil(TopStack's chip row bottom) + PhoneTopGapPx` (56 px after the
+  0.8) in whole px. A phone % label never shrinks for a long value
+  (`PlanPercent`: full size, slid inward to stay on the card); the odds text is
+  never rounded.
   Captions on a phone: Pull / ×10 / Auto (Auto ON). `/selftest` measures every
   text and the hit area at 844 × 390 and 896 × 414.
   `StudsOffsetWorldSpace` stays zero; `StudsOffset` is (0, 0, 2) (camera-relative

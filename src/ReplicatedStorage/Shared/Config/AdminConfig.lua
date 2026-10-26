@@ -17,10 +17,12 @@
 ]]
 local AdminConfig = {}
 
--- Harris: put your Roblox UserId in this list (e.g. { 123456789 }) so you're
--- an admin even if the place moves to a group you don't own. Add co-admins
--- the same way. The place owner is always an admin without being listed.
-AdminConfig.AdminUserIds = {} :: { number }
+-- Listed admins work everywhere, including an unpublished / Team Create place
+-- where the owner lookup fails. Add co-admins the same way. The place owner is
+-- always an admin without being listed.
+AdminConfig.AdminUserIds = {
+	1599938767, -- Harris (ILIKESIMULATORGG)
+} :: { number }
 
 AdminConfig.Strengths = { 1, 2, 3 }
 AdminConfig.DurationMinutes = { 5, 10, 15 }

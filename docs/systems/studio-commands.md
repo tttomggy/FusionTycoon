@@ -76,10 +76,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   and your VIP chip are hidden while it is open and the chip is back when it
   closes (each for the desktop and phone HUD layout via `UIKit.SetForcedPhone`;
   the window itself can't be resized from a script); on the phone layout the card's
-  scale is `GachaBoardController.PhoneScaleFor(logical viewport)` (0.55..1.0), and
+  scale is `GachaBoardController.PhoneScaleFor(logical viewport)` (0.52..1.0), and
   with the character on the pad at the default camera the whole card, projected by
-  hand for 844 × 390 and 896 × 414, is on screen under TopStack's chip row and over
-  the weapon bar, its % text ≥ 12 px on screen;
+  hand for 844 × 390 and 896 × 414, is on screen at least `ceil(chip row bottom) + 4`
+  px under the top of the screen (TopStack's chip row) and over the weapon bar, its
+  % text ≥ 13 px on screen (long odds like `0.0035%` included: the size never drops,
+  the label slides inward instead);
   tier %s vs `GetGachaRates` at the server's luck and under an admin-luck
   event, the luck pill, solid black (no "?") orbs, the (i) panel sums; all 6 cells drawn
   with a % ≥ 12 px tall; the PS99 face (white paper + light rim, the 26 px title

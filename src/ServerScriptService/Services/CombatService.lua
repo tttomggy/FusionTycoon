@@ -99,6 +99,8 @@ local state = {
 	-- userId -> placed banana peels
 	peels = {} :: { [number]: { Model } },
 	folder = nil :: Folder?,
+	-- userId -> WeaponUnlocked cards sent this session (/selftest compares)
+	unlockCards = {} :: { [number]: number },
 }
 
 local function serverNow(): number
@@ -561,6 +563,13 @@ local function giveTools(player: Player)
 	end
 end
 
+-- The "You got the ..." card. Only for a weapon the player just earned: a
+-- grant at join (the Studio start) has nothing on screen to show it on.
+local function sendUnlockCard(player: Player, id: string)
+	state.unlockCards[player.UserId] = (state.unlockCards[player.UserId] or 0) + 1
+	RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = id })
+end
+
 -- True when an owned weapon is in neither the Backpack nor the character.
 local function missingTools(player: Player): boolean
 	local backpack = player:FindFirstChildOfClass("Backpack")
@@ -583,7 +592,7 @@ local function grantByRebirths(player: Player)
 	for _, id in CombatConfig.GetUnlockedByRebirths(PlayerDataService.GetRebirths(player)) do
 		if PlayerDataService.GrantWeapon(player, id) then
 			granted = true
-			RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = id })
+			sendUnlockCard(player, id)
 		end
 	end
 	if granted or (player.Character ~= nil and missingTools(player)) then
@@ -597,7 +606,7 @@ function CombatService.GrantWeapon(player: Player, id: string): boolean
 	if not PlayerDataService.GrantWeapon(player, id) then
 		return false
 	end
-	RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = id })
+	sendUnlockCard(player, id)
 	giveTools(player)
 	return true
 end
@@ -608,12 +617,18 @@ function CombatService.RefreshTools(player: Player)
 	giveTools(player)
 end
 
--- Studio /weapons all | reset.
-function CombatService.DebugSetAll(player: Player, all: boolean)
+-- How many unlock cards this player was sent (/selftest).
+function CombatService.GetUnlockCardsSent(player: Player): number
+	return state.unlockCards[player.UserId] or 0
+end
+
+-- Studio /weapons all | reset. `silent`: grant without the unlock cards (the
+-- Studio start does it at join, where they open over a loading screen).
+function CombatService.DebugSetAll(player: Player, all: boolean, silent: boolean?)
 	if all then
 		for _, weapon in CombatConfig.Weapons do
-			if PlayerDataService.GrantWeapon(player, weapon.Id) then
-				RemoteEvents.WeaponUnlocked:FireClient(player, { Weapon = weapon.Id })
+			if PlayerDataService.GrantWeapon(player, weapon.Id) and not silent then
+				sendUnlockCard(player, weapon.Id)
 			end
 		end
 	else
@@ -1059,6 +1074,7 @@ local function onPlayerRemoving(player: Player)
 		peel:Destroy()
 	end
 	state.peels[player.UserId] = nil
+	state.unlockCards[player.UserId] = nil
 end
 
 -- The verdict of `player`'s last melee swing (nil before the first). /selftest

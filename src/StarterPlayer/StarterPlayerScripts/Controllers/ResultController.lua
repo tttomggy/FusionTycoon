@@ -53,6 +53,7 @@ local FusionController = require(script.Parent.FusionController)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
 local ShopController = require(script.Parent.ShopController)
+local NotifyOptInController = require(script.Parent.NotifyOptInController)
 
 local ResultController = {}
 
@@ -98,6 +99,9 @@ end
 
 local bigHolder: Frame? = nil
 local sunburstConnection: RBXScriptConnection? = nil
+-- The high moment the open big card stands for (NotifyOptInController asks
+-- for notifications when it closes): only while `Holder` is the open card.
+local bigMoment: { Holder: Frame, Kind: NotifyOptInController.Moment, Tier: string }? = nil
 
 local function closeBigCard()
 	if sunburstConnection then
@@ -107,6 +111,11 @@ local function closeBigCard()
 	local holder = bigHolder
 	bigHolder = nil
 	UIKit.SetOverlay("ResultCard", false)
+	local moment = bigMoment
+	bigMoment = nil
+	if holder and moment and moment.Holder == holder then
+		NotifyOptInController.OnMoment(moment.Kind, moment.Tier)
+	end
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -179,6 +188,9 @@ type BigCardInfo = {
 	Headline: string?,
 	-- Closes by itself after this long, or on a tap (Common / Rare pulls).
 	AutoCloseSeconds: number?,
+	-- A fusion success or a manual pull: its close is a moment to ask for
+	-- notifications (NotifyOptInController decides if it is time).
+	Moment: NotifyOptInController.Moment?,
 }
 
 local function showBigCard(info: BigCardInfo)
@@ -214,6 +226,7 @@ local function showBigCard(info: BigCardInfo)
 		ZIndex = 2,
 	})
 	bigHolder = holder
+	bigMoment = if info.Moment then { Holder = holder, Kind = info.Moment, Tier = tier } else nil
 	UIKit.SetOverlay("ResultCard", true)
 	buildSunburst(body)
 	local z = body.ZIndex + 3
@@ -569,6 +582,7 @@ local MULTI_GAP = 10
 local MULTI_POP_STAGGER = 0.06
 
 local multiHolder: Frame? = nil
+local multiBestTier: string? = nil -- the open ×10 card's best tier: a moment when it closes (manual pulls only)
 -- 10-pull cards shown for Auto pull cycles (/selftest counts them).
 local autoCardsShown = 0
 
@@ -584,6 +598,11 @@ local function closeMultiCard()
 	local holder = multiHolder
 	multiHolder = nil
 	UIKit.SetOverlay("MultiPull", false)
+	local bestTier = multiBestTier
+	multiBestTier = nil
+	if holder and bestTier then
+		NotifyOptInController.OnMoment("Pull", bestTier)
+	end
 	if holder then
 		local tween = UIKit.PopOut(holder)
 		tween.Completed:Once(function()
@@ -695,6 +714,7 @@ local function showMultiCard(items: { any }, title: string?, auto: boolean?)
 		ZIndex = 1, -- under the big card the best pull may also get
 	})
 	multiHolder = holder
+	multiBestTier = if auto then nil else best.Tier
 	if auto then
 		autoCardsShown += 1
 	end
@@ -1847,6 +1867,7 @@ local function onFusionResolved(result: any)
 	do
 		showBigCard({
 			Caption = "FUSION SUCCESS",
+			Moment = "Fusion",
 			Headline = tier:upper() .. " ORB!",
 			AutoCloseSeconds = if tier == "Rare" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,
 			SourceLine = sourceLine,
@@ -1922,6 +1943,7 @@ local function onGachaPullResult(payload: any)
 		-- A daily / gift reward names itself ("🎁 DAY 7 REWARD").
 		Caption = if named then payload.Caption else (if tier:sub(1, 1) == "E" then "YOU GOT AN" else "YOU GOT A"),
 		Headline = if named then nil else (tier:upper() .. " ORB!"),
+		Moment = if payload.Auto == true then nil else "Pull",
 		Item = newItem,
 		Description = ("earns %s/s on a pedestal"):format(NumberFormat.Money(earnRate(newItem))),
 		AutoCloseSeconds = if tier == "Common" or tier == "Rare" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,

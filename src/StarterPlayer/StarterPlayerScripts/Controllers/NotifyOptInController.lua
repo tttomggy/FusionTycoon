@@ -6,8 +6,12 @@
 	notifications. The ask is Roblox's own modal (PromptOptIn); we add no
 	card before it.
 
-	  * When: right after the daily reward card closes from a granted claim
-	    (DailyCard's OnRevealClosed), the "come back tomorrow" moment.
+	  * When: never on join. Earliest NotifyConfig.MinSessionSeconds into this
+	    session's play AND the tutorial done. Then at the first high moment
+	    (OnMoment): a successful fusion's result card closing, a pull of
+	    NotifyConfig.MinPullTier or better closing (ResultController), or the
+	    daily reveal closing (DailyCard's OnRevealClosed). If none happened by
+	    NotifyConfig.FallbackSeconds, the next time no overlay is open (Tick).
 	  * Guards: no tutorial; no card open (UIKit overlays, the shop's side
 	    cards: waits up to WAIT_LIMIT_SECONDS, then gives up for the
 	    session); not within LOSS_QUIET_SECONDS of a purchase prompt or a
@@ -22,6 +26,8 @@ local MarketplaceService = game:GetService("MarketplaceService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local NotifyConfig = require(ReplicatedStorage.Shared.Config.NotifyConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonController = require(script.Parent.TycoonController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -33,6 +39,9 @@ local SETTLE_SECONDS = 0.5
 local RETRY_SECONDS = 0.5
 local WAIT_LIMIT_SECONDS = 20
 local LOSS_QUIET_SECONDS = 1
+local TICK_SECONDS = 1 -- the fallback's check rate
+
+export type Moment = "Fusion" | "Pull" | "Daily"
 
 -- The two calls we make on the Roblox service, so /selftest can swap in a stub.
 export type Service = {
@@ -44,9 +53,12 @@ export type Service = {
 local realService = ExperienceNotificationService :: any
 local service: Service = realService
 local tutorialActive: () -> boolean = TycoonController.IsTutorialActive
+local clock: () -> number = os.clock -- /selftest swaps in a fake one
+local realSessionStart = os.clock() -- the module loads when the client boots
+local sessionStart = realSessionStart
 
 local attempted = false -- the ask was made (or ruled out) this session
-local pending = false -- a reveal close is waiting on its guards
+local pending = false -- an ask is waiting on its guards
 local suppressed = false -- /selftest
 local lastLossAt = -math.huge
 
@@ -87,11 +99,8 @@ local function ask()
 	end
 end
 
--- DailyCard: the card closed after a granted claim.
-function NotifyOptInController.OnDailyRevealClosed()
-	if attempted or pending or suppressed or tutorialActive() then
-		return
-	end
+-- Waits out the guards (up to WAIT_LIMIT_SECONDS), then asks.
+local function startAsk()
 	pending = true
 	task.spawn(function()
 		task.wait(SETTLE_SECONDS)
@@ -112,16 +121,58 @@ function NotifyOptInController.OnDailyRevealClosed()
 	end)
 end
 
+local function sessionSeconds(): number
+	return clock() - sessionStart
+end
+
+-- A high moment just ended (its card closed). Nothing before the session has
+-- run MinSessionSeconds, none during the tutorial, a pull only from
+-- MinPullTier up; the first one after that starts the ask.
+function NotifyOptInController.OnMoment(kind: Moment, tier: string?)
+	if attempted or pending or suppressed or tutorialActive() then
+		return
+	end
+	if sessionSeconds() < NotifyConfig.MinSessionSeconds then
+		return
+	end
+	if kind == "Pull" then
+		local minRank = ItemConfig.Tiers[NotifyConfig.MinPullTier] or math.huge
+		if (ItemConfig.Tiers[tier or ""] or 0) < minRank then
+			return
+		end
+	end
+	startAsk()
+end
+
+-- DailyCard: the card closed after a granted claim.
+function NotifyOptInController.OnDailyRevealClosed()
+	NotifyOptInController.OnMoment("Daily")
+end
+
+-- Once a second: no moment came by FallbackSeconds, so ask the next time no
+-- overlay is open.
+function NotifyOptInController.Tick()
+	if attempted or pending or suppressed or tutorialActive() then
+		return
+	end
+	if sessionSeconds() >= NotifyConfig.FallbackSeconds then
+		startAsk()
+	end
+end
+
 -- /selftest: while on, the real prompt never opens by itself.
 function NotifyOptInController.SelfTestSuppress(on: boolean)
 	suppressed = on
 end
 
--- /selftest: swap in a stub service (and a tutorial probe); nil puts the real
--- ones back. Either way the session starts fresh (not asked yet).
-function NotifyOptInController.SetServiceForTest(stub: Service?, isTutorialActive: (() -> boolean)?)
+-- /selftest: swap in a stub service, a tutorial probe and a clock (seconds
+-- of session play); nil puts the real ones back. Either way the session
+-- starts fresh (not asked yet).
+function NotifyOptInController.SetServiceForTest(stub: Service?, isTutorialActive: (() -> boolean)?, fakeClock: (() -> number)?)
 	service = stub or realService
 	tutorialActive = isTutorialActive or TycoonController.IsTutorialActive
+	clock = fakeClock or os.clock
+	sessionStart = if fakeClock then fakeClock() else realSessionStart
 	attempted = false
 	pending = false
 	lastLossAt = -math.huge
@@ -141,6 +192,12 @@ function NotifyOptInController.Init()
 	end)
 	MarketplaceService.PromptGamePassPurchaseFinished:Connect(noteLoss)
 	MarketplaceService.PromptPurchaseFinished:Connect(noteLoss)
+	task.spawn(function()
+		while true do
+			task.wait(TICK_SECONDS)
+			NotifyOptInController.Tick()
+		end
+	end)
 end
 
 return NotifyOptInController

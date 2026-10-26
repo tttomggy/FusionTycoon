@@ -96,7 +96,7 @@ safeInit("EventController", EventController)
 safeInit("AdminController", AdminController)
 safeInit("ShopController", ShopController)
 safeInit("DailyController", DailyController)
-safeInit("NotifyOptInController", NotifyOptInController) -- the notification opt-in ask after the daily reveal
+safeInit("NotifyOptInController", NotifyOptInController) -- the notification opt-in ask (5 min in, at the first high moment)
 safeInit("TutorialController", TutorialController) -- the first-time tutorial (banner, dotted path, hand)
 safeInit("HudGate", HudGate) -- the progressive HUD: what a new player sees builds up with the tutorial
 safeInit("CombatController", CombatController) -- weapons: the bar, swings, ragdoll, hit effects

@@ -27,22 +27,35 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   today gold glowing "TODAY", Day 7 purple),
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
-- **Notify opt-in** (`NotifyOptInController`, client only): once per session,
-  right after the daily card closes from a granted claim (`DailyCard`'s
-  `OnRevealClosed` handler), it calls Roblox's
-  `ExperienceNotificationService:PromptOptIn()`. The modal text is Roblox's;
-  we show no card of ours. Guards: no tutorial; no UIKit overlay or shop side
-  card (waits up to 20 s, then gives up for the session); no failed fusion or
-  purchase prompt in the last second; not `/selftest`-suppressed
-  (`SelfTestSuppress`, set by `clearScreen`); and `CanPromptOptInAsync()` in a
-  `pcall` must return true (Roblox enforces under-13, already opted in and the
-  30-day cooldown; we save nothing). Logs `NotifyOptInShown` /
-  `NotifyOptInClosed` (`OptInPromptClosed`) through remote
-  `NotifyOptInAnalytics { Event = "Shown" | "Closed" }` → `RewardService` →
-  `AnalyticsKit.Custom` (`RemoteGuard.Allow`, whitelisted). `/selftest` swaps
-  a stub in with `SetServiceForTest(stub, tutorialProbe)` (tutorial active →
-  not called; bare screen → once, a second close still once; erroring
-  `CanPromptOptInAsync` → not called, no error) and restores the real service.
+- **Notify opt-in** (`NotifyOptInController`, client only): once per session
+  it calls Roblox's `ExperienceNotificationService:PromptOptIn()`. The modal
+  text is Roblox's; we show no card of ours. **Never on join** (the daily card
+  auto-opens on join, so "after the daily reveal" used to mean "on join").
+  Numbers in `NotifyConfig`: `MinSessionSeconds = 300`, `FallbackSeconds =
+  480`, `MinPullTier = "Epic"`. Earliest = 5 min of this session's play
+  (`clock()` from Init) AND the tutorial done. After that, the first high
+  moment (`OnMoment(kind, tier)`) starts the ask: a successful fusion's big
+  result card closing (`ResultController`, `Moment = "Fusion"`), a pull of
+  Epic or better closing (a manual single pull's big card, or the ×10 card
+  by its best tier; Auto pulls never count), or the daily reveal closing
+  (`DailyCard`'s `OnRevealClosed`; counts only after the 5 min). A moment
+  before 5 min or during the tutorial is lost. **Fallback:** once a second
+  `Tick()` checks `FallbackSeconds`; at 8 min with no ask yet it asks the
+  next time no overlay is open. Guards on every path: no tutorial; no UIKit
+  overlay or shop side card (waits up to 20 s, then gives up for the
+  session); no failed fusion or purchase prompt in the last second; not
+  `/selftest`-suppressed (`SelfTestSuppress`, set by `clearScreen`); and
+  `CanPromptOptInAsync()` in a `pcall` must return true (Roblox enforces
+  under-13, already opted in and the 30-day cooldown; we save nothing).
+  Logs `NotifyOptInShown` / `NotifyOptInClosed` (`OptInPromptClosed`)
+  through remote `NotifyOptInAnalytics { Event = "Shown" | "Closed" }` →
+  `RewardService` → `AnalyticsKit.Custom` (`RemoteGuard.Allow`,
+  whitelisted). `/selftest` swaps in a stub service, a tutorial probe and a
+  fake clock (`SetServiceForTest(stub, tutorialProbe, clock)`): tutorial
+  active → not called; before 5 min a reveal or fusion close → not called;
+  after 5 min a Rare pull → not called, a fusion success close → once; at the
+  fallback time with no moment → once; a second moment → still once;
+  erroring `CanPromptOptInAsync` → not called, no error.
 - **Playtime gifts** (`GiftConfig`, `RewardService`): six gifts at 5 / 10
   / 15 / 25 / 40 / 60 minutes played **in this visit**: every visit starts
   fresh (0 s, nothing claimed), leaving loses the unclaimed ones

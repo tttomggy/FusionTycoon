@@ -33,6 +33,7 @@ local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
+local AdminConfig = require(ReplicatedStorage.Shared.Config.AdminConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local SoundConfig = require(ReplicatedStorage.Shared.Config.SoundConfig)
@@ -108,7 +109,9 @@ function DebugService.ApplyStudioStart(player: Player): boolean
 		PlayerDataService.SetRebirths(player, rebirths)
 	end
 	if DebugConfig.StudioGrantAllWeapons then
-		CombatService.DebugSetAll(player, true)
+		-- No unlock cards at join: nothing is on screen yet to hold them, and
+		-- five stacked TutorialCards each tripped UIKit's no-card watchdog.
+		CombatService.DebugSetAll(player, true, true)
 	end
 	PlayerDataService.SyncTycoon(player)
 	return true
@@ -619,6 +622,26 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 		local why = CombatService.WhyNotHittable(player)
 		data.Rebirths = rebirths
 		result(why == "NeedsRebirth", "combat: a Rebirth-0 player can't be hit", tostring(why))
+
+		-- The Studio start grants every weapon at join with no unlock card (a
+		-- card there opens over a loading screen: UIKit's "opened without a
+		-- card on screen" x5). Silent grant: weapons owned, zero cards sent.
+		local ownedBefore = table.clone(data.Weapons)
+		PlayerDataService.ResetWeapons(player)
+		local cardsBefore = CombatService.GetUnlockCardsSent(player)
+		CombatService.DebugSetAll(player, true, true)
+		local cardsSent = CombatService.GetUnlockCardsSent(player) - cardsBefore
+		local owned = 0
+		for _ in data.Weapons do
+			owned += 1
+		end
+		data.Weapons = ownedBefore
+		CombatService.RefreshTools(player)
+		result(
+			cardsSent == 0 and owned == #CombatConfig.Weapons,
+			"combat: the join-time weapon grant (Studio start) sends no unlock card",
+			("%d cards sent, %d/%d weapons granted"):format(cardsSent, owned, #CombatConfig.Weapons)
+		)
 	end
 
 	-- Each weapon, equipped through the server on the tester: the RightGrip
@@ -1735,6 +1758,13 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		result(#serverErrors == 0, ("remote fuzz: no server errors (%d junk calls)"):format(fuzzReport.Fired or 0), table.concat(serverErrors, " | "))
 		result(fingerprintAfter == before, "remote fuzz: no state change")
 		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
+		-- The fuzz's admin calls aim at a fake negative id (the tester may be a
+		-- listed admin); a non-admin is still refused by the same check the
+		-- AdminService handlers run.
+		result(
+			not AdminConfig.IsAdmin(-987654321, nil) and not AdminConfig.IsAdmin(-987654321, -987654321) and not AdminConfig.IsAdmin(0, nil),
+			"admin check: a fake negative id is never an admin"
+		)
 	end
 	RemoteGuard.Reset(player)
 	-- The client checked every hovering thing before the fuzz; rebuild the

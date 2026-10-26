@@ -6,7 +6,7 @@
 	floating right over it and opening as you walk up, like a Pet Simulator 99
 	egg card. A 300 x 204 px card plus a 72 px E / R / T row, the same size
 	at any zoom. On a phone one UIScale shrinks the whole card until it fits
-	between TopStack's chip row and the pad (PhoneScaleFor, 0.55..1.0). This is
+	between TopStack's chip row and the pad (PhoneScaleFor, 0.52..1.0). This is
 	the final placement: not docked, not following the camera.
 
 	Why the earlier in-world tries failed: they were sized in studs (huge up
@@ -186,6 +186,7 @@ type ButtonView = {
 	Circle: TextLabel,
 	Glyph: ImageLabel,
 	Caption: TextLabel,
+	Slot: number, -- -1 / 0 / 1: which side of the centre key (x the row's spacing)
 }
 
 type TileView = {
@@ -542,20 +543,43 @@ local function buildContent(view: CardView, card: Frame)
 	})
 end
 
+-- A tile's % label: its size and how far to slide it sideways (px) so the text
+-- and its outline stay inside the card. `column` is 1..3 (the grid is 3 wide).
+-- The phone keeps the full PhoneTextPx for every value (a long one like
+-- "0.0035%" used to drop 3 px and fell to 12 px on screen); the odds text
+-- itself is never rounded or reformatted. The width is an estimate (the
+-- Display font's digits run ~0.56 em), generous so the slide is never short.
+local PERCENT_EM_PER_CHAR = 0.56
+local CARD_EDGE_MARGIN = 2
+function GachaBoardController.PlanPercent(text: string, phone: boolean, column: number): (number, number)
+	local base = if phone then G.PhoneTextPx else PERCENT_SIZE
+	local size = if phone or #text <= 6 then base else base - 3
+	local half = #text * PERCENT_EM_PER_CHAR * size / 2 + PERCENT_INK + PERCENT_OUTLINE
+	local gridWidth = CELL_SIZE.X * 3 + CELL_GAP * 2
+	local centre = (CARD.X - gridWidth) / 2 + (column - 1) * (CELL_SIZE.X + CELL_GAP) + CELL_SIZE.X / 2
+	local shift = 0
+	if centre + half > CARD.X - CARD_EDGE_MARGIN then
+		shift = CARD.X - CARD_EDGE_MARGIN - half - centre
+	elseif centre - half < CARD_EDGE_MARGIN then
+		shift = CARD_EDGE_MARGIN + half - centre
+	end
+	return size, math.round(shift)
+end
+
 -- Sets the text and colours from the odds, luck, event, Index and price.
 -- Never creates or destroys anything.
 local function updateContent(view: CardView)
 	local inputs = currentInputs()
 	local rows = currentRows(inputs.Luck)
 	local found = foundTiers()
-	for _, row in rows.Tiers do
+	for index, row in rows.Tiers do
 		local tile = view.Tiles[row.Tier]
 		if tile then
-			local base = if view.Phone then G.PhoneTextPx else PERCENT_SIZE
-			local size = if #row.Text <= 6 then base else base - 3
+			local size, shift = GachaBoardController.PlanPercent(row.Text, view.Phone, (index - 1) % 3 + 1)
 			for _, text in { tile.Percent, tile.Outline } do
 				text.Text = row.Text
 				text.TextSize = size
+				text.Position = UDim2.new(0.5, shift, 0, PERCENT_Y)
 			end
 			local isFound = found[row.Tier] == true
 			tile.Orb.Visible = isFound
@@ -855,7 +879,7 @@ local KEYS: { KeySpec } = {
 }
 
 local function captionFor(spec: KeySpec): string
-	-- The phone's captions are 24 px (13 px after the scale): "Auto ×10" would not fit under its key.
+	-- The phone's captions are 25 px (13 px after the scale): "Auto ×10" would not fit under its key.
 	local phone = UIKit.IsPhone()
 	if spec.Id == "Auto" then
 		if phone then
@@ -1069,7 +1093,7 @@ local function buildKeyBar(root: Instance): Frame
 			Size = UDim2.new(1, 0, 0, 16),
 			TextXAlignment = Enum.TextXAlignment.Center,
 		})
-		buttons[spec.Id] = { Holder = holder, Shadow = shadow, Button = body, Circle = circle, Glyph = glyph, Caption = caption }
+		buttons[spec.Id] = { Holder = holder, Shadow = shadow, Button = body, Circle = circle, Glyph = glyph, Caption = caption, Slot = index - 2 }
 	end
 	applyButtonSizes()
 	return row
@@ -1173,12 +1197,16 @@ end
 -- a pixel-size billboard, so on a phone it must shrink until the whole card
 -- (title to key bar, PhoneFullHeight tall) fits between TopStack's chip row and
 -- the pad's anchor, which sits at G.PhoneAnchorY of the screen height when you
--- stand on the pad at the default camera. In screen px (logical x PhoneScale);
+-- stand on the pad at the default camera. In screen px (logical x PhoneScale):
+-- the card's top lands on math.ceil(chip row bottom) + G.PhoneTopGapPx, the
+-- height between it and the anchor snapped down to a whole px; the factor is
 -- clamped to G.PhoneScaleMin..G.PhoneScaleMax. Pure: /selftest runs it at
 -- 844 x 390 and 896 x 414.
 function GachaBoardController.PhoneScaleFor(view: Vector2): number
-	local room = (G.PhoneAnchorY * view.Y - G.PhoneTopReservePx) * UITheme.PhoneScale
-	return math.clamp(room / GachaBoardController.PhoneFullHeight, G.PhoneScaleMin, G.PhoneScaleMax)
+	local anchorPx = G.PhoneAnchorY * view.Y * UITheme.PhoneScale
+	local topPx = math.ceil(G.PhoneTopReservePx * UITheme.PhoneScale) + G.PhoneTopGapPx
+	local heightPx = math.floor(anchorPx - topPx)
+	return math.clamp(heightPx / GachaBoardController.PhoneFullHeight, G.PhoneScaleMin, G.PhoneScaleMax)
 end
 
 -- The phone variant: not the desktop card shrunk evenly (its 11-12 px lines
@@ -1196,15 +1224,17 @@ local function applyVariant(view: CardView)
 	local pillHeight = if phone then G.PhonePillHeightPx else 20
 	local pillTextPx = if phone then G.PhoneTextPx else 11
 	local rowHeight = if phone then G.PhoneButtonRowPx else ROW_HEIGHT
+	local spacing = if phone then G.PhoneButtonSpacingPx else BUTTON_SPACING
 	view.Billboard.Size = UDim2.fromOffset(CARD.X, topPad + cardHeight + rowHeight)
 	view.Card.Position = UDim2.fromOffset(0, topPad)
 	view.Card.Size = UDim2.fromOffset(CARD.X, cardHeight)
 	view.KeyBar.Position = UDim2.fromOffset(0, topPad + cardHeight + KEY_BAR_GAP)
 	view.KeyBar.Size = UDim2.fromOffset(CARD.X, rowHeight - KEY_BAR_GAP)
 	for _, button in buttons do
-		button.Holder.Size = UDim2.fromOffset(BUTTON_SPACING - 2, rowHeight - KEY_BAR_GAP)
-		button.Caption.TextSize = if phone then 24 else 14
-		button.Caption.Size = UDim2.new(1, 0, 0, if phone then 24 else 16)
+		button.Holder.Size = UDim2.fromOffset(spacing - 2, rowHeight - KEY_BAR_GAP)
+		button.Holder.Position = UDim2.new(0.5, button.Slot * spacing, 0, 0)
+		button.Caption.TextSize = if phone then G.PhoneCaptionPx else 14
+		button.Caption.Size = UDim2.new(1, 0, 0, if phone then G.PhoneCaptionPx else 16)
 	end
 	refreshButtons()
 	view.EventRow.Position = UDim2.fromOffset(10, -topPad + 2)

@@ -43,6 +43,7 @@ local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
+local NotifyConfig = require(ReplicatedStorage.Shared.Config.NotifyConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
@@ -60,6 +61,9 @@ local running = false
 local NAN = 0 / 0
 local INF = math.huge
 local BIG_STRING = string.rep("x", 10000)
+-- Never a real player and never an admin (negative ids are refused by
+-- AdminConfig.IsAdmin); the fuzz's per-player admin calls aim at it.
+local FAKE_USER_ID = -987654321
 
 -- Junk for every remote that takes arguments. Each entry is the argument
 -- list for one FireServer call. None of these is a valid request.
@@ -121,13 +125,15 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		-- Never a real step: 0, out of range, fractions, junk, a non-true Replay.
 		TutorialAdvance = { {}, { "x" }, { { Step = 0 } }, { { Step = 99 } }, { { Step = 1.5 } }, { { Step = "1" } }, { { Replay = "yes" } } },
 		-- A non-admin tester: the SUSPICIOUS warn and nothing changes (the
-		-- fingerprint check); an admin tester: junk ids are rejected.
+		-- fingerprint check); an admin tester: junk ids are rejected. The
+		-- per-player actions use FAKE_USER_ID, never a real player's id: a listed
+		-- admin running this must not be able to reset someone in the server.
 		AdminAction = {
 			{},
 			{ { Action = "Nope" } },
 			{ { Action = "StartEvent", Args = { Id = "Nope" } } },
-			{ { Action = "RestartTutorial", Args = { UserId = otherUserId } } },
-			{ { Action = "ResetPlayer", Args = { UserId = otherUserId } } },
+			{ { Action = "RestartTutorial", Args = { UserId = FAKE_USER_ID } } },
+			{ { Action = "ResetPlayer", Args = { UserId = FAKE_USER_ID } } },
 			{ { Action = "ResetPlayer", Args = { UserId = 0 / 0 } } },
 			{ { Action = "ResetPlayer", Args = { UserId = "x" } } },
 			{ { Action = "ResetPlayer" } },
@@ -3107,8 +3113,10 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 	if left < 0 or right > size.X then
 		table.insert(problems, ("x %.0f..%.0f is off the %d px width"):format(left, right, size.X))
 	end
-	if top < stackBottom - 0.5 then
-		table.insert(problems, ("top %.0f is above the stack's bottom %.0f"):format(top, stackBottom))
+	-- The card's top: ceil(stack bottom) + PhoneTopGapPx of air (a whole px).
+	local minTop = math.ceil(stackBottom) + G.PhoneTopGapPx
+	if top < minTop - 0.5 then
+		table.insert(problems, ("top %.1f is above the stack's bottom %.0f + %d px of air = %d"):format(top, stackBottom, G.PhoneTopGapPx, minTop))
 	end
 	if bottom > floorPx + 0.5 or bottom > size.Y then
 		table.insert(problems, ("bottom %.0f is below the %s at %.0f"):format(bottom, if barRect then "weapon bar" else "bottom row", floorPx))
@@ -3159,6 +3167,28 @@ local function gachaPhoneText(card: any, size: Vector2): ProbeLine
 	local hitPx = (card.InfoHit :: GuiObject).Size.X.Offset * scale
 	if hitPx < UITheme.MinTapSize - 0.05 then
 		table.insert(small, ("the (i) hit area is %.1f px"):format(hitPx))
+	end
+	-- Long odds keep the full size too (never a smaller % to fit the tile), and
+	-- slide inward so they stay on the card, in every column.
+	for _, sample in { "0.0035%", "0.00022%" } do
+		for column = 1, 3 do
+			local size, shift = Board.PlanPercent(sample, true, column)
+			if size * scale < MIN_PERCENT_PX - 0.05 then
+				table.insert(small, ("%q in column %d is %.1f px"):format(sample, column, size * scale))
+			end
+			if math.abs(shift) > 20 then
+				table.insert(small, ("%q in column %d slides %d px"):format(sample, column, shift))
+			end
+		end
+	end
+	for _, key in { "Pull", "Multi", "Auto" } do
+		local keyHolder = gui:FindFirstChild(key .. "Key", true)
+		if keyHolder and keyHolder:IsA("GuiObject") then
+			local keyPx = math.min(keyHolder.Size.X.Offset, keyHolder.Size.Y.Offset) * scale
+			if keyPx < UITheme.MinTapSize - 0.05 then
+				table.insert(small, ("the %s key's tap area is %.1f px"):format(key, keyPx))
+			end
+		end
 	end
 	return {
 		Ok = #small == 0 and checked > 0,
@@ -4120,9 +4150,12 @@ local function probeTutorial(payload: any)
 	RemoteEvents.SelfTestReport:FireServer({ Stage = "TutorialProbe", ProbeId = payload.ProbeId, Lines = lines, Data = reportData })
 end
 
--- NotifyOptInController with a stub Roblox service: nothing while the tutorial
--- runs, one ask when the reveal closes on a bare screen (a second close in the
--- same session adds none), and a service that errors costs no client error.
+-- NotifyOptInController with a stub Roblox service and a fake session clock
+-- (so it does not wait 5 real minutes): nothing while the tutorial runs or
+-- before MinSessionSeconds; after that one ask at the first high moment (a
+-- fusion success, an Epic+ pull, the daily reveal closing); the fallback asks
+-- at FallbackSeconds when no moment came; never twice in a session; and a
+-- service that errors costs no client error.
 local function testNotifyOptIn(): { string }
 	local controller = require(script.Parent.NotifyOptInController) :: any
 	local DailyController = require(script.Parent.DailyController) :: any
@@ -4140,12 +4173,27 @@ local function testNotifyOptIn(): { string }
 			calls += 1
 		end,
 	}
-	local function closeReveal(): number
+	local now = 0
+	local tutorial = false
+	local function fresh()
+		now = 0
+		controller.SetServiceForTest(stub, function()
+			return tutorial
+		end, function()
+			return now
+		end)
+	end
+	-- Runs `fire`, waits out the settle delay plus a margin, returns the asks it caused.
+	local function asks(fire: () -> ()): number
 		local before = calls
-		controller.OnDailyRevealClosed()
-		-- The settle delay plus a margin; a guard that holds never calls.
+		fire()
 		task.wait(1.4)
 		return calls - before
+	end
+	local function moment(kind: string, tier: string?): number
+		return asks(function()
+			controller.OnMoment(kind, tier)
+		end)
 	end
 	local function add(ok: boolean, name: string)
 		table.insert(lines, (if ok then "PASS " else "FAIL ") .. name)
@@ -4153,21 +4201,45 @@ local function testNotifyOptIn(): { string }
 	local ok, err = pcall(function()
 		clearScreen(true)
 		controller.SelfTestSuppress(false)
-		local tutorial = true
-		controller.SetServiceForTest(stub, function()
-			return tutorial
-		end)
-		add(closeReveal() == 0, "notify opt-in: not asked while the tutorial is active")
+		local minSeconds = NotifyConfig.MinSessionSeconds
+		local fallback = NotifyConfig.FallbackSeconds
+
+		tutorial = true
+		fresh()
+		now = fallback + 1
+		add(moment("Fusion") == 0, "notify opt-in: not asked while the tutorial is active")
+		add(asks(controller.Tick) == 0, "notify opt-in: the fallback does not ask during the tutorial either")
+
 		tutorial = false
-		add(closeReveal() == 1, "notify opt-in: asked once when the reveal closes on a bare screen")
-		add(closeReveal() == 0, "notify opt-in: a second reveal close in the same session asks no more")
+		fresh()
+		now = minSeconds - 1
+		add(asks(controller.OnDailyRevealClosed) == 0, "notify opt-in: a daily reveal close before 5 min asks nothing")
+		add(moment("Fusion") == 0, "notify opt-in: a fusion success close before 5 min asks nothing")
+		now = minSeconds + 1
+		add(moment("Pull", "Rare") == 0, "notify opt-in: a Rare pull close asks nothing (below the Epic floor)")
+		add(moment("Fusion") == 1, "notify opt-in: after 5 min a fusion success close asks once")
+		add(moment("Fusion") == 0 and asks(controller.OnDailyRevealClosed) == 0, "notify opt-in: a second moment in the same session asks no more")
+
+		fresh()
+		now = fallback - 1
+		add(asks(controller.Tick) == 0, "notify opt-in: before the fallback time with no moment asks nothing")
+		now = fallback + 1
+		add(asks(controller.Tick) == 1, "notify opt-in: at the fallback time with no moment asks once")
+		add(moment("Fusion") == 0 and asks(controller.Tick) == 0, "notify opt-in: a moment after the fallback ask asks no more")
+
+		fresh()
+		now = minSeconds + 1
+		add(moment("Pull", NotifyConfig.MinPullTier) == 1, "notify opt-in: a pull of the Epic floor closing asks once")
+		fresh()
+		now = minSeconds + 1
+		add(asks(controller.OnDailyRevealClosed) == 1, "notify opt-in: after 5 min the daily reveal closing asks once")
+
 		canErrors = true
-		controller.SetServiceForTest(stub, function()
-			return false
-		end)
-		add(closeReveal() == 0, "notify opt-in: a CanPromptOptInAsync error asks nothing and throws nothing")
+		fresh()
+		now = minSeconds + 1
+		add(moment("Fusion") == 0, "notify opt-in: a CanPromptOptInAsync error asks nothing and throws nothing")
 	end)
-	controller.SetServiceForTest(nil, nil)
+	controller.SetServiceForTest(nil, nil, nil)
 	controller.SelfTestSuppress(true)
 	DailyController.SelfTestSuppress(true)
 	if not ok then

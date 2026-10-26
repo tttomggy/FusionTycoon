@@ -10,7 +10,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   3 s, no ragdoll), Slap Glove (quest: melee 6, 2.5 s, 120) and Banana Peel
   (quest: one out, 10 s, lasts 20 s, the first enemy to step on it slips).
   `PlayerData.Weapons` (a set, sanitised, snapshot `Weapons`); an OnSync
-  hook grants rebirth weapons + `WeaponUnlocked` (the tutorial-style card);
+  hook grants rebirth weapons + `WeaponUnlocked` (the tutorial-style card; the
+  Studio start's join-time grant is silent, `DebugSetAll(player, true, true)`:
+  five cards opened over a loading screen and tripped UIKit's no-card watchdog);
   Roblox `Tool`s in the Backpack, given on every spawn **once the data is
   loaded** (a live server spawns the character first: `onCharacterAdded`
   polls `IsDataLoaded` every 0.25 s, up to 30 s). The OnSync hook also
