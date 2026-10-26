@@ -70,9 +70,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   Requests; Creator Hub → API Keys → a key with the user notifications write
   permission for this experience, added under the experience's Secrets as
   `OpenCloudNotify`; Creator Hub → Engagement → Notifications → create the
-  3 strings and paste their ids into `NotifyConfig.StringIds`; nothing sends
-  before 100 visits, then check Notifications → Analytics. Strings (examples):
-  `Admin Abuse is LIVE in {experienceName}: x{luck} luck for {minutes}
+  3 strings and paste their **UUIDs** (not asset numbers; sent as-is as
+  `message_id`) into `NotifyConfig.StringIds`; nothing sends
+  before 100 visits, then check Notifications → Analytics. `{experienceName}`
+  is not sent (the title is the game's name); `NotifyConfig.Placeholders` lists
+  each type's parameters (/selftest checks them). Strings:
+  `Admin Abuse is LIVE: x{luck} luck for {minutes}
   min!` / `Your Day {day} reward is ready. Keep your {streak}-day streak!` /
   `Your lab is full: {cash} is waiting for you.`
 - **Notify opt-in** (`NotifyOptInController`, client only): once per session

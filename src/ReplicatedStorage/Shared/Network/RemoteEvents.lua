@@ -54,7 +54,7 @@ local REMOTE_EVENT_NAMES = {
 	"NotifyOptInAnalytics", -- client -> server: { Event = "Shown" | "Closed" } the Roblox notification opt-in prompt showed / was closed (analytics only; whitelisted, rate-limited)
 	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks this visit's play time and that it isn't claimed)
 	"GiftResult", -- server -> client: { Result = "Granted" | "Refused", Index?, Kind?, Lines?, Reason? } (the Gifts panel's reveal)
-	"FriendJoined", -- server -> one client: a Roblox friend joined your server and the boost grew; { Name (DisplayName), Percent } (the "👥 <Name> joined: +15% income!" line; the count itself rides SyncTycoon.Friends)
+	"FriendJoined", -- server -> one client: a Roblox friend joined your server and the boost grew; { Name (DisplayName), Percent, Friended } (the "👥 <Name> joined: +15% income!" line, or "👥 You and <Name> are friends: +15% income!" when Friended: they became friends mid-session; the count itself rides SyncTycoon.Friends)
 	"ShopAnnouncement", -- server -> all: { Kind = "Overclock", PlayerName, Seconds } (the Server Overclock banner)
 	"RequestSteal", -- client -> server: grab the item on an enemy pedestal; { OwnerUserId, PedestalIndex } (the server resolves the rest)
 	"HeistStarted", -- server -> thief and victim: a carry began; { Role = "Thief"|"Victim", Item, OtherName, OtherUserId, EndsAt, GraceEndsAt (server times) }

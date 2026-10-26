@@ -167,6 +167,8 @@ Most of the 77 were the TEST, not the game:
   under 1000 × 600 (a 2346 × 125 window gave cards negative heights and ~60 FAILs):
   ONE `FAIL selftest window: …` replaces card placement, text fits, shop chips and
   the tutorial bar / hand geometry. Enlarge the Studio game window and run again.
+  A **phone-sized** view (`UIKit.IsPhone()`, or touch with no keyboard: the device
+  emulator) skips the same checks but reports `PASS selftest window: phone view …`.
 - The explain card's "OK turns on after 1.5 s" reads the card's own clock
   (`TutorialExplain.GetReadTimes`), not a race against `task.wait`.
 - Auto pull test: passive income is paused (`TycoonService.SelfTestFreezeIncome`)

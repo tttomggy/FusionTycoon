@@ -15,7 +15,7 @@
 	Creator Hub string ids, the queue numbers, and the PURE rules the service
 	and /selftest share (priority pick, once-a-day, due times, launch data,
 	the request body). Roblox allows one notification per user per day per
-	experience; nothing sends until a type's StringId is filled in.
+	experience; a type whose StringId is "" never sends.
 ]]
 local DailyConfig = require(script.Parent.DailyConfig)
 local OfflineConfig = require(script.Parent.OfflineConfig)
@@ -41,14 +41,23 @@ NotifyConfig.MinPullTier = "Epic"
 -- Highest priority first: the one a user gets that day.
 NotifyConfig.Priority = { "AdminAbuse", "DailyStreak", "LabFull" } :: { NotifyType }
 
--- Creator Hub -> the experience -> Engagement -> Notifications: create the
--- three strings (<= 99 chars, parameters {day} {streak} / {luck} {minutes} /
--- {cash}) and paste each asset id here. "" = that type never sends.
+-- Creator Hub -> the experience -> Engagement -> Notifications: the three
+-- strings (<= 99 chars). The ids are the strings' UUIDs (not asset numbers),
+-- sent as-is in the request's message_id. {experienceName} is not sent: the
+-- notification's title is the game's name. "" = that type never sends.
 NotifyConfig.StringIds = {
-	AdminAbuse = "",
-	DailyStreak = "",
-	LabFull = "",
+	AdminAbuse = "a951a5cd-b76b-8642-9854-b00b979e3224", -- Admin Abuse is LIVE: x{luck} luck for {minutes} min!
+	DailyStreak = "723f39b7-ec59-b247-8974-f952865a812d", -- Your Day {day} reward is ready. Keep your {streak}-day streak!
+	LabFull = "f8502273-b1a4-9442-ba36-b11fa7e8509c", -- Your lab is full: {cash} is waiting for you.
 } :: { [string]: string }
+
+-- The parameters each string takes, exactly its placeholders above: an entry's
+-- Params keys are these and no others (/selftest checks).
+NotifyConfig.Placeholders = {
+	AdminAbuse = { "luck", "minutes" },
+	DailyStreak = { "day", "streak" },
+	LabFull = { "cash" },
+} :: { [string]: { string } }
 
 -- LaunchData the notification hands the joining client (whitelisted on join).
 NotifyConfig.LaunchData = {
@@ -192,6 +201,11 @@ function NotifyConfig.ParseLaunchData(raw: unknown): string?
 		end
 	end
 	return nil
+end
+
+-- The AdminAbuse entry for a start with `luck` x luck for `minutes` minutes.
+function NotifyConfig.BuildAdminAbuseEntry(dueAt: number, luck: number, minutes: number): Entry
+	return { Type = "AdminAbuse", DueAt = dueAt, Params = { luck = luck, minutes = minutes } }
 end
 
 -- The Open Cloud request body for one entry (parameters are string values).

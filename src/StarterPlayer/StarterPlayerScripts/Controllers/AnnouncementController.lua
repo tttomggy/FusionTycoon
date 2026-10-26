@@ -592,10 +592,14 @@ function AnnouncementController.ShowOverclock(playerName: string, seconds: numbe
 end
 
 -- "👥 Bob joined: +15% income!" (a Roblox friend came into your server; the
--- server only sends it when the boost really grew).
-function AnnouncementController.ShowFriendJoined(name: string, percent: number)
+-- server only sends it when the boost really grew). `friended`: they became
+-- friends while both were already here: "You and Bob are friends".
+function AnnouncementController.ShowFriendJoined(name: string, percent: number, friended: boolean?)
+	local text = if friended
+		then "👥 You and %s are friends: +%d%% income!"
+		else "👥 %s joined: +%d%% income!"
 	enqueue({
-		Text = ("👥 %s joined: +%d%% income!"):format(UIKit.EscapeRichText(name), percent),
+		Text = text:format(UIKit.EscapeRichText(name), percent),
 		AccentColor = Colors.AccentGreen,
 	})
 end
@@ -611,7 +615,7 @@ function AnnouncementController.Init()
 	RemoteEvents.HeistFeed.OnClientEvent:Connect(onHeistFeed)
 	RemoteEvents.FriendJoined.OnClientEvent:Connect(function(payload: any)
 		if typeof(payload) == "table" and typeof(payload.Name) == "string" and typeof(payload.Percent) == "number" then
-			AnnouncementController.ShowFriendJoined(payload.Name, math.floor(payload.Percent))
+			AnnouncementController.ShowFriendJoined(payload.Name, math.floor(payload.Percent), payload.Friended == true)
 		end
 	end)
 	RemoteEvents.ShopAnnouncement.OnClientEvent:Connect(function(payload: any)

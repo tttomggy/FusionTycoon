@@ -46,6 +46,12 @@ like the Overclock:
   `SyncTycoon.Friends`. A join syncs both players; the `FriendJoined` remote
   (`{ Name, Percent }`) makes both clients show "👥 <DisplayName> joined: +15%
   income!" (TopStack announcement), only to a player whose boost really grew.
+- **Friends made mid-session:** a loop spawned in `:Start()` calls
+  `FriendService.RecheckStep` every 0.5 s: it re-asks the ONE pair with the
+  oldest answer past `RecheckSeconds` (never a burst), and if the answer changed
+  recounts both players from the cache and syncs only those whose count moved.
+  A count that grew sends `FriendJoined` with `Friended = true`: "👥 You and
+  <DisplayName> are friends: +15% income!".
 - HUD: the **Friends** chip is the always-on, rightmost cell of `UI/EffectsTray`
   (👥, "+30%", "+0%" with no friends; tooltip "Friends in this server: +15%
   income each (max +60%)"). A tap asks `SocialService:PromptGameInvite` when
@@ -53,7 +59,9 @@ like the Overclock:
   tooltip. Roblox's own age/privacy rules decide who can invite.
 - `/selftest` section 14 (`/selftest friends`): `FriendService.SetCheck(stub)` +
   `Recount(player, fakePeers)` give 0, 2, 6 friends and a throwing call;
-  `SetCheck(nil)` restores the real check. A client probe (`FriendChip`) checks the chip.
+  `SetCheck(nil)` restores the real check. `SetClock(fake)` + `RecheckStep(peers)`
+  flip a pair to friends and age it past 60 s: both counts +1, one call;
+  `SetClock(nil)` restores `os.clock`. A client probe (`FriendChip`) checks the chip.
 
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse Mythics
 at 7–15% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`).

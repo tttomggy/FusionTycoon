@@ -451,11 +451,7 @@ function NotifyService.QueueAdminAbuse(luck: number, minutes: number)
 	state.lastAdminAbuseAt = now
 	task.spawn(function()
 		local recent = state.recent :: any
-		local entry: Entry = {
-			Type = "AdminAbuse",
-			DueAt = os.time(),
-			Params = { luck = luck, minutes = minutes },
-		}
+		local entry: Entry = NotifyConfig.BuildAdminAbuseEntry(os.time(), luck, minutes)
 		local queued = 0
 		local upper: any = nil
 		while state.running and queued < NotifyConfig.AdminAbuseMaxRecipients do
@@ -549,16 +545,48 @@ function NotifyService.SelfTest(result: (boolean, string, string?) -> ())
 	)
 
 	-- Request body.
-	local body = NotifyConfig.BuildBody(123, { Type = "DailyStreak", DueAt = 0, Params = { day = 4 } }, "999")
+	local body = NotifyConfig.BuildBody(123, { Type = "DailyStreak", DueAt = 0, Params = { day = 4 } }, "723f39b7-ec59-b247-8974-f952865a812d")
 	result(
 		body.source.universe == "universes/123"
-			and body.payload.message_id == "999"
+			and body.payload.message_id == "723f39b7-ec59-b247-8974-f952865a812d"
 			and body.payload.parameters.day.string_value == "4"
 			and body.join_experience.launch_data == "daily"
 			and body.analytics_data.category == "DailyStreak",
 		"notify: the Open Cloud body carries the universe, string id, parameters, launch data and category",
 		""
 	)
+	-- The real ids are UUIDs, sent untouched; the parameters are the strings' placeholders.
+	local badIds: { string } = {}
+	for _, notifyType in NotifyConfig.Priority do
+		local id = NotifyConfig.StringIds[notifyType] or ""
+		if id ~= "" and not string.match(id, "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$") then
+			table.insert(badIds, notifyType)
+		end
+	end
+	result(#badIds == 0, "notify: every string id is a UUID", table.concat(badIds, ","))
+	local entries: { Entry } = { NotifyConfig.BuildAdminAbuseEntry(0, 5, 10) }
+	for _, only in { "DailyStreak", "LabFull" } do
+		local planned = NotifyService.PlanLeave(claimed, 100, midnight, function(notifyType: string)
+			return notifyType == only
+		end)
+		if planned then
+			table.insert(entries, planned)
+		end
+	end
+	local wrongParams: { string } = {}
+	for _, entry in entries do
+		local want = table.clone(NotifyConfig.Placeholders[entry.Type])
+		local have: { string } = {}
+		for name in entry.Params do
+			table.insert(have, name)
+		end
+		table.sort(want)
+		table.sort(have)
+		if table.concat(want, ",") ~= table.concat(have, ",") then
+			table.insert(wrongParams, ("%s: %s"):format(entry.Type, table.concat(have, ",")))
+		end
+	end
+	result(#entries == 3 and #wrongParams == 0, "notify: each type sends exactly its placeholders ({luck} {minutes} / {day} {streak} / {cash})", if #entries == 3 then table.concat(wrongParams, "; ") else "an entry was not planned")
 	local outcomes = { NotifyConfig.Outcome(200), NotifyConfig.Outcome(429), NotifyConfig.Outcome(403), NotifyConfig.Outcome(500), NotifyConfig.Outcome(nil) }
 	result(table.concat(outcomes, ",") == "Sent,Backoff,Drop,Retry,Retry", "notify: 2xx sent, 429 backs off, other 4xx dropped, 5xx / no answer retried", table.concat(outcomes, ","))
 

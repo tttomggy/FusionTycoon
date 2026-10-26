@@ -11,18 +11,24 @@
 	  * answers are cached per pair for FriendConfig.RecheckSeconds;
 	  * PlayerAdded rechecks the pairs that involve the new player, and
 	    PlayerRemoving drops the leaver from everyone's count. Both run on
-	    their own thread (never in Init).
+	    their own thread (never in Init);
+	  * friendships made mid-session: one loop (:Start) rechecks the pairs whose
+	    answer is older than RecheckSeconds, ONE pair per RECHECK_STEP_SECONDS
+	    (never a burst), and syncs only the players whose count changed. A count
+	    that grows shows "You and <Name> are friends" (they were already here).
 
 	The count lives in PlayerDataService (SetFriendCount), ships as
 	SyncTycoon.Friends and feeds IncomeInputs.FriendMultiplier. A friend
 	joining syncs and notifies both players (FriendJoined remote).
 
-	/selftest swaps the Roblox call for a stub (SetCheck) and feeds fake peers
-	(Recount); SetCheck(nil) puts the real one back.
+	/selftest swaps the Roblox call for a stub (SetCheck), the clock (SetClock)
+	and feeds fake peers (Recount, RecheckStep); SetCheck(nil) / SetClock(nil)
+	put the real ones back.
 
 	Follows ServiceTemplate:
 	  :Init()   connects PlayerAdded / PlayerRemoving.
-	  :Start()  resolves PlayerDataService, counts everyone already here.
+	  :Start()  resolves PlayerDataService, counts everyone already here,
+	            spawns the recheck loop.
 ]]
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -42,6 +48,8 @@ type CacheEntry = { Friends: boolean, At: number }
 type State = {
 	connections: { RBXScriptConnection },
 	check: FriendCheck,
+	-- Seconds; os.clock, or /selftest's fake one (SetClock).
+	clock: () -> number,
 	-- "lowId:highId" -> the last answer for that pair.
 	cache: { [string]: CacheEntry },
 }
@@ -50,6 +58,7 @@ type State = {
 
 local LOAD_WAIT_SECONDS = 30 -- a joiner's banners wait this long for their data
 local BANNER_DELAY_SECONDS = 3 -- ...then this long for their client to settle
+local RECHECK_STEP_SECONDS = 0.5 -- the recheck loop asks Roblox about one pair per step
 
 local function robloxCheck(a: Player, b: Player): boolean
 	return a:IsFriendsWithAsync(b.UserId)
@@ -58,6 +67,7 @@ end
 local state: State = {
 	connections = {},
 	check = robloxCheck,
+	clock = os.clock,
 	cache = {},
 }
 
@@ -82,15 +92,28 @@ end
 -- answer is "not friends".
 local function areFriends(a: Player, b: Player): boolean
 	local key = pairKey(a, b)
-	local now = os.clock()
+	local now = state.clock()
 	local entry = state.cache[key]
 	if entry and now - entry.At < FriendConfig.RecheckSeconds then
 		return entry.Friends
 	end
 	local ok, answer = pcall(state.check, a, b)
 	local friends = ok and answer == true
-	state.cache[key] = { Friends = friends, At = os.clock() }
+	state.cache[key] = { Friends = friends, At = state.clock() }
 	return friends
+end
+
+-- Friends of `player` among `peers` by the cached answers only (never asks
+-- Roblox): the recheck loop's count, so one step is one call.
+local function cachedCount(player: Player, peers: { Player }): number
+	local count = 0
+	for _, peer in peers do
+		local entry = if peer.UserId ~= player.UserId then state.cache[pairKey(player, peer)] else nil
+		if entry and entry.Friends then
+			count += 1
+		end
+	end
+	return count
 end
 
 -- Friends of `player` among `peers` (the player itself is skipped).
@@ -130,13 +153,15 @@ local function dropFromCache(player: Player)
 	end
 end
 
-local function notifyJoined(player: Player, other: Player)
+-- `friended`: they became friends while both were here (not "joined").
+local function notifyJoined(player: Player, other: Player, friended: boolean?)
 	if player.Parent ~= Players then
 		return
 	end
 	RemoteEvents.FriendJoined:FireClient(player, {
 		Name = other.DisplayName,
 		Percent = FriendConfig.PercentPerFriend,
+		Friended = friended == true,
 	})
 end
 
@@ -207,6 +232,51 @@ end
 
 --[[ Public API ----------------------------------------------------------- ]]
 
+-- One step of the recheck loop: asks Roblox again about the one pair among
+-- `peers` (default: everyone here) whose answer is the oldest and past
+-- RecheckSeconds (or missing). If the answer changed, both players are
+-- recounted from the cache and synced when their count moved; a count that
+-- grew shows "You and <Name> are friends". Returns true if a pair was asked.
+function FriendService.RecheckStep(peers: { Player }?): boolean
+	local here = peers or liveUnless(nil)
+	local now = state.clock()
+	local dueA: Player? = nil
+	local dueB: Player? = nil
+	local oldest = math.huge
+	for i = 1, #here do
+		for j = i + 1, #here do
+			local entry = state.cache[pairKey(here[i], here[j])]
+			local at = if entry then entry.At else -math.huge
+			if now - at >= FriendConfig.RecheckSeconds and at < oldest then
+				oldest = at
+				dueA, dueB = here[i], here[j]
+			end
+		end
+	end
+	if not dueA or not dueB then
+		return false
+	end
+	local key = pairKey(dueA, dueB)
+	local before = state.cache[key]
+	local ok, answer = pcall(state.check, dueA, dueB)
+	local friends = ok and answer == true
+	state.cache[key] = { Friends = friends, At = state.clock() }
+	if before and before.Friends == friends then
+		return true
+	end
+	for _, pair in { { dueA, dueB }, { dueB, dueA } } do
+		local player, other = pair[1], pair[2]
+		local was = PlayerDataService.GetFriendCount(player)
+		if PlayerDataService.SetFriendCount(player, cachedCount(player, here)) then
+			if PlayerDataService.GetFriendCount(player) > was then
+				notifyJoined(player, other, true)
+			end
+			sync(player)
+		end
+	end
+	return true
+end
+
 -- Counts `player`'s friends among `peers` (default: everyone here), stores
 -- the count and syncs when it changed. Returns the stored (capped) count.
 -- /selftest passes fake peers; the server itself uses it for the catch-up.
@@ -223,6 +293,11 @@ end
 function FriendService.SetCheck(check: FriendCheck?)
 	state.check = check or robloxCheck
 	table.clear(state.cache)
+end
+
+-- /selftest: swap the clock the cache ages by (seconds), or nil for os.clock.
+function FriendService.SetClock(clock: (() -> number)?)
+	state.clock = clock or os.clock
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]
@@ -248,6 +323,16 @@ function FriendService:Start()
 	for _, player in Players:GetPlayers() do
 		task.spawn(onJoined, player)
 	end
+	-- Friends made while both are here: one pair per step, forever.
+	task.spawn(function()
+		while true do
+			task.wait(RECHECK_STEP_SECONDS)
+			local ok, err = pcall(FriendService.RecheckStep)
+			if not ok then
+				warn("[FriendService] recheck failed: " .. tostring(err))
+			end
+		end
+	end)
 end
 
 return FriendService

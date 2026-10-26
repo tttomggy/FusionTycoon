@@ -1725,8 +1725,54 @@ local function runFriendBoostSelfTest(player: Player, result: (boolean, string, 
 			("ok %s, count %s, multiplier %s"):format(tostring(failedOk), tostring(failedCount), tostring(inputsFail.FriendMultiplier))
 		)
 		chip(0)
+
+		-- Friends made mid-session: a pair that turns friends is found by the
+		-- recheck loop once its answer is older than RecheckSeconds, one
+		-- Roblox call per step, and both players' counts go up.
+		local fakeFriend = fakePeers(1)[1]
+		local both: { Player } = { player, fakeFriend }
+		local clockNow = 0
+		local askedCalls = 0
+		local nowFriends = false
+		FriendService.SetClock(function()
+			return clockNow
+		end)
+		FriendService.SetCheck(function()
+			askedCalls += 1
+			return nowFriends
+		end)
+		PlayerDataService.SetFriendCount(fakeFriend, 0)
+		local before = FriendService.Recount(player, both)
+		nowFriends = true
+		askedCalls = 0
+		clockNow = FriendConfig.RecheckSeconds - 1
+		local early = FriendService.RecheckStep(both)
+		clockNow = FriendConfig.RecheckSeconds + 1
+		local due = FriendService.RecheckStep(both)
+		local afterOne = FriendService.RecheckStep(both)
+		result(
+			before == 0
+				and not early
+				and due
+				and not afterOne
+				and askedCalls == 1
+				and PlayerDataService.GetFriendCount(player) == 1
+				and PlayerDataService.GetFriendCount(fakeFriend) == 1,
+			"friend boost: a pair that becomes friends mid-session is found by the recheck, both counts +1, one call",
+			("before %d, early %s, due %s, again %s, calls %d, counts %d/%d"):format(
+				before,
+				tostring(early),
+				tostring(due),
+				tostring(afterOne),
+				askedCalls,
+				PlayerDataService.GetFriendCount(player),
+				PlayerDataService.GetFriendCount(fakeFriend)
+			)
+		)
+		PlayerDataService.SetFriendCount(fakeFriend, 0)
 	end)
-	-- The real check and the real count, whatever happened above.
+	-- The real check, clock and count, whatever happened above.
+	FriendService.SetClock(nil)
 	FriendService.SetCheck(nil)
 	FriendService.Recount(player)
 	if not ok then

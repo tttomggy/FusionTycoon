@@ -31,6 +31,7 @@ local LogService = game:GetService("LogService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
@@ -397,7 +398,9 @@ end
 -- the objective bar, the hand, shop chips) mean nothing in a squeezed game
 -- view: a 2346 x 125 window gave every card a negative height and 60 FAILs
 -- that were not the game's. Returns why the window is too small (nil = fine);
--- the run then says so ONCE as a FAIL and skips those checks.
+-- the run then says so ONCE and skips those checks: a FAIL for a small desktop
+-- view, a PASS for a phone-sized one (windowLine; a phone view is the point of
+-- an emulated run, and its phone checks all ran).
 local MIN_WINDOW = Vector2.new(1000, 600)
 local function windowProblem(): string?
 	local camera = Workspace.CurrentCamera
@@ -406,6 +409,21 @@ local function windowProblem(): string?
 		return nil
 	end
 	return ("the game view is %d x %d, the live-screen checks need at least %d x %d (Studio: enlarge the game window, undock Output / other panels, then run /selftest again)"):format(size.X, size.Y, MIN_WINDOW.X, MIN_WINDOW.Y)
+end
+
+-- True on a phone-sized view: the phone layout, or a touch screen with no keyboard.
+local function isPhoneView(): boolean
+	return UIKit.IsPhone() or (UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled)
+end
+
+-- The one report line for a view windowProblem() rejected.
+local function windowLine(problem: string): string
+	if isPhoneView() then
+		local camera = Workspace.CurrentCamera
+		local size = if camera then camera.ViewportSize else Vector2.new(0, 0)
+		return ("PASS selftest window: phone view %d x %d, desktop-only live-screen checks skipped"):format(size.X, size.Y)
+	end
+	return "FAIL selftest window: " .. problem
 end
 
 -- Logical px of `gui`'s visible rect: itself plus a "Shadow" sibling or
@@ -4324,7 +4342,7 @@ local function run(payload: any)
 		local ok, err = pcall(function()
 			local tooSmall = windowProblem()
 			if tooSmall then
-				table.insert(lines, "FAIL selftest window: " .. tooSmall)
+				table.insert(lines, windowLine(tooSmall))
 			else
 				testPlacedCards()
 				for _, line in cardLines do
@@ -4370,7 +4388,7 @@ local function run(payload: any)
 	local tooSmall = windowProblem()
 	local panelLines: { string } = {}
 	if tooSmall then
-		table.insert(panelLines, "FAIL selftest window: " .. tooSmall)
+		table.insert(panelLines, windowLine(tooSmall))
 	else
 		panelLines = testPanels()
 		for _, line in textFitLines do
