@@ -10,6 +10,7 @@ src/ReplicatedStorage/Shared/
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
                  OfflineConfig — offline earnings rate/cap,
+                 FriendConfig — the friend boost (+15% per friend, max 4),
                  EventConfig — the event clock, effects and info-card copy,
                  SoundConfig — every sound slot,
                  MusicConfig — the background playlist and its fades, AdminConfig —
@@ -63,7 +64,8 @@ src/ServerScriptService/
                            QuestService quests and power-ups;
                            CombatService weapons, hits and ragdoll;
                            RewardService the daily reward and playtime
-                           gifts; LeaderboardService the street boards)
+                           gifts; LeaderboardService the street boards;
+                           FriendService the friend boost's friend count)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController
@@ -95,7 +97,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   SettingsPanel (the ⚙ button: reveal-card rules, sound and music volume),
                   ShopPanel + ShopCards (the shop, the offer / Starter /
                   deal side cards), DealParts (part tiles + YOU GET list),
-                  EffectsTray (active effects as cartoon badges + tooltips; bottom-right row on desktop and tablet, top-right on a phone),
+                  EffectsTray (active effects as cartoon badges + tooltips, with the always-on Friends chip; bottom-right row on desktop and tablet, top-right on a phone),
                   PurchaseCelebration (the reveal after a purchase),
                   DailyCard (the daily reward card), GiftsPanel (the GIFTS
                   button's panel),

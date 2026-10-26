@@ -28,6 +28,7 @@ local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local DealState = require(ReplicatedStorage.Shared.Modules.DealState)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
@@ -56,6 +57,7 @@ type FusionServiceModule = typeof(require(script.Parent.FusionService))
 type CombatServiceModule = typeof(require(script.Parent.CombatService))
 type QuestServiceModule = typeof(require(script.Parent.QuestService))
 type RewardServiceModule = typeof(require(script.Parent.RewardService))
+type FriendServiceModule = typeof(require(script.Parent.FriendService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -80,6 +82,7 @@ local FusionService: FusionServiceModule
 local CombatService: CombatServiceModule
 local QuestService: QuestServiceModule
 local RewardService: RewardServiceModule
+local FriendService: FriendServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -1605,11 +1608,139 @@ local function runEffectsTraySelfTest(player: Player, result: (boolean, string, 
 	PlayerDataService.SyncTycoon(player)
 end
 
+-- The friend boost (FriendService / FriendConfig): the friendship call is
+-- swapped for a stub and fake peers are counted, so one tester covers 0, 2
+-- and 6 friends and a failing call. Steady income and offline pay must not
+-- move; the client reports the chip. The real check is put back at the end.
+local function runFriendBoostSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local function fakePeers(count: number): { Player }
+		local peers: { Player } = {}
+		for index = 1, count do
+			local fake: any = { UserId = -9000 - index, Name = "Friend" .. index, DisplayName = "Friend" .. index }
+			table.insert(peers, fake)
+		end
+		return peers
+	end
+	local function near(a: number, b: number): boolean
+		return math.abs(a - b) <= 1e-9 * math.max(1, math.abs(a), math.abs(b))
+	end
+	local function friendsRow(inputs: TycoonConfig.IncomeInputs): number?
+		for _, part in TycoonConfig.GetIncomeBreakdown(inputs) do
+			if part.Label == "Friends" then
+				return part.Value
+			end
+		end
+		return nil
+	end
+	local function chip(percent: number)
+		task.wait(0.8)
+		tutorialProbe(player, { Kind = "FriendChip", Percent = percent }, result)
+	end
+
+	local allFriends = function(): boolean
+		return true
+	end
+	local ok, err = pcall(function()
+		-- 0 friends.
+		FriendService.SetCheck(function()
+			return false
+		end)
+		local count0 = FriendService.Recount(player, fakePeers(3))
+		local inputs0 = PlayerDataService.GetIncomeInputs(player)
+		if not inputs0 then
+			result(false, "friend boost: income inputs for the tester", "none")
+			return
+		end
+		local mult0 = TycoonConfig.GetIncomeMultiplier(inputs0)
+		local live0 = TycoonConfig.GetPassiveCashPerSecond(inputs0)
+		local steady0 = PlayerDataService.GetSteadyIncomePerSecond(player)
+		local offline0 = PlayerDataService.GetBasePassiveCashPerSecond(player)
+		result(
+			count0 == 0 and inputs0.FriendMultiplier == 1 and PlayerDataService.GetTycoonSnapshot(player).Friends == 0,
+			"friend boost: 0 friends -> multiplier 1, snapshot Friends 0",
+			("count %d, multiplier %s"):format(count0, tostring(inputs0.FriendMultiplier))
+		)
+		chip(0)
+
+		-- 2 friends.
+		FriendService.SetCheck(allFriends)
+		local count2 = FriendService.Recount(player, fakePeers(2))
+		local inputs2 = PlayerDataService.GetIncomeInputs(player) :: TycoonConfig.IncomeInputs
+		local row2 = friendsRow(inputs2)
+		result(
+			count2 == 2
+				and near(inputs2.FriendMultiplier or 0, 1.3)
+				and row2 ~= nil
+				and near(row2, 1.3)
+				and near(TycoonConfig.GetIncomeMultiplier(inputs2), mult0 * 1.3)
+				and near(TycoonConfig.GetPassiveCashPerSecond(inputs2), live0 * 1.3)
+				and PlayerDataService.GetTycoonSnapshot(player).Friends == 2,
+			"friend boost: 2 friends -> x1.30 on all income, a Friends row of 1.3 in the breakdown",
+			("count %d, multiplier %s, row %s, income %s vs %s"):format(
+				count2,
+				tostring(inputs2.FriendMultiplier),
+				tostring(row2),
+				tostring(TycoonConfig.GetPassiveCashPerSecond(inputs2)),
+				tostring(live0)
+			)
+		)
+		result(
+			near(PlayerDataService.GetSteadyIncomePerSecond(player), steady0)
+				and near(PlayerDataService.GetBasePassiveCashPerSecond(player), offline0)
+				and OfflineConfig.Compute(PlayerDataService.GetBasePassiveCashPerSecond(player), 3600) == OfflineConfig.Compute(offline0, 3600),
+			"friend boost: steady income (the gacha price) and offline earnings ignore friends",
+			("steady %s vs %s, base %s vs %s"):format(
+				tostring(PlayerDataService.GetSteadyIncomePerSecond(player)),
+				tostring(steady0),
+				tostring(PlayerDataService.GetBasePassiveCashPerSecond(player)),
+				tostring(offline0)
+			)
+		)
+		chip(30)
+
+		-- 6 friends: capped at +60%.
+		local count6 = FriendService.Recount(player, fakePeers(6))
+		local inputs6 = PlayerDataService.GetIncomeInputs(player) :: TycoonConfig.IncomeInputs
+		result(
+			count6 == FriendConfig.MaxFriends
+				and near(inputs6.FriendMultiplier or 0, 1.6)
+				and near(TycoonConfig.GetIncomeMultiplier(inputs6), mult0 * 1.6)
+				and near(PlayerDataService.GetSteadyIncomePerSecond(player), steady0),
+			"friend boost: 6 friends are capped at x1.60",
+			("count %d, multiplier %s"):format(count6, tostring(inputs6.FriendMultiplier))
+		)
+		chip(60)
+
+		-- The Roblox call fails: not friends, nothing thrown.
+		FriendService.SetCheck(function()
+			error("friend check failed (selftest)")
+		end)
+		local failedOk, failedCount = pcall(FriendService.Recount, player, fakePeers(3))
+		local inputsFail = PlayerDataService.GetIncomeInputs(player) :: TycoonConfig.IncomeInputs
+		result(
+			failedOk and failedCount == 0 and inputsFail.FriendMultiplier == 1,
+			"friend boost: a failing friendship call counts as not friends, no server error",
+			("ok %s, count %s, multiplier %s"):format(tostring(failedOk), tostring(failedCount), tostring(inputsFail.FriendMultiplier))
+		)
+		chip(0)
+	end)
+	-- The real check and the real count, whatever happened above.
+	FriendService.SetCheck(nil)
+	FriendService.Recount(player)
+	if not ok then
+		result(false, "friend boost (errored)", tostring(err))
+	end
+end
+
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
 	print(("[SelfTest] running for %s"):format(player.Name))
 	if only == "combat" then
 		print("[SelfTest] == 10. combat ==")
 		runCombatSelfTest(player, result)
+		return
+	elseif only == "friends" then
+		print("[SelfTest] == 14. friend boost ==")
+		runFriendBoostSelfTest(player, result)
 		return
 	elseif only == "gacha" then
 		print("[SelfTest] == 12. gacha card ==")
@@ -1842,6 +1973,11 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- round icons bottom right.
 	runSection("13. effects tray", result, function()
 		runEffectsTraySelfTest(player, result)
+	end)
+
+	-- 14. The friend boost: the count, the multiplier, the chip.
+	runSection("14. friend boost", result, function()
+		runFriendBoostSelfTest(player, result)
 		-- The daily reward may open by itself again.
 		tutorialProbe(player, { Kind = "ClearScreen", Label = "the end", Report = false, Suppress = false }, result)
 	end)
@@ -2263,6 +2399,7 @@ function DebugService:Start()
 	CombatService = require(script.Parent.CombatService)
 	QuestService = require(script.Parent.QuestService)
 	RewardService = require(script.Parent.RewardService)
+	FriendService = require(script.Parent.FriendService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
 		local applied: { [number]: boolean } = {}

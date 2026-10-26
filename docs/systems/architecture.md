@@ -31,6 +31,7 @@ calls left in `Services/`.
 | `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService` | `--!strict` |
 | `QuestService` | `:Init()` `:Start()` | `PlayerDataService`, `CombatService` | `--!strict` |
+| `FriendService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker
@@ -81,6 +82,7 @@ cycle's cards closed, send the next ×10),
 prompt only), `SetSetting` (C→S `{ Key, Tier?, Value }`: RevealRule,
 SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
+`FriendJoined` (S→one client `{ Name, Percent }`: a Roblox friend joined and the friend boost grew; the count itself is `SyncTycoon.Friends`),
 `ShopAnalytics` (C→S `{ Event, Key? }`, analytics only),
 `NotifyOptInAnalytics` (C→S `{ Event = "Shown" | "Closed" }`, analytics only), `ClaimDaily`
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /

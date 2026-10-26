@@ -591,6 +591,15 @@ function AnnouncementController.ShowOverclock(playerName: string, seconds: numbe
 	})
 end
 
+-- "👥 Bob joined: +15% income!" (a Roblox friend came into your server; the
+-- server only sends it when the boost really grew).
+function AnnouncementController.ShowFriendJoined(name: string, percent: number)
+	enqueue({
+		Text = ("👥 %s joined: +%d%% income!"):format(UIKit.EscapeRichText(name), percent),
+		AccentColor = Colors.AccentGreen,
+	})
+end
+
 function AnnouncementController.Init()
 	screenGui = UIKit.Screen("Announcements", 100)
 	FusionController.FusionResolved:Connect(onFusionResolved)
@@ -600,6 +609,11 @@ function AnnouncementController.Init()
 	RemoteEvents.GoalCompleted.OnClientEvent:Connect(onGoalCompleted)
 	RemoteEvents.RebirthAnnouncement.OnClientEvent:Connect(onRebirthAnnouncement)
 	RemoteEvents.HeistFeed.OnClientEvent:Connect(onHeistFeed)
+	RemoteEvents.FriendJoined.OnClientEvent:Connect(function(payload: any)
+		if typeof(payload) == "table" and typeof(payload.Name) == "string" and typeof(payload.Percent) == "number" then
+			AnnouncementController.ShowFriendJoined(payload.Name, math.floor(payload.Percent))
+		end
+	end)
 	RemoteEvents.ShopAnnouncement.OnClientEvent:Connect(function(payload: any)
 		if typeof(payload) == "table" and payload.Kind == "Overclock" and typeof(payload.PlayerName) == "string" then
 			local seconds = if typeof(payload.Seconds) == "number" then payload.Seconds else ShopConfig.OverclockSeconds

@@ -175,6 +175,7 @@ function ShopController.GetBaseIncome(): number
 	local inputs = TycoonController.GetIncomeInputs()
 	inputs.BoostMultiplier = 1
 	inputs.OverclockMultiplier = 1
+	inputs.FriendMultiplier = 1
 	return TycoonConfig.GetPassiveCashPerSecond(inputs)
 end
 

@@ -26,6 +26,35 @@ the pad card and Rebirth panel use `TycoonController.GetSteadyIncomePerSecond`
 ×10 pull at 150 s of steady income late in a run (uncapped 5–12 min); it does
 not bring the first Secret in (see the TycoonConfig header table).
 
+**Friend boost** (`FriendConfig`, `FriendService`): every Roblox friend in your
+server adds +15% to ALL your income, at most 4 friends (+60%). It is a boost,
+like the Overclock:
+- `TycoonConfig.IncomeInputs.FriendMultiplier` (`1 + 0.15 × min(count, 4)`) is
+  multiplied in `GetIncomeMultiplier` and has a "Friends" row in
+  `GetIncomeBreakdown` (the HUD pill hides it at ×1). It is built only in
+  `PlayerDataService.GetIncomeInputs` (1 when `baseOnly`) and
+  `TycoonController.GetIncomeInputs`.
+- It is NOT in `GetSteadyIncomePerSecond` (the gacha price ignores boosts), and
+  not in offline earnings, cash packs or quest targets (all `baseOnly`;
+  `ShopController.GetBaseIncome` sets it to 1 on the client). `tools/econ_sim.py`
+  stays solo (`FRIEND_MULT = 1`).
+- The count is server-side only. `FriendService` asks
+  `Player:IsFriendsWithAsync` (pcall'd; a failure is "not friends"), caches each
+  pair for `FriendConfig.RecheckSeconds` (60), and recounts on PlayerAdded (the
+  pairs with the new player) and PlayerRemoving (no banner). It stores the
+  count with `PlayerDataService.SetFriendCount`; the snapshot ships it as
+  `SyncTycoon.Friends`. A join syncs both players; the `FriendJoined` remote
+  (`{ Name, Percent }`) makes both clients show "👥 <DisplayName> joined: +15%
+  income!" (TopStack announcement), only to a player whose boost really grew.
+- HUD: the **Friends** chip is the always-on, rightmost cell of `UI/EffectsTray`
+  (👥, "+30%", "+0%" with no friends; tooltip "Friends in this server: +15%
+  income each (max +60%)"). A tap asks `SocialService:PromptGameInvite` when
+  `CanSendGameInviteAsync` (pcall'd, cached 60 s) allows it, else it only pins the
+  tooltip. Roblox's own age/privacy rules decide who can invite.
+- `/selftest` section 14 (`/selftest friends`): `FriendService.SetCheck(stub)` +
+  `Recount(player, fakePeers)` give 0, 2, 6 friends and a throwing call;
+  `SetCheck(nil)` restores the real check. A client probe (`FriendChip`) checks the chip.
+
 Items (Depth 1): six tiers up to **Secret** (gacha 0.002%, or fuse Mythics
 at 7–15% once you have Rebirth 1 — `FusionConfig.CanFuseTierFor`).
 

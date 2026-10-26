@@ -205,6 +205,10 @@ Most of the 77 were the TEST, not the game:
 - The explain-card line's Detail now says `open`, `text matches` and the first 30
   characters of the text shown; the card body has a minimum height (no negative size).
 - "deal real path" names the cards blocking it.
+- `/selftest` section 14 (`/selftest friends` alone) tests the friend boost: a stubbed
+  friendship check and fake peers give 0 / 2 / 6 friends (×1 / ×1.30 / capped ×1.60), a
+  throwing check counts as not friends, steady income and offline pay do not move,
+  and the client reports the Friends chip (`+0%` / `+30%` / `+60%`, tooltip, tap).
 - The effects tray placement and tooltip are pure functions
   (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
   `/selftest` runs them against the real HUD rects and the weapon bar

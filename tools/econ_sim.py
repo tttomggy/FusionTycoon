@@ -57,6 +57,9 @@ PEDESTALS = 4
 DOUBLE_CASH_MULT = 2.0  # ShopConfig.DoubleCashMultiplier
 VIP_MULT = 1.25  # ShopConfig.VipMultiplier
 BOOST_MULT = 2.0  # ShopConfig.BoostMultiplier
+# FriendConfig / IncomeInputs.FriendMultiplier: +15% per Roblox friend in the
+# server (max +60%). The sim is a SOLO player: no friends, always 1.
+FRIEND_MULT = 1.0
 EXTRA_PEDESTALS = 6  # ShopConfig.ExtraPedestals
 PAYERS = {
     "free": {"mult": 1.0, "pedestals": PEDESTALS, "boost": False},
@@ -350,7 +353,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
 
     def global_mult():
         burst = BOOST_MULT if qs["boost"] > 0 and not shop["boost"] else 1
-        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult * burst
+        return mult() * (1 + REBIRTH_INCOME_PER * rebirths) * index_bonus() * shop_mult * burst * FRIEND_MULT
 
     def ped_items():
         pedestals = base_pedestals + (SECOND_FLOOR_PEDESTALS if rebirths >= SECOND_FLOOR_REBIRTHS else 0)

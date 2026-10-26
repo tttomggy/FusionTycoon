@@ -15,6 +15,16 @@
 	  Safe Fusion    🛡 violet  "×N" badge       (tokens you hold)
 	  Fusion Spark   ⚡ gold    "×1" badge       (armed for the next fusion)
 	  Coin Magnet    🧲 red     READY            (armed for the next rain)
+	  Friends        👥 pink    "+30%"           (the friend boost; ALWAYS shown, even "+0%")
+
+	The Friends chip is the rightmost cell (LayoutOrder 0): the corner slot
+	never moves, effects pop in to its left. The number is the live
+	multiplier from the server's snapshot (FriendConfig, TycoonController
+	.GetFriendCount); its tooltip is the rule ("Friends in this server: +15%
+	income each (max +60%)"). A tap or click asks Roblox to invite friends
+	(SocialService:PromptGameInvite) when CanSendGameInviteAsync allows it
+	(pcall'd, re-asked every INVITE_RECHECK_SECONDS); when it does not, the
+	tap only pins the tooltip.
 
 	Every number comes from the synced data the old HUD pills used
 	(TycoonController, ShopState): no new server state. No product photos:
@@ -67,7 +77,9 @@
 	least is used; with no side on screen at all it goes under the icon,
 	clamped on screen.
 ]]
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SocialService = game:GetService("SocialService")
 local TweenService = game:GetService("TweenService")
 local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
@@ -75,6 +87,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -114,6 +127,7 @@ local TOOLTIP_EDGE = 8 -- px kept clear of the screen edge
 local TOOLTIP_LAYER_ABOVE_HUD = 5 -- the tooltip gui's DisplayOrder over the HUD's
 local TAP_SECONDS = 3 -- a tapped tooltip closes by itself after this
 local GLYPH_STROKE = 2
+local INVITE_RECHECK_SECONDS = 60 -- CanSendGameInviteAsync is asked at most this often
 
 type EffectState = {
 	Id: string,
@@ -124,6 +138,7 @@ type EffectState = {
 	Seconds: number?, -- a timer under the circle ("12:41")
 	Ready: boolean?, -- "READY" under the circle
 	Badge: string?, -- "×2" on the circle's top-right
+	Caption: string?, -- text under the circle in place of a timer ("+30%")
 	Name: string, -- the tooltip's bold first line
 	Plain: string, -- its second line: what the effect does
 	Tail: string, -- its third line ("12:41 left", "×3 left", "Ready")
@@ -207,9 +222,56 @@ local function secondsText(seconds: number): string
 	return EventState.FormatTimer(math.ceil(seconds))
 end
 
+-- Can this player send a game invite? (CanSendGameInviteAsync yields and may
+-- error: asked on its own thread, an error is "no", the answer kept for
+-- INVITE_RECHECK_SECONDS.)
+local canInvite = false
+local inviteCheckedAt = -math.huge
+local inviteChecking = false
+
+local function checkInvite()
+	if inviteChecking or os.clock() - inviteCheckedAt < INVITE_RECHECK_SECONDS then
+		return
+	end
+	inviteChecking = true
+	task.spawn(function()
+		local ok, can = pcall(function()
+			return SocialService:CanSendGameInviteAsync(Players.LocalPlayer)
+		end)
+		canInvite = ok and can == true
+		inviteCheckedAt = os.clock()
+		inviteChecking = false
+	end)
+end
+
+-- The Friends chip's tap: Roblox's own invite window, when it may open.
+local function promptInvite()
+	if not canInvite then
+		return
+	end
+	task.spawn(function()
+		pcall(function()
+			SocialService:PromptGameInvite(Players.LocalPlayer)
+		end)
+	end)
+end
+
 -- The effects that are on, in tray order.
 local function collect(): { EffectState }
 	local list: { EffectState } = {}
+	-- Always on, even with no friends here: the rightmost cell.
+	local friends = TycoonController.GetFriendCount()
+	table.insert(list, {
+		Id = "Friends",
+		Order = 0,
+		Gradient = UITheme.Gradients.Pink,
+		Glyph = "👥",
+		Fx = "Safe",
+		Caption = ("+%d%%"):format(FriendConfig.GetPercent(friends)),
+		Name = "Friend Boost",
+		Plain = FriendConfig.RuleText(),
+		Tail = ("%d of %d friends here%s"):format(friends, FriendConfig.MaxFriends, if canInvite then " · Tap to invite" else ""),
+	})
 	local income = TycoonController.GetBoostSecondsLeft("Income")
 	if income > 0 then
 		table.insert(list, {
@@ -989,6 +1051,9 @@ local function buildCell(state: EffectState): Cell
 		hoverLeave(id)
 	end)
 	hit.Activated:Connect(function()
+		if id == "Friends" then
+			promptInvite()
+		end
 		tapCell(id)
 	end)
 	return cell
@@ -999,6 +1064,8 @@ local function updateCell(cell: Cell, state: EffectState)
 	cell.State = state
 	if state.Seconds then
 		cell.Timer.Text = secondsText(state.Seconds)
+	elseif state.Caption then
+		cell.Timer.Text = state.Caption
 	elseif state.Ready then
 		cell.Timer.Text = "READY"
 	else
@@ -1079,6 +1146,7 @@ end
 --[[ Refresh -------------------------------------------------------------------------- ]]
 
 local function refresh()
+	checkInvite()
 	local hidden = TycoonController.IsTutorialActive() or not TycoonController.HasSynced() or phoneHidden
 	screenGui.Enabled = not hidden
 	tooltipGui.Enabled = not hidden
@@ -1118,7 +1186,7 @@ end
 --[[ Public ---------------------------------------------------------------------------- ]]
 
 -- Screen-px centre of an effect's icon ("Income" | "Luck" | "Server" | ...),
--- or the tray's first slot when it isn't up yet (the purchase flight lands
+-- or the tray's first free slot when it isn't up yet (the purchase flight lands
 -- where the icon is about to appear).
 function EffectsTray.GetTarget(id: string): Vector2
 	local cell = cells[id]
@@ -1129,7 +1197,8 @@ function EffectsTray.GetTarget(id: string): Vector2
 	local scale = UIKit.EffectiveScale(tray)
 	local view = viewportSize()
 	local circle = fitSize
-	-- The first slot is the rightmost one, in the corner.
+	-- The rightmost slot is the always-on Friends chip's; a new effect lands in the
+	-- slot to its left.
 	local top = if lastPlan
 		then lastPlan.Top
 		elseif UIKit.IsPhone() then UIKit.GetCardTop()
@@ -1137,7 +1206,7 @@ function EffectsTray.GetTarget(id: string): Vector2
 	local right = if lastPlan
 		then lastPlan.Rect.Position.X + lastPlan.Rect.Size.X
 		else view.X / scale - (if UIKit.IsPhone() then RIGHT_MARGIN else RIGHT_EDGE - CELL_SIDE_GAP / 2)
-	return Vector2.new((right - cellWidth(circle) / 2) * scale, (top + circle / 2) * scale)
+	return Vector2.new((right - cellWidth(circle) * 3 / 2) * scale, (top + circle / 2) * scale)
 end
 
 -- A little bounce on the icon (the purchase flight just landed on it).

@@ -3711,6 +3711,62 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 	return lines
 end
 
+-- The Friends chip (UI/EffectsTray): always there, "+N%" under a 👥 circle,
+-- the rule as its tooltip, and the client's own multiplier agreeing with the
+-- count the server just synced (`percent` = 0 / 30 / 60). A tap must not throw
+-- (the invite itself needs Roblox's window, so only the tooltip half is run).
+local function probeFriendChip(percent: number): { ProbeLine }
+	local EffectsTray = require(UI.EffectsTray) :: any
+	local tycoon = require(script.Parent.TycoonController) :: any
+	local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig) :: any
+	local lines: { ProbeLine } = {}
+	EffectsTray.Refresh()
+	task.wait(0.3)
+	local chip: any = nil
+	for _, view in EffectsTray.GetCells() do
+		if view.Id == "Friends" then
+			chip = view
+		end
+	end
+	local want = ("+%d%%"):format(percent)
+	table.insert(lines, {
+		Ok = chip ~= nil and chip.Timer == want and chip.Glyph == "👥",
+		Name = ("friend chip: a 👥 circle reading %s"):format(want),
+		Detail = if chip then ("glyph '%s', text '%s'"):format(chip.Glyph, chip.Timer) else "no Friends cell in the tray",
+	})
+	local inputs = tycoon.GetIncomeInputs()
+	local wantMultiplier = 1 + percent / 100
+	table.insert(lines, {
+		Ok = math.abs((inputs.FriendMultiplier or 0) - wantMultiplier) < 1e-9 and tycoon.GetFriendCount() == percent / FriendConfig.PercentPerFriend,
+		Name = ("friend chip: the client's income inputs carry x%.2f from the snapshot"):format(wantMultiplier),
+		Detail = ("FriendMultiplier %s, count %s"):format(tostring(inputs.FriendMultiplier), tostring(tycoon.GetFriendCount())),
+	})
+	if chip then
+		EffectsTray.TestHover("Friends", true)
+		task.wait(0.2)
+		local tip = EffectsTray.GetTooltip()
+		EffectsTray.TestHover("Friends", false)
+		table.insert(lines, {
+			Ok = tip.Visible and tip.Plain == FriendConfig.RuleText(),
+			Name = "friend chip: the tooltip is the rule (+15% income each, max +60%)",
+			Detail = ("visible %s, plain '%s'"):format(tostring(tip.Visible), tostring(tip.Plain)),
+		})
+		local tapOk = pcall(EffectsTray.TestTap, "Friends")
+		EffectsTray.TestTap("Friends") -- a second tap unpins it
+		table.insert(lines, {
+			Ok = tapOk and not EffectsTray.GetTooltip().Visible,
+			Name = "friend chip: a tap pins the tooltip and a second tap closes it",
+			Detail = ("tap ok %s"):format(tostring(tapOk)),
+		})
+		table.insert(lines, {
+			Ok = chip.HitSize.X >= UITheme.MinTapSize and chip.HitSize.Y >= UITheme.MinTapSize,
+			Name = ("friend chip: the tap target is at least %d px"):format(UITheme.MinTapSize),
+			Detail = ("hit %d x %d"):format(math.floor(chip.HitSize.X), math.floor(chip.HitSize.Y)),
+		})
+	end
+	return lines
+end
+
 local function probeEffectsTray(tokens: number): { ProbeLine }
 	local EffectsTray = require(UI.EffectsTray) :: any
 	local hud = require(script.Parent.HudController) :: any
@@ -4121,6 +4177,8 @@ local function probeTutorial(payload: any)
 			return probeGachaBack()
 		elseif payload.Kind == "QuestBadge" then
 			return probeQuestBadge()
+		elseif payload.Kind == "FriendChip" then
+			return probeFriendChip(if typeof(payload.Percent) == "number" then payload.Percent else 0)
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
 		elseif payload.Kind == "FuseMeter" then

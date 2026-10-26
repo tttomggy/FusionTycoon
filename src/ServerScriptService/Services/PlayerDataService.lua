@@ -38,6 +38,7 @@ local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
+local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
@@ -210,6 +211,8 @@ export type TycoonSnapshot = {
 	-- Uids of this player's displayed items a thief is carrying right now:
 	-- they earn nothing until back (the client's income skips them too).
 	CarriedUids: { string },
+	-- Roblox friends in this server, 0..FriendConfig.MaxFriends (FriendService).
+	Friends: number,
 	-- One-time tips already seen (TipConfig ids), as a dense list.
 	TipKeys: { string },
 	-- The player's settings (SettingsConfig), a copy.
@@ -278,6 +281,9 @@ type State = {
 	-- The last offline payout collected this session (OfflineDouble can
 	-- still double it once), per UserId.
 	lastOfflinePaid: { [number]: number },
+	-- Session-only: the Roblox friends in this server per UserId (FriendService
+	-- counts them, SetFriendCount stores them; the friend boost reads it).
+	friendCounts: { [number]: number },
 	connections: { RBXScriptConnection },
 }
 
@@ -409,6 +415,7 @@ local state: State = {
 	settingsSyncQueued = {},
 	shop = {},
 	lastOfflinePaid = {},
+	friendCounts = {},
 	connections = {},
 }
 
@@ -1597,7 +1604,25 @@ function PlayerDataService.GetIncomeInputs(player: Player, baseOnly: boolean?): 
 		PassMultiplier = ShopConfig.GetPassIncomeMultiplier(PlayerDataService.GetOwnedPasses(player)),
 		BoostMultiplier = if not baseOnly and data.Boosts.Income > 0 then ShopConfig.BoostMultiplier else 1,
 		OverclockMultiplier = if baseOnly then 1 else ShopState.GetOverclockMultiplier(),
+		-- A boost: your friends aren't with you while you're away.
+		FriendMultiplier = if baseOnly then 1 else FriendConfig.GetMultiplier(PlayerDataService.GetFriendCount(player)),
 	}
+end
+
+-- The Roblox friends in this server (0..FriendConfig.MaxFriends).
+function PlayerDataService.GetFriendCount(player: Player): number
+	return state.friendCounts[player.UserId] or 0
+end
+
+-- FriendService is the only writer. Returns true when the count changed
+-- (the caller syncs; a hook can't, SyncTycoon runs them).
+function PlayerDataService.SetFriendCount(player: Player, count: number): boolean
+	local clamped = FriendConfig.ClampCount(count)
+	if (state.friendCounts[player.UserId] or 0) == clamped then
+		return false
+	end
+	state.friendCounts[player.UserId] = clamped
+	return true
 end
 
 -- The gacha price cap's base (TycoonConfig.GetSteadyIncomePerSecond): the
@@ -1955,6 +1980,8 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		PendingOffline = if pending then pending.Amount else 0,
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
+		-- Roblox friends in this server (the friend boost; the chip's number).
+		Friends = PlayerDataService.GetFriendCount(player),
 		TipKeys = indexKeys(data and data.Tips or {}),
 		Weapons = indexKeys(data and data.Weapons or {}),
 		-- Quests (QuestService's status for this sync) and power-ups.
@@ -2233,6 +2260,7 @@ local function onPlayerRemoving(player: Player)
 	state.lastSyncRequest[userId] = nil
 	state.shop[userId] = nil
 	state.lastOfflinePaid[userId] = nil
+	state.friendCounts[userId] = nil
 	task.delay(RELEASE_FLAG_SECONDS, function()
 		if not Players:GetPlayerByUserId(userId) then
 			state.releasing[userId] = nil

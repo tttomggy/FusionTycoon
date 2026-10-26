@@ -365,11 +365,14 @@ export type IncomeInputs = {
 	PassMultiplier: number?, -- 2x Cash x VIP (permanent passes)
 	BoostMultiplier: number?, -- a timed Boost / Quick Boost
 	OverclockMultiplier: number?, -- the Server Overclock (everyone here)
+	-- The friend boost (FriendConfig.GetMultiplier of the Roblox friends in
+	-- this server); a boost, so the steady income and offline pay skip it.
+	FriendMultiplier: number?,
 }
 
 -- "The multiplier" for every per-generator or per-item number the game
 -- shows: Multiplier Pad x rebirth x Index x the shop's passes, boost and
--- Server Overclock. (GetCashMultiplierValue is the pad alone; only the
+-- Server Overclock x the friend boost. (GetCashMultiplierValue is the pad alone; only the
 -- pad's own label and Upgrades row use it.)
 function TycoonConfig.GetIncomeMultiplier(inputs: IncomeInputs): number
 	return TycoonConfig.GetCashMultiplierValue(inputs.CashMultiplierLevel)
@@ -378,6 +381,7 @@ function TycoonConfig.GetIncomeMultiplier(inputs: IncomeInputs): number
 		* (inputs.PassMultiplier or 1)
 		* (inputs.BoostMultiplier or 1)
 		* (inputs.OverclockMultiplier or 1)
+		* (inputs.FriendMultiplier or 1)
 end
 
 -- The pieces of GetIncomeMultiplier, for the HUD pill's breakdown.
@@ -389,6 +393,7 @@ function TycoonConfig.GetIncomeBreakdown(inputs: IncomeInputs): { { Label: strin
 		{ Label = "Passes", Value = inputs.PassMultiplier or 1 },
 		{ Label = "Boost", Value = inputs.BoostMultiplier or 1 },
 		{ Label = "Server Overclock", Value = inputs.OverclockMultiplier or 1 },
+		{ Label = "Friends", Value = inputs.FriendMultiplier or 1 },
 	}
 end
 
@@ -417,7 +422,7 @@ function TycoonConfig.GetPassiveCashPerSecond(inputs: IncomeInputs): number
 end
 
 -- Income without anything temporary or bought (the event's generator boost,
--- a Boost, the Server Overclock, the passes), from the same inputs: the
+-- a Boost, the Server Overclock, the passes, the friend boost), from the same inputs: the
 -- gacha price cap's base, so a buyer is never charged more for pulling.
 function TycoonConfig.GetSteadyIncomePerSecond(inputs: IncomeInputs): number
 	local steady = table.clone(inputs)
@@ -425,6 +430,7 @@ function TycoonConfig.GetSteadyIncomePerSecond(inputs: IncomeInputs): number
 	steady.BoostMultiplier = 1
 	steady.OverclockMultiplier = 1
 	steady.PassMultiplier = 1
+	steady.FriendMultiplier = 1
 	return TycoonConfig.GetPassiveCashPerSecond(steady)
 end
 

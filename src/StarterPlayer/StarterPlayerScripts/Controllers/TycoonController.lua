@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
+local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
@@ -30,6 +31,7 @@ local hasSynced = false
 local rebirths = 0
 local indexFound: { [string]: boolean } = {}
 local indexMultiplier = 1
+local friendCount = 0 -- Roblox friends in this server (the server's count, the snapshot's Friends)
 local pendingOffline = 0
 -- Uids of displayed items a thief is carrying: they earn nothing meanwhile.
 local carriedUids: { [string]: boolean } = {}
@@ -187,6 +189,11 @@ end
 
 function TycoonController.GetRebirths(): number
 	return rebirths
+end
+
+-- Roblox friends here (0..FriendConfig.MaxFriends), as the server counted.
+function TycoonController.GetFriendCount(): number
+	return friendCount
 end
 
 -- Cash price of the next rebirth.
@@ -415,6 +422,7 @@ function TycoonController.GetIncomeInputs(): TycoonConfig.IncomeInputs
 		PassMultiplier = ShopConfig.GetPassIncomeMultiplier(shop.OwnedPasses),
 		BoostMultiplier = if TycoonController.GetBoostSecondsLeft("Income") > 0 then ShopConfig.BoostMultiplier else 1,
 		OverclockMultiplier = ShopState.GetOverclockMultiplier(),
+		FriendMultiplier = FriendConfig.GetMultiplier(friendCount),
 	}
 end
 
@@ -512,6 +520,7 @@ local function onSyncTycoon(snapshot: any)
 	serverLuck = if typeof(snapshot.Luck) == "number" then snapshot.Luck else 1
 	luckBase = if typeof(snapshot.LuckBase) == "number" then snapshot.LuckBase else serverLuck
 	rebirths = if typeof(snapshot.Rebirths) == "number" then snapshot.Rebirths else 0
+	friendCount = if typeof(snapshot.Friends) == "number" then FriendConfig.ClampCount(snapshot.Friends) else 0
 	indexFound = {}
 	if typeof(snapshot.IndexKeys) == "table" then
 		for _, key in snapshot.IndexKeys do
