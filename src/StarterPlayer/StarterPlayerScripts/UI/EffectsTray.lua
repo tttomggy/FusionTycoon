@@ -16,9 +16,14 @@
 	  Fusion Spark   ⚡ gold    "×1" badge       (armed for the next fusion)
 	  Coin Magnet    🧲 red     READY            (armed for the next rain)
 	  Friends        👥 pink    "+30%"           (the friend boost; ALWAYS shown, even "+0%")
+	  Passes         🎟 blue    "x2.5" / "ON"    (ONE circle for every owned gamepass; only with 1+; count badge at 2+)
 
 	The Friends chip is the rightmost cell (LayoutOrder 0): the corner slot
-	never moves, effects pop in to its left. The number is the live
+	never moves, effects pop in to its left. The Passes circle (Order 1) sits
+	just left of it: permanent, no timer ring, its label the cash multiplier
+	the owned passes give (ShopConfig.GetPassIncomeMultiplier) or ON when none
+	of them touch cash; its tooltip lists one line per owned pass from
+	ShopConfig. A purchase adds it at once (the live OwnedPasses snapshot). The number is the live
 	multiplier from the server's snapshot (FriendConfig, TycoonController
 	.GetFriendCount); its tooltip is the rule ("Friends in this server: +15%
 	income each (max +60%)"). A tap or click asks Roblox to invite friends
@@ -88,6 +93,7 @@ local Workspace = game:GetService("Workspace")
 
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
+local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -256,6 +262,71 @@ local function promptInvite()
 	end)
 end
 
+-- The owned passes, in tooltip order: each key with its emoji and the line's
+-- value (names and numbers come from ShopConfig).
+local PASS_ORDER = { "DoubleCash", "VIP", "Lucky", "AutoFuse", "ExtraPedestals", "LabStyle" }
+local PASS_ICONS: { [string]: string } = {
+	DoubleCash = "💰",
+	VIP = "👑",
+	Lucky = "🍀",
+	AutoFuse = "⚙",
+	ExtraPedestals = "🏛",
+	LabStyle = "🎨",
+}
+
+local function passValue(key: string): string
+	if key == "DoubleCash" then
+		return ("%s income"):format(NumberFormat.Multiplier(ShopConfig.DoubleCashMultiplier))
+	elseif key == "VIP" then
+		return ("%s income"):format(NumberFormat.Multiplier(ShopConfig.VipMultiplier))
+	elseif key == "Lucky" then
+		return ("%s luck"):format(NumberFormat.Multiplier(ShopConfig.LuckyMultiplier))
+	elseif key == "ExtraPedestals" then
+		return ("+%d"):format(ShopConfig.ExtraPedestals - ShopConfig.BasePedestals)
+	end
+	return "on"
+end
+
+-- /selftest stub for the owned set (nil = the live snapshot).
+local testOwned: { [string]: boolean }? = nil
+
+local function ownsPass(key: string): boolean
+	local stub = testOwned
+	if stub then
+		return stub[key] == true
+	end
+	return TycoonController.OwnsPass(key)
+end
+
+-- The Passes circle's state, or nil when the player owns none.
+local function passesState(): EffectState?
+	local lines: { string } = {}
+	local set: { [string]: boolean } = {}
+	for _, key in PASS_ORDER do
+		local item = ShopConfig.GetItem(key)
+		if item and ownsPass(key) then
+			set[key] = true
+			table.insert(lines, ("%s %s: %s"):format(PASS_ICONS[key], item.Name, passValue(key)))
+		end
+	end
+	if #lines == 0 then
+		return nil
+	end
+	local cash = ShopConfig.GetPassIncomeMultiplier(set)
+	return {
+		Id = "Passes",
+		Order = 1,
+		Gradient = UITheme.Gradients.Blue,
+		Glyph = "🎟",
+		Fx = "Safe",
+		Badge = if #lines >= 2 then tostring(#lines) else nil,
+		Caption = if cash > 1 then NumberFormat.Multiplier(cash) else "ON",
+		Name = "Your passes",
+		Plain = table.concat(lines, "\n"),
+		Tail = "",
+	}
+end
+
 -- The effects that are on, in tray order.
 local function collect(): { EffectState }
 	local list: { EffectState } = {}
@@ -272,11 +343,15 @@ local function collect(): { EffectState }
 		Plain = FriendConfig.RuleText(),
 		Tail = ("%d of %d friends here%s"):format(friends, FriendConfig.MaxFriends, if canInvite then " · Tap to invite" else ""),
 	})
+	local passes = passesState()
+	if passes then
+		table.insert(list, passes)
+	end
 	local income = TycoonController.GetBoostSecondsLeft("Income")
 	if income > 0 then
 		table.insert(list, {
 			Id = "Income",
-			Order = 1,
+			Order = 2,
 			Gradient = UITheme.Gradients.Green,
 			Glyph = "💵",
 			Fx = "Cash",
@@ -290,7 +365,7 @@ local function collect(): { EffectState }
 	if luck > 0 then
 		table.insert(list, {
 			Id = "Luck",
-			Order = 2,
+			Order = 3,
 			Gradient = UITheme.Gradients.Teal,
 			Glyph = "🍀",
 			Fx = "Luck",
@@ -305,7 +380,7 @@ local function collect(): { EffectState }
 	if server > 0 then
 		table.insert(list, {
 			Id = "Server",
-			Order = 3,
+			Order = 4,
 			Gradient = UITheme.Gradients.Orange,
 			Glyph = "⚙️",
 			Fx = "Cog",
@@ -322,7 +397,7 @@ local function collect(): { EffectState }
 	if boots > 0 then
 		table.insert(list, {
 			Id = "SpeedBoots",
-			Order = 4,
+			Order = 5,
 			Gradient = UITheme.Gradients.Blue,
 			Glyph = "👟",
 			Fx = "Speed",
@@ -336,7 +411,7 @@ local function collect(): { EffectState }
 	if tokens > 0 then
 		table.insert(list, {
 			Id = "SafeFusion",
-			Order = 5,
+			Order = 6,
 			Gradient = UITheme.Gradients.Violet,
 			Glyph = "🛡",
 			Fx = "Safe",
@@ -349,7 +424,7 @@ local function collect(): { EffectState }
 	if TycoonController.IsArmed("FusionSpark") then
 		table.insert(list, {
 			Id = "FusionSpark",
-			Order = 6,
+			Order = 7,
 			Gradient = UITheme.Gradients.Gold,
 			Glyph = "⚡",
 			Fx = "Spark",
@@ -362,7 +437,7 @@ local function collect(): { EffectState }
 	if TycoonController.IsArmed("CoinMagnet") then
 		table.insert(list, {
 			Id = "CoinMagnet",
-			Order = 7,
+			Order = 8,
 			Gradient = UITheme.Gradients.Red,
 			Glyph = "🧲",
 			Fx = "Magnet",
@@ -586,6 +661,7 @@ local function fillTooltip(cell: Cell)
 	tooltipName.Text = cell.State.Name
 	tooltipPlain.Text = cell.State.Plain
 	tooltipTime.Text = cell.State.Tail
+	tooltipTime.Visible = cell.State.Tail ~= ""
 end
 
 --[[ Placement maths (pure) ----------------------------------------------------------
@@ -1302,6 +1378,12 @@ end
 -- /selftest: what the last placement settled on (nil before the first).
 function EffectsTray.GetPlan(): TrayPlan?
 	return lastPlan
+end
+
+-- /selftest: pretend the player owns exactly these pass keys (nil: the live set).
+function EffectsTray.SetTestOwned(owned: { [string]: boolean }?)
+	testOwned = owned
+	refresh()
 end
 
 -- /selftest: forces a refresh now (tests don't wait for the next tick).

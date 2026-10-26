@@ -1329,7 +1329,7 @@ local function runAutoFillSelfTest(player: Player, result: (boolean, string, str
 		return
 	end
 	local def = ItemConfig.PickRandomOfTier(tier) :: any
-	local function add(mutation: string, count: number): { string }
+	local function add(mutation: string?, count: number): { string }
 		local uids = {}
 		for _ = 1, count do
 			local item = PlayerDataService.AddItem(player, def.Id, tier :: string, mutation)
@@ -1339,6 +1339,16 @@ local function runAutoFillSelfTest(player: Player, result: (boolean, string, str
 		end
 		return uids
 	end
+	-- Only plain orbs: no tip.
+	local plain = add(nil, 3)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	tutorialProbe(player, { Kind = "FuseTip", Tier = tier, Expect = "" }, result)
+	PlayerDataService.RemoveItemsByUid(player, plain)
+	-- Three Golden orbs: the tip names GOLDEN, and goes once an orb is in.
+	local tipGoldens = add("Golden", 3)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	tutorialProbe(player, { Kind = "FuseTip", Tier = tier, Expect = "GOLDEN" }, result)
+	PlayerDataService.RemoveItemsByUid(player, tipGoldens)
 	local goldens = add("Golden", FusionConfig.MaxFusionInputs)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	tutorialProbe(player, { Kind = "AutoFillMutated", Tier = tier, Expect = "Fill", Count = FusionConfig.MaxFusionInputs }, result)
@@ -2025,6 +2035,11 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- round icons bottom right.
 	runSection("13. effects tray", result, function()
 		runEffectsTraySelfTest(player, result)
+	end)
+
+	-- 13b. The 🎟 PASSES circle, from a stubbed owned set.
+	runSection("13b. passes circle", result, function()
+		tutorialProbe(player, { Kind = "PassesCircle" }, result)
 	end)
 
 	-- 14. The friend boost: the count, the multiplier, the chip.

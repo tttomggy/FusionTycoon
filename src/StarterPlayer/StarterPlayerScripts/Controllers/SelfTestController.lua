@@ -3597,6 +3597,14 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				if effects == 3 then
 					plan3 = plan
 				end
+				if phone and effects == 5 and viewport.Name == "844 x 390" then
+					-- Friends + Passes + 3 timed effects.
+					table.insert(lines, {
+						Ok = plan.Rows == 1 and plan.Circle >= UITheme.MinTapSize and #plan.Hits == 0,
+						Name = "passes circle: the phone tray (844 x 390) holds Friends + Passes + 3 timed effects on one row, 44 px taps, clear of the HUD",
+						Detail = ("%d rows, %d px icons, touches: %s"):format(plan.Rows, plan.Circle, table.concat(plan.Hits, ", ")),
+					})
+				end
 				-- Every circle's centre y: one row (±1 px), or right-aligned rows when it wraps.
 				local rowYs: { number } = {}
 				local rightEdges: { number } = {}
@@ -3781,6 +3789,81 @@ local function probeFriendChip(percent: number): { ProbeLine }
 			Name = ("friend chip: the tap target is at least %d px"):format(UITheme.MinTapSize),
 			Detail = ("hit %d x %d"):format(math.floor(chip.HitSize.X), math.floor(chip.HitSize.Y)),
 		})
+	end
+	return lines
+end
+
+-- The 🎟 PASSES circle (UI/EffectsTray): one circle for every owned pass, from
+-- a stubbed owned set. None: no circle. {DoubleCash}: label x2, one tooltip
+-- line, no badge. {DoubleCash, VIP, Lucky}: badge 3, label x2.5, 3 lines.
+local function probePassesCircle(): { ProbeLine }
+	local EffectsTray = require(UI.EffectsTray) :: any
+	local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat) :: any
+	local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig) :: any
+	local lines: { ProbeLine } = {}
+	local function circle(owned: { [string]: boolean }): any
+		EffectsTray.SetTestOwned(owned)
+		task.wait(0.3)
+		for _, view in EffectsTray.GetCells() do
+			if view.Id == "Passes" then
+				return view
+			end
+		end
+		return nil
+	end
+	local function tooltipLines(): number
+		EffectsTray.TestHover("Passes", true)
+		task.wait(0.2)
+		local tip = EffectsTray.GetTooltip()
+		EffectsTray.TestHover("Passes", false)
+		if not tip.Visible or tip.Name ~= "Your passes" then
+			return -1
+		end
+		return #string.split(tip.Plain, "\n")
+	end
+	local ok, err = pcall(function()
+		local none = circle({})
+		table.insert(lines, {
+			Ok = none == nil,
+			Name = "passes circle: a player with no pass has no circle",
+			Detail = if none then "a Passes cell is showing" else "no Passes cell",
+		})
+		local one = circle({ DoubleCash = true })
+		local oneLines = if one then tooltipLines() else -1
+		table.insert(lines, {
+			Ok = one ~= nil
+				and one.Glyph == "🎟"
+				and one.Timer == NumberFormat.Multiplier(ShopConfig.DoubleCashMultiplier)
+				and one.Badge == nil
+				and oneLines == 1,
+			Name = "passes circle: {DoubleCash} shows one 🎟 circle labelled x2, no badge, a one-line tooltip",
+			Detail = if one then ("glyph '%s', label '%s', badge %s, %d tooltip lines"):format(one.Glyph, one.Timer, tostring(one.Badge), oneLines) else "no Passes cell",
+		})
+		local three = circle({ DoubleCash = true, VIP = true, Lucky = true })
+		local threeLines = if three then tooltipLines() else -1
+		local wantLabel = NumberFormat.Multiplier(ShopConfig.DoubleCashMultiplier * ShopConfig.VipMultiplier)
+		table.insert(lines, {
+			Ok = three ~= nil and three.Badge == "3" and three.Timer == wantLabel and threeLines == 3,
+			Name = ("passes circle: {DoubleCash, VIP, Lucky} shows badge 3, label %s, a three-line tooltip"):format(wantLabel),
+			Detail = if three then ("badge %s, label '%s', %d tooltip lines"):format(tostring(three.Badge), three.Timer, threeLines) else "no Passes cell",
+		})
+		local luckyOnly = circle({ Lucky = true, LabStyle = true })
+		table.insert(lines, {
+			Ok = luckyOnly ~= nil and luckyOnly.Timer == "ON",
+			Name = "passes circle: passes that do not touch cash read ON",
+			Detail = if luckyOnly then ("label '%s'"):format(luckyOnly.Timer) else "no Passes cell",
+		})
+		if three then
+			table.insert(lines, {
+				Ok = three.HitSize.X >= UITheme.MinTapSize and three.HitSize.Y >= UITheme.MinTapSize,
+				Name = ("passes circle: the tap target is at least %d px"):format(UITheme.MinTapSize),
+				Detail = ("hit %d x %d"):format(math.floor(three.HitSize.X), math.floor(three.HitSize.Y)),
+			})
+		end
+	end)
+	EffectsTray.SetTestOwned(nil)
+	if not ok then
+		table.insert(lines, { Ok = false, Name = "passes circle (errored)", Detail = tostring(err) })
 	end
 	return lines
 end
@@ -4030,6 +4113,39 @@ end
 -- AUTO-FILL on `tier` with an empty chamber: which orbs it selects and the
 -- toast it shows. `expect` = "Fill" (n orbs of one stack + the "Filled with"
 -- toast) or "None" (0 orbs + the "Not enough" toast).
+-- The Fuse panel's mutation tip on `tier` with an empty chamber (`expect` = a
+-- mutation word it must name, or "" for no tip), then with one orb in.
+local function probeFuseTip(tier: string, expect: string): { ProbeLine }
+	local panel = require(UI.FusePanel) :: any
+	task.wait(0.4) -- the inventory sync
+	panel.Open()
+	task.wait(0.2)
+	local empty = panel.SelfTestTip(tier, false)
+	local oneIn = panel.SelfTestTip(tier, true)
+	panel.Close()
+	local lines: { ProbeLine } = {}
+	if expect == "" then
+		table.insert(lines, {
+			Ok = empty == nil,
+			Name = "fuse tip: an empty chamber with only plain orbs shows no tip",
+			Detail = tostring(empty),
+		})
+	else
+		local want = ("Tip: put a %s orb in first, then AUTO-FILL fills %s."):format(expect, expect)
+		table.insert(lines, {
+			Ok = empty == want,
+			Name = ("fuse tip: an empty chamber with a group of %s orbs names %s"):format(expect, expect),
+			Detail = tostring(empty),
+		})
+		table.insert(lines, {
+			Ok = oneIn == nil,
+			Name = "fuse tip: gone as soon as an orb is in the chamber",
+			Detail = tostring(oneIn),
+		})
+	end
+	return lines
+end
+
 local function probeAutoFillMutated(tier: string, expect: string, count: number): { ProbeLine }
 	local panel = require(UI.FusePanel) :: any
 	local toasts = require(script.Parent.ToastController) :: any
@@ -4197,10 +4313,14 @@ local function probeTutorial(payload: any)
 			return probeQuestBadge()
 		elseif payload.Kind == "FriendChip" then
 			return probeFriendChip(if typeof(payload.Percent) == "number" then payload.Percent else 0)
+		elseif payload.Kind == "PassesCircle" then
+			return probePassesCircle()
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
 		elseif payload.Kind == "FuseMeter" then
 			return probeFuseMeter(tonumber(payload.Pity) or 0, payload.Full == true)
+		elseif payload.Kind == "FuseTip" then
+			return probeFuseTip(tostring(payload.Tier), tostring(payload.Expect))
 		elseif payload.Kind == "AutoFillMutated" then
 			return probeAutoFillMutated(tostring(payload.Tier), tostring(payload.Expect), if typeof(payload.Count) == "number" then payload.Count else 0)
 		elseif payload.Kind == "AutoReset" then

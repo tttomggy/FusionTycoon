@@ -11,6 +11,20 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   **Earned or free, never sold:** weapons and power-ups, and Auto pull (the
   Gacha card's T key = Auto ×10, `GachaConfig.AutoPull*`): a convenience every
   player gets, not a pass, not a product.
+  - **Owned passes show up (the 🎟 PASSES circle):** `UI/EffectsTray` has ONE
+    circle for every owned gamepass (the phone tray is one row), only when
+    `TycoonController.OwnsPass` is true for 1+ (the live `OwnedPasses` of the
+    snapshot; a purchase mid-session pops it in). `LayoutOrder 1`, just left
+    of Friends; Blue gradient (the shop's Passes colour); permanent, so no
+    timer ring; a count badge at 2+; the label under it is the cash
+    multiplier the owned passes give (`ShopConfig.GetPassIncomeMultiplier`,
+    `x2.5` for 2x Cash + VIP) or `ON` when none touch cash. Its tooltip (the
+    tray's usual rules; a tap pins it) is bold "Your passes" and one line per
+    owned pass, names and numbers from `ShopConfig`: "💰 2x Cash: x2 income",
+    "👑 VIP: x1.25 income", "🍀 Lucky: x1.5 luck", "⚙ Auto-Fuse: on",
+    "🏛 +2 Pedestals: +2", "🎨 Neon Pink Lab: on". No purchase prompt, no
+    "buy" circle for a player with none. `/selftest` section 13b stubs the
+    owned set (`EffectsTray.SetTestOwned`).
   - **Prices are live:** `ShopPrices.Get(key)` reads
     `MarketplaceService:GetProductInfo` (cached 10 min); every "SAVE %",
     "Worth ~~N~~ R$" and sale "(−38%)" is computed from those live prices

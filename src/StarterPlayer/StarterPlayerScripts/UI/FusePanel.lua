@@ -101,6 +101,9 @@ local meterTarget = 0 -- the fill fraction the bar is heading for
 local chipsRow: Frame
 local predictionBox: Frame
 local optionsRow: Frame
+local tipLabel: TextLabel
+-- Assigned after largestMutatedGroup (the chamber refresh sits above it).
+local updateMutationTip: () -> () = function() end
 local safeButton: TextButton
 local safeHolder: Frame
 local autoButton: TextButton
@@ -399,6 +402,8 @@ local function refreshChamber()
 		chip.Parent = chipsRow
 	end
 
+	updateMutationTip()
+
 	local prediction, warning, color = predictionText(items, nextTier)
 	predictionBox.Visible = prediction ~= nil
 	predictionLabel.Text = prediction or ""
@@ -625,8 +630,8 @@ end
 -- Empty chamber and no unmutated item of this tier: the largest group of
 -- mutated items sharing one stack (not carried; displayed ones count, as
 -- everywhere else in the panel, but come last), max 6. Ties go to the lower stacked multiplier, so the rarest stack is kept.
--- Returns the uids and the stack's label; nothing when no group has 2+.
-local function largestMutatedGroup(): ({ string }, string?)
+-- Returns the uids, the stack's label and its top mutation; nothing when no group has 2+.
+local function largestMutatedGroup(): ({ string }, string?, string?)
 	local groups: { { Uids: { string }, Displayed: { string }, Base: string?, Events: { string }?, Value: number } } = {}
 	for _, item in InventoryController.GetInventory() do
 		if
@@ -665,13 +670,29 @@ local function largestMutatedGroup(): ({ string }, string?)
 		end
 	end
 	if not best then
-		return {}, nil
+		return {}, nil, nil
 	end
 	local uids = {}
 	for index = 1, math.min(#best.Uids, FusionConfig.MaxFusionInputs) do
 		uids[index] = best.Uids[index]
 	end
-	return uids, MutationConfig.GetStackLabel(best.Base, best.Events)
+	return uids, MutationConfig.GetStackLabel(best.Base, best.Events), MutationConfig.GetTop(best.Base, best.Events)
+end
+
+-- AUTO-FILL only matches a mutation when the first orb in the chamber has it,
+-- so with an empty chamber and a group of 2+ orbs sharing one stack on this
+-- tab, one muted line says how.
+updateMutationTip = function()
+	local text = ""
+	if #selected == 0 and not rebirthsNeeded(selectedTier) then
+		local _, _, top = largestMutatedGroup()
+		if top then
+			local word = string.upper(top)
+			text = ("Tip: put a %s orb in first, then AUTO-FILL fills %s."):format(word, word)
+		end
+	end
+	tipLabel.Text = text
+	tipLabel.Visible = text ~= ""
 end
 
 local function autoFill()
@@ -887,6 +908,21 @@ local function buildChamber(column: ScrollingFrame)
 		TextXAlignment = Enum.TextXAlignment.Center,
 		LayoutOrder = 7,
 		ZIndex = column.ZIndex + 1,
+		Parent = column,
+	})
+	tipLabel = UIKit.Label({
+		Name = "MutationTip",
+		Text = "",
+		Font = Fonts.Body,
+		TextSize = 13,
+		TextColor3 = Colors.Muted,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.new(1, 0, 0, 0),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		LayoutOrder = 9,
+		ZIndex = column.ZIndex + 1,
+		Visible = false,
 		Parent = column,
 	})
 	-- Shop options (hidden unless you own a token / the pass).
@@ -1164,6 +1200,26 @@ function FusePanel.SelfTestAutoFill(tier: string): { any }
 	refreshAll()
 	autoFill()
 	return selectedItems()
+end
+
+-- /selftest: the mutation tip as drawn on `tier`'s tab with an empty chamber
+-- (or, with `orbFirst`, one orb of that tier already in); nil when hidden.
+function FusePanel.SelfTestTip(tier: string, orbFirst: boolean): string?
+	if not modal then
+		return nil
+	end
+	selectedTier = tier
+	table.clear(selected)
+	if orbFirst then
+		for _, item in InventoryController.GetInventory() do
+			if item.Tier == tier then
+				table.insert(selected, item.Uid)
+				break
+			end
+		end
+	end
+	refreshAll()
+	return if tipLabel.Visible then tipLabel.Text else nil
 end
 
 -- /selftest: the Secret meter as drawn, with `tier` on the tab and its orbs

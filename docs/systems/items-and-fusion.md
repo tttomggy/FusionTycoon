@@ -104,7 +104,14 @@ orb of the tier it fills the largest same-stack group of mutated orbs, not
 carried (displayed ones allowed, spare copies first), needing 2+, ties to the lower stacked value, toast
 "Filled with GOLDEN orbs (they keep their mutation)", else "Not enough
 matching orbs to fuse" + a tab pulse; `FusionController.GetAutoFill`, AGAIN
-and FUSE ALL still skip mutated items). The fusion
+and FUSE ALL still skip mutated items). Players won't guess that, so with an
+**empty chamber** and a group of 2+ orbs sharing one stack on the selected tab
+(`largestMutatedGroup`, with or without plain orbs too) the Fuse panel shows
+one muted line (`MutationTip`, last in the chamber column):
+"Tip: put a GOLDEN orb in first, then AUTO-FILL fills GOLDEN." (the largest
+group's top mutation). It is gone as soon as any orb is in the chamber, on a
+rebirth-locked tab, and with only plain orbs. No change to AUTO-FILL, AGAIN or
+FUSE ALL. The fusion
 result carries `MutationSource = "Kept" | "Rolled"`: the big card shows
 the pill and "GOLDEN kept" / "GOLDEN rolled!";
 the fail card says "Kept your Golden Rare (…)". The five count chips sit in

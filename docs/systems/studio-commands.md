@@ -99,6 +99,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   pulls Auto pull runs exactly 2 ×10 cycles (≥ 3 s apart, the client showing
   the 10-pull card each time) and stops for cash — this one really pulls 20
   items on the Mock store; cash is given back);
+  **13b. passes circle**: a stubbed owned set (none → no circle;
+  `{DoubleCash}` → label `x2`, 1 tooltip line; `{DoubleCash, VIP, Lucky}` →
+  badge 3, `x2.5`, 3 lines; cash-less passes read `ON`), the phone tray at
+  844 × 390 holding Friends + Passes + 3 timed effects on one row; the Fuse
+  mutation tip is checked inside section 8 (plain only → none, 3 Golden →
+  names GOLDEN, an orb in → gone);
   **13. effects tray**: a Luck Potion, Speed Boots and 2 Safe Fusion tokens
   are granted, the client reports a luck circle with a timer, a Speed Boots
   circle and a Safe Fusion circle with `×2`, all on the right edge of
