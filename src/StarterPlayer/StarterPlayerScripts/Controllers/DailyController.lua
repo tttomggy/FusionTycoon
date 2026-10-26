@@ -9,13 +9,20 @@
 	    turn: it waits OPEN_DELAY_SECONDS after the first sync, then until
 	    no other card is open (UIKit overlays, the shop's side cards), so it
 	    is never stacked on another card.
+	  * Joined from a DailyStreak notification (the server sets the player
+	    attribute NotifyConfig.LaunchAttribute = "daily" from the whitelisted
+	    LaunchData): the same open, without the 2 s wait. Once, and only when
+	    today's reward can still be claimed. "admin" / "lab" need nothing
+	    extra (the event and the welcome-back card are already up).
 	  * DailyController.Open() reopens it (the Gifts panel's daily row).
 	  * DailyResult: Granted plays the reveal; Refused toasts.
 	  * Closing the card after a granted claim hands over to
 	    NotifyOptInController (the Roblox notification opt-in ask).
 ]]
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
+local NotifyConfig = require(ReplicatedStorage.Shared.Config.NotifyConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
@@ -40,6 +47,7 @@ local REFUSALS: { [string]: string } = {
 local autoOpened = false
 local autoSuppressed = false -- /selftest: no card pops up by itself while a section runs
 local lastCanClaim = false
+local launchedFromNotification = false -- joined from a DailyStreak notification: open without the wait
 local claimSentAt = 0
 
 function DailyController.CanClaim(): boolean
@@ -63,8 +71,10 @@ local function tryAutoOpen()
 		return
 	end
 	autoOpened = true
+	local delay = if launchedFromNotification then 0 else OPEN_DELAY_SECONDS
+	launchedFromNotification = false
 	task.spawn(function()
-		task.wait(OPEN_DELAY_SECONDS)
+		task.wait(delay)
 		while UIKit.IsOverlayOpen() or ShopCards.IsSideOpen() or TycoonController.IsTutorialActive() do
 			task.wait(RETRY_SECONDS)
 		end
@@ -117,6 +127,20 @@ local function claim()
 	end)
 end
 
+-- The server sets NotifyConfig.LaunchAttribute from the join's whitelisted
+-- LaunchData. Only "daily" does anything here, once.
+local function onLaunchAttribute()
+	local player = Players.LocalPlayer
+	local action = NotifyConfig.ParseLaunchData(player:GetAttribute(NotifyConfig.LaunchAttribute))
+	if action ~= "daily" or launchedFromNotification then
+		return
+	end
+	launchedFromNotification = true
+	if TycoonController.HasSynced() then
+		tryAutoOpen()
+	end
+end
+
 function DailyController.Init()
 	DailyCard.Init({
 		OnClaim = claim,
@@ -125,6 +149,8 @@ function DailyController.Init()
 	})
 	RemoteEvents.DailyResult.OnClientEvent:Connect(onDailyResult)
 	TycoonController.TycoonChanged:Connect(tryAutoOpen)
+	Players.LocalPlayer:GetAttributeChangedSignal(NotifyConfig.LaunchAttribute):Connect(onLaunchAttribute)
+	onLaunchAttribute()
 end
 
 return DailyController

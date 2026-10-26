@@ -65,7 +65,8 @@ src/ServerScriptService/
                            CombatService weapons, hits and ragdoll;
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards;
-                           FriendService the friend boost's friend count)
+                           FriendService the friend boost's friend count;
+                           NotifyService the Open Cloud notifications)
 src/StarterPlayer/StarterPlayerScripts/
     Controllers/  client controllers (one per domain): HudController,
                   ToastController (error/neutral toasts), ResultController

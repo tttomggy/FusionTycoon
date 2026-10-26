@@ -209,6 +209,10 @@ Most of the 77 were the TEST, not the game:
   friendship check and fake peers give 0 / 2 / 6 friends (×1 / ×1.30 / capped ×1.60), a
   throwing check counts as not friends, steady income and offline pay do not move,
   and the client reports the Friends chip (`+0%` / `+30%` / `+60%`, tooltip, tap).
+- `/selftest` section 15 (`/selftest notify` alone) tests the notification rules with an
+  injected clock and a fake sender (priority pick, one per UTC day, DailyStreak / LabFull
+  due times, launch-data whitelist, the request body, 429 / 4xx / 5xx answers); no HTTP
+  and no MemoryStore.
 - The effects tray placement and tooltip are pure functions
   (`EffectsTray.PlanTrayFor` / `PlanTooltipFor`, logical px in screen space) and
   `/selftest` runs them against the real HUD rects and the weapon bar

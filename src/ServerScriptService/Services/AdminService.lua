@@ -33,6 +33,9 @@
 	        Stop? } to that admin only (shot whitelisted against
 	        TrailerConfig); the cinematic is client-only. Non-admins: nothing.
 
+	Starting a Luck or an event also queues the AdminAbuse notification
+	(NotifyService.QueueAdminAbuse), on the server that got the action only.
+
 	Scope "All" publishes { Action, Args, SenderUserId } on MessagingService
 	topic FT_Admin; every server (this one included, via its own
 	subscription) re-checks SenderUserId against AdminConfig and re-validates
@@ -69,6 +72,7 @@ type EventServiceModule = typeof(require(script.Parent.EventService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type TutorialServiceModule = typeof(require(script.Parent.TutorialService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
+type NotifyServiceModule = typeof(require(script.Parent.NotifyService))
 
 type Args = { [string]: any }
 
@@ -98,6 +102,7 @@ local EventService: EventServiceModule
 local HeistService: HeistServiceModule
 local TutorialService: TutorialServiceModule
 local TycoonService: TycoonServiceModule
+local NotifyService: NotifyServiceModule
 
 local AdminService = {}
 
@@ -312,6 +317,17 @@ local function applyPlayerAction(admin: Player, action: string, userId: number)
 	reply(admin, true, ("%s reset to zero"):format(target.DisplayName))
 end
 
+-- The admin starting an event or luck is Admin Abuse starting: this server
+-- (the one that received the action, never the ones that hear FT_Admin)
+-- queues the AdminAbuse notification for players who are away.
+local function queueAdminAbuseNotification(action: string, args: Args)
+	if action == "Luck" then
+		NotifyService.QueueAdminAbuse(AdminConfig.LuckMultiplier, AdminConfig.LuckSeconds // 60)
+	elseif action == "StartEvent" then
+		NotifyService.QueueAdminAbuse(AdminConfig.LuckMultiplier, args.Minutes)
+	end
+end
+
 local function onAdminAction(player: Player, payload: unknown)
 	if not isAdmin(player.UserId) then
 		warn(("AdminService: SUSPICIOUS AdminAction from non-admin %s (%d)"):format(player.Name, player.UserId))
@@ -367,15 +383,18 @@ local function onAdminAction(player: Player, payload: unknown)
 		end)
 		if ok then
 			-- This server applies it from its own subscription, like the rest.
+			queueAdminAbuseNotification(action, args)
 			reply(player, true, "Sent to all servers: " .. action)
 			return
 		end
 		warn(("AdminService: FT_Admin publish failed (%s); applying here only"):format(tostring(err)))
 		apply(action, args)
+		queueAdminAbuseNotification(action, args)
 		reply(player, false, "All-servers publish failed: applied on this server only")
 		return
 	end
 	apply(action, args)
+	queueAdminAbuseNotification(action, args)
 	reply(player, true, if allServers then action .. " applied here (no cross-server link)" else action .. " applied")
 end
 
@@ -488,6 +507,7 @@ function AdminService:Start()
 	HeistService = require(script.Parent.HeistService)
 	TutorialService = require(script.Parent.TutorialService)
 	TycoonService = require(script.Parent.TycoonService)
+	NotifyService = require(script.Parent.NotifyService)
 	state.running = true
 	task.spawn(resolveOwner)
 	task.spawn(function()

@@ -27,6 +27,54 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   today gold glowing "TODAY", Day 7 purple),
   "🔥 N-day streak", "CLAIM DAY N", the reveal, the footer (skip rule + Day
   7 odds). Pull days close the card for the real pull card.
+- **Notifications** (`NotifyService`, server; numbers and pure rules in
+  `NotifyConfig`): the three Roblox experience notifications, sent through
+  Open Cloud `POST /cloud/v2/users/{id}/notifications` (`HttpService:
+  RequestAsync`, `x-api-key` from `HttpService:GetSecret("OpenCloudNotify")`).
+  Roblox allows ONE per user per day per experience, 13+ opted-in users only,
+  one user per call, string ids made in Creator Hub (<= 99 chars).
+  **Inert until it can work:** off in Studio, off if `HttpEnabled` is false,
+  off without the secret (one `warn` at start), and a type whose
+  `NotifyConfig.StringIds` entry is `""` is never queued or sent.
+  | Type | Queued | Params |
+  |---|---|---|
+  | `AdminAbuse` | `AdminService` on a Luck or StartEvent action, **only by the server that got the action** (`NotifyService.QueueAdminAbuse(luck, minutes)`; an event + luck within 10 min queue once). Everyone in `RecentPlayers` not in that server, newest first, `AdminAbuseMaxRecipients = 2000`, paced 10/s | `luck`, `minutes` |
+  | `DailyStreak` | player leaves; due the next UTC day after their last claim + 3 h (a reward already claimable waits 3 h from leaving; never for someone with no streak) | `day`, `streak` |
+  | `LabFull` | player leaves; due `OfflineConfig.MaxSeconds` (4 h) later, only if the lab would earn something | `cash` (`NumberFormat.Money` of the full offline pay) |
+  Per user at most one queue entry. A leaver keeps the earlier-due of
+  DailyStreak / LabFull (`NotifyConfig.PickEntry`); an entry replaces a queued
+  one unless the queued one is a higher type (`Merge`, priority AdminAbuse >
+  DailyStreak > LabFull). One send per user per UTC day: `NotifySent` (hash
+  map) is checked before every send and written after; a 429/4xx/5xx never
+  uses the day up. **MemoryStore:** sorted map `NotifyQueue` (userId →
+  `{ Type, DueAt, Params }`, sort key `DueAt`), sorted map `RecentPlayers`
+  (7 days), hash maps `NotifyPresence` (90 s, refreshed by every server's
+  worker while the player is in ANY server) and `NotifySent` (2 days).
+  PlayerAdded removes the entry and writes presence; the release hook
+  (`PlayerDataService.OnRelease`) queues. **Worker** on every server every
+  30 s: `GetRangeAsync` the due entries (50), claim each with `UpdateAsync`
+  (`ClaimedUntil` +120 s, so two servers never send the same one),
+  `NotifyService.Process`, then delete. `Process(userId, entry, deps)` is the
+  decision with its world injected (clock, string id, presence, sent day,
+  sender): `Disabled` / `Stale` (due > 24 h ago) / `Present` / `AlreadySent` /
+  `Sent` / `Backoff` (429: the whole worker waits 60 s, the entry stays) /
+  `Drop` (other 4xx: never retried) / `Retry` (5xx, no answer, or a failed
+  MemoryStore read: due again in 5 min, 3 tries). The status code of the
+  first send of each type per server is logged. **Launch data on join:**
+  `Player:GetJoinData().LaunchData` is whitelisted (`daily` / `admin` /
+  `lab`, `NotifyConfig.ParseLaunchData`) and set as the player attribute
+  `LaunchAction`; `DailyController` opens the daily card at once for `daily`
+  (still after the tutorial / overlay guards; nothing if already claimed);
+  `admin` and `lab` need nothing (the event and the welcome-back card are
+  already visible). **Setup (Harris):** Game Settings → Security → Allow HTTP
+  Requests; Creator Hub → API Keys → a key with the user notifications write
+  permission for this experience, added under the experience's Secrets as
+  `OpenCloudNotify`; Creator Hub → Engagement → Notifications → create the
+  3 strings and paste their ids into `NotifyConfig.StringIds`; nothing sends
+  before 100 visits, then check Notifications → Analytics. Strings (examples):
+  `Admin Abuse is LIVE in {experienceName}: x{luck} luck for {minutes}
+  min!` / `Your Day {day} reward is ready. Keep your {streak}-day streak!` /
+  `Your lab is full: {cash} is waiting for you.`
 - **Notify opt-in** (`NotifyOptInController`, client only): once per session
   it calls Roblox's `ExperienceNotificationService:PromptOptIn()`. The modal
   text is Roblox's; we show no card of ours. **Never on join** (the daily card

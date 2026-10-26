@@ -32,6 +32,7 @@ calls left in `Services/`.
 | `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService` | `--!strict` |
 | `QuestService` | `:Init()` `:Start()` | `PlayerDataService`, `CombatService` | `--!strict` |
 | `FriendService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
+| `NotifyService` | `:Init()` `:Start()` | `PlayerDataService` (AdminService calls `QueueAdminAbuse`) | `--!strict` |
 
 ⚠ **Strict-mode conversion is the one thing still outstanding.** Both flagged
 files are dense Instance construction, and there is still no Luau type checker

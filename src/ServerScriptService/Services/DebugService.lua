@@ -58,6 +58,7 @@ type CombatServiceModule = typeof(require(script.Parent.CombatService))
 type QuestServiceModule = typeof(require(script.Parent.QuestService))
 type RewardServiceModule = typeof(require(script.Parent.RewardService))
 type FriendServiceModule = typeof(require(script.Parent.FriendService))
+type NotifyServiceModule = typeof(require(script.Parent.NotifyService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -83,6 +84,7 @@ local CombatService: CombatServiceModule
 local QuestService: QuestServiceModule
 local RewardService: RewardServiceModule
 local FriendService: FriendServiceModule
+local NotifyService: NotifyServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -1742,6 +1744,10 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		print("[SelfTest] == 14. friend boost ==")
 		runFriendBoostSelfTest(player, result)
 		return
+	elseif only == "notify" then
+		print("[SelfTest] == 15. notifications ==")
+		NotifyService.SelfTest(result)
+		return
 	elseif only == "gacha" then
 		print("[SelfTest] == 12. gacha card ==")
 		runGachaCardSelfTest(player, result)
@@ -1978,6 +1984,12 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- 14. The friend boost: the count, the multiplier, the chip.
 	runSection("14. friend boost", result, function()
 		runFriendBoostSelfTest(player, result)
+	end)
+
+	-- 15. Notifications: priority, once a day, due times, launch data and the
+	-- sender's answers, all with an injected clock and a fake sender.
+	runSection("15. notifications", result, function()
+		NotifyService.SelfTest(result)
 		-- The daily reward may open by itself again.
 		tutorialProbe(player, { Kind = "ClearScreen", Label = "the end", Report = false, Suppress = false }, result)
 	end)
@@ -2400,6 +2412,7 @@ function DebugService:Start()
 	QuestService = require(script.Parent.QuestService)
 	RewardService = require(script.Parent.RewardService)
 	FriendService = require(script.Parent.FriendService)
+	NotifyService = require(script.Parent.NotifyService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
 		local applied: { [number]: boolean } = {}
