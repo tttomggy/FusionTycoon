@@ -355,7 +355,7 @@ TutorialConfig.Tips = {
 		Target = "NearestRivalPedestal",
 		PromptName = "StealPrompt",
 		Prompt = "STEAL",
-		Line = "Steal from the rival lab! Hold E, then run home.",
+		Line = "Steal from the rival lab! Hold E, run home, don't get caught!",
 		MaxSeconds = 180, -- ends on the first delivered rival steal, or after 3 min
 	},
 	{ Id = "tipUpgrade", Hand = "Upgrades", Line = "Upgrade generators to earn faster!" },

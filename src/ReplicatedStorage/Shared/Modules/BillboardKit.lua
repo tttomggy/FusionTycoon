@@ -13,6 +13,15 @@
 	Colours and fonts come from UITheme. Every BillboardGui: LightInfluence 0,
 	AlwaysOnTop false, and a MaxDistance.
 
+	THE CLOSE-UP RULE: a billboard sized in studs grows without limit as you
+	walk up to it (a 3.6-stud `+ EMPTY` pill was ~300 px, the LOCK console
+	~450 px). newBillboard therefore gives every one a DistanceLowerLimit from
+	its width (LowerLimitFor, numbers in PlotLayout.LabelCap: at most 220 px
+	wide on a 1080p screen) and tags it StudLabel; /selftest projects each
+	tagged label at 3 studs and wants <= 240 px. A new stud-sized label
+	goes through newBillboard (never Instance.new) so it gets the cap; a
+	label that wants a tighter one (the gate sign) sets its own after.
+
 	Labels only the plot owner should see carry the attribute OwnerOnly =
 	true; the client's WorldLabelController disables them for everyone else.
 ]]
@@ -96,10 +105,35 @@ local function scaledLabel(parent: Instance, name: string, font: Font, color: Co
 	return text
 end
 
+-- The pixels one stud covers at `distance` studs on a screen `viewHeight` px
+-- tall (vertical field of view `fovDegrees`).
+function BillboardKit.PixelsPerStud(distance: number, viewHeight: number, fovDegrees: number): number
+	return viewHeight / (2 * distance * math.tan(math.rad(fovDegrees) / 2))
+end
+
+-- The DistanceLowerLimit that keeps a label `studsWide` wide at most
+-- PlotLayout.LabelCap.MaxWidthPx wide on screen.
+function BillboardKit.LowerLimitFor(studsWide: number): number
+	local cap = PlotLayout.LabelCap
+	return studsWide * cap.ViewHeightPx / (2 * math.tan(math.rad(cap.ReferenceFov) / 2) * cap.MaxWidthPx)
+end
+
+-- The width a stud-sized label draws at `distance` studs: it stops growing
+-- inside its DistanceLowerLimit. /selftest uses it.
+function BillboardKit.ProjectedWidth(studsWide: number, distance: number, lowerLimit: number, viewHeight: number, fovDegrees: number): number
+	return studsWide * BillboardKit.PixelsPerStud(math.max(distance, lowerLimit), viewHeight, fovDegrees)
+end
+
+-- Every label built here carries this attribute so /selftest can find them.
+BillboardKit.STUD_LABEL_ATTRIBUTE = "StudLabel"
+
 local function newBillboard(parent: Instance, name: string, studs: Vector2, offset: Vector3, maxDistance: number): BillboardGui
 	local billboard = Instance.new("BillboardGui")
 	billboard.Name = name
 	billboard.Size = UDim2.fromScale(studs.X, studs.Y)
+	-- A stud-sized label stops growing close up (see the header).
+	billboard.DistanceLowerLimit = BillboardKit.LowerLimitFor(studs.X)
+	billboard:SetAttribute(BillboardKit.STUD_LABEL_ATTRIBUTE, true)
 	billboard.StudsOffset = offset
 	billboard.MaxDistance = maxDistance
 	billboard.LightInfluence = 0

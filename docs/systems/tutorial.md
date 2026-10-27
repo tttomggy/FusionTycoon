@@ -79,7 +79,7 @@ feeds it and runs the hand.
 | `tipIndex` | a new Index entry found after the tutorial ended (the baseline is the count when it ended / when you joined) | INDEX | New orb! Each one boosts your income forever. |
 | `tipEvent` | the event chip is on screen (the `event_<Id>` pulse stays) | the event chip | Lab weather! Tap it to see the bonus. |
 | `tipRebirth` | cash / Rebirth cost >= 50% | REBIRTH | Rebirth when the bar is full: keep your orbs, earn faster forever. |
-| `tipRival` | a rival lab with an orb is in the world and `RivalTipAfterDoneSeconds` (20 s) have passed since "You're ready!" (`PlanTip`'s `RivalLab` / `SinceDone`; first in `Tips`, so it wins once due) | the big STEAL button at the lit path's end (the **nearest rival lab's best pedestal**: `GoalMarkerController` target `NearestRivalPedestal`, highest tier, then nearest) | Steal from the rival lab! Hold E, then run home. |
+| `tipRival` | a rival lab with an orb is in the world and `RivalTipAfterDoneSeconds` (20 s) have passed since "You're ready!" (`PlanTip`'s `RivalLab` / `SinceDone`; first in `Tips`, so it wins once due) | the big STEAL button at the lit path's end (the **nearest rival lab's best pedestal**: `GoalMarkerController` target `NearestRivalPedestal`, highest tier, then nearest) | Steal from the rival lab! Hold E, run home, don't get caught! |
 
 - At most one tip (or `giftHand` / `questHand`, which share the slot) is up; the
   next waits `TipGapSeconds` (20 s) after it is gone, and the first
@@ -169,7 +169,11 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   chip at the weather step, REBIRTH at the rebirth step, and at the end
   ⚙, SHOP / GIFTS / QUESTS / the deal badge / power-ups, then NEXT GOAL +
   the quest tracker, one by one (`HudRevealDelay`). Each pops (0 → 1.15 →
-  1, sparkles, a "NEW!" pill for 3 s). The gate runs at the end of the
+  1, sparkles, a "NEW!" pill for 3 s: a badge centred on the button's top
+  edge, its bottom `BADGE_OVERLAP` (4 px) below it, the note right above;
+  measured from `AbsolutePosition` + the GuiInset, re-placed every frame so it
+  follows a moving bottom row; `HudGate.MeasureBadges` is what `/selftest`
+  checks). The gate runs at the end of the
   render step and forces a hidden key's roots `Visible = false`, because
   their owners (HudController, EventController) keep setting their own
   Visible; on reveal a root is shown or its owner's `OnShow` refreshes
@@ -356,6 +360,15 @@ and 230 px on a 1080p screen. They now carry `DistanceLowerLimit =
 PlotLayout.ShieldFence.GateSignMinDistance` (40 studs): closer than that
 they stop growing (sign ~230 x 46 px). The HUD LOCK chip is a 44 px chip
 and was never a lock button.
+
+**Every stud-sized world label** now has the same cap: `BillboardKit`'s
+`newBillboard` sets `DistanceLowerLimit = LowerLimitFor(width)` from
+`PlotLayout.LabelCap` (220 px wide at most on a 1080p screen at the default
+field of view, ~3.5 x the width in studs) and tags the label `StudLabel`.
+That covers the `+ EMPTY` pills (were ~300 px), the LOCK console (~450 px),
+pedestal item labels, station pads, the generator labels and every chip
+(rival labs, events). `/selftest` projects each tagged label at 3 studs and
+wants <= 240 px. A new stud-sized label goes through `newBillboard`.
 
 Smaller: `EventInfoCard` re-centres once its PopIn is over (the PopIn
 tween made AbsoluteSize lag PopScale by a frame: a 3-7 px error baked into

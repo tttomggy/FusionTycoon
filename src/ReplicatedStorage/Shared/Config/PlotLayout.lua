@@ -83,6 +83,18 @@ PlotLayout.ShieldFence = {
 	GateSignMinDistance = 40,
 }
 
+-- The close-up cap of every stud-sized world label (BillboardKit.newBillboard
+-- sets each one's DistanceLowerLimit from this): standing next to a label it
+-- stops growing at MaxWidthPx wide on a ViewHeightPx-tall screen with the
+-- default field of view. The `+ EMPTY` pills were ~300 px each and the
+-- LOCK console ~450 px at a pedestal / on the gacha card. The limit follows
+-- from the label's width: studs * ViewHeightPx / (2 * tan(fov / 2) * MaxWidthPx).
+PlotLayout.LabelCap = {
+	MaxWidthPx = 220,
+	ViewHeightPx = 1080,
+	ReferenceFov = 70,
+}
+
 --[[ Plan: local (x, 0, z) of each element --------------------------------- ]]
 
 PlotLayout.CLAIM_STATION = v3(0, 0, 24)
@@ -362,6 +374,11 @@ PlotLayout.Gacha = {
 	PopOutStuds = 19, -- ... and closes beyond this (the gap stops flicker)
 	PopSeconds = 0.12, -- UIScale 0.85 -> 1 in, 1 -> 0.85 out (Quad)
 	PopFromScale = 0.85,
+	-- Desktop and phone: the card's top never rides up under TopStack (the
+	-- NIGHT chip hid the first row of orbs). After the world-anchor placement
+	-- the card slides down just enough to start StackGapPx under the stack's
+	-- bottom (GachaBoardController.StackShiftFor); readable beats anchored.
+	StackGapPx = 4,
 	-- PHONE size (GachaBoardController.PhoneScaleFor): the whole card (title to key bar)
 	-- must fit between the top of the screen's stack and the pad's anchor. At the default
 	-- camera, standing on the pad, the anchor projects to ~59.5% of the screen height at

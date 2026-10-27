@@ -49,6 +49,7 @@ local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local ShopPrices = require(ReplicatedStorage.Shared.Modules.ShopPrices)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local UI = script.Parent.Parent.UI
@@ -1087,6 +1088,27 @@ local function testTopStack(): { string }
 		then ("PASS gate sign and lock stop growing up close (%d billboards)"):format(gateChecked)
 		else "FAIL gate sign / lock billboards: " .. table.concat(gateBad, "; "))
 
+	-- Every stud-sized label BillboardKit builds (EMPTY pills, the LOCK
+	-- console, pedestal labels, station pads, rival-lab chips...) is capped:
+	-- at 3 studs from its adornee, on a 1080p view, it draws <= 240 px wide.
+	local capChecked, capBad = 0, {}
+	do
+		local camera = Workspace.CurrentCamera
+		local fov = if camera then camera.FieldOfView else PlotLayout.LabelCap.ReferenceFov
+		for _, gui in Workspace:GetDescendants() do
+			if gui:IsA("BillboardGui") and gui:GetAttribute(BillboardKit.STUD_LABEL_ATTRIBUTE) == true then
+				capChecked += 1
+				local wide = BillboardKit.ProjectedWidth(gui.Size.X.Scale, 3, gui.DistanceLowerLimit, 1080, fov)
+				if wide > 240 then
+					table.insert(capBad, ("%s limit %.1f, %.0f px"):format(gui:GetFullName(), gui.DistanceLowerLimit, wide))
+				end
+			end
+		end
+	end
+	table.insert(lines, if #capBad == 0 and capChecked > 0
+		then ("PASS stud-sized world labels stop growing up close (%d labels, <= 240 px at 3 studs)"):format(capChecked)
+		else ("FAIL stud-sized world labels (%d checked): %s"):format(capChecked, table.concat(capBad, "; ")))
+
 	local shown: { string } = {}
 	local function item(name: string, priority: number?)
 		TopStack.Announce({
@@ -1888,6 +1910,22 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		Name = ("tutorial %s: the HUD shows exactly its set"):format(stepId),
 		Detail = table.concat(mismatches, ", "),
 	})
+	-- A NEW! pill is a badge on its button's top edge: its bottom within 6 px
+	-- of the edge, centred on the button within 4 px.
+	if not tooSmall then
+		local badgeBad: { string } = {}
+		local probes = HudGate.MeasureBadges()
+		for _, probe in probes do
+			if math.abs(probe.PillBottom - probe.ButtonTop) > 6 or math.abs(probe.PillCentreX - probe.ButtonCentreX) > 4 then
+				table.insert(badgeBad, ("%s bottom %.0f vs top %.0f, centre %.0f vs %.0f"):format(probe.Key, probe.PillBottom, probe.ButtonTop, probe.PillCentreX, probe.ButtonCentreX))
+			end
+		end
+		table.insert(lines, {
+			Ok = #badgeBad == 0,
+			Name = ("tutorial %s: NEW! pills sit on their buttons' top edge (%d checked)"):format(stepId, #probes),
+			Detail = table.concat(badgeBad, "; "),
+		})
+	end
 	-- The weapon bar: nothing at Rebirth 0 (no greyed R1 / R2 / R3).
 	local rebirths = require(script.Parent.TycoonController).GetRebirths()
 	local bar = localPlayer:WaitForChild("PlayerGui"):FindFirstChild("WeaponBar")
@@ -2661,8 +2699,9 @@ local function probeGachaCard(serverLuck: number, label: string, serverCost: num
 	if gui.Size.X.Scale ~= 0 or gui.Size.Y.Scale ~= 0 or gui.Size.X.Offset ~= G.CardPx.X or gui.Size.Y.Offset ~= wantHeight then
 		table.insert(billboardBad, ("Size %s, wanted pixels %dx%d"):format(tostring(gui.Size), G.CardPx.X, wantHeight))
 	end
-	if gui.SizeOffset ~= Vector2.new(0, 0.5) then
-		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5)"):format(tostring(gui.SizeOffset)))
+	-- (0, 0.5), or slid down by the stack clamp (Y below 0.5, never above).
+	if gui.SizeOffset.X ~= 0 or gui.SizeOffset.Y > 0.5 + 1e-6 then
+		table.insert(billboardBad, ("SizeOffset %s, wanted (0, 0.5) or the card slid down (0, <0.5)"):format(tostring(gui.SizeOffset)))
 	end
 	if gui.StudsOffset ~= Vector3.new(0, 0, 2) or gui.StudsOffsetWorldSpace ~= Vector3.zero then
 		table.insert(billboardBad, ("an offset is off: StudsOffset %s (wanted 0, 0, 2), world %s (wanted 0)"):format(tostring(gui.StudsOffset), tostring(gui.StudsOffsetWorldSpace)))
@@ -2993,7 +3032,10 @@ type ScreenBox = { Left: number, Top: number, Right: number, Bottom: number, Anc
 local function cardScreenBox(card: any, camera: Camera): ScreenBox
 	local anchor = camera:WorldToViewportPoint((card.Anchor :: Attachment).WorldPosition)
 	local size = (card.PopRoot :: GuiObject).AbsoluteSize
-	return { Left = anchor.X - size.X / 2, Top = anchor.Y - size.Y, Right = anchor.X + size.X / 2, Bottom = anchor.Y, AnchorZ = anchor.Z }
+	-- The stack clamp may have slid the card down (SizeOffset below 0.5).
+	local gui = card.Billboard :: BillboardGui
+	local slide = (0.5 - gui.SizeOffset.Y) * gui.Size.Y.Offset
+	return { Left = anchor.X - size.X / 2, Top = anchor.Y - size.Y + slide, Right = anchor.X + size.X / 2, Bottom = anchor.Y + slide, AnchorZ = anchor.Z }
 end
 
 -- Puts the camera 12.5 studs behind the character (the default view), looking
@@ -3232,6 +3274,49 @@ local function gachaPhoneText(card: any, size: Vector2): ProbeLine
 	}
 end
 
+-- The desktop card on a view `size` px big, character on the pad, default
+-- camera, the event chip up: the card's top stays >= TopStack's bottom + 4 px
+-- (the NIGHT chip once hid its first row of orbs). Checked as placed
+-- (anchor projection, then the clamp), and again with the anchor pushed high
+-- on the screen (a tilted camera) so the clamp has to do its work.
+local function gachaDesktopStack(card: any, camera: Camera, size: Vector2): ProbeLine
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local TopStack = require(UI.TopStack) :: any
+	local G = PlotLayout.Gacha
+	local name = ("gacha card (desktop %dx%d): standing on the pad the card's top is >= the stack's bottom + %d px"):format(size.X, size.Y, G.StackGapPx)
+	local anchor = card.Anchor :: Attachment
+	local point = projectFor(camera, anchor.WorldPosition, size)
+	if not point then
+		return { Ok = false, Name = name, Detail = "the anchor is behind the camera" }
+	end
+	local height = (card.Billboard :: BillboardGui).Size.Y.Offset
+	local stackBottom = TopStack.PlanFor(UIKit.GetCardTopFor(false), 0, 44, 0).Announce
+	local minTop = math.ceil(stackBottom) + G.StackGapPx
+	local problems: { string } = {}
+	local detail: { string } = {}
+	for _, anchorY in { point.Y, size.Y * 0.3, size.Y * 0.1 } do
+		local top = anchorY - height + Board.StackShiftFor(anchorY, height, stackBottom, size.Y)
+		table.insert(detail, ("anchor y %.0f -> top %.0f"):format(anchorY, top))
+		if top < minTop - 0.5 then
+			table.insert(problems, ("anchor y %.0f: top %.1f is above the stack's bottom %.0f + %d = %d"):format(anchorY, top, stackBottom, G.StackGapPx, minTop))
+		end
+	end
+	-- The live card (this window): the same rule on what is drawn.
+	local liveTop = Board.GetDrawnTop()
+	if liveTop and card.PopRoot.Visible then
+		local liveMin = math.ceil(TopStack.GetBottom()) + G.StackGapPx
+		table.insert(detail, ("live top %.0f (min %d)"):format(liveTop, liveMin))
+		if liveTop < liveMin - 0.5 then
+			table.insert(problems, ("live card top %.1f is above the stack's bottom + %d = %d"):format(liveTop, G.StackGapPx, liveMin))
+		end
+	end
+	return {
+		Ok = #problems == 0,
+		Name = name,
+		Detail = ("stack bottom %.0f, %s%s"):format(stackBottom, table.concat(detail, ", "), if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+	}
+end
+
 -- On the pad: the anchor (the Attachment's world position) NEVER changes: not
 -- over 4 camera yaws at a fixed zoom, not over the zoom range (6 / 12.5 / 40
 -- studs), and no billboard offset is ever written.
@@ -3284,6 +3369,12 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 		for _, size in PHONE_TEST_VIEWS do
 			table.insert(lines, gachaPhoneFit(card, camera, size))
 			table.insert(lines, gachaPhoneText(card, size))
+		end
+	else
+		defaultCamera(camera, root, back, 12.5, 0)
+		waitFrames(6)
+		for _, size in { Vector2.new(1920, 1080), Vector2.new(1366, 768) } do
+			table.insert(lines, gachaDesktopStack(card, camera, size))
 		end
 	end
 	camera.CameraType = savedType

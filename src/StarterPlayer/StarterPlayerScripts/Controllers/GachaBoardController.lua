@@ -15,6 +15,11 @@
 	pull with E / R / T from PromptDistance + 3 studs, so you stop in front of
 	the pad and see the card over it.
 
+	  * The stack clamp (desktop AND phone): every frame the card is up its top
+	    is held >= TopStack's bottom + PlotLayout.Gacha.StackGapPx (4 px) by
+	    sliding the billboard's SizeOffset down (StackShiftFor, pure). The
+	    anchor and the studs offsets below still never change; if the clamp
+	    moves the card off its anchor, it stays clamped (readable beats anchored).
 	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
 	    pad is a cylinder turned 90 degrees about Z, so an offset on the pad
 	    itself would be applied in ITS axes, sideways), Size = (300, 324) px,
@@ -110,6 +115,7 @@ local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
+local TopStack = require(script.Parent.Parent.UI.TopStack)
 
 local GachaBoardController = {}
 
@@ -1471,6 +1477,68 @@ end
 -- Distance hysteresis (Near), then Open = Near and not covered / ragdolled /
 -- carrying; and, while up, the shimmer and the zoom check. The card is
 -- adorned to the pad: it never follows the camera.
+-- Pure: how many px the card slides down so its top starts StackGapPx under
+-- the stack. `anchorY` is the anchor's screen y (the card's bottom edge),
+-- `cardHeight` the card as drawn (phone scale included), `stackBottom` the
+-- bottom of TopStack in screen px, `viewHeight` the screen's. 0 when it
+-- already clears; never more than the room left under the anchor, so the key
+-- bar stays on screen. /selftest runs it at 1920 x 1080 and 1366 x 768.
+function GachaBoardController.StackShiftFor(anchorY: number, cardHeight: number, stackBottom: number, viewHeight: number): number
+	local minTop = math.ceil(stackBottom) + G.StackGapPx
+	local top = anchorY - cardHeight
+	if top >= minTop then
+		return 0
+	end
+	return math.clamp(minTop - top, 0, math.max(0, viewHeight - anchorY))
+end
+
+-- TopStack's bottom in screen px (its y is logical: x the phone's 0.8).
+local function stackBottomPx(): number
+	return TopStack.GetBottom() * (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
+end
+
+-- The card as drawn: the billboard's height x the phone's scale.
+local function drawnHeight(view: CardView): number
+	local scale = view.Root:FindFirstChild("PhoneScale")
+	return view.Billboard.Size.Y.Offset * (if scale and scale:IsA("UIScale") then scale.Scale else 1)
+end
+
+-- Every frame while the card is up: slide it down (SizeOffset, a fraction of
+-- its own height) when its top would sit under the event chip / stack. The
+-- anchor and the studs offsets are never touched.
+local function clampToStack(view: CardView)
+	local camera = Workspace.CurrentCamera
+	if not camera then
+		return
+	end
+	local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
+	local shift = 0
+	if point.Z > 0 then
+		shift = GachaBoardController.StackShiftFor(point.Y, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
+	end
+	local fullHeight = view.Billboard.Size.Y.Offset
+	local want = Vector2.new(0, 0.5 - shift / math.max(fullHeight, 1))
+	if (view.Billboard.SizeOffset - want).Magnitude > 0.0005 then
+		view.Billboard.SizeOffset = want
+	end
+end
+
+-- The card's top on screen as it is drawn right now (anchor projection, less
+-- the card's height, plus the slide), for /selftest.
+function GachaBoardController.GetDrawnTop(): number?
+	local view = card
+	local camera = Workspace.CurrentCamera
+	if not view or not camera then
+		return nil
+	end
+	local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
+	if point.Z <= 0 then
+		return nil
+	end
+	local slide = (0.5 - view.Billboard.SizeOffset.Y) * view.Billboard.Size.Y.Offset
+	return point.Y - drawnHeight(view) + slide
+end
+
 local function stepFrame()
 	local view = card
 	if not view or not view.Pad.Parent then
@@ -1492,6 +1560,9 @@ local function stepFrame()
 		popIn(view)
 	elseif not want and view.Open then
 		popOut(view)
+	end
+	if view.PopRoot.Visible then
+		clampToStack(view)
 	end
 end
 

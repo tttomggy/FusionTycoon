@@ -24,11 +24,16 @@
 	    AlsoHide   other elements held hidden with them, never animated
 	    ForceShow  false: the owner decides Visible, OnShow refreshes it
 	    NewSide    where the NEW! pill sits: "Top" (default), "Below", "Right"
+	               Top is a badge: centred on the button's top edge, its bottom
+	               BADGE_OVERLAP px below it, the note right above it; measured
+	               from AbsolutePosition + the GuiInset, re-placed every frame
 	  IsShown(key)    the state this frame; IsVisible(key) the element itself
 	                  (/selftest checks both per step)
+	  MeasureBadges() /selftest: a real NEW! pill per shown Top key, measured
 	  Init()
 ]]
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local GuiService = game:GetService("GuiService")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
 
@@ -47,6 +52,10 @@ local SPARKLE_COUNT = 6
 local SPARKLE_DISTANCE = 46
 local POP_UP = 1.15
 local POPS_DISPLAY_ORDER = 59
+-- The NEW! pill is a badge on the button's top edge: its bottom hangs this
+-- many px below the edge (the selftest allows +-6), the note sits above it.
+local BADGE_OVERLAP = 4
+local BADGE_GAP = 8 -- "Below" / "Right": the gap to the button
 
 export type Entry = {
 	Roots: () -> { GuiObject },
@@ -148,10 +157,14 @@ local function getOverlay(): Frame
 	return frame
 end
 
--- The element's rectangle in the overlay's own (design px) space.
+-- The element's rectangle in the overlay's own (design px) space. The overlay
+-- is an IgnoreGuiInset gui, but AbsolutePosition is still reported below the
+-- Roblox top bar, so the inset is added back (without it every pill sat one
+-- top bar, ~58 px, above its button).
 local function rectOf(root: GuiObject): (Vector2, Vector2)
 	local scale = UIKit.EffectiveScale(getOverlay())
-	return root.AbsolutePosition / scale, root.AbsoluteSize / scale
+	local inset = Vector2.new(0, GuiService:GetGuiInset().Y)
+	return (root.AbsolutePosition + inset) / scale, root.AbsoluteSize / scale
 end
 
 local function sparkles(root: GuiObject)
@@ -178,7 +191,22 @@ local function sparkles(root: GuiObject)
 	end
 end
 
-local function newPill(root: GuiObject, note: string?, side: string?)
+-- Puts the pill holder against `root` (the badge rule: see BADGE_OVERLAP).
+local function placeHolder(holder: Frame, root: GuiObject, side: string?)
+	local position, size = rectOf(root)
+	if side == "Below" then
+		holder.AnchorPoint = Vector2.new(0.5, 0)
+		holder.Position = UDim2.fromOffset(position.X + size.X / 2, position.Y + size.Y + BADGE_GAP)
+	elseif side == "Right" then
+		holder.AnchorPoint = Vector2.new(0, 0)
+		holder.Position = UDim2.fromOffset(position.X + size.X + BADGE_GAP, position.Y)
+	else
+		holder.AnchorPoint = Vector2.new(0.5, 1)
+		holder.Position = UDim2.fromOffset(position.X + size.X / 2, position.Y + BADGE_OVERLAP)
+	end
+end
+
+local function newPill(root: GuiObject, note: string?, side: string?): (Frame, GuiObject)
 	local holder = Instance.new("Frame")
 	holder.Name = "HudNew"
 	holder.BackgroundTransparency = 1
@@ -191,7 +219,7 @@ local function newPill(root: GuiObject, note: string?, side: string?)
 	layout.VerticalAlignment = if side == "Below" or side == "Right" then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom
 	layout.Padding = UDim.new(0, 4)
 	layout.Parent = holder
-	UIKit.Pill({
+	local badge = UIKit.Pill({
 		Name = "NewPill",
 		Parent = holder,
 		Text = "NEW!",
@@ -211,27 +239,55 @@ local function newPill(root: GuiObject, note: string?, side: string?)
 			LayoutOrder = 1,
 		})
 	end
-	-- Follows the element for its 3 s.
+	-- Follows the element for its 3 s (it re-places every frame, so a bottom
+	-- row that moves, a phone layout or the jump button takes it along).
 	local started = os.clock()
 	local connection: RBXScriptConnection
+	placeHolder(holder, root, side)
 	connection = RunService.RenderStepped:Connect(function()
 		if os.clock() - started > NEW_SECONDS or not root.Parent then
 			connection:Disconnect()
 			holder:Destroy()
 			return
 		end
-		local position, size = rectOf(root)
-		if side == "Below" then
-			holder.AnchorPoint = Vector2.new(0.5, 0)
-			holder.Position = UDim2.fromOffset(position.X + size.X / 2, position.Y + size.Y + 8)
-		elseif side == "Right" then
-			holder.AnchorPoint = Vector2.new(0, 0)
-			holder.Position = UDim2.fromOffset(position.X + size.X + 8, position.Y)
-		else
-			holder.AnchorPoint = Vector2.new(0.5, 1)
-			holder.Position = UDim2.fromOffset(position.X + size.X / 2, position.Y - 6)
-		end
+		placeHolder(holder, root, side)
 	end)
+	return holder, UIKit.PillRoot(badge)
+end
+
+export type BadgeProbe = { Key: string, PillBottom: number, ButtonTop: number, PillCentreX: number, ButtonCentreX: number }
+
+-- /selftest: puts a real NEW! pill on every shown key whose NewSide is Top
+-- (the buttons) and measures it one frame later, in logical px with the inset
+-- added back (the selftest's visibleRect rule). The pills are removed again.
+function HudGate.MeasureBadges(): { BadgeProbe }
+	local probes: { BadgeProbe } = {}
+	local made: { { Key: string, Holder: Frame, Badge: GuiObject, Root: GuiObject } } = {}
+	for key, entry in entries do
+		if shown[key] and (entry.NewSide == nil or entry.NewSide == "Top") then
+			local root = entry.Roots()[1]
+			if root and root.Visible and root.AbsoluteSize.X > 0 then
+				local holder, badge = newPill(root, TutorialConfig.HudRevealNote[key], entry.NewSide)
+				table.insert(made, { Key = key, Holder = holder, Badge = badge, Root = root })
+			end
+		end
+	end
+	RunService.RenderStepped:Wait()
+	local inset = GuiService:GetGuiInset().Y
+	local scale = UIKit.EffectiveScale(getOverlay())
+	for _, item in made do
+		local badgePos, badgeSize = item.Badge.AbsolutePosition, item.Badge.AbsoluteSize
+		local rootPos, rootSize = item.Root.AbsolutePosition, item.Root.AbsoluteSize
+		table.insert(probes, {
+			Key = item.Key,
+			PillBottom = (badgePos.Y + inset + badgeSize.Y) / scale,
+			ButtonTop = (rootPos.Y + inset) / scale,
+			PillCentreX = (badgePos.X + badgeSize.X / 2) / scale,
+			ButtonCentreX = (rootPos.X + rootSize.X / 2) / scale,
+		})
+		item.Holder:Destroy()
+	end
+	return probes
 end
 
 local function reveal(key: string, animate: boolean)
