@@ -21,8 +21,10 @@
 	                                           LogCustomEvent (+ CustomField01)
 
 	Funnel steps (in order): Join, ClaimLab, FirstUpgrade, FirstPull,
-	FirstDisplay, FirstFuse, FirstMultiplier, FirstEvent, FirstRebirth,
-	FirstSteal.
+	FirstDisplay, FirstFuse, FirstRivalSteal, FirstMultiplier, FirstEvent,
+	FirstRebirth, FirstSteal. (FirstRivalSteal went in after FirstFuse with the
+	rival labs: every later step moved up one. Pre-launch, so fine; a saved
+	Funnel set is keyed by NAME and unaffected.)
 
 	Not a service: services and PlayerDataService require it directly.
 ]]
@@ -42,6 +44,7 @@ AnalyticsKit.FunnelSteps = {
 	"FirstPull",
 	"FirstDisplay",
 	"FirstFuse",
+	"FirstRivalSteal", -- first delivered steal from a rival lab (RivalService; HeistService marks it)
 	"FirstMultiplier",
 	"FirstEvent",
 	"FirstRebirth",

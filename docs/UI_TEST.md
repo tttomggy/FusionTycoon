@@ -1234,11 +1234,12 @@ In Studio nothing is sent: every call prints `[Analytics] …` in Output.
 - [ ] **Funnel, in order, once each.** Fresh profile: `funnel 1 Join`;
   step on CLAIM: `funnel 2 ClaimLab`; buy an upgrade: `funnel 3
   FirstUpgrade`; pull: `funnel 4 FirstPull`; display an item: `funnel 5
-  FirstDisplay`; fuse: `funnel 6 FirstFuse`; Multiplier Pad: `funnel 7
-  FirstMultiplier`; `/event goldenrain`: `funnel 8 FirstEvent`;
-  `/rebirthready` + rebirth: `funnel 9 FirstRebirth`; deliver a steal:
-  `funnel 10 FirstSteal`. Doing any of them again prints no funnel line
-  (with `FT_StudioSaves`, not even after a rejoin).
+  FirstDisplay`; fuse: `funnel 6 FirstFuse`; deliver a steal from a rival
+  lab: `funnel 7 FirstRivalSteal` (+ `custom RivalStealDelivered`); Multiplier
+  Pad: `funnel 8 FirstMultiplier`; `/event goldenrain`: `funnel 9
+  FirstEvent`; `/rebirthready` + rebirth: `funnel 10 FirstRebirth`; deliver a
+  steal from a player: `funnel 11 FirstSteal`. Doing any of them again prints
+  no funnel line (with `FT_StudioSaves`, not even after a rejoin).
 - [ ] **Economy.** Sinks print on an upgrade (`Upgrade`), a MAX
   (`UpgradeMax`, ONE line for all levels), a pull / ×10 (`Pull` /
   `Pull10`), the pad (`MultiplierPad`) and a rebirth (`Rebirth`, the cash

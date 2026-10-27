@@ -20,8 +20,10 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   prints `[Analytics] …` and sends nothing). `Funnel(player, step)`:
   `LogOnboardingFunnelStepEvent` once per player ever (`PlayerData.Funnel`,
   via `SetFunnelStore` from PlayerDataService): Join, ClaimLab,
-  FirstUpgrade, FirstPull, FirstDisplay, FirstFuse, FirstMultiplier,
-  FirstEvent, FirstRebirth, FirstSteal. `Source` / `Sink` →
+  FirstUpgrade, FirstPull, FirstDisplay, FirstFuse, FirstRivalSteal,
+  FirstMultiplier, FirstEvent, FirstRebirth, FirstSteal (FirstRivalSteal went
+  in after FirstFuse with the rival labs, so every later step moved up one;
+  fine pre-launch, and `PlayerData.Funnel` is keyed by name). `Source` / `Sink` →
   `LogEconomyEvent` ("Cash"): passive income summed per minute
   (`AddIncome`, flushed on leave too), coins, cash packs (IAP), daily and
   gift cash (TimedReward); upgrades (a MAX is ONE event), pulls, the pad,
@@ -29,7 +31,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   OfferDismissed (client → remote `ShopAnalytics`, whitelisted,
   rate-limited), NotifyOptInShown / NotifyOptInClosed (client → remote
   `NotifyOptInAnalytics`, whitelisted, rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
-  StealStarted / StealDelivered / StealSaved, QuestClaimed (id),
+  StealStarted / StealDelivered / StealSaved, RivalStealDelivered /
+  RivalStealTagged (the guard's touch or a weapon hit) / RivalStealTimeout
+  (field: the orb's tier), RivalGuardHit (weapon), QuestClaimed (id),
   PowerUpUsed (key). Never call AnalyticsService
   directly.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
