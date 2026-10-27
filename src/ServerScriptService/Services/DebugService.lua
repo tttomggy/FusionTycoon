@@ -899,6 +899,7 @@ local function runTipSelfTest(result: (boolean, string, string?) -> ())
 			NewIndex = false,
 			EventChip = false,
 			RebirthProgress = 0,
+			RivalLab = false,
 		}
 		if change then
 			for key, value in change do
@@ -913,8 +914,9 @@ local function runTipSelfTest(result: (boolean, string, string?) -> ())
 		tipIndex = { NewIndex = true },
 		tipEvent = { EventChip = true },
 		tipRebirth = { RebirthProgress = 0.5 },
+		tipRival = { RivalLab = true },
 	}
-	local everything: { [string]: any } = { Cash = 1000, NewIndex = true, EventChip = true, RebirthProgress = 1 }
+	local everything: { [string]: any } = { Cash = 1000, NewIndex = true, EventChip = true, RebirthProgress = 1, RivalLab = true }
 	for _, tip in TutorialConfig.Tips do
 		result(TipConfig.IsValid(tip.Id), ("tips: %s is a saved tip id (TipConfig)"):format(tip.Id))
 		result(TutorialConfig.PlanTip(state(triggers[tip.Id])) == tip.Id, ("tips: %s fires on its own trigger"):format(tip.Id), tostring(TutorialConfig.PlanTip(state(triggers[tip.Id]))))
@@ -947,7 +949,7 @@ local function runTipSelfTest(result: (boolean, string, string?) -> ())
 	local seen: { [string]: boolean } = {}
 	for _ = 1, #TutorialConfig.Tips + 2 do
 		local plan = everything
-		local planned = TutorialConfig.PlanTip(state({ Cash = plan.Cash, NewIndex = plan.NewIndex, EventChip = plan.EventChip, RebirthProgress = plan.RebirthProgress, Seen = seen }))
+		local planned = TutorialConfig.PlanTip(state({ Cash = plan.Cash, NewIndex = plan.NewIndex, EventChip = plan.EventChip, RebirthProgress = plan.RebirthProgress, RivalLab = plan.RivalLab, Seen = seen }))
 		if not planned then
 			break
 		end
@@ -964,6 +966,15 @@ local function runTipSelfTest(result: (boolean, string, string?) -> ())
 		"tips: the Multiplier tip is for level 0 only"
 	)
 	result(TutorialConfig.PlanTip(state({ RebirthProgress = 0.49 })) == nil, "tips: the Rebirth tip waits for 50%")
+	-- tipRival: ~20 s after "You're ready!", and only with a rival lab in the world.
+	local rivalSoon = TutorialConfig.PlanTip(state({ RivalLab = true, SinceDone = TutorialConfig.RivalTipAfterDoneSeconds - 0.1 }))
+	local rivalDue = TutorialConfig.PlanTip(state({ RivalLab = true, SinceDone = TutorialConfig.RivalTipAfterDoneSeconds }))
+	result(rivalSoon == nil and rivalDue == "tipRival", ("tips: tipRival waits %d s after the tutorial ends"):format(TutorialConfig.RivalTipAfterDoneSeconds), tostring(rivalSoon) .. " / " .. tostring(rivalDue))
+	local rivalTip = TutorialConfig.GetTip("tipRival")
+	result(
+		rivalTip ~= nil and rivalTip.Target == "NearestRivalPedestal" and rivalTip.PromptName == "StealPrompt" and rivalTip.MaxSeconds == 180,
+		"tips: tipRival points at the nearest rival pedestal's StealPrompt and lasts 3 min"
+	)
 	local maxed = state({ Cash = 1e9 })
 	maxed.UpgradeCost = nil
 	maxed.MultiplierCost = nil

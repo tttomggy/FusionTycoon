@@ -759,6 +759,9 @@ local function onHeistEnded(payload: any)
 	end
 	local other = tostring(payload.OtherName)
 	if payload.Role == "Thief" then
+		if payload.Outcome == "Delivered" and payload.Rival == true then
+			TycoonController.NoteRivalDelivery()
+		end
 		if payload.Outcome == "Delivered" then
 			ResultController.ShowHeistComplete(item, other)
 		elseif payload.Rival == true and payload.Outcome == "Saved" then

@@ -319,9 +319,20 @@ export type TipDef = {
 	Target: string?,
 	PromptName: string?,
 	Prompt: string?,
+	MaxSeconds: number?, -- how long it stays up (default TipMaxSeconds)
 }
 
 TutorialConfig.Tips = {
+	{
+		-- Steal from a rival lab (RivalService): path arrows to the nearest
+		-- rival lab's best pedestal, then the big STEAL button (the hold) at it.
+		Id = "tipRival",
+		Target = "NearestRivalPedestal",
+		PromptName = "StealPrompt",
+		Prompt = "STEAL",
+		Line = "Steal from the rival lab! Hold E, then run home.",
+		MaxSeconds = 180, -- ends on the first delivered rival steal, or after 3 min
+	},
 	{ Id = "tipUpgrade", Hand = "Upgrades", Line = "Upgrade generators to earn faster!" },
 	{
 		Id = "tipMultiplier",
@@ -338,6 +349,7 @@ TutorialConfig.Tips = {
 TutorialConfig.TipGapSeconds = 20 -- a second tip waits this long after the first is gone
 TutorialConfig.TipAfterDoneSeconds = 3 -- ... and the first waits this long after the tutorial ends
 TutorialConfig.TipMaxSeconds = 45 -- a tip nobody follows goes by itself (it stays seen)
+TutorialConfig.RivalTipAfterDoneSeconds = 20 -- tipRival: this long after "You're ready!" (the tutorial's end)
 TutorialConfig.RebirthTipProgress = 0.5 -- tipRebirth: cash / Rebirth cost
 -- The line under the first pull that lands on a pedestal (no step for it).
 TutorialConfig.PedestalLine = "Your orbs earn cash every second!"
@@ -368,6 +380,7 @@ export type TipState = {
 	NewIndex: boolean, -- an Index entry was found since the tutorial ended
 	EventChip: boolean, -- the event chip is on screen
 	RebirthProgress: number, -- cash / the Rebirth cost
+	RivalLab: boolean, -- a rival lab with an orb you could grab is in the world
 }
 
 -- The tip to show now, or nil. Never during the tutorial or a replay, never
@@ -386,6 +399,7 @@ function TutorialConfig.PlanTip(state: TipState): string?
 		tipIndex = state.NewIndex,
 		tipEvent = state.EventChip,
 		tipRebirth = state.RebirthProgress >= TutorialConfig.RebirthTipProgress,
+		tipRival = state.RivalLab and state.SinceDone >= TutorialConfig.RivalTipAfterDoneSeconds,
 	}
 	for _, tip in TutorialConfig.Tips do
 		if not state.Seen[tip.Id] and ready[tip.Id] then

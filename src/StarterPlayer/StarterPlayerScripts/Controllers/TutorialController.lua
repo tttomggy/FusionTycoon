@@ -115,7 +115,8 @@ local wasActive = false
 local pedestalPops: { BillboardGui } = {}
 local pedestalPopUntil = 0 -- os.clock() the "+$X/s" pops go
 local pedestalHintShown = false -- the pedestal line was shown for this run of the tutorial
-local tipPressing: TutorialConfig.TipDef? = nil -- a world tip (the Multiplier Pad): its path and big button are up
+local tipPressing: TutorialConfig.TipDef? = nil -- a world tip (the Multiplier Pad, a rival lab): its path and big button are up
+local rivalDeliveriesAtTipStart = 0 -- tipRival ends on the next delivered rival steal
 local pressing = false
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
@@ -200,7 +201,12 @@ local function pressPrompt(step: { Target: string?, PromptName: string? })
 	end
 	task.spawn(function()
 		prompt:InputHoldBegin()
-		RunService.Heartbeat:Wait()
+		-- A hold prompt (the rival steal, 1.5 s) needs the whole hold.
+		if prompt.HoldDuration > 0 then
+			task.wait(prompt.HoldDuration + 0.15)
+		else
+			RunService.Heartbeat:Wait()
+		end
 		prompt:InputHoldEnd()
 		pressing = false
 	end)
@@ -717,6 +723,14 @@ local TIPS: { [string]: TipRuntime } = {
 	tipIndex = { Opened = IndexPanel.IsOpen, Hand = handOf("Index") },
 	tipEvent = { Opened = EventInfoCard.IsOpen, Hand = EventController.GetChip },
 	tipRebirth = { Opened = RebirthPanel.IsOpen, Hand = handOf("Rebirth") },
+	tipRival = {
+		Opened = function(): boolean
+			return TycoonController.GetRivalDeliveries() > rivalDeliveriesAtTipStart
+		end,
+		Hand = function(): GuiObject?
+			return TutorialHand.GetContextualButton()
+		end,
+	},
 	giftHand = {
 		Opened = GiftsPanel.IsOpen,
 		Hand = handOf("Gifts"),
@@ -764,6 +778,9 @@ local function startTip(id: string)
 	tipShowing = id
 	tipShownAt = os.clock()
 	TycoonController.MarkTipSeen(id)
+	if id == "tipRival" then
+		rivalDeliveriesAtTipStart = TycoonController.GetRivalDeliveries()
+	end
 	local def = TutorialConfig.GetTip(id)
 	if def then
 		AnnouncementController.ShowLine(def.Line, "Tip")
@@ -811,6 +828,7 @@ local function tipState(done: boolean, replay: boolean): TutorialConfig.TipState
 		NewIndex = indexFound and not seen.tipIndex,
 		EventChip = chip ~= nil and chip.Visible,
 		RebirthProgress = if cost > 0 then cash / cost else 0,
+		RivalLab = GoalMarkerController.ResolvePlotTarget("NearestRivalPedestal") ~= nil,
 	}
 end
 
@@ -836,7 +854,9 @@ local function tipFrame()
 	local id = tipShowing
 	if id then
 		local runtime = TIPS[id]
-		if not runtime or runtime.Opened() or os.clock() - tipShownAt >= TutorialConfig.TipMaxSeconds then
+		local def = TutorialConfig.GetTip(id)
+		local maxSeconds = (def and def.MaxSeconds) or TutorialConfig.TipMaxSeconds
+		if not runtime or runtime.Opened() or os.clock() - tipShownAt >= maxSeconds then
 			endTip()
 			return
 		end

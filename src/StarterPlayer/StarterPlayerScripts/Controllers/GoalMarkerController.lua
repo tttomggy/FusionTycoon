@@ -35,6 +35,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -118,6 +119,44 @@ local function resolveTarget(name: string): Instance?
 	if pedestalIndex then
 		local pedestals = plot:FindFirstChild("Pedestals")
 		return pedestals and pedestals:FindFirstChild(name)
+	end
+	if name == "NearestRivalPedestal" then
+		-- The best grabbable pedestal (highest tier, then nearest) in the
+		-- nearest rival lab that has one (WorldLabelController marks its
+		-- StealPrompt Mode "Steal"). tipRival's arrows and hand.
+		local folder = plot.Parent
+		local character = localPlayer.Character
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not folder or not root or not root:IsA("BasePart") then
+			return nil
+		end
+		local bestLabDistance = math.huge
+		local bestPedestal: Instance? = nil
+		for _, other in folder:GetChildren() do
+			local pedestals = if other:GetAttribute("Rival") == true then other:FindFirstChild("Pedestals") else nil
+			local origin = if other:IsA("Model") then other.PrimaryPart else nil
+			if pedestals and origin then
+				local labDistance = (origin.Position - root.Position).Magnitude
+				local labBest: Instance? = nil
+				local labRank = -1
+				local labDistanceToPedestal = math.huge
+				for _, pedestal in pedestals:GetChildren() do
+					local prompt = pedestal:FindFirstChild("StealPrompt")
+					if pedestal:IsA("BasePart") and prompt and prompt:GetAttribute("Mode") == "Steal" then
+						local tier = pedestal:GetAttribute("OrbTier")
+						local rank = if typeof(tier) == "string" then ItemConfig.Tiers[tier] or 0 else 0
+						local distance = (pedestal.Position - root.Position).Magnitude
+						if rank > labRank or (rank == labRank and distance < labDistanceToPedestal) then
+							labBest, labRank, labDistanceToPedestal = pedestal, rank, distance
+						end
+					end
+				end
+				if labBest and labDistance < bestLabDistance then
+					bestLabDistance, bestPedestal = labDistance, labBest
+				end
+			end
+		end
+		return bestPedestal
 	end
 	if name == "NearestEnemyPedestal" then
 		-- The closest pedestal in another lab you could grab right now
@@ -381,7 +420,14 @@ end
 -- "FirstEmptyPedestal", which is legitimately missing when all are full.
 local function checkTargetExists(name: string, target: Instance?)
 	local plot = getPlot()
-	if target or name == "FirstEmptyPedestal" or name == "NearestEnemyPedestal" or not plot or plot:GetAttribute("Claimed") ~= true then
+	if
+		target
+		or name == "FirstEmptyPedestal"
+		or name == "NearestEnemyPedestal"
+		or name == "NearestRivalPedestal"
+		or not plot
+		or plot:GetAttribute("Claimed") ~= true
+	then
 		missingSince[name] = nil
 		return
 	end
@@ -409,8 +455,10 @@ local function refresh()
 	if not override and layer then
 		setUiTarget(nil)
 		local target = if layer.Name then resolveTarget(layer.Name) else nil
-		local origin = getPlotOrigin()
-		if not target or not origin then
+		-- A rival lab's pedestal stands outside your walls: no plot origin to check.
+		local foreign = layer.Name == "NearestRivalPedestal"
+		local origin = if foreign then nil else getPlotOrigin()
+		if not target or (not origin and not foreign) then
 			clearWorldMarker()
 			return
 		end

@@ -27,6 +27,7 @@ TipConfig.Ids = {
 	tipIndex = true, -- first new Index entry after the tutorial: hand on INDEX
 	tipEvent = true, -- the first event chip seen after the tutorial
 	tipRebirth = true, -- first time Rebirth progress >= 50%: hand on REBIRTH
+	tipRival = true, -- ~20 s after "You're ready!": arrows to the nearest rival lab's best pedestal (steal from it)
 } :: { [string]: boolean }
 
 -- "event_<EventId>": the HUD event chip pulses until the first tap for

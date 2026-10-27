@@ -278,6 +278,18 @@ function TycoonController.GetSecondsSinceTutorialDone(): number
 	return if doneAt then os.clock() - doneAt else math.huge
 end
 
+-- Rival steals you delivered this session (HeistController notes each one):
+-- tipRival ends on the first.
+local rivalDeliveries = 0
+
+function TycoonController.NoteRivalDelivery()
+	rivalDeliveries += 1
+end
+
+function TycoonController.GetRivalDeliveries(): number
+	return rivalDeliveries
+end
+
 function TycoonController.HasSeenTip(id: string): boolean
 	return tipsSeen[id] == true
 end

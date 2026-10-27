@@ -258,6 +258,8 @@ local function showPedestal(rival: Rival, index: number)
 		if steal and steal:IsA("ProximityPrompt") then
 			steal.ObjectText = stealLabel
 		end
+		-- For the client's "best pedestal" (the tipRival arrows).
+		pedestal:SetAttribute("OrbTier", orb.Tier)
 	else
 		PedestalVisuals.Clear(pedestal)
 		BillboardKit.SetPedestalLabel(pedestal, nil)
@@ -270,6 +272,7 @@ local function showPedestal(rival: Rival, index: number)
 			empty.Enabled = false
 		end
 		pedestal:SetAttribute("StealLabel", "")
+		pedestal:SetAttribute("OrbTier", nil)
 		local steal = pedestal:FindFirstChild("StealPrompt")
 		if steal and steal:IsA("ProximityPrompt") then
 			steal.ObjectText = ""
