@@ -11,12 +11,14 @@
 
 	Heist StealPrompts (EnemyOnly) start disabled everywhere and are enabled
 	here, re-checked every STEAL_CHECK_SECONDS, only when: the viewer isn't
-	the owner, the viewer has HeistConfig.MinRebirths (leaderstats), the lab
+	the owner, the viewer has HeistConfig.MinRebirthsVsPlayers (leaderstats), the lab
 	isn't Protected (owner under MinRebirths) or shielded (ShieldUntil), the
 	pedestal is Filled and not BeingStolen, and the viewer isn't already
 	carrying. A pedestal the owner is guarding (GuardedByOwner) shows "Owner
 	is guarding" instead of a hold. The server re-checks all of it on
-	RequestSteal.
+	RequestSteal. A RIVAL lab's prompt (attribute RivalId, no owner, no shield)
+	is a Steal for everyone at HeistConfig.MinRebirthsVsRivals (0) while its
+	pedestal is Filled and not BeingStolen.
 
 	It also hides every plot BillboardGui (pedestal and pad labels) drawn
 	within HIDE_NEAR_STUDS of the camera, showing it again past
@@ -157,6 +159,19 @@ end
 export type StealMode = "Hidden" | "Locked" | "Shielded" | "Guarded" | "Steal"
 
 local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
+	if typeof(prompt:GetAttribute("RivalId")) == "number" then
+		-- A rival lab: no owner, no shield, no Rebirth gate for the thief.
+		local rivalPedestal = prompt.Parent
+		if
+			viewerCarrying
+			or not rivalPedestal
+			or rivalPedestal:GetAttribute("Filled") ~= true
+			or rivalPedestal:GetAttribute("BeingStolen") == true
+		then
+			return "Hidden"
+		end
+		return if viewerRebirths < HeistConfig.MinRebirthsVsRivals then "Locked" else "Steal"
+	end
 	local owner = prompt:GetAttribute("OwnerUserId")
 	if owner == localUserId or viewerCarrying then
 		return "Hidden"
@@ -169,7 +184,7 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 	if not plot or plot:GetAttribute("Protected") ~= false then
 		return "Hidden"
 	end
-	if viewerRebirths < HeistConfig.MinRebirths then
+	if viewerRebirths < HeistConfig.MinRebirthsVsPlayers then
 		return "Locked"
 	end
 	local shieldUntil = plot:GetAttribute("ShieldUntil")

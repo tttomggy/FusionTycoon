@@ -29,6 +29,13 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # (EventConfig), then Rebirth
                                                 # 1-3 vs. the same seeds
                                                 # without events
+        python3 tools/econ_sim.py 30 12 --rivals
+                                                # rival-lab steals on (from
+                                                # minute 3, RivalConfig's
+                                                # StealsPerHour), then Rebirth
+                                                # 1-3 vs. the same seeds
+                                                # without (target: Rebirth 1
+                                                # sooner, still >= 35 min)
 """
 import random, sys
 
@@ -159,6 +166,24 @@ AWAY_SECONDS = 8 * 3600
 # event from Random.new(slotStart); the sim draws the same distribution
 # from its own seeded RNG per slot.
 EVENTS = False
+# Rival labs (RivalConfig.lua / HeistConfig.MinRebirthsVsRivals = 0): from
+# minute 3 ANY player can steal an orb from an NPC lab, at most StealsPerHour
+# delivered per rolling hour. The sim's player steals at that cap, every
+# 3600 / 12 s (an upper bound: nobody delivers 12 an hour, and the run home
+# costs real play time the sim does not charge). The tier comes from the
+# band = the player's own rebirths (a solo player is the server's lowest),
+# capped at MaxBand; plain, one GOLDEN_CHANCE Golden; never Mythic / Secret.
+RIVALS = False
+RIVAL_START_SECONDS = 180
+RIVAL_STEALS_PER_HOUR = 12
+RIVAL_GOLDEN_CHANCE = 0.05
+RIVAL_MAX_BAND = 3
+RIVAL_TIER_WEIGHTS = {
+    0: {"Common": 60, "Rare": 30, "Epic": 10},
+    1: {"Common": 40, "Rare": 38, "Epic": 18, "Legendary": 4},
+    2: {"Common": 25, "Rare": 35, "Epic": 28, "Legendary": 12},
+    3: {"Common": 15, "Rare": 30, "Epic": 35, "Legendary": 20},
+}
 
 # Quests (QuestConfig.lua), only with --quests: the average player. Each
 # session-day of QUEST_DAY_PLAY_SECONDS of play hands out 3 dailies (a
@@ -259,6 +284,10 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             ev_slots[slot] = ev
         ev = ev_slots[slot]
         return (ev, slot) if clock - slot * EV_SLOT < EV_DURATION[ev] else None
+
+    # Rival-lab steals: a separate RNG, so the base run's draws never move.
+    rival_rng = random.Random(seed * 104729 + 5)
+    next_steal = RIVAL_START_SECONDS
 
     shop = PAYERS[payer]
     base_pedestals = shop["pedestals"]
@@ -470,6 +499,21 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         ev_last[0], ev_last[1] = (cur if cur else (None, -1))
         if QUESTS:
             quest_step()
+        while RIVALS and t >= next_steal:
+            # One delivered rival steal: the orb from the band's weights.
+            weights = RIVAL_TIER_WEIGHTS[min(rebirths, RIVAL_MAX_BAND)]
+            roll = rival_rng.random() * sum(weights.values())
+            tier = "Common"
+            for tr, w in weights.items():
+                tier = tr
+                if roll < w:
+                    break
+                roll -= w
+            golden = rival_rng.random() < RIVAL_GOLDEN_CHANCE
+            add(tier, "Golden" if golden else "None")
+            milestones["rival_steals"] = milestones.get("rival_steals", 0) + 1
+            mark("first_rival_steal")
+            next_steal += 3600 / RIVAL_STEALS_PER_HOUR
         income = cps(ev)
         cash += income * step
         earned += income * step
@@ -645,6 +689,8 @@ if __name__ == "__main__":
         EVENTS = True
     if "--quests" in sys.argv:
         QUESTS = True
+    if "--rivals" in sys.argv:
+        RIVALS = True
     sessions = 0
     for a in sys.argv:
         if a.startswith("--share="):
@@ -701,6 +747,22 @@ if __name__ == "__main__":
         for k in [f"chain{i}" for i in range(1, len(QUEST_CHAIN) + 1)]:
             vals = sorted(r[0].get(k, 1e12) for r in runs)
             print(f"  {k:10s} median {fmt(vals[mid] if vals[mid] < 1e12 else None)}")
+    if RIVALS:
+        # The same seeds without rival steals: how much the NPC labs move
+        # Rebirth 1-3 (target: Rebirth 1 sooner, but not under 35 min).
+        RIVALS = False
+        base = [run(s, hours * 3600) for s in range(seeds)]
+        RIVALS = True
+        print(f"rival steals ({RIVAL_STEALS_PER_HOUR}/h from minute {RIVAL_START_SECONDS // 60}) vs. none (same seeds), median:")
+        for k in ["rebirth1", "rebirth2", "rebirth3"]:
+            a = sorted(r[0].get(k, 1e12) for r in base)[mid]
+            b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
+            if a < 1e12 and b < 1e12:
+                print(f"  {k:10s} none {fmt(a)}  rivals {fmt(b)}  {(a - b) / a:+.1%} sooner")
+            else:
+                print(f"  {k:10s} none {fmt(a if a < 1e12 else None)}  rivals {fmt(b if b < 1e12 else None)}")
+        lo1 = sorted(r[0].get("rebirth1", 1e12) for r in runs)[lo]
+        print(f"  fastest decile Rebirth 1 with rivals: {fmt(lo1 if lo1 < 1e12 else None)} (target >= 0:35:00)")
     if EVENTS:
         # The same seeds without events: how much the clock speeds Rebirth
         # 1-3 (target: at most 15% sooner).

@@ -12,11 +12,21 @@
 	  Tag      the owner within TagDistance of you: the item goes back.
 	  Fail     tagged, timeout, thief dies or leaves, victim leaves: back.
 
+	Rival labs (RivalConfig, RivalService): the same grab / carry / deliver
+	flow against an NPC lab. Any player can steal from one, Rebirth 0
+	included; the Rebirth gate below is for stealing from REAL players only.
+
 	HeistService owns the state; nothing here is saved.
 ]]
 local HeistConfig = {}
 
-HeistConfig.MinRebirths = 1 -- both thief and victim need at least this many rebirths
+-- Player vs player: BOTH the thief and the victim need at least this many
+-- rebirths (a new lab is "Protected" until then).
+HeistConfig.MinRebirthsVsPlayers = 1
+-- Player vs a rival lab (NPC): nobody is gated, so a brand-new player can steal
+-- from minute 3. No victim exists, so only the thief's count is checked.
+HeistConfig.MinRebirthsVsRivals = 0
+HeistConfig.MinRebirths = HeistConfig.MinRebirthsVsPlayers -- the player-vs-player gate (older name; teasers and the HUD read it)
 
 -- Grab
 HeistConfig.GrabHoldSeconds = 1.5 -- StealPrompt HoldDuration

@@ -5,8 +5,11 @@
 
 	  * Grab: holding E on an enemy pedestal's StealPrompt (enabled only when
 	    the steal is allowed, WorldLabelController) fires RequestSteal with
-	    just which pedestal: { OwnerUserId, PedestalIndex }. A rejection comes
-	    back as HeistEnded { Outcome = "Rejected", Reason } -> a toast.
+	    just which pedestal: { OwnerUserId, PedestalIndex }, or { RivalId,
+	    PedestalIndex } on a rival lab (an NPC lab with a guard; any player,
+	    Rebirth 0 included). A rejection comes back as HeistEnded { Outcome =
+	    "Rejected", Reason } -> a toast ("The rivals are on alert. Try again in
+	    N min" past RivalConfig.StealsPerHour).
 	  * Every client, for every carrying player (the server sets Heist*
 	    attributes on the Player), the thief's own client included: a
 	    cosmetic copy of the pedestal orb 3 studs over their head (mutation
@@ -124,6 +127,7 @@ local REJECT_MESSAGES: { [string]: string } = {
 	Shielded = "Their shield is up",
 	LabCapped = "This lab has been robbed enough for now",
 	AlreadyStolen = "Someone's already carrying that",
+	RivalGone = "That rival lab just packed up",
 	Empty = "Nothing to steal there",
 	TooFar = "Get closer",
 	NoCharacter = "Can't steal right now",
@@ -645,9 +649,10 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 		return
 	end
 	local owner = prompt:GetAttribute("OwnerUserId")
+	local rivalId = prompt:GetAttribute("RivalId")
 	local pedestal = prompt.Parent
 	local index = pedestal and pedestal:GetAttribute("PedestalIndex")
-	if typeof(owner) ~= "number" or typeof(index) ~= "number" then
+	if (typeof(owner) ~= "number" and typeof(rivalId) ~= "number") or typeof(index) ~= "number" then
 		return
 	end
 	-- WorldLabelController's local Mode: a guarded pedestal and the
@@ -660,7 +665,12 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
 		return
 	elseif mode == "Locked" then
-		ToastController.Show(("Stealing unlocks at Rebirth %d"):format(HeistConfig.MinRebirths), "Neutral")
+		ToastController.Show(("Stealing unlocks at Rebirth %d"):format(HeistConfig.MinRebirthsVsPlayers), "Neutral")
+		return
+	end
+	if typeof(rivalId) == "number" then
+		-- A rival lab (NPC): the server resolves the lab, the orb and the range.
+		RemoteEvents.RequestSteal:FireServer({ RivalId = rivalId, PedestalIndex = index })
 		return
 	end
 	RemoteEvents.RequestSteal:FireServer({ OwnerUserId = owner, PedestalIndex = index })
@@ -728,6 +738,11 @@ local function onHeistEnded(payload: any)
 			end
 			return
 		end
+		if payload.Reason == "RivalAlert" then
+			local minutes = math.max(1, math.ceil((tonumber(payload.Seconds) or 60) / 60))
+			ToastController.Show(("The rivals are on alert. Try again in %d min"):format(minutes), "Neutral")
+			return
+		end
 		local message = REJECT_MESSAGES[payload.Reason]
 		if message then
 			ToastController.Show(message, "Neutral")
@@ -746,6 +761,8 @@ local function onHeistEnded(payload: any)
 	if payload.Role == "Thief" then
 		if payload.Outcome == "Delivered" then
 			ResultController.ShowHeistComplete(item, other)
+		elseif payload.Rival == true and payload.Outcome == "Saved" then
+			ToastController.Show("The lab guard got you! The orb went back", "Error")
 		else
 			ToastController.Show(THIEF_FAIL_TOASTS[payload.Outcome] or "It slipped away", "Error")
 		end
@@ -1192,9 +1209,16 @@ local function updateTeaching()
 				end
 			end
 		end
-		-- First time inside a lab you could rob: say how, once.
+		-- First time inside a lab you could rob: say how, once. (A rival lab
+		-- has its own tip, tipRival; the player-vs-player teaching is unchanged.)
 		local origin = plot:IsA("Model") and plot.PrimaryPart
-		if hasTarget and myRoot and origin and not TycoonController.HasSeenTip("stealHowTo") then
+		if
+			hasTarget
+			and plot:GetAttribute("Rival") ~= true
+			and myRoot
+			and origin
+			and not TycoonController.HasSeenTip("stealHowTo")
+		then
 			if PlotLayout.IsInsidePlot(origin.CFrame:PointToObjectSpace(myRoot.Position)) then
 				TycoonController.MarkTipSeen("stealHowTo")
 				ToastController.Show(STEAL_TIP, "Neutral", { Big = true })

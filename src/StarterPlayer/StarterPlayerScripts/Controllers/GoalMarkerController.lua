@@ -136,7 +136,9 @@ local function resolveTarget(name: string): Instance?
 				for _, pedestal in pedestals:GetChildren() do
 					local prompt = pedestal:FindFirstChild("StealPrompt")
 					local mode = prompt and prompt:GetAttribute("Mode")
-					if pedestal:IsA("BasePart") and mode == "Steal" then
+					-- A rival lab's pedestal is not a player's (first_steal is the
+					-- player-vs-player goal; NearestRivalPedestal points at rivals).
+					if pedestal:IsA("BasePart") and mode == "Steal" and other:GetAttribute("Rival") ~= true then
 						local distance = (pedestal.Position - root.Position).Magnitude
 						if distance < bestDistance then
 							best, bestDistance = pedestal, distance

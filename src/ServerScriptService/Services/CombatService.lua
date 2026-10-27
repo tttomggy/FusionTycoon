@@ -39,6 +39,10 @@
 	  * Hitting a carrying thief: HeistService.KnockCarrier (the orb goes
 	    home, the owner sees SAVED). Analytics: Hit (weapon), ThiefKnocked,
 	    GuardKnocked.
+	  * A rival lab's guard (RivalService) is hit like a player by any
+	    weapon that finds it (melee box, ranged ray): it falls over for
+	    RivalConfig.GuardStunSeconds, can't tag and loses the chase, so a
+	    friend can cover a thief. Analytics: RivalGuardHit (weapon).
 	  * HitFx { Weapon, Kind, From, To, Attacker?, Target? } to everyone: the
 	    bonk / beam / freeze / slip effects, a Swing for every accepted melee
 	    swing (a miss too, so others see it), a Throw when a peel lands
@@ -62,10 +66,12 @@ local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
 type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
+type RivalServiceModule = typeof(require(script.Parent.RivalService))
 
 local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
 local TycoonService: TycoonServiceModule
+local RivalService: RivalServiceModule
 
 local CombatService = {}
 CombatService.Name = "CombatService"
@@ -461,6 +467,27 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 	if attacker then
 		AnalyticsKit.Custom(attacker, "Hit", nil, weapon.Id)
 	end
+end
+
+-- A confirmed hit on rival `rivalId`'s guard: it falls over (RivalService),
+-- everyone sees the bonk / freeze FX. Nothing else: it has no health.
+function CombatService.ApplyGuardHit(attacker: Player, rivalId: number, weapon: CombatConfig.Weapon, from: Vector3)
+	local model = RivalService.GetGuardModel(rivalId)
+	local root = model and model:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") or RivalService.IsGuardStunned(rivalId) then
+		return
+	end
+	if not RivalService.StunGuard(rivalId, from) then
+		return
+	end
+	RemoteEvents.HitFx:FireAllClients({
+		Weapon = weapon.Id,
+		Kind = if weapon.Kind == "Freeze" then "Freeze" else "Bonk",
+		From = from,
+		To = root.Position,
+		Attacker = attacker.UserId,
+	})
+	AnalyticsKit.Custom(attacker, "RivalGuardHit", nil, weapon.Id)
 end
 
 --[[ Tools ---------------------------------------------------------------------------- ]]
@@ -895,6 +922,20 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	for _, candidate in candidates do
 		table.insert(found, ("%s %.1f studs"):format(candidate.Name, seen[candidate] :: number))
 	end
+	-- Rival labs' guards in the box (within reach) are hit too.
+	local guards: { number } = {}
+	for _, part in parts do
+		local rivalId = RivalService.GuardOfPart(part)
+		local guardModel = if rivalId then RivalService.GetGuardModel(rivalId) else nil
+		local guardRoot = guardModel and guardModel:FindFirstChild("HumanoidRootPart")
+		if rivalId and guardRoot and guardRoot:IsA("BasePart") and not table.find(guards, rivalId) then
+			local distance = (guardRoot.Position - root.Position).Magnitude
+			if distance <= maxReach then
+				table.insert(guards, rivalId)
+				table.insert(found, ("Lab Guard %.1f studs"):format(distance))
+			end
+		end
+	end
 
 	local hits: { Player } = {}
 	local refusals: { string } = {}
@@ -915,8 +956,11 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	for _, target in hits do
 		table.insert(hitNames, target.Name)
 	end
+	for _ in guards do
+		table.insert(hitNames, "Lab Guard")
+	end
 	local verdict: string
-	if #hits > 0 then
+	if #hits > 0 or #guards > 0 then
 		verdict = "HIT " .. table.concat(hitNames, ", ")
 		if #refusals > 0 then
 			verdict ..= "; " .. table.concat(refusals, ", ")
@@ -929,6 +973,9 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	recordVerdict(attacker, weapon, found, hitNames, ("%s box found [%s] -> %s"):format(prefix, table.concat(found, ", "), verdict))
 	for _, target in hits do
 		CombatService.ApplyHit(attacker, target, weapon, root.Position)
+	end
+	for _, rivalId in guards do
+		CombatService.ApplyGuardHit(attacker, rivalId, weapon, root.Position)
 	end
 end
 
@@ -987,6 +1034,10 @@ local function onRequestHit(attacker: Player, payload: unknown)
 		local endPoint = if hit then hit.Position else origin + direction.Unit * weapon.Range
 		local character = hit and hit.Instance:FindFirstAncestorWhichIsA("Model")
 		local target = character and Players:GetPlayerFromCharacter(character)
+		local guardRivalId = if hit and not target then RivalService.GuardOfPart(hit.Instance) else nil
+		if guardRivalId then
+			CombatService.ApplyGuardHit(attacker, guardRivalId, weapon, origin)
+		end
 		if target and target ~= attacker then
 			local why = CombatService.WhyNotHittable(target)
 			local targetRoot = getRoot(target)
@@ -1105,6 +1156,7 @@ function CombatService:Start()
 	PlayerDataService = require(script.Parent.PlayerDataService)
 	HeistService = require(script.Parent.HeistService)
 	TycoonService = require(script.Parent.TycoonService)
+	RivalService = require(script.Parent.RivalService)
 	PlayerDataService.OnSync(grantByRebirths)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do
