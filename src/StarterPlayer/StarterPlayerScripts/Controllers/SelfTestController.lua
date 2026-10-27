@@ -3052,6 +3052,15 @@ local function waitFrames(count: number)
 	end
 end
 
+-- " | a; b" for a Detail: the hard misses, then the soft ones ("" if none).
+local function joinProblems(hard: { string }, soft: { string }): string
+	local all = table.clone(hard)
+	for _, problem in soft do
+		table.insert(all, problem)
+	end
+	return if #all > 0 then " | " .. table.concat(all, "; ") else ""
+end
+
 -- The position checks, for one camera. (1) THE BUG CHECK: the anchor's flat
 -- (XZ) distance to the pad's centre is < 0.1 studs (the card was adorned to a
 -- cylinder turned 90 degrees, so it sat ~9.8 studs sideways). (2) The card's
@@ -3061,20 +3070,25 @@ end
 -- covers the ball. A billboard's own AbsolutePosition is
 -- local to the billboard, so the screen box comes from the anchor's projection
 -- and PopRoot's (phone-scaled) size.
-local function positionProblems(card: any, camera: Camera, needBallBelow: boolean): ({ string }, string)
+-- Returns (hard, soft, detail): the card shut, the anchor off the pad or behind
+-- the camera are hard (FAIL); the card off the pad's centre on screen or not
+-- covering the ball are soft (a WARN, never counted).
+local function positionProblems(card: any, camera: Camera, needBallBelow: boolean): ({ string }, { string }, string)
+	local Board = require(script.Parent.GachaBoardController) :: any
 	local pad = card.Pad :: BasePart
 	local anchor = card.Anchor :: Attachment
 	local box = cardScreenBox(card, camera)
+	local hard: { string } = {}
 	local problems: { string } = {}
 	local flat = Vector2.new(anchor.WorldPosition.X - pad.Position.X, anchor.WorldPosition.Z - pad.Position.Z).Magnitude
 	if flat >= 0.1 then
-		table.insert(problems, ("the anchor is %.2f studs off the pad's centre"):format(flat))
+		table.insert(hard, ("the anchor is %.2f studs off the pad's centre"):format(flat))
 	end
 	if not (card.Open and card.Shown) then
-		table.insert(problems, "the card is not open")
+		table.insert(hard, "the card is not open: " .. Board.DescribeState())
 	end
 	if box.AnchorZ <= 0 then
-		table.insert(problems, "the anchor is behind the camera")
+		table.insert(hard, "the anchor is behind the camera")
 	end
 	local padCentre = camera:WorldToViewportPoint(pad.Position)
 	local centreX = (box.Left + box.Right) / 2
@@ -3095,7 +3109,7 @@ local function positionProblems(card: any, camera: Camera, needBallBelow: boolea
 			table.insert(problems, "no CapsuleBand part on the station")
 		end
 	end
-	return problems, ("flat %.3f studs, card x %.0f-%.0f y %.0f-%.0f, pad centre x %.0f, capsule centre %s"):format(flat, box.Left, box.Right, box.Top, box.Bottom, padCentre.X, ballText)
+	return hard, problems, ("flat %.3f studs, card x %.0f-%.0f y %.0f-%.0f, pad centre x %.0f, capsule centre %s"):format(flat, box.Left, box.Right, box.Top, box.Bottom, padCentre.X, ballText)
 end
 
 -- Approach: the server stands the character 8 studs in front of the pad on
@@ -3123,24 +3137,26 @@ local function probeGachaApproach(phone: boolean): { ProbeLine }
 	local distance = toPad.Magnitude
 	defaultCamera(camera, root, -toPad.Unit, 12.5, 0)
 	waitFrames(6)
-	local approachProblems, approachDetail = positionProblems(card, camera, true)
+	local approachHard, approachSoft, approachDetail = positionProblems(card, camera, true)
 	camera.CFrame = CFrame.lookAt(pad.Position + Vector3.new(0, 40, 0), pad.Position, Vector3.new(0, 0, -1))
 	waitFrames(6)
-	local topProblems, topDetail = positionProblems(card, camera, false)
+	local topHard, topSoft, topDetail = positionProblems(card, camera, false)
 	camera.CameraType = savedType
 	camera.CFrame = savedCFrame
 	UIKit.SetForcedPhone(nil)
 	local window = ("%d x %d window"):format(camera.ViewportSize.X, camera.ViewportSize.Y)
 	return {
 		{
-			Ok = #approachProblems == 0,
+			Ok = #approachHard + #approachSoft == 0,
+			Warn = #approachHard == 0 and #approachSoft > 0,
 			Name = ("gacha card (%s, %s): 8 studs in front of the pad the card is centred on the pad and covers the capsule ball"):format(layout, window),
-			Detail = ("%.1f studs from the pad; %s%s"):format(distance, approachDetail, if #approachProblems > 0 then " | " .. table.concat(approachProblems, "; ") else ""),
+			Detail = ("%.1f studs from the pad; %s%s"):format(distance, approachDetail, joinProblems(approachHard, approachSoft)),
 		},
 		{
-			Ok = #topProblems == 0,
+			Ok = #topHard + #topSoft == 0,
+			Warn = #topHard == 0 and #topSoft > 0,
 			Name = ("gacha card (%s, %s): with the camera straight above the pad the card is centred on it"):format(layout, window),
-			Detail = ("%s%s"):format(topDetail, if #topProblems > 0 then " | " .. table.concat(topProblems, "; ") else ""),
+			Detail = ("%s%s"):format(topDetail, joinProblems(topHard, topSoft)),
 		},
 	}
 end
@@ -3199,9 +3215,11 @@ end
 -- still >= 13 px on screen. When the window IS this size the live drawn card
 -- is measured; otherwise (projecting onto a size that is not the window says
 -- nothing about the drawn card) the pure PhonePlanFor decides, from the
--- anchor's projection. Returns (problems, detail).
+-- anchor's projection. Returns (hard, soft, detail): the card's POSITION
+-- (off the width, under the chip row, below the floor) is a soft miss (a WARN,
+-- never counted); a card that is not built or a % text under 13 px is hard.
 local MIN_PERCENT_PX = PlotLayout.Gacha.PhoneMinTextPx
-local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: string): ({ string }, string)
+local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: string): ({ string }, { string }, string)
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local TopStack = require(UI.TopStack) :: any
 	local combat = require(script.Parent.CombatController) :: any
@@ -3212,7 +3230,7 @@ local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: str
 	-- The billboard sits StudsOffset (2 studs toward the camera) off the anchor.
 	local point = projectFor(camera, anchor.WorldPosition + camera.CFrame:VectorToWorldSpace(gui.StudsOffset), size)
 	if not point then
-		return { where .. ": the anchor is behind the camera" }, where .. ": behind the camera"
+		return { where .. ": the anchor is behind the camera" }, {}, where .. ": behind the camera"
 	end
 	local full = Board.PhoneFullHeight
 	local live = UIKit.IsPhone() and card.PopRoot.Visible and math.abs(camera.ViewportSize.X - size.X) < 2 and math.abs(camera.ViewportSize.Y - size.Y) < 2
@@ -3225,7 +3243,7 @@ local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: str
 	if live then
 		local drawnTop, drawnBottom, drawnScale = Board.GetDrawnRect()
 		if not drawnTop or not drawnBottom or not drawnScale then
-			return { where .. ": the live card has no screen rect" }, where .. ": no rect"
+			return { where .. ": the live card has no screen rect" }, {}, where .. ": no rect"
 		end
 		scale, top, bottom = drawnScale, drawnTop, drawnBottom
 		stackBottom = TopStack.GetStableBottom() * UITheme.PhoneScale
@@ -3237,6 +3255,7 @@ local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: str
 	end
 	local width = G.CardPx.X * scale
 	local left, right = point.X - width / 2, point.X + width / 2
+	local hard: { string } = {}
 	local problems: { string } = {}
 	if left < 0 or right > size.X then
 		table.insert(problems, ("%s: x %.0f..%.0f is off the %d px width"):format(where, left, right, size.X))
@@ -3252,7 +3271,7 @@ local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: str
 	local percentPx = 0
 	local tiles = card.Tiles
 	if typeof(tiles) ~= "table" or next(tiles) == nil then
-		table.insert(problems, "card not built: the card has no Tiles to measure")
+		table.insert(hard, "card not built: the card has no Tiles to measure")
 	else
 		for _, tile in tiles do
 			percentPx = (tile.Percent :: TextLabel).TextSize * scale
@@ -3260,29 +3279,31 @@ local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: str
 		end
 	end
 	if percentPx < MIN_PERCENT_PX - 0.05 then
-		table.insert(problems, ("%s: the %% text is %.1f px"):format(where, percentPx))
+		table.insert(hard, ("%s: the %% text is %.1f px"):format(where, percentPx))
 	end
-	return problems, ("%s %s scale %.3f x %.0f..%.0f y %.0f..%.0f"):format(if live then "live" else "projected", where, scale, left, right, top, bottom)
+	return hard, problems, ("%s %s scale %.3f x %.0f..%.0f y %.0f..%.0f"):format(if live then "live" else "projected", where, scale, left, right, top, bottom)
 end
 
--- One line per phone size over every tester spot (`results` / `details` hold
--- gachaPhoneAt's output per spot); `quiet`, `withToast`, `toastProblem` are
--- the probe's one gachaToastTops measurement.
-local function gachaPhoneLine(size: Vector2, results: { { string } }, details: { string }, standing: string, quiet: number?, withToast: number?, toastProblem: string?): ProbeLine
+-- One line per phone size over every tester spot (`hard` / `soft` / `details`
+-- hold gachaPhoneAt's output over the spots); `quiet`, `withToast`,
+-- `toastProblem` are the probe's one gachaToastTops measurement. The position
+-- misses (soft) make a WARN; a hard miss (card shut, % text, a toast moving
+-- the card) is a FAIL.
+local function gachaPhoneLine(size: Vector2, hard: { string }, soft: { string }, details: { string }, standing: string, quiet: number?, withToast: number?, toastProblem: string?): ProbeLine
 	local name = ("gacha card (phone %dx%d): standing on the pad (centre and 3 studs off each side) the whole card is on screen, under the event chip row and over the weapon bar, %% text >= %d px"):format(size.X, size.Y, MIN_PERCENT_PX)
-	local problems: { string } = {}
-	for _, list in results do
-		for _, problem in list do
-			table.insert(problems, problem)
-		end
-	end
+	local problems: { string } = table.clone(hard)
 	if toastProblem then
 		table.insert(problems, toastProblem)
 	elseif quiet and withToast and math.abs(quiet - withToast) > 1 then
 		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
 	end
+	local hardCount = #problems
+	for _, problem in soft do
+		table.insert(problems, problem)
+	end
 	return {
 		Ok = #problems == 0,
+		Warn = hardCount == 0 and #soft > 0,
 		Name = name,
 		Detail = ("%s; %s; drawn top %s / %s with a toast%s"):format(
 			standing,
@@ -3316,6 +3337,9 @@ local function gachaPhoneText(card: any, size: Vector2): ProbeLine
 				table.insert(small, ("%s %q %.1f px"):format(object.Name, object.Text:sub(1, 12), px))
 			end
 		end
+	end
+	if checked == 0 then
+		table.insert(small, "no text is drawn: " .. Board.DescribeState())
 	end
 	local hitPx = (card.InfoHit :: GuiObject).Size.X.Offset * scale
 	if hitPx < UITheme.MinTapSize - 0.05 then
@@ -3354,7 +3378,12 @@ end
 -- camera, the event chip up: the card's top stays >= TopStack's bottom + 4 px
 -- (the NIGHT chip once hid its first row of orbs). Checked as placed
 -- (anchor projection, then the clamp), and again with the anchor pushed high
--- on the screen (a tilted camera) so the clamp has to do its work.
+-- on the screen (a tilted camera) so the clamp has to do its work. The live
+-- card is only measured when the real window is tall enough for the desktop
+-- card (minTop + its height): in a shorter one (the phone emulator with the
+-- desktop layout forced) the "keep the key bar on screen" cap rightly wins
+-- and the line says it was skipped. A top that misses its spot is a WARN; a
+-- toast moving the card is a FAIL.
 local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet: number?, withToast: number?, toastProblem: string?): ProbeLine
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local TopStack = require(UI.TopStack) :: any
@@ -3368,7 +3397,8 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet
 	local height = (card.Billboard :: BillboardGui).Size.Y.Offset
 	local stackBottom = TopStack.PlanFor(UIKit.GetCardTopFor(false), 0, 44, 0).Announce
 	local minTop = math.ceil(stackBottom) + G.StackGapPx
-	local problems: { string } = {}
+	local problems: { string } = {} -- soft: where the top sits (a WARN)
+	local hard: { string } = {} -- a toast moving the card (a FAIL)
 	local detail: { string } = {}
 	for _, anchorY in { point.Y, size.Y * 0.3, size.Y * 0.1 } do
 		local top = anchorY - height + Board.StackShiftFor(anchorY, height, stackBottom, size.Y)
@@ -3383,12 +3413,18 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet
 	-- is measured once per probe (the caller's gachaToastTops).
 	local liveMin = math.ceil(TopStack.GetStableBottom()) + G.StackGapPx
 	if toastProblem then
-		table.insert(problems, toastProblem)
+		table.insert(hard, toastProblem)
+	end
+	local windowY = camera.ViewportSize.Y
+	local needed = liveMin + height
+	local liveTall = windowY >= needed
+	if not liveTall then
+		table.insert(detail, ("live top skipped: window %d px tall, the desktop card needs %d"):format(windowY, needed))
 	end
 	local liveTops: { { Label: string, Top: number? } } = { { Label = "no toast", Top = quiet }, { Label = "toast up", Top = withToast } }
 	for _, entry in liveTops do
 		local label, liveTop = entry.Label, entry.Top
-		if liveTop and card.PopRoot.Visible then
+		if liveTall and liveTop and card.PopRoot.Visible then
 			table.insert(detail, ("live top %.0f %s (min %d)"):format(liveTop, label, liveMin))
 			if liveTop < liveMin - 0.5 then
 				table.insert(problems, ("live card top %.1f (%s) is above the stable stack bottom + %d = %d"):format(liveTop, label, G.StackGapPx, liveMin))
@@ -3396,16 +3432,18 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet
 		end
 	end
 	if quiet and withToast and math.abs(quiet - withToast) > 1 then
-		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
+		table.insert(hard, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
 	end
-	-- A failing live card says what the clamp itself used (its last frame).
-	if #problems > 0 then
+	-- A miss says what the clamp itself used (its last frame; only while the
+	-- clamp debug flag is on, which the probe sets).
+	if #problems + #hard > 0 and Board.IsClampDebug() then
 		table.insert(problems, Board.GetClampTrace() .. (", stable bottom now %.1f"):format(TopStack.GetStableBottom()))
 	end
 	return {
-		Ok = #problems == 0,
+		Ok = #problems + #hard == 0,
+		Warn = #hard == 0 and #problems > 0,
 		Name = name,
-		Detail = ("stack bottom %.0f, %s%s"):format(stackBottom, table.concat(detail, ", "), if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+		Detail = ("stack bottom %.0f, %s%s"):format(stackBottom, table.concat(detail, ", "), joinProblems(hard, problems)),
 	}
 end
 
@@ -3456,13 +3494,18 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 	local gui = card.Billboard :: BillboardGui
 	local anchor = card.Anchor :: Attachment
 	local want = anchor.WorldPosition
-	local savedType, savedCFrame, savedRoot = camera.CameraType, camera.CFrame, root.CFrame
+	local savedCFrame, savedRoot = camera.CFrame, root.CFrame
 	camera.CameraType = Enum.CameraType.Scriptable
+	-- Undo: the next probe starts with the tester on the pad's centre (where
+	-- this one found them, at their own height and facing) and the camera back
+	-- on Custom, whatever spot or camera this probe left.
+	local home = CFrame.new(want.X, savedRoot.Y, want.Z) * (savedRoot - savedRoot.Position)
 	restoreProbe = function()
 		debugBoard.SetClampDebug(false)
-		camera.CameraType = savedType
+		camera.CameraType = Enum.CameraType.Custom
 		camera.CFrame = savedCFrame
-		root.CFrame = savedRoot
+		root.CFrame = home
+		root.AssemblyLinearVelocity = Vector3.zero
 		UIKit.SetForcedPhone(nil)
 	end
 	-- Leaves the world as it found it, but only if this probe is still the
@@ -3522,10 +3565,12 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 			{ Label = "3 studs toward the camera", Offset = Vector3.new(3, 0, 0) },
 			{ Label = "3 studs away from the camera", Offset = Vector3.new(-3, 0, 0) },
 		}
-		local results: { [number]: { { string } } } = {}
+		local hardMisses: { [number]: { string } } = {}
+		local softMisses: { [number]: { string } } = {}
 		local details: { [number]: { string } } = {}
 		for index in PHONE_TEST_VIEWS do
-			results[index] = {}
+			hardMisses[index] = {}
+			softMisses[index] = {}
 			details[index] = {}
 		end
 		local quiet, withToast, toastProblem
@@ -3544,15 +3589,38 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 					return {}
 				end
 			end
+			-- The card must be up at every spot (a shut card names its cause). A
+			-- tester that fell out of the world respawns as a NEW character: the
+			-- probe's root (and the server's) are then stale, so say it.
+			local shutNote: string? = nil
+			if localPlayer.Character ~= character or not root:IsDescendantOf(Workspace) then
+				shutNote = ("%s: the tester respawned (the old character is gone)"):format(site.Label)
+			end
+			local cardNow = debugBoard.GetCard()
+			if not shutNote and not (cardNow and cardNow.Open and cardNow.Shown) then
+				waitFrames(20)
+				cardNow = debugBoard.GetCard()
+				if not (cardNow and cardNow.Open and cardNow.Shown) then
+					shutNote = ("%s: the card is shut: %s"):format(site.Label, debugBoard.DescribeState())
+				end
+			end
 			for index, size in PHONE_TEST_VIEWS do
-				local problems, detail = gachaPhoneAt(card, camera, size, site.Label)
-				table.insert(results[index], problems)
+				local hard, soft, detail = gachaPhoneAt(card, camera, size, site.Label)
+				if shutNote then
+					table.insert(hard, shutNote)
+				end
+				for _, problem in hard do
+					table.insert(hardMisses[index], problem)
+				end
+				for _, problem in soft do
+					table.insert(softMisses[index], problem)
+				end
 				table.insert(details[index], detail)
 			end
 		end
 		local standing = ("tester started %.1f studs from the anchor, stood at its centre"):format(startOff)
 		for index, size in PHONE_TEST_VIEWS do
-			table.insert(lines, gachaPhoneLine(size, results[index], details[index], standing, quiet, withToast, toastProblem))
+			table.insert(lines, gachaPhoneLine(size, hardMisses[index], softMisses[index], details[index], standing, quiet, withToast, toastProblem))
 			table.insert(lines, gachaPhoneText(card, size))
 		end
 	else

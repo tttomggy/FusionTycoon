@@ -1344,6 +1344,31 @@ function GachaBoardController.GetBlockReason(): string?
 	return if #reasons > 0 then table.concat(reasons, "; ") else nil
 end
 
+-- Why the card is (not) up, as one line for /selftest's FAIL detail: the
+-- block reason, Near / Open, how far the character stands from the pad, the
+-- pop state (PopRoot, PopScale), the phone UIScale and the billboard's
+-- SizeOffset. A shut card names its cause instead of just "not open".
+function GachaBoardController.DescribeState(): string
+	local view = card
+	if not view then
+		return "no card"
+	end
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local distance = if root and root:IsA("BasePart") then (root.Position - view.Pad.Position).Magnitude else -1
+	local phoneScale = view.Root:FindFirstChild("PhoneScale")
+	return ("block %s, Near %s, Open %s, %.1f studs from the pad, PopRoot.Visible %s, PopScale %.3f, PhoneScale %s, SizeOffset %s"):format(
+		tostring(GachaBoardController.GetBlockReason()),
+		tostring(view.Near),
+		tostring(view.Open),
+		distance,
+		tostring(view.PopRoot.Visible),
+		view.Pop.Scale,
+		if phoneScale and phoneScale:IsA("UIScale") then ("%.4f"):format(phoneScale.Scale) else "none",
+		tostring(view.Billboard.SizeOffset)
+	)
+end
+
 local function buildCard(pad: BasePart)
 	local anchor = Instance.new("Attachment")
 	anchor.Name = "GachaCardAnchor"
@@ -1597,6 +1622,10 @@ local clampDebug = false
 -- gacha probe; off otherwise).
 function GachaBoardController.SetClampDebug(on: boolean)
 	clampDebug = on
+end
+
+function GachaBoardController.IsClampDebug(): boolean
+	return clampDebug
 end
 
 -- The last clamp's numbers as one line ("clamp #N: stack ..., minTop ...").

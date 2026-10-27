@@ -152,6 +152,30 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   counts as a PASS (used for the Bat's two reach lines only, approved by eye).
 - The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
+- **Gacha card POSITION lines are WARN, not FAIL** (launch is gated on 0 FAIL; a
+  card a few px off its ideal spot is not a blocker): the phone fit (`standing on
+  the pad (centre and 3 studs off each side) ... whole card on screen, under the
+  event chip row and over the weapon bar`), the desktop stack (`card's top is >=
+  the stack's bottom + 4 px`), and the approach / top-down `centred on the pad /
+  covers the capsule ball` geometry. Still FAIL: the card opens, closes and
+  reopens, E / R / T bind, text >= 13 px, tap targets >= 44 px, the anchor never
+  changes, the probe runs in its own layout, a toast never moves the card, the
+  anchor sits on the pad's centre and in front of the camera.
+- **The live desktop top is only measured in a tall enough window**
+  (`camera.ViewportSize.Y >= ceil(stable bottom) + 4 + 324`). In a shorter one (the
+  phone emulator with the desktop layout forced: 388 px tall, the 324 px card
+  needs 392) the "keep the key bar on screen" cap rightly wins over the 4 px, so
+  the line prints `live top skipped: window N px tall, the desktop card needs M`.
+  The pure 1920 x 1080 / 1366 x 768 checks always run. The clamp trace
+  (`GetClampTrace`) is appended to a missed line while `SetClampDebug` is on (the
+  probe turns it on).
+- **A shut card says why.** Every gacha check that finds the card shut appends
+  `GachaBoardController.DescribeState()`: the block reason, `Near`, `Open`, studs
+  from the pad (read from the CURRENT character), `PopRoot.Visible`, `PopScale`,
+  the `PhoneScale` UIScale and the `SizeOffset`. The phone on-pad probe checks the
+  card is up at every tester spot (and that the tester did not respawn). After the
+  probe the tester is put back on the pad's centre (their own height and facing)
+  and the camera on `Custom`, whatever spot it left.
 - **The tutorial drive sets the Multiplier Pad to level 0** (put back after):
   with the Pad bought the server skips the Multiplier step (`Skip =
   "MultiplierBought"`, no `TutorialStep = 8`), so the drive would never probe
