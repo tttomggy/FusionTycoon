@@ -15,12 +15,15 @@
 	pull with E / R / T from PromptDistance + 3 studs, so you stop in front of
 	the pad and see the card over it.
 
-	  * The stack clamp (DESKTOP only): every frame the card is up its top is
-	    held >= TopStack's STABLE bottom (objective bar + event chip, no toast)
-	    + PlotLayout.Gacha.StackGapPx (4 px) by sliding the billboard's
-	    SizeOffset.Y down (StackShiftFor, pure; SizeOffset.X is kept). A toast
-	    never moves the card: it draws over it for its 2.5 s. The phone is not
-	    clamped: PhoneScaleFor already puts its top at chip row + PhoneTopGapPx.
+	  * The stack clamp (desktop AND phone): every frame the card is up its top
+	    is held >= TopStack's STABLE bottom (objective bar + event chip, no
+	    toast; x PhoneScale on a phone) + the air (StackGapPx / PhoneTopGapPx,
+	    4 px) by sliding the billboard's SizeOffset.Y down (StackShiftFor, pure;
+	    SizeOffset.X is kept). A toast never moves the card: it draws over it for
+	    its 2.5 s. PhoneScaleFor assumes you stand at the pad's centre; standing
+	    off-centre moves the anchor, so on a phone the slide stops at the floor
+	    (weapon bar / bottom row) and the UIScale then lowers just enough, down
+	    to PhoneScaleMin (PhonePlanFor, pure).
 	    The anchor and the studs offsets below never change; if the clamp moves
 	    the card off its anchor, it stays clamped (readable beats anchored).
 	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
@@ -1485,9 +1488,12 @@ end
 -- `cardHeight` the card as drawn (phone scale included), `stackBottom` the
 -- bottom of TopStack in screen px, `viewHeight` the screen's. 0 when it
 -- already clears; never more than the room left under the anchor, so the key
--- bar stays on screen. /selftest runs it at 1920 x 1080 and 1366 x 768.
-function GachaBoardController.StackShiftFor(anchorY: number, cardHeight: number, stackBottom: number, viewHeight: number): number
-	local minTop = math.ceil(stackBottom) + G.StackGapPx
+-- bar stays on screen (pass the floor, e.g. the weapon bar's top, as
+-- `viewHeight` to cap the slide there). `gap` is the air under the stack
+-- (default G.StackGapPx; the phone passes G.PhoneTopGapPx). /selftest runs it
+-- at 1920 x 1080 and 1366 x 768.
+function GachaBoardController.StackShiftFor(anchorY: number, cardHeight: number, stackBottom: number, viewHeight: number, gap: number?): number
+	local minTop = math.ceil(stackBottom) + (gap or G.StackGapPx)
 	local top = anchorY - cardHeight
 	if top >= minTop then
 		return 0
@@ -1507,21 +1513,74 @@ local function drawnHeight(view: CardView): number
 	return view.Billboard.Size.Y.Offset * (if scale and scale:IsA("UIScale") then scale.Scale else 1)
 end
 
--- Every frame while the card is up (desktop): slide it down (SizeOffset.Y, a
--- fraction of its own height) when its top would sit under the event chip.
--- The phone is not clamped (PhoneScaleFor owns its placement): it only gets
--- an old slide undone. The anchor, the studs offsets and SizeOffset.X are
--- never touched.
+-- Screen y of the card's bottom edge: the anchor plus the billboard's
+-- camera-space StudsOffset (2 studs toward the camera), nil behind the camera.
+local function anchorScreenY(view: CardView, camera: Camera): number?
+	local world = view.Anchor.WorldPosition + camera.CFrame:VectorToWorldSpace(view.Billboard.StudsOffset)
+	local point = camera:WorldToViewportPoint(world)
+	if point.Z <= 0 then
+		return nil
+	end
+	return point.Y
+end
+
+-- Screen y of the phone's floor: the weapon bar's top while it shows, else the
+-- HUD's bottom row's top (the card never goes below it).
+local function phoneFloorPx(camera: Camera): number
+	local bar = (require(script.Parent.CombatController) :: any).GetBarRect()
+	if bar then
+		return bar.Position.Y
+	end
+	return camera.ViewportSize.Y - UIKit.GetCardBottomFor(true) * UITheme.PhoneScale
+end
+
+-- Pure: the phone card's (UIScale, slide px) for an anchor at screen y
+-- `anchorY` (the card's bottom edge), the `baseScale` PhoneScaleFor gave, the
+-- STABLE stack bottom and the floor (screen px). The card slides down just
+-- enough to start G.PhoneTopGapPx under the stack, never past the floor; if
+-- that is not enough it shrinks (UIScale down to G.PhoneScaleMin, bottom on
+-- the floor); at the minimum the top wins and it slides on. /selftest runs it
+-- at 844 x 390 and 896 x 414.
+function GachaBoardController.PhonePlanFor(anchorY: number, baseScale: number, stackBottom: number, floorPx: number, viewHeight: number): (number, number)
+	local full = GachaBoardController.PhoneFullHeight
+	local gap = G.PhoneTopGapPx
+	local minTop = math.ceil(stackBottom) + gap
+	local lowest = math.max(anchorY, math.min(floorPx, viewHeight))
+	local slide = GachaBoardController.StackShiftFor(anchorY, full * baseScale, stackBottom, lowest, gap)
+	if anchorY - full * baseScale + slide >= minTop - 0.01 then
+		return baseScale, slide
+	end
+	local scale = math.clamp((lowest - minTop) / full, G.PhoneScaleMin, baseScale)
+	slide = lowest - anchorY
+	if lowest - full * scale < minTop then
+		slide = math.clamp(minTop - (anchorY - full * scale), 0, math.max(0, viewHeight - anchorY))
+	end
+	return scale, slide
+end
+
+-- Every frame while the card is up: slide it down (SizeOffset.Y, a fraction
+-- of its own height) when its top would sit under the event chip row. The
+-- phone also lowers its UIScale when the slide alone cannot clear it
+-- (PhonePlanFor). The STABLE bottom is used, so a toast never moves the
+-- card. The anchor, the studs offsets and SizeOffset.X are never touched.
 local function clampToStack(view: CardView)
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
 	end
 	local shift = 0
-	if not UIKit.IsPhone() then
-		local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
-		if point.Z > 0 then
-			shift = GachaBoardController.StackShiftFor(point.Y, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
+	local anchorY = anchorScreenY(view, camera)
+	if anchorY then
+		if UIKit.IsPhone() then
+			local base = GachaBoardController.PhoneScaleFor(UIKit.GetLogicalViewport())
+			local scale: number
+			scale, shift = GachaBoardController.PhonePlanFor(anchorY, base, stackBottomPx(), phoneFloorPx(camera), camera.ViewportSize.Y)
+			local gui = view.Root:FindFirstChild("PhoneScale")
+			if gui and gui:IsA("UIScale") and math.abs(gui.Scale - scale) > 0.0005 then
+				gui.Scale = scale
+			end
+		else
+			shift = GachaBoardController.StackShiftFor(anchorY, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
 		end
 	end
 	local current = view.Billboard.SizeOffset
@@ -1532,20 +1591,33 @@ local function clampToStack(view: CardView)
 	end
 end
 
--- The card's top on screen as it is drawn right now (anchor projection, less
--- the card's height, plus the slide), for /selftest.
-function GachaBoardController.GetDrawnTop(): number?
+-- The card's top and bottom on screen as it is drawn right now (anchor
+-- projection, less the card's height, plus the slide), and its UIScale (1 on
+-- a desktop), for /selftest.
+function GachaBoardController.GetDrawnRect(): (number?, number?, number?)
 	local view = card
 	local camera = Workspace.CurrentCamera
 	if not view or not camera then
-		return nil
+		return nil, nil, nil
 	end
-	local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
-	if point.Z <= 0 then
-		return nil
+	local anchorY = anchorScreenY(view, camera)
+	if not anchorY then
+		return nil, nil, nil
 	end
 	local slide = (0.5 - view.Billboard.SizeOffset.Y) * view.Billboard.Size.Y.Offset
-	return point.Y - drawnHeight(view) + slide
+	local height = drawnHeight(view)
+	return anchorY - height + slide, anchorY + slide, height / math.max(view.Billboard.Size.Y.Offset, 1)
+end
+
+function GachaBoardController.GetDrawnTop(): number?
+	local top = GachaBoardController.GetDrawnRect()
+	return top
+end
+
+-- The phone's floor in screen px (weapon bar top, else the HUD row's top).
+function GachaBoardController.GetPhoneFloorPx(): number?
+	local camera = Workspace.CurrentCamera
+	return if camera then phoneFloorPx(camera) else nil
 end
 
 local function stepFrame()

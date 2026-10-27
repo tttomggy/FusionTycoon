@@ -172,6 +172,15 @@ Most of the 77 were the TEST, not the game:
   later request (combat weapons, gacha, auto pull) took the one before it, so
   the server destroyed a weapon while the client was still measuring it. A step
   probe now has 75 s (`SELFTEST_STEP_TIMEOUT`); a stale report is dropped.
+- **The gacha-on-pad probe has its own timeout** (`SELFTEST_GACHA_PAD_TIMEOUT`, 45 s):
+  4 yaws, 3 zooms, a toast wait and (phone) five tester spots x two sizes outran
+  the 10 s probe timeout, the server fired the phone probe while the desktop one
+  ran, and the desktop probe's late `SetForcedPhone(nil)` un-forced the phone
+  layout mid-probe (the phone checks measured the desktop card). The client probe
+  now carries its `ProbeId`: its camera / forced-layout / tester restore only runs
+  while it is still the current probe, and every new probe first runs the previous
+  probe's undo. The probe asserts `UIKit.IsPhone()` equals its `Phone` at its start,
+  and `gachaToastTops()` runs once per probe.
 - **Window guard.** The client refuses to measure the live screen in a game view
   under 1000 × 600 (a 2346 × 125 window gave cards negative heights and ~60 FAILs):
   ONE `FAIL selftest window: …` replaces card placement, text fits, shop chips and

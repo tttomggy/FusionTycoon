@@ -215,6 +215,10 @@ local SELFTEST_REPORT_TIMEOUT = 90 -- the client's big stages (Fuzz, Done)
 local SELFTEST_PROBE_TIMEOUT = 10 -- one combat / gacha probe
 -- The effects tray probe: two layouts x (a 3 s tooltip wait + checks) + three window sizes.
 local SELFTEST_EFFECTS_TIMEOUT = 30
+-- The gacha-on-pad probe: 4 yaws + 3 zooms, a toast wait, and (phone) five
+-- tester spots x two sizes. A timeout here let the next probe start while it
+-- still ran, and its late layout restore broke the next probe's.
+local SELFTEST_GACHA_PAD_TIMEOUT = 45
 local SELFTEST_STEP_TIMEOUT = 75 -- one tutorial step probe: the presenter (30 s cap) + its card, bar, hand and HUD waits
 local SELFTEST_SLOT_COUNT = 200
 local TUTORIAL_BUDGET_SECONDS = 45 -- Tutorial 5: claim to Done, walking excluded
@@ -270,7 +274,7 @@ local function tutorialProbe(player: Player, payload: { [string]: any }, result:
 	local probeId = probeCounter
 	payload.ProbeId = probeId
 	RemoteEvents.SelfTest:FireClient(player, payload)
-	local report = waitForReport(player, "TutorialProbe", if payload.Kind == "Step" then SELFTEST_STEP_TIMEOUT elseif payload.Kind == "EffectsTray" then SELFTEST_EFFECTS_TIMEOUT else SELFTEST_PROBE_TIMEOUT, probeId)
+	local report = waitForReport(player, "TutorialProbe", if payload.Kind == "Step" then SELFTEST_STEP_TIMEOUT elseif payload.Kind == "EffectsTray" then SELFTEST_EFFECTS_TIMEOUT elseif payload.Kind == "GachaOnPad" then SELFTEST_GACHA_PAD_TIMEOUT else SELFTEST_PROBE_TIMEOUT, probeId)
 	if not report or typeof(report.Lines) ~= "table" then
 		local which = if payload.Kind == "Weapon" or payload.Kind == "Switch" then "combat " .. tostring(payload.Weapon or payload.To or "")
 			elseif payload.Kind == "WeaponReleased" then "combat release"

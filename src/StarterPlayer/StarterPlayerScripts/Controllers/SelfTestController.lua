@@ -3192,44 +3192,62 @@ local function gachaToastTops(): (number?, number?, string?)
 	return quiet, Board.GetDrawnTop(), if shown then nil else "the test announcement never showed"
 end
 
--- The gacha card on a phone `size` px big, character on the pad, default
--- camera: its whole rect (title to key bar) is on screen, below TopStack's chip
--- row and above the weapon bar (or the HUD's bottom row before Rebirth 1), and
--- the % text is still >= 13 px on screen.
+-- The gacha card on a phone `size` px big with the tester at one spot on the
+-- pad (`where`), default camera: its whole rect (title to key bar) is on
+-- screen, below TopStack's STABLE chip row (+ PhoneTopGapPx) and above the
+-- weapon bar (or the HUD's bottom row before Rebirth 1), and the % text is
+-- still >= 13 px on screen. When the window IS this size the live drawn card
+-- is measured; otherwise (projecting onto a size that is not the window says
+-- nothing about the drawn card) the pure PhonePlanFor decides, from the
+-- anchor's projection. Returns (problems, detail).
 local MIN_PERCENT_PX = PlotLayout.Gacha.PhoneMinTextPx
-local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLine
+local function gachaPhoneAt(card: any, camera: Camera, size: Vector2, where: string): ({ string }, string)
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local TopStack = require(UI.TopStack) :: any
 	local combat = require(script.Parent.CombatController) :: any
 	local G = PlotLayout.Gacha
-	local name = ("gacha card (phone %dx%d): standing on the pad the whole card is on screen, under the event chip row and over the weapon bar, %% text >= %d px"):format(size.X, size.Y, MIN_PERCENT_PX)
 	local view = size / UITheme.PhoneScale
-	local scale = Board.PhoneScaleFor(view)
 	local anchor = card.Anchor :: Attachment
-	-- The billboard sits 2 studs toward the camera (StudsOffset 0, 0, 2).
-	local point = projectFor(camera, anchor.WorldPosition - camera.CFrame.LookVector * 2, size)
+	local gui = card.Billboard :: BillboardGui
+	-- The billboard sits StudsOffset (2 studs toward the camera) off the anchor.
+	local point = projectFor(camera, anchor.WorldPosition + camera.CFrame:VectorToWorldSpace(gui.StudsOffset), size)
 	if not point then
-		return { Ok = false, Name = name, Detail = "the anchor is behind the camera" }
+		return { where .. ": the anchor is behind the camera" }, where .. ": behind the camera"
 	end
-	local full = Vector2.new(G.CardPx.X, Board.PhoneFullHeight)
-	local width, height = full.X * scale, full.Y * scale
-	local left, right, top, bottom = point.X - width / 2, point.X + width / 2, point.Y - height, point.Y
-	-- TopStack's lowest slot with the event chip up: its Announce line's y (logical) x 0.8.
+	local full = Board.PhoneFullHeight
+	local live = UIKit.IsPhone() and card.PopRoot.Visible and math.abs(camera.ViewportSize.X - size.X) < 2 and math.abs(camera.ViewportSize.Y - size.Y) < 2
+	-- TopStack's lowest stable slot with the event chip up: its Announce line's y (logical) x 0.8.
 	local stackBottom = TopStack.PlanFor(UIKit.GetCardTopFor(true), 0, 44, 0).Announce * UITheme.PhoneScale
 	local barRect = combat.GetBarRectFor(view, false)
 	local floorLogical = if barRect then barRect.Position.Y else view.Y - UIKit.GetCardBottomFor(true)
 	local floorPx = floorLogical * UITheme.PhoneScale
+	local scale, top, bottom = 0, 0, 0
+	if live then
+		local drawnTop, drawnBottom, drawnScale = Board.GetDrawnRect()
+		if not drawnTop or not drawnBottom or not drawnScale then
+			return { where .. ": the live card has no screen rect" }, where .. ": no rect"
+		end
+		scale, top, bottom = drawnScale, drawnTop, drawnBottom
+		stackBottom = TopStack.GetStableBottom() * UITheme.PhoneScale
+		floorPx = Board.GetPhoneFloorPx() or floorPx
+	else
+		local slide: number
+		scale, slide = Board.PhonePlanFor(point.Y, Board.PhoneScaleFor(view), stackBottom, floorPx, size.Y)
+		top, bottom = point.Y - full * scale + slide, point.Y + slide
+	end
+	local width = G.CardPx.X * scale
+	local left, right = point.X - width / 2, point.X + width / 2
 	local problems: { string } = {}
 	if left < 0 or right > size.X then
-		table.insert(problems, ("x %.0f..%.0f is off the %d px width"):format(left, right, size.X))
+		table.insert(problems, ("%s: x %.0f..%.0f is off the %d px width"):format(where, left, right, size.X))
 	end
-	-- The card's top: ceil(stack bottom) + PhoneTopGapPx of air (a whole px).
+	-- The card's top: ceil(stable stack bottom) + PhoneTopGapPx of air (a whole px).
 	local minTop = math.ceil(stackBottom) + G.PhoneTopGapPx
 	if top < minTop - 0.5 then
-		table.insert(problems, ("top %.1f is above the stack's bottom %.0f + %d px of air = %d"):format(top, stackBottom, G.PhoneTopGapPx, minTop))
+		table.insert(problems, ("%s: top %.1f is above the stack's bottom %.0f + %d px of air = %d"):format(where, top, stackBottom, G.PhoneTopGapPx, minTop))
 	end
 	if bottom > floorPx + 0.5 or bottom > size.Y then
-		table.insert(problems, ("bottom %.0f is below the %s at %.0f"):format(bottom, if barRect then "weapon bar" else "bottom row", floorPx))
+		table.insert(problems, ("%s: bottom %.0f is below the %s at %.0f"):format(where, bottom, if barRect then "weapon bar" else "bottom row", floorPx))
 	end
 	local percentPx = 0
 	local tiles = card.Tiles
@@ -3242,39 +3260,33 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 		end
 	end
 	if percentPx < MIN_PERCENT_PX - 0.05 then
-		table.insert(problems, ("the %% text is %.1f px"):format(percentPx))
+		table.insert(problems, ("%s: the %% text is %.1f px"):format(where, percentPx))
 	end
-	-- The phone card is not clamped and a toast never moves it.
-	local gui = card.Billboard :: BillboardGui
-	if math.abs(gui.SizeOffset.Y - 0.5) > 1e-4 then
-		table.insert(problems, ("SizeOffset %s: the phone card was slid (it is not clamped)"):format(tostring(gui.SizeOffset)))
+	return problems, ("%s %s scale %.3f x %.0f..%.0f y %.0f..%.0f"):format(if live then "live" else "projected", where, scale, left, right, top, bottom)
+end
+
+-- One line per phone size over every tester spot (`results` / `details` hold
+-- gachaPhoneAt's output per spot); `quiet`, `withToast`, `toastProblem` are
+-- the probe's one gachaToastTops measurement.
+local function gachaPhoneLine(size: Vector2, results: { { string } }, details: { string }, standing: string, quiet: number?, withToast: number?, toastProblem: string?): ProbeLine
+	local name = ("gacha card (phone %dx%d): standing on the pad (centre and 3 studs off each side) the whole card is on screen, under the event chip row and over the weapon bar, %% text >= %d px"):format(size.X, size.Y, MIN_PERCENT_PX)
+	local problems: { string } = {}
+	for _, list in results do
+		for _, problem in list do
+			table.insert(problems, problem)
+		end
 	end
-	local quiet, withToast, toastProblem = gachaToastTops()
 	if toastProblem then
 		table.insert(problems, toastProblem)
 	elseif quiet and withToast and math.abs(quiet - withToast) > 1 then
 		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
 	end
-	-- Where the tester stands: the projection above assumes the pad's centre.
-	local character = localPlayer.Character
-	local standRoot = character and character:FindFirstChild("HumanoidRootPart")
-	local offPad = if standRoot and standRoot:IsA("BasePart")
-		then Vector3.new(standRoot.Position.X - anchor.WorldPosition.X, 0, standRoot.Position.Z - anchor.WorldPosition.Z).Magnitude
-		else -1
 	return {
 		Ok = #problems == 0,
 		Name = name,
-		Detail = ("scale %.3f, card x %.0f..%.0f y %.0f..%.0f, stack bottom %.0f, %s top %.0f, %% %.1f px, tester %.1f studs from the anchor, drawn top %s / %s with a toast%s"):format(
-			scale,
-			left,
-			right,
-			top,
-			bottom,
-			stackBottom,
-			if barRect then "weapon bar" else "bottom row",
-			floorPx,
-			percentPx,
-			offPad,
+		Detail = ("%s; %s; drawn top %s / %s with a toast%s"):format(
+			standing,
+			table.concat(details, "; "),
 			if quiet then ("%.0f"):format(quiet) else "n/a",
 			if withToast then ("%.0f"):format(withToast) else "n/a",
 			if #problems > 0 then " | " .. table.concat(problems, "; ") else ""
@@ -3343,7 +3355,7 @@ end
 -- (the NIGHT chip once hid its first row of orbs). Checked as placed
 -- (anchor projection, then the clamp), and again with the anchor pushed high
 -- on the screen (a tilted camera) so the clamp has to do its work.
-local function gachaDesktopStack(card: any, camera: Camera, size: Vector2): ProbeLine
+local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet: number?, withToast: number?, toastProblem: string?): ProbeLine
 	local Board = require(script.Parent.GachaBoardController) :: any
 	local TopStack = require(UI.TopStack) :: any
 	local G = PlotLayout.Gacha
@@ -3367,8 +3379,8 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2): Prob
 	end
 	-- The live card (this window): the same rule on what is drawn, against the
 	-- STABLE bottom (chip row), with no announcement up and with one showing:
-	-- a toast never moves the card (the two tops agree within 1 px).
-	local quiet, withToast, toastProblem = gachaToastTops()
+	-- a toast never moves the card (the two tops agree within 1 px). The pair
+	-- is measured once per probe (the caller's gachaToastTops).
 	local liveMin = math.ceil(TopStack.GetStableBottom()) + G.StackGapPx
 	if toastProblem then
 		table.insert(problems, toastProblem)
@@ -3393,26 +3405,68 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2): Prob
 	}
 end
 
+-- The probe that is current (probeTutorial sets it) and the undo for the
+-- camera / forced layout / tester it left changed. A probe the server gave up
+-- on keeps running; it must never touch the next probe's layout, so its
+-- restore only runs while it is still current, and a new probe starts by
+-- running the previous probe's undo.
+local activeProbeId: number? = nil
+local restoreProbe: (() -> ())? = nil
+
 -- On the pad: the anchor (the Attachment's world position) NEVER changes: not
 -- over 4 camera yaws at a fixed zoom, not over the zoom range (6 / 12.5 / 40
--- studs), and no billboard offset is ever written.
-local function probeGachaOnPad(phone: boolean): { ProbeLine }
+-- studs), and no billboard offset is ever written. Then the card's rect: the
+-- desktop stack clamp at two window sizes, the phone clamp at two phone sizes
+-- with the tester at the pad's centre and 3 studs off each side.
+local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 	local layout = if phone then "phone layout" else "desktop layout"
+	local function current(): boolean
+		return activeProbeId == probeId
+	end
 	UIKit.SetForcedPhone(phone)
+	restoreProbe = function()
+		UIKit.SetForcedPhone(nil)
+	end
 	task.wait(0.4)
+	local layoutLine: ProbeLine = {
+		Ok = UIKit.IsPhone() == phone,
+		Name = ("gacha card (%s): the probe starts in its own layout"):format(layout),
+		Detail = ("UIKit.IsPhone() is %s, the probe wants %s"):format(tostring(UIKit.IsPhone()), tostring(phone)),
+	}
 	local card = waitForCard(true, 3)
 	local camera = Workspace.CurrentCamera
 	local character = localPlayer.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not card or not camera or not root or not root:IsA("BasePart") then
-		UIKit.SetForcedPhone(nil)
-		return { { Ok = false, Name = ("gacha card (%s): on the pad"):format(layout), Detail = "no card, camera or character" } }
+		if current() then
+			UIKit.SetForcedPhone(nil)
+			restoreProbe = nil
+		end
+		return { layoutLine, { Ok = false, Name = ("gacha card (%s): on the pad"):format(layout), Detail = "no card, camera or character" } }
 	end
 	local gui = card.Billboard :: BillboardGui
 	local anchor = card.Anchor :: Attachment
 	local want = anchor.WorldPosition
-	local savedType, savedCFrame = camera.CameraType, camera.CFrame
+	local savedType, savedCFrame, savedRoot = camera.CameraType, camera.CFrame, root.CFrame
 	camera.CameraType = Enum.CameraType.Scriptable
+	restoreProbe = function()
+		camera.CameraType = savedType
+		camera.CFrame = savedCFrame
+		root.CFrame = savedRoot
+		UIKit.SetForcedPhone(nil)
+	end
+	-- Leaves the world as it found it, but only if this probe is still the
+	-- current one (a stale probe's restore was already run by its successor).
+	local function finish(lines: { ProbeLine }): { ProbeLine }
+		if current() then
+			local undo = restoreProbe
+			restoreProbe = nil
+			if undo then
+				undo()
+			end
+		end
+		return lines
+	end
 	local back = Vector3.new(1, 0, 0)
 	local moved: { string } = {}
 	local function check(what: string)
@@ -3424,14 +3478,21 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 	for _, yaw in { 0, 90, 180, 270 } do
 		defaultCamera(camera, root, back, 12.5, yaw)
 		waitFrames(6)
+		if not current() then
+			return {}
+		end
 		check("yaw " .. yaw)
 	end
 	for _, studs in { 6, 12.5, 40 } do
 		defaultCamera(camera, root, back, studs, 0)
 		waitFrames(8)
+		if not current() then
+			return {}
+		end
 		check(("zoom %.1f"):format(studs))
 	end
 	local lines: { ProbeLine } = {
+		layoutLine,
 		{
 			Ok = #moved == 0,
 			Name = ("gacha card (%s): the anchor never changes while the camera turns (4 yaws) or zooms (6 / 12.5 / 40 studs)"):format(layout),
@@ -3439,24 +3500,63 @@ local function probeGachaOnPad(phone: boolean): { ProbeLine }
 		},
 	}
 	if phone then
-		-- Standing on the pad at the default camera, at the two test phones.
-		defaultCamera(camera, root, back, 12.5, 0)
-		waitFrames(6)
-		for _, size in PHONE_TEST_VIEWS do
-			table.insert(lines, gachaPhoneFit(card, camera, size))
+		-- The tester starts wherever the server put them: say how far off the
+		-- pad's centre (PhoneScaleFor assumes the centre), then stand there.
+		local startOff = Vector3.new(root.Position.X - want.X, 0, root.Position.Z - want.Z).Magnitude
+		local centre = Vector3.new(want.X, root.Position.Y, want.Z)
+		-- The camera sits at +X looking at the tester, so screen-right is -Z.
+		local sites: { { Label: string, Offset: Vector3 } } = {
+			{ Label = "centre", Offset = Vector3.zero },
+			{ Label = "3 studs right", Offset = Vector3.new(0, 0, -3) },
+			{ Label = "3 studs left", Offset = Vector3.new(0, 0, 3) },
+			{ Label = "3 studs toward the camera", Offset = Vector3.new(3, 0, 0) },
+			{ Label = "3 studs away from the camera", Offset = Vector3.new(-3, 0, 0) },
+		}
+		local results: { [number]: { { string } } } = {}
+		local details: { [number]: { string } } = {}
+		for index in PHONE_TEST_VIEWS do
+			results[index] = {}
+			details[index] = {}
+		end
+		local quiet, withToast, toastProblem
+		for siteIndex, site in sites do
+			root.CFrame = CFrame.new(centre + site.Offset)
+			root.AssemblyLinearVelocity = Vector3.zero
+			defaultCamera(camera, root, back, 12.5, 0)
+			waitFrames(10)
+			if not current() then
+				return {}
+			end
+			if siteIndex == 1 then
+				-- Once per probe: the toast never moves the card.
+				quiet, withToast, toastProblem = gachaToastTops()
+				if not current() then
+					return {}
+				end
+			end
+			for index, size in PHONE_TEST_VIEWS do
+				local problems, detail = gachaPhoneAt(card, camera, size, site.Label)
+				table.insert(results[index], problems)
+				table.insert(details[index], detail)
+			end
+		end
+		local standing = ("tester started %.1f studs from the anchor, stood at its centre"):format(startOff)
+		for index, size in PHONE_TEST_VIEWS do
+			table.insert(lines, gachaPhoneLine(size, results[index], details[index], standing, quiet, withToast, toastProblem))
 			table.insert(lines, gachaPhoneText(card, size))
 		end
 	else
 		defaultCamera(camera, root, back, 12.5, 0)
 		waitFrames(6)
+		local quiet, withToast, toastProblem = gachaToastTops()
+		if not current() then
+			return {}
+		end
 		for _, size in { Vector2.new(1920, 1080), Vector2.new(1366, 768) } do
-			table.insert(lines, gachaDesktopStack(card, camera, size))
+			table.insert(lines, gachaDesktopStack(card, camera, size, quiet, withToast, toastProblem))
 		end
 	end
-	camera.CameraType = savedType
-	camera.CFrame = savedCFrame
-	UIKit.SetForcedPhone(nil)
-	return lines
+	return finish(lines)
 end
 
 -- What the open card covers steps aside: the pad's small GACHA label is off
@@ -4452,6 +4552,14 @@ end
 local function probeTutorial(payload: any)
 	local lines: { ProbeLine } = {}
 	local reportData: { [string]: any }? = nil
+	-- This probe is the current one now; whatever the previous probe left
+	-- changed (camera, forced layout, tester) is put back before it starts.
+	activeProbeId = if typeof(payload.ProbeId) == "number" then payload.ProbeId else nil
+	local undo = restoreProbe
+	restoreProbe = nil
+	if undo then
+		pcall(undo)
+	end
 	local ok, result = pcall(function()
 		if payload.Kind == "RootPos" then
 			local rootLines, rootData = probeRootPos()
@@ -4510,7 +4618,7 @@ local function probeTutorial(payload: any)
 		elseif payload.Kind == "GachaApproach" then
 			return probeGachaApproach(payload.Phone == true)
 		elseif payload.Kind == "GachaOnPad" then
-			return probeGachaOnPad(payload.Phone == true)
+			return probeGachaOnPad(payload.Phone == true, payload.ProbeId)
 		elseif payload.Kind == "GachaCovers" then
 			return probeGachaCovers()
 		elseif payload.Kind == "GachaFar" then

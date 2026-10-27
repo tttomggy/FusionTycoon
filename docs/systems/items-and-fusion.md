@@ -135,19 +135,27 @@ in front of it and see the card over it).
   300 × 196 card + the 90 px E / R / T row; 0.8 on a phone through one
   `PhoneScale` UIScale about the bottom line), `SizeOffset` (0, 0.5) so it grows
   upward from the anchor (the captions' bottom edge is on it).
-  **Stack clamp (desktop only):** every frame the card is up its top is held
+  **Stack clamp (desktop and phone):** every frame the card is up its top is held
   >= `TopStack.GetStableBottom()` (the objective bar + event chip rows, i.e. where
-  the announcement line starts) + `PlotLayout.Gacha.StackGapPx` (4 px) by sliding
-  `SizeOffset.Y` below 0.5 (`GachaBoardController.StackShiftFor`, pure; never more
-  than the room left under the anchor, so the key bar stays on screen;
-  `SizeOffset.X` is kept). **A toast never moves the card**: it uses the stable
-  bottom, not `GetBottom()` (which includes the 2.5 s announcement line), and the
-  toast draws over the card. **The phone is not clamped**: `PhoneScaleFor` puts
-  its top at the chip row + `PhoneTopGapPx`. The anchor and `StudsOffset` still
-  never change; the card may leave its anchor, it stays clamped (the NIGHT chip
-  once hid the first row of orbs on PC). `/selftest` measures the drawn top with
-  no announcement and with one showing (equal within 1 px, >= stable bottom + 4)
-  at 1920 x 1080 and 1366 x 768, and the phone sizes.
+  the announcement line starts; x `PhoneScale` on a phone) + the air
+  (`PlotLayout.Gacha.StackGapPx` / `PhoneTopGapPx`, 4 px) by sliding `SizeOffset.Y`
+  below 0.5 (`GachaBoardController.StackShiftFor`, pure; `SizeOffset.X` is kept).
+  **A toast never moves the card**: it uses the stable bottom, not `GetBottom()`
+  (which includes the 2.5 s announcement line), and the toast draws over the card.
+  **Phone:** `PhoneScaleFor` assumes you stand at the pad's centre at the default
+  camera; standing off-centre moves the anchor on screen, so the phone clamps too.
+  `PhonePlanFor` (pure) slides the card down, but never past the **floor** (the
+  weapon bar's top, else the HUD bottom row's top: `GetCardBottomFor`); when the
+  slide alone cannot clear the chip row it lowers the card's `PhoneScale` just
+  enough (never below `PhoneScaleMin`), and at the minimum the top wins. The anchor
+  and `StudsOffset` still never change; the card may leave its anchor, it stays
+  clamped (the NIGHT chip once hid the first row of orbs on PC). `/selftest`
+  measures the drawn top with no announcement and with one showing (equal within
+  1 px, once per probe), and on a phone stands the tester at the pad's centre and
+  3 studs off each side (the probe says how far from the anchor it started): top
+  >= stable bottom + gap and bottom <= the floor, at 844 x 390 and 896 x 414. When
+  the window is not that size the pure `PhonePlanFor` is asserted on the
+  projected anchor (a projection says nothing about the live drawn card).
   **Phone variant** (`applyVariant`, `PlotLayout.Gacha.Phone*`): not the desktop
   card shrunk evenly. No mutation line (the (i) panel has it); the %, the pills,
   the (i) mark and the key captions are 25-26 px so they read >= 13 px at
