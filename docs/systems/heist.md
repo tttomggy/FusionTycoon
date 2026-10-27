@@ -150,7 +150,12 @@ number); the steal itself is `HeistService`'s, same flow.
   Power Surge's chips go over a rival's generators too. A rival lab has **zero
   ProximityPrompts but its 4 steal prompts**, no Highlight, no live owner-only
   label. Lights: a rival adds what a claimed lab's floor has (machine core,
-  portal, collector) plus its 4 orb lights, nothing more.
+  portal, collector) plus the lights of its 4 pedestals, nothing more: TWO per
+  filled pedestal (the `PedestalLight` and the orb's own), so
+  `RivalConfig.MaxPedestalLights` = 2 x `PedestalCount` = 8, exactly what a fully
+  filled player lab adds. `/selftest` asserts that budget and that every rival
+  pedestal light obeys the caps (pedestal 0.8-1.6 / range 8-12, orb light 1, no
+  shadows).
 - **Stolen orb = empty cap + countdown.** A rival pedestal whose orb was
   delivered keeps the normal empty cap and carries the attribute `RespawnAt`
   (`RivalService` clock = unix seconds, set in `showPedestal`, cleared when the

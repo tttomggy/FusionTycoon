@@ -3159,6 +3159,39 @@ local function projectFor(camera: Camera, world: Vector3, size: Vector2): Vector
 	return Vector2.new((ndcX * 0.5 + 0.5) * size.X, (0.5 - ndcY * 0.5) * size.Y)
 end
 
+-- The live card's drawn top with NO announcement up, then with one showing: a
+-- toast never moves the card, so the two agree (the caller allows 1 px).
+-- Returns (quiet, withToast, problem).
+local function gachaToastTops(): (number?, number?, string?)
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local TopStack = require(UI.TopStack) :: any
+	local waited = 0
+	while TopStack.GetHeight("Announce") > 0 and waited < 4 do
+		task.wait(0.1)
+		waited += 0.1
+	end
+	waitFrames(3)
+	local quiet = Board.GetDrawnTop()
+	TopStack.Announce({
+		Key = "SelfTestGachaToast",
+		Priority = 5,
+		Seconds = 1,
+		Height = 40,
+		Show = function(_y: number) end,
+		Hide = function(_cut: boolean): number?
+			return 0
+		end,
+	})
+	local up = 0
+	while TopStack.GetHeight("Announce") <= 0 and up < 1 do
+		task.wait(0.05)
+		up += 0.05
+	end
+	waitFrames(3)
+	local shown = TopStack.GetHeight("Announce") > 0
+	return quiet, Board.GetDrawnTop(), if shown then nil else "the test announcement never showed"
+end
+
 -- The gacha card on a phone `size` px big, character on the pad, default
 -- camera: its whole rect (title to key bar) is on screen, below TopStack's chip
 -- row and above the weapon bar (or the HUD's bottom row before Rebirth 1), and
@@ -3211,10 +3244,41 @@ local function gachaPhoneFit(card: any, camera: Camera, size: Vector2): ProbeLin
 	if percentPx < MIN_PERCENT_PX - 0.05 then
 		table.insert(problems, ("the %% text is %.1f px"):format(percentPx))
 	end
+	-- The phone card is not clamped and a toast never moves it.
+	local gui = card.Billboard :: BillboardGui
+	if math.abs(gui.SizeOffset.Y - 0.5) > 1e-4 then
+		table.insert(problems, ("SizeOffset %s: the phone card was slid (it is not clamped)"):format(tostring(gui.SizeOffset)))
+	end
+	local quiet, withToast, toastProblem = gachaToastTops()
+	if toastProblem then
+		table.insert(problems, toastProblem)
+	elseif quiet and withToast and math.abs(quiet - withToast) > 1 then
+		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
+	end
+	-- Where the tester stands: the projection above assumes the pad's centre.
+	local character = localPlayer.Character
+	local standRoot = character and character:FindFirstChild("HumanoidRootPart")
+	local offPad = if standRoot and standRoot:IsA("BasePart")
+		then Vector3.new(standRoot.Position.X - anchor.WorldPosition.X, 0, standRoot.Position.Z - anchor.WorldPosition.Z).Magnitude
+		else -1
 	return {
 		Ok = #problems == 0,
 		Name = name,
-		Detail = ("scale %.3f, card x %.0f..%.0f y %.0f..%.0f, stack bottom %.0f, %s top %.0f, %% %.1f px%s"):format(scale, left, right, top, bottom, stackBottom, if barRect then "weapon bar" else "bottom row", floorPx, percentPx, if #problems > 0 then " | " .. table.concat(problems, "; ") else ""),
+		Detail = ("scale %.3f, card x %.0f..%.0f y %.0f..%.0f, stack bottom %.0f, %s top %.0f, %% %.1f px, tester %.1f studs from the anchor, drawn top %s / %s with a toast%s"):format(
+			scale,
+			left,
+			right,
+			top,
+			bottom,
+			stackBottom,
+			if barRect then "weapon bar" else "bottom row",
+			floorPx,
+			percentPx,
+			offPad,
+			if quiet then ("%.0f"):format(quiet) else "n/a",
+			if withToast then ("%.0f"):format(withToast) else "n/a",
+			if #problems > 0 then " | " .. table.concat(problems, "; ") else ""
+		),
 	}
 end
 
@@ -3301,14 +3365,26 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2): Prob
 			table.insert(problems, ("anchor y %.0f: top %.1f is above the stack's bottom %.0f + %d = %d"):format(anchorY, top, stackBottom, G.StackGapPx, minTop))
 		end
 	end
-	-- The live card (this window): the same rule on what is drawn.
-	local liveTop = Board.GetDrawnTop()
-	if liveTop and card.PopRoot.Visible then
-		local liveMin = math.ceil(TopStack.GetBottom()) + G.StackGapPx
-		table.insert(detail, ("live top %.0f (min %d)"):format(liveTop, liveMin))
-		if liveTop < liveMin - 0.5 then
-			table.insert(problems, ("live card top %.1f is above the stack's bottom + %d = %d"):format(liveTop, G.StackGapPx, liveMin))
+	-- The live card (this window): the same rule on what is drawn, against the
+	-- STABLE bottom (chip row), with no announcement up and with one showing:
+	-- a toast never moves the card (the two tops agree within 1 px).
+	local quiet, withToast, toastProblem = gachaToastTops()
+	local liveMin = math.ceil(TopStack.GetStableBottom()) + G.StackGapPx
+	if toastProblem then
+		table.insert(problems, toastProblem)
+	end
+	local liveTops: { { Label: string, Top: number? } } = { { Label = "no toast", Top = quiet }, { Label = "toast up", Top = withToast } }
+	for _, entry in liveTops do
+		local label, liveTop = entry.Label, entry.Top
+		if liveTop and card.PopRoot.Visible then
+			table.insert(detail, ("live top %.0f %s (min %d)"):format(liveTop, label, liveMin))
+			if liveTop < liveMin - 0.5 then
+				table.insert(problems, ("live card top %.1f (%s) is above the stable stack bottom + %d = %d"):format(liveTop, label, G.StackGapPx, liveMin))
+			end
 		end
+	end
+	if quiet and withToast and math.abs(quiet - withToast) > 1 then
+		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
 	end
 	return {
 		Ok = #problems == 0,

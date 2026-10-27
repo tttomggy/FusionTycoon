@@ -260,7 +260,10 @@ goes to the front and cuts a lower one that is showing, an item with the
 same `Key` replaces its queued twin, `Valid` skips a stale item at its turn.
 `AnnouncementController` (banners, goals, fusion, rebirth, heist feed) and
 `EventController` (event start) feed it. The welcome splash waits with
-`TopStack.WhenIdle`.
+`TopStack.WhenIdle`. `TopStack.GetStableBottom()` (= `GetY("Announce")`) is the
+bottom of the objective + chip rows without the toast; a world card that must
+clear the chip row (the gacha card) uses it, so a toast never moves the card.
+`GetBottom()` includes the announcement line.
 
 The HUD's left column is one stack too. Desktop: NEXT GOAL, the quest tracker,
 then the cash card (it never sits above y 274 and follows the goal card and

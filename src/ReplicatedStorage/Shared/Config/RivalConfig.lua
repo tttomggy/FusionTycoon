@@ -26,6 +26,10 @@ local RivalConfig = {}
 
 RivalConfig.MaxRivals = 3
 RivalConfig.PedestalCount = 4 -- pedestals 1..4 (the ground floor's first four) hold orbs
+-- The pedestal-side light budget of a rival lab = what a fully filled player
+-- lab adds on those pedestals: each filled pedestal has TWO lights (the
+-- RarityVisuals "PedestalLight" and the orb's own light). /selftest asserts it.
+RivalConfig.MaxPedestalLights = 2 * RivalConfig.PedestalCount
 RivalConfig.RespawnSeconds = 90
 RivalConfig.GoldenChance = 0.05 -- the only mutation a rival orb ever has
 

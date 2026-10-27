@@ -2553,15 +2553,31 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			if not plot or not view or not pedestal or not index then
 				result(false, "rivals: a rival with an orb and the tester's lab", "none")
 			else
-				-- Light budget: a rival lab adds at most what one claimed player lab adds
-				-- (its floor lights, and the pedestals' orb lights: 4 of them).
+				-- Light budget: a rival lab adds at most what one fully filled player
+				-- lab adds: its floor lights, and on its pedestals two lights each (the
+				-- "PedestalLight" and the orb's own), RivalConfig.MaxPedestalLights.
 				local rivalFloor, playerFloor = countLights(view.Plot, false), countLights(plot, false)
-				local rivalOrbs = countLights(view.Plot, true)
+				local rivalLights = countLights(view.Plot, true)
 				result(
-					rivalFloor <= playerFloor and rivalOrbs <= RivalConfig.PedestalCount,
+					rivalFloor <= playerFloor and rivalLights <= RivalConfig.MaxPedestalLights,
 					"rivals: a rival lab's lights stay within one claimed player lab's",
-					("floor %d vs %d, orb lights %d (max %d)"):format(rivalFloor, playerFloor, rivalOrbs, RivalConfig.PedestalCount)
+					("floor %d vs %d, pedestal + orb lights %d (max %d)"):format(rivalFloor, playerFloor, rivalLights, RivalConfig.MaxPedestalLights)
 				)
+				-- CLAUDE.md caps on every rival light: pedestal lights Brightness 0.8-1.6
+				-- and Range 8-12, the orb light Brightness 1 (its range grows with the
+				-- tier), all Shadows = false.
+				local capBad: { string } = {}
+				for _, descendant in view.Plot:GetDescendants() do
+					if descendant:IsA("Light") and descendant.Enabled and descendant:FindFirstAncestor("Pedestals") then
+						local isPedestalLight = descendant.Name == "PedestalLight"
+						local brightnessOk = if isPedestalLight then descendant.Brightness >= 0.8 and descendant.Brightness <= 1.6 else descendant.Brightness == PlotLayout.Pedestal.OrbLightBrightness
+						local rangeOk = not isPedestalLight or (descendant.Range >= 8 and descendant.Range <= 12)
+						if descendant.Shadows or not brightnessOk or not rangeOk then
+							table.insert(capBad, ("%s brightness %.2f range %.1f shadows %s"):format(descendant:GetFullName(), descendant.Brightness, descendant.Range, tostring(descendant.Shadows)))
+						end
+					end
+				end
+				result(#capBad == 0, "rivals: every rival pedestal light obeys the caps (pedestal 0.8-1.6 / 8-12, orb 1, no shadows)", table.concat(capBad, "; "))
 				putNextTo(pedestal)
 				local orb = RivalService.GetOrb(view.Id, index)
 				local before = inventoryCount()

@@ -15,11 +15,14 @@
 	pull with E / R / T from PromptDistance + 3 studs, so you stop in front of
 	the pad and see the card over it.
 
-	  * The stack clamp (desktop AND phone): every frame the card is up its top
-	    is held >= TopStack's bottom + PlotLayout.Gacha.StackGapPx (4 px) by
-	    sliding the billboard's SizeOffset down (StackShiftFor, pure). The
-	    anchor and the studs offsets below still never change; if the clamp
-	    moves the card off its anchor, it stays clamped (readable beats anchored).
+	  * The stack clamp (DESKTOP only): every frame the card is up its top is
+	    held >= TopStack's STABLE bottom (objective bar + event chip, no toast)
+	    + PlotLayout.Gacha.StackGapPx (4 px) by sliding the billboard's
+	    SizeOffset.Y down (StackShiftFor, pure; SizeOffset.X is kept). A toast
+	    never moves the card: it draws over it for its 2.5 s. The phone is not
+	    clamped: PhoneScaleFor already puts its top at chip row + PhoneTopGapPx.
+	    The anchor and the studs offsets below never change; if the clamp moves
+	    the card off its anchor, it stays clamped (readable beats anchored).
 	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
 	    pad is a cylinder turned 90 degrees about Z, so an offset on the pad
 	    itself would be applied in ITS axes, sideways), Size = (300, 324) px,
@@ -1492,9 +1495,10 @@ function GachaBoardController.StackShiftFor(anchorY: number, cardHeight: number,
 	return math.clamp(minTop - top, 0, math.max(0, viewHeight - anchorY))
 end
 
--- TopStack's bottom in screen px (its y is logical: x the phone's 0.8).
+-- The bottom of TopStack's STABLE rows (chip row) in screen px; its y is
+-- logical: x the phone's 0.8. Never the toast-inclusive GetBottom.
 local function stackBottomPx(): number
-	return TopStack.GetBottom() * (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
+	return TopStack.GetStableBottom() * (if UIKit.IsPhone() then UITheme.PhoneScale else 1)
 end
 
 -- The card as drawn: the billboard's height x the phone's scale.
@@ -1503,22 +1507,27 @@ local function drawnHeight(view: CardView): number
 	return view.Billboard.Size.Y.Offset * (if scale and scale:IsA("UIScale") then scale.Scale else 1)
 end
 
--- Every frame while the card is up: slide it down (SizeOffset, a fraction of
--- its own height) when its top would sit under the event chip / stack. The
--- anchor and the studs offsets are never touched.
+-- Every frame while the card is up (desktop): slide it down (SizeOffset.Y, a
+-- fraction of its own height) when its top would sit under the event chip.
+-- The phone is not clamped (PhoneScaleFor owns its placement): it only gets
+-- an old slide undone. The anchor, the studs offsets and SizeOffset.X are
+-- never touched.
 local function clampToStack(view: CardView)
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
 	end
-	local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
 	local shift = 0
-	if point.Z > 0 then
-		shift = GachaBoardController.StackShiftFor(point.Y, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
+	if not UIKit.IsPhone() then
+		local point = camera:WorldToViewportPoint(view.Anchor.WorldPosition)
+		if point.Z > 0 then
+			shift = GachaBoardController.StackShiftFor(point.Y, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
+		end
 	end
+	local current = view.Billboard.SizeOffset
 	local fullHeight = view.Billboard.Size.Y.Offset
-	local want = Vector2.new(0, 0.5 - shift / math.max(fullHeight, 1))
-	if (view.Billboard.SizeOffset - want).Magnitude > 0.0005 then
+	local want = Vector2.new(current.X, 0.5 - shift / math.max(fullHeight, 1))
+	if (current - want).Magnitude > 0.0005 then
 		view.Billboard.SizeOffset = want
 	end
 end

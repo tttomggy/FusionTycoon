@@ -126,6 +126,15 @@ function TopStack.GetBottom(): number
 	return bottom
 end
 
+-- Logical px from the top of the screen to the bottom of the STABLE rows:
+-- the objective bar and the event chip (= where the announcement line
+-- starts). It does not grow while a toast is up, so a world card that must
+-- clear the chip row (the gacha card) never jumps with every 2.5 s banner;
+-- the toast draws over it. The caller scales for a phone.
+function TopStack.GetStableBottom(): number
+	return TopStack.GetY("Announce")
+end
+
 function TopStack.OnChanged(callback: (slot: Slot) -> ())
 	table.insert(listeners, callback)
 end
