@@ -29,6 +29,7 @@ local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
@@ -137,6 +138,11 @@ local goalRewardLabel: TextLabel
 local goalTextLabel: TextLabel
 local goalBar: Frame
 local goalCountLabel: TextLabel
+-- An "own a tier" goal's next action (GoalSteps) and its small odds hint.
+local goalStepLabel: TextLabel
+local goalHintLabel: TextLabel
+local goalHasStep = false
+local goalHasHint = false
 local goalPathButton: TextButton? = nil
 local goalPadding: UIPadding
 local goalHeader: Frame
@@ -280,7 +286,7 @@ local function buildGoalTracker()
 		Parent = body,
 		Size = UDim2.new(1, 0, 0, LAYOUT.Desktop.GoalBarHeight),
 		Fill = UITheme.Gradients.Gold,
-		LayoutOrder = 3,
+		LayoutOrder = 5,
 		ZIndex = body.ZIndex + 1,
 	})
 
@@ -291,7 +297,37 @@ local function buildGoalTracker()
 		TextColor3 = Colors.Muted,
 		Size = UDim2.new(1, 0, 0, 14),
 		TextXAlignment = Enum.TextXAlignment.Right,
+		LayoutOrder = 6,
+		ZIndex = body.ZIndex + 1,
+		Parent = body,
+	})
+
+	-- The next action under the goal text, and (while more orbs help) the
+	-- odds hint under that. Wrapped, so a long line grows the card and never clips.
+	goalStepLabel = UIKit.Label({
+		Name = "Step",
+		Font = Fonts.BodyHeavy,
+		TextSize = 14,
+		RichText = true,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.fromScale(1, 0),
+		LayoutOrder = 3,
+		Visible = false,
+		ZIndex = body.ZIndex + 1,
+		Parent = body,
+	})
+	goalHintLabel = UIKit.Label({
+		Name = "Hint",
+		Font = Fonts.Body,
+		TextSize = 12,
+		TextColor3 = Colors.Muted,
+		RichText = true,
+		TextWrapped = true,
+		AutomaticSize = Enum.AutomaticSize.Y,
+		Size = UDim2.fromScale(1, 0),
 		LayoutOrder = 4,
+		Visible = false,
 		ZIndex = body.ZIndex + 1,
 		Parent = body,
 	})
@@ -336,6 +372,11 @@ local function applyGoalLayout(isPhone: boolean)
 	goalTextLabel.Visible = not isPhone
 	goalBar.Visible = not isPhone
 	goalCountLabel.Visible = goalHasCount and not isPhone
+	-- The action stays on the phone pill too, a size smaller.
+	goalStepLabel.TextSize = if isPhone then 12 else 14
+	goalHintLabel.TextSize = 12
+	goalStepLabel.Visible = goalHasStep
+	goalHintLabel.Visible = goalHasHint
 	goalPhoneLine.Visible = isPhone
 	local vertical, horizontal = if isPhone then 6 else 12, if isPhone then 10 else 14
 	goalPadding.PaddingTop = UDim.new(0, vertical)
@@ -350,10 +391,15 @@ export type GoalView = {
 	Current: number,
 	Target: number,
 	Unit: string?, -- e.g. "Rare"; nil hides the count line
+	Lines: GoalSteps.Lines?, -- an "own a tier" goal's next action (RichText); nil hides both lines
 }
+
+-- The goal on the tracker now (/selftest puts it back after its samples).
+local lastGoalView: GoalView? = nil
 
 -- Shows a goal on the tracker, or hides the tracker when `goal` is nil.
 function HudController.SetGoal(goal: GoalView?)
+	lastGoalView = goal
 	if not goal then
 		goalHolder.Visible = false
 		return
@@ -373,6 +419,13 @@ function HudController.SetGoal(goal: GoalView?)
 		)
 	end
 	goalCountLabel.Visible = goalHasCount and not goalPhoneMode
+	local lines = goal.Lines
+	goalHasStep = lines ~= nil
+	goalHasHint = lines ~= nil and lines.Hint ~= nil
+	goalStepLabel.Text = if lines then lines.Line else ""
+	goalHintLabel.Text = if lines and lines.Hint then lines.Hint else ""
+	goalStepLabel.Visible = goalHasStep
+	goalHintLabel.Visible = goalHasHint
 end
 
 -- Completion flourish: flash the border Goal-coloured and pop the panel.
@@ -2290,6 +2343,77 @@ local SELFTEST_LEFT_SHARE = 0.4
 local SELFTEST_PHONE_HEIGHTS = { 390, 414 }
 local SELFTEST_BOTTOM_MARGIN = 8
 
+-- The tallest goal card: a long title, the action line and the odds hint
+-- (a 3-orb Legendary fuse with more orbs to gain).
+local function selfTestGoalView(): GoalView
+	return {
+		Text = "Fuse Legendaries into a Mythic",
+		Reward = 1.25e6,
+		Current = 1,
+		Target = 2,
+		Unit = "Legendary",
+		Lines = GoalSteps.Format({
+			Kind = "Fuse",
+			Tier = "Legendary",
+			Owned = 3,
+			Count = 3,
+			Chance = 0.27,
+			BestChance = 0.45,
+			Target = GoalSteps.Targets.Fuse,
+		}),
+	}
+end
+
+-- /selftest: the goal card with all three lines up (title, action, odds hint)
+-- shows every line without clipping, stays on screen, and keeps the 👣
+-- toggle a full-size tap target. The caller forces the layout first.
+function HudController.SelfTestGoalLines(scaleName: string): { string }
+	local goalWas = goalHolder.Visible
+	local previous = lastGoalView
+	selfTestHold = true
+	goalHolder.Visible = true
+	HudController.SetGoal(selfTestGoalView())
+	applyLayout(layoutIsPhone)
+	task.wait(0.4)
+	local problems: { string } = {}
+	local labels: { [string]: TextLabel } = { Step = goalStepLabel, Hint = goalHintLabel }
+	if layoutIsPhone then
+		labels.Title = goalPhoneText
+	else
+		labels.Title = goalTextLabel
+	end
+	for name, label in labels do
+		if not label.Visible then
+			table.insert(problems, name .. " hidden")
+		elseif name ~= "Title" or not layoutIsPhone then
+			-- (The phone's title line truncates with "…" on purpose.)
+			if not label.TextFits then
+				table.insert(problems, name .. " clipped")
+			end
+		end
+	end
+	local screen = screenGui.AbsoluteSize
+	local position, size = goalHolder.AbsolutePosition, goalHolder.AbsoluteSize
+	if position.X + size.X > screen.X + 1 or position.Y + size.Y > screen.Y + 1 then
+		table.insert(problems, ("card ends at %.0f x %.0f on a %.0f x %.0f screen"):format(position.X + size.X, position.Y + size.Y, screen.X, screen.Y))
+	end
+	local button = goalPathButton
+	local tap = if button then button.AbsoluteSize / UIKit.EffectiveScale(button) else Vector2.zero
+	if not button or tap.X < UITheme.MinTapSize - 1 or tap.Y < UITheme.MinTapSize - 1 then
+		table.insert(problems, ("👣 toggle is %.0f x %.0f"):format(tap.X, tap.Y))
+	end
+	HudController.SetGoal(previous)
+	-- SetGoal(nil) hides the card; put the caller's visibility back.
+	goalHolder.Visible = goalWas
+	selfTestHold = false
+	applyLayout(layoutIsPhone)
+	return {
+		if #problems == 0
+			then ("PASS hud goal tracker shows 3 lines (%s, card %.0f x %.0f px, 👣 %.0f px)"):format(scaleName, size.X, size.Y, tap.X)
+			else ("FAIL hud goal tracker 3 lines (%s): %s"):format(scaleName, table.concat(problems, "; ")),
+	}
+end
+
 -- Shows the deal badge and "next in" with long sample texts, then checks every element of the left group ends inside
 -- the left 40% of the screen. The caller forces the phone layout first.
 function HudController.SelfTestLeftColumn(scaleName: string): { string }
@@ -2308,8 +2432,10 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 	end
 	phoneGrid.Visible = true
 	goalHolder.Visible = true
+	local previousGoal = lastGoalView
+	-- The tallest card: title, the action line and the odds hint.
+	HudController.SetGoal(selfTestGoalView())
 	goalPhoneText.Text = "Fuse 5 times to unlock the next orb tier"
-	goalPhoneReward.Text = "+$1.25M"
 	applyLayout(layoutIsPhone)
 	task.wait(0.3)
 
@@ -2401,6 +2527,7 @@ function HudController.SelfTestLeftColumn(scaleName: string): { string }
 		end
 	end
 
+	HudController.SetGoal(previousGoal)
 	questTracker.Visible = trackerWas
 	goalHolder.Visible = goalWas
 	selfTestHold = false
@@ -2669,6 +2796,7 @@ local function refreshGoal()
 		Current = progress.Current,
 		Target = progress.Target,
 		Unit = goal.Unit,
+		Lines = if progress.Step then GoalSteps.Format(progress.Step) else nil,
 	})
 end
 

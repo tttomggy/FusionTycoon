@@ -26,8 +26,11 @@ again), `/cash <amount>`, `/resetmultiplier`.
    - [ ] Put an item on a pedestal (+$200)
    - [ ] Fuse at your Fusion Machine (+$300); `/cash 5000` and pull until you
      have a pair.
-5. Goal 7 (**Own a Rare item**) shows a **0 / 1 Rare** count line under the
-   bar.
+5. Goal 7 (**Fuse Commons into a Rare**) shows a **0 / 1 Rare** count line
+   under the bar, and under the goal text the next action (`Pull from the
+   Gacha for more orbs (0 / 2 Common)` with one Common, `Fuse your 3
+   Commons: 68%` + `More Commons = better odds (6 → 100%)` with three);
+   the arrow follows it (Gacha Pad / Fusion Machine).
 6. Rejoin (stop and Play) with saving enabled. The tracker resumes at the
    same goal and no reward is paid twice.
 

@@ -1177,6 +1177,15 @@ local function testHudLeftColumn(): { string }
 				table.insert(lines, line)
 			end
 		end
+		-- The goal card with its 3 lines (title, next action, odds hint).
+		local goalOk, goalResult = pcall(hud.SelfTestGoalLines, if phone then "phone" else "desktop")
+		if not goalOk then
+			table.insert(lines, "FAIL hud goal tracker lines: " .. tostring(goalResult))
+		else
+			for _, line in goalResult do
+				table.insert(lines, line)
+			end
+		end
 	end
 	UIKit.SetForcedPhone(nil)
 	return lines
@@ -4529,6 +4538,26 @@ local function probeFuseTip(tier: string, expect: string): { ProbeLine }
 	return lines
 end
 
+-- The Fuse panel's "Add more ... for better odds" line on `tier` with
+-- `chamber` orbs in: `expect` is the whole line, or "" when it must be hidden.
+local function probeFuseOdds(tier: string, chamber: number, expect: string): { ProbeLine }
+	local panel = require(UI.FusePanel) :: any
+	task.wait(0.4) -- the inventory sync
+	panel.Open()
+	task.wait(0.2)
+	local text = panel.SelfTestOdds(tier, chamber)
+	panel.Close()
+	return {
+		{
+			Ok = (text or "") == expect,
+			Name = if expect == ""
+				then ("fuse odds line: hidden with %d %s in the chamber"):format(chamber, tier)
+				else ("fuse odds line: %d %s in the chamber says '%s'"):format(chamber, tier, expect),
+			Detail = tostring(text),
+		},
+	}
+end
+
 local function probeAutoFillMutated(tier: string, expect: string, count: number): { ProbeLine }
 	local panel = require(UI.FusePanel) :: any
 	local toasts = require(script.Parent.ToastController) :: any
@@ -4732,6 +4761,8 @@ local function probeTutorial(payload: any)
 			return probeFuseMeter(tonumber(payload.Pity) or 0, payload.Full == true)
 		elseif payload.Kind == "FuseTip" then
 			return probeFuseTip(tostring(payload.Tier), tostring(payload.Expect))
+		elseif payload.Kind == "FuseOdds" then
+			return probeFuseOdds(tostring(payload.Tier), tonumber(payload.Chamber) or 0, tostring(payload.Expect))
 		elseif payload.Kind == "AutoFillMutated" then
 			return probeAutoFillMutated(tostring(payload.Tier), tostring(payload.Expect), if typeof(payload.Count) == "number" then payload.Count else 0)
 		elseif payload.Kind == "AutoReset" then

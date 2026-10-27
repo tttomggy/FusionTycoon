@@ -24,6 +24,10 @@
 	stream in. The one exception is "NearestEnemyPedestal" (the steal goal),
 	which is in another lab by definition.
 
+	An "own a tier" goal's target follows its next action (GoalSteps, in
+	GoalProgress.Step): the Fusion Machine, the Gacha Pad or the UPGRADES
+	button; GoalConfig's Target is the fallback.
+
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
 	claimed warns once (a renamed part or a stale GoalConfig entry).
@@ -490,7 +494,10 @@ local function refresh()
 		return
 	end
 
-	local targetName = goal.Target
+	-- An "own a tier" goal's next action points somewhere of its own (the
+	-- Fusion Machine, the Gacha Pad, UPGRADES) and follows every sync.
+	local progress = TycoonController.GetGoalProgress()
+	local targetName = if progress and progress.Step then progress.Step.Target else goal.Target
 	if targetName:sub(1, 3) == "ui:" then
 		clearWorldMarker()
 		setUiTarget(targetName:sub(4))

@@ -7,7 +7,10 @@
 	reward, advances GoalIndex and fires GoalCompleted. Several goals can
 	complete in one check (e.g. an older save that already did them). Also
 	publishes progress toward the current goal, which goes out with the same
-	snapshot.
+	snapshot. For "own a tier" goals the progress carries the NEXT ACTION
+	(GoalSteps: fuse N orbs, fuse a lower tier, pull, or earn cash), worked
+	out from the inventory with FusionService's rules and re-evaluated on
+	every sync, so it switches the moment a pull lands or a fuse ends.
 
 	No polling: it runs from PlayerDataService.OnSync, which every service
 	already triggers through SyncTycoon after any state change.
@@ -21,6 +24,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
+local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 
 --[[ Types ---------------------------------------------------------------- ]]
@@ -145,6 +152,36 @@ local EVALUATORS: { [string]: Evaluator } = {
 	end,
 }
 
+--[[ Next action --------------------------------------------------------- ]]
+
+-- The next action toward an "own a tier" goal (nil for any other goal).
+-- `inventory` and `cash` default to the player's own; /selftest passes
+-- stubbed ones. Orbs a thief is carrying can't be fused, so they don't count.
+function GoalService.ComputeStep(player: Player, goal: GoalConfig.GoalDef, inventory: { { Uid: string, Tier: string } }?, cash: number?): GoalSteps.Step?
+	local tier = GoalSteps.GetGoalTier(goal)
+	if not tier then
+		return nil
+	end
+	local counts: { [string]: number } = {}
+	local owned: { any } = inventory or PlayerDataService.GetInventory(player) or {}
+	for _, item in owned do
+		if not PlayerDataService.IsItemCarried(player, item.Uid) then
+			counts[item.Tier] = (counts[item.Tier] or 0) + 1
+		end
+	end
+	-- The same bonus the Fuse panel adds: the live event and an armed Fusion Spark.
+	local sparkDef = QuestConfig.PowerUps.FusionSpark
+	local spark = if PlayerDataService.IsArmed(player, sparkDef.Key) then sparkDef.FusionBonus or 0 else 0
+	return GoalSteps.Compute(tier, {
+		Counts = counts,
+		Rebirths = PlayerDataService.GetRebirths(player),
+		Cash = cash or PlayerDataService.GetCash(player),
+		PullCost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player), PlayerDataService.GetSteadyIncomePerSecond(player)),
+		FreePulls = PlayerDataService.GetTutorialFreePulls(player),
+		FusionBonus = EventState.GetFusionSuccessBonus() + spark,
+	})
+end
+
 --[[ Check ---------------------------------------------------------------- ]]
 
 local function checkGoals(player: Player)
@@ -171,7 +208,11 @@ local function checkGoals(player: Player)
 
 		local done, current, target = evaluate(player, data)
 		if not done then
-			PlayerDataService.SetGoalProgress(player, { Current = current, Target = target })
+			PlayerDataService.SetGoalProgress(player, {
+				Current = current,
+				Target = target,
+				Step = GoalService.ComputeStep(player, goal),
+			})
 			return
 		end
 

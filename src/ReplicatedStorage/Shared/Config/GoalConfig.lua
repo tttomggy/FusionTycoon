@@ -14,6 +14,13 @@
 	lowest-index empty pedestal), "NearestEnemyPedestal" (the closest
 	pedestal in another lab you could steal from right now), or
 	"ui:<Button>" for a HUD button.
+
+	"Own a tier" goals (own_rare / own_epic / own_legendary / own_mythic:
+	`Kind = "OwnTier", Tier = ...`) also show the NEXT ACTION under the goal
+	text and move the arrow to match (GoalSteps, computed in GoalService on
+	every sync): fuse your N orbs of the tier below, fuse a lower tier up
+	first, pull from the Gacha, or earn cash for a pull. Their `Target` is the
+	fallback (the Fusion Machine) for a client that has no step yet.
 ]]
 local GoalConfig = {}
 
@@ -23,6 +30,11 @@ export type GoalDef = {
 	Reward: number,
 	Unit: string?,
 	Target: string,
+	-- "OwnTier" + Tier: an "own a <Tier>" goal. GoalService adds the live next
+	-- action (GoalSteps) to its progress, and that action's target replaces
+	-- `Target` while it lasts.
+	Kind: string?,
+	Tier: string?,
 }
 
 GoalConfig.Goals = {
@@ -34,13 +46,13 @@ GoalConfig.Goals = {
 	-- the first pull. Kept (not removed) so saved GoalIndex values still line up.
 	{ Id = "display_item", Text = "Your best orb goes on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
 	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine" },
-	{ Id = "own_rare", Text = "Own a Rare item", Reward = 400, Unit = "Rare", Target = "FusionMachine" },
+	{ Id = "own_rare", Text = "Fuse Commons into a Rare", Reward = 400, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Rare" },
 	{ Id = "upgrade_multiplier", Text = "Upgrade your Multiplier", Reward = 1500, Target = "MultiplierStation" },
-	{ Id = "own_epic", Text = "Fuse Rares into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine" },
+	{ Id = "own_epic", Text = "Fuse Rares into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Epic" },
 	{ Id = "unlock_ember_forge", Text = "Unlock the Ember Forge", Reward = 5000, Unit = "Basic LV", Target = "Generator_ember_forge" },
-	{ Id = "own_legendary", Text = "Own a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine" },
+	{ Id = "own_legendary", Text = "Fuse Epics into a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine", Kind = "OwnTier", Tier = "Legendary" },
 	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation" },
-	{ Id = "own_mythic", Text = "Own a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine" },
+	{ Id = "own_mythic", Text = "Fuse Legendaries into a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine", Kind = "OwnTier", Tier = "Mythic" },
 	-- Checked after the rebirth resets the run, so the reward lands in the new run.
 	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
 	-- Heist (unlocks at Rebirth 1): defend first, then steal.

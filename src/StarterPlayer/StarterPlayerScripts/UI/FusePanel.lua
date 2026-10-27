@@ -39,6 +39,7 @@ local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
 local Controllers = script.Parent.Parent.Controllers
 local InventoryController = require(Controllers.InventoryController)
 local TycoonController = require(Controllers.TycoonController)
@@ -150,6 +151,15 @@ local function rebirthsNeeded(tier: string): number?
 		return needed
 	end
 	return nil
+end
+
+-- The success bonus the roll adds: the live event's (Void Moon) and an armed
+-- Fusion Spark's (quest power-up). Also returns the spark part alone.
+local function fusionBonus(): (number, number)
+	local spark = if TycoonController.IsArmed("FusionSpark")
+		then QuestConfig.PowerUps.FusionSpark.FusionBonus or 0
+		else 0
+	return EventState.GetFusionSuccessBonus() + spark, spark
 end
 
 local function itemsByUid(): { [string]: any }
@@ -299,10 +309,7 @@ local function refreshChamber()
 
 	-- With the live event's success bonus (Void Moon) and an armed Fusion
 	-- Spark (quest power-up), like the server's roll.
-	local spark = if TycoonController.IsArmed("FusionSpark")
-		then QuestConfig.PowerUps.FusionSpark.FusionBonus or 0
-		else 0
-	local bonus = EventState.GetFusionSuccessBonus() + spark
+	local bonus, spark = fusionBonus()
 	local pity = TycoonController.GetSecretPity()
 	pitySeen = pity
 	local chance = FusionConfig.GetFusionChanceWithPity(selectedTier, math.max(count, FusionConfig.MinFusionInputs), bonus, pity)
@@ -679,12 +686,43 @@ local function largestMutatedGroup(): ({ string }, string?, string?)
 	return uids, MutationConfig.GetStackLabel(best.Base, best.Events), MutationConfig.GetTop(best.Base, best.Events)
 end
 
+-- A chamber of 2-5 orbs with more of the tab's tier in the inventory: what
+-- the next orb and a full chamber would do to the odds ("" when nothing to say:
+-- full, nothing more owned, a locked tier or an already sure fusion).
+local function moreOrbsLine(): string
+	local count = #selected
+	if count < FusionConfig.MinFusionInputs or count >= FusionConfig.MaxFusionInputs or rebirthsNeeded(selectedTier) then
+		return ""
+	end
+	local owned = 0
+	for _, item in InventoryController.GetInventory() do
+		if item.Tier == selectedTier then
+			owned += 1
+		end
+	end
+	local reachable = math.min(owned, FusionConfig.MaxFusionInputs)
+	if reachable <= count then
+		return ""
+	end
+	local bonus = fusionBonus()
+	local pity = TycoonController.GetSecretPity()
+	if FusionConfig.GetFusionChanceWithPity(selectedTier, count, bonus, pity) >= 1 then
+		return ""
+	end
+	local parts = {}
+	for _, orbs in { count + 1, if reachable > count + 1 then reachable else nil } do
+		table.insert(parts, ("%d → %s"):format(orbs, percent(FusionConfig.GetFusionChanceWithPity(selectedTier, orbs, bonus, pity))))
+	end
+	return ("Add more %s for better odds: %s"):format(GoalSteps.Plural(selectedTier), table.concat(parts, ", "))
+end
+
 -- AUTO-FILL only matches a mutation when the first orb in the chamber has it,
 -- so with an empty chamber and a group of 2+ orbs sharing one stack on this
--- tab, one muted line says how.
+-- tab, one muted line says how. The more-orbs odds line (it needs orbs in the
+-- chamber, so the two never apply together) takes the same slot and wins.
 updateMutationTip = function()
-	local text = ""
-	if #selected == 0 and not rebirthsNeeded(selectedTier) then
+	local text = moreOrbsLine()
+	if text == "" and #selected == 0 and not rebirthsNeeded(selectedTier) then
 		local _, _, top = largestMutatedGroup()
 		if top then
 			local word = string.upper(top)
@@ -1216,6 +1254,23 @@ function FusePanel.SelfTestTip(tier: string, orbFirst: boolean): string?
 				table.insert(selected, item.Uid)
 				break
 			end
+		end
+	end
+	refreshAll()
+	return if tipLabel.Visible then tipLabel.Text else nil
+end
+
+-- /selftest: the more-orbs odds line as drawn with the first `chamber` orbs of
+-- `tier` in the chamber; nil when hidden.
+function FusePanel.SelfTestOdds(tier: string, chamber: number): string?
+	if not modal then
+		return nil
+	end
+	selectedTier = tier
+	table.clear(selected)
+	for _, item in InventoryController.GetInventory() do
+		if #selected < chamber and item.Tier == tier then
+			table.insert(selected, item.Uid)
 		end
 	end
 	refreshAll()

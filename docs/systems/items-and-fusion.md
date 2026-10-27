@@ -402,6 +402,42 @@ look, never the odds.
   levels · Core Engine LV 15" / "+23 levels across 3 generators", one
   bump per changed generator; the panel refreshes at most 4×/s.
 
+- **Goal steps ("own a tier" goals):** `own_rare` / `own_epic` /
+  `own_legendary` / `own_mythic` (`GoalConfig` `Kind = "OwnTier", Tier`) say
+  what to do NEXT instead of only pointing at the Fusion Machine. The pure
+  rules are `Shared/Modules/GoalSteps.Compute` (goal tier G, input tier I =
+  the one below it, same rules as FusionService: `CanFuseTierFor`,
+  `GetFusionChance` with the event + Fusion Spark bonus, fuse max 6, orbs a
+  thief carries don't count); `GoalService.ComputeStep` feeds it the player's
+  inventory on every sync (the `OnSync` hook) and ships the result as
+  `GoalProgress.Step`. The HUD tracker renders `GoalSteps.Format(step)` as a
+  2nd line (the action) and a small 3rd line (the odds hint) under the goal
+  text, and `GoalMarkerController` points at `Step.Target`:
+
+  | Situation | 2nd line | Arrow |
+  |---|---|---|
+  | >= 2 of I | `Fuse your N Epics: 45%` (N = min(owned, 6)); 3rd line `More Epics = better odds (6 → 66%)` while N < 6 and chance < 100% | Fusion Machine |
+  | < 2 of I, >= 2 of a lower tier (highest first) | `Fuse Rares to make Epics (1 / 2 Epic)` | Fusion Machine |
+  | nothing to fuse, a pull is affordable (or a free pull is left) | `Pull from the Gacha for more orbs (1 / 2 Epic)` | Gacha Pad |
+  | nothing to fuse, no pull affordable | `Earn cash for your next pull ($X)` | UPGRADES button (`ui:Upgrades` outline) |
+
+  Goal texts say the verb (`Fuse Epics into a Legendary`); rewards are
+  unchanged. Tier names are coloured by `UITheme.GetTierLight`, money goes
+  through `NumberFormat.Money`. The tracker's card grows with the lines
+  (`AutomaticSize`), on a phone they sit under the one-line pill (12 px).
+- **Fuse panel odds line:** a chamber of 2-5 same-tier orbs with more of that
+  tier in the inventory shows one muted line in the mutation-tip slot:
+  `Add more Epics for better odds: 3 → 45%, 6 → 66%` (next count, and
+  min(owned, 6) when that is further). Gone at 6 orbs, when nothing more of
+  the tier is owned, and on a sure (pity-full) fusion. It wins over the
+  mutation tip (the tip needs an empty chamber, so they never collide);
+  AUTO-FILL is unchanged.
+- `/selftest`: "goal steps" (server, stubbed inventories through
+  `GoalService.ComputeStep`: Gacha / Fuse lower / Fuse N + hint / no hint at 6 /
+  earn cash, one case for each other tier goal), "fuse odds line" (client
+  probe `FuseOdds`), and "hud goal tracker shows 3 lines" (no clipping,
+  on screen, 👣 toggle >= 44 px, at the desktop and phone layouts).
+
 *Board bug fixed (Oct 13), kept for the lesson:* `buildTile` / `buildChip`
 returned their frames but never parented them, so the first board drew only
 its header and price pill. The selftest read the controller's own table and

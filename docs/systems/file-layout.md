@@ -36,7 +36,8 @@ src/ReplicatedStorage/Shared/
                  tagging), PlotKit (plot shell + sign gate), StationKit
                  (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
-                 ball path), PortalKit (the Rebirth Portal), FloorKit (the 2nd
+                 ball path), PortalKit (the Rebirth Portal), GoalSteps (an "own a tier"
+                 goal's next action: rules + text), FloorKit (the 2nd
                  floor), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
                  WeaponKit (the five weapon models: Tool, viewport model,

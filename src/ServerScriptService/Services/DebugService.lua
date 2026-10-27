@@ -44,6 +44,9 @@ local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local AdminConfig = require(ReplicatedStorage.Shared.Config.AdminConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local SoundConfig = require(ReplicatedStorage.Shared.Config.SoundConfig)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
@@ -67,6 +70,7 @@ type RewardServiceModule = typeof(require(script.Parent.RewardService))
 type FriendServiceModule = typeof(require(script.Parent.FriendService))
 type NotifyServiceModule = typeof(require(script.Parent.NotifyService))
 type RivalServiceModule = typeof(require(script.Parent.RivalService))
+type GoalServiceModule = typeof(require(script.Parent.GoalService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -94,6 +98,7 @@ local RewardService: RewardServiceModule
 local FriendService: FriendServiceModule
 local NotifyService: NotifyServiceModule
 local RivalService: RivalServiceModule
+local GoalService: GoalServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -1731,6 +1736,27 @@ local function runAutoFillSelfTest(player: Player, result: (boolean, string, str
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	tutorialProbe(player, { Kind = "FuseTip", Tier = tier, Expect = "" }, result)
 	PlayerDataService.RemoveItemsByUid(player, plain)
+	-- The more-orbs odds line: 2 of 6 plain orbs in the chamber name the next
+	-- orb and a full chamber; a full chamber or nothing more owned hides it.
+	local oddsOrbs = add(nil, FusionConfig.MaxFusionInputs)
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	local sparkDef = QuestConfig.PowerUps.FusionSpark
+	local oddsBonus = EventState.GetFusionSuccessBonus() + (if PlayerDataService.IsArmed(player, sparkDef.Key) then sparkDef.FusionBonus or 0 else 0)
+	local function oddsPercent(count: number): string
+		return FusionConfig.FormatPercent(FusionConfig.GetFusionChance(tier :: string, count, oddsBonus) * 100) .. "%"
+	end
+	tutorialProbe(player, {
+		Kind = "FuseOdds",
+		Tier = tier,
+		Chamber = 2,
+		Expect = ("Add more %s for better odds: 3 → %s, 6 → %s"):format(GoalSteps.Plural(tier), oddsPercent(3), oddsPercent(6)),
+	}, result)
+	tutorialProbe(player, { Kind = "FuseOdds", Tier = tier, Chamber = FusionConfig.MaxFusionInputs, Expect = "" }, result)
+	PlayerDataService.RemoveItemsByUid(player, { oddsOrbs[3], oddsOrbs[4], oddsOrbs[5], oddsOrbs[6] })
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
+	tutorialProbe(player, { Kind = "FuseOdds", Tier = tier, Chamber = 2, Expect = "" }, result)
+	PlayerDataService.RemoveItemsByUid(player, { oddsOrbs[1], oddsOrbs[2] })
+	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	-- Three Golden orbs: the tip names GOLDEN, and goes once an orb is in.
 	local tipGoldens = add("Golden", 3)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
@@ -1758,6 +1784,107 @@ local function runSection(title: string, result: (boolean, string, string?) -> (
 	if not ok then
 		result(false, title .. " (errored)", tostring(err))
 	end
+end
+
+-- The "own a tier" goals' next action (GoalSteps through GoalService.ComputeStep)
+-- on stubbed inventories: line, hint and the arrow's target. Pure: nothing
+-- of the tester's is changed (the stub inventory and cash are passed in).
+local function runGoalStepsSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local goalsById: { [string]: any } = {}
+	for _, goal in GoalConfig.Goals do
+		goalsById[goal.Id] = goal
+	end
+	local sparkDef = QuestConfig.PowerUps.FusionSpark
+	local bonus = EventState.GetFusionSuccessBonus() + (if PlayerDataService.IsArmed(player, sparkDef.Key) then sparkDef.FusionBonus or 0 else 0)
+	local function percent(tier: string, count: number): string
+		return FusionConfig.FormatPercent(FusionConfig.GetFusionChance(tier, count, bonus) * 100) .. "%"
+	end
+	local RICH = 1e30 -- cash that affords any pull
+	local function check(name: string, goalId: string, counts: { [string]: number }, cash: number, want: { Line: string, Hint: string?, Target: string })
+		local inventory: { { Uid: string, Tier: string } } = {}
+		for tier, count in counts do
+			for index = 1, count do
+				table.insert(inventory, { Uid = ("selftest-%s-%d"):format(tier, index), Tier = tier })
+			end
+		end
+		local step = GoalService.ComputeStep(player, goalsById[goalId], inventory, cash)
+		if not step then
+			result(false, "goal steps: " .. name, "no step")
+			return
+		end
+		local lines = GoalSteps.Format(step)
+		local line = GoalSteps.Plain(lines.Line)
+		local hint = if lines.Hint then GoalSteps.Plain(lines.Hint) else nil
+		result(
+			line == want.Line and hint == want.Hint and step.Target == want.Target,
+			"goal steps: " .. name,
+			("line '%s' hint '%s' target %s; wanted '%s' '%s' %s"):format(line, tostring(hint), step.Target, want.Line, tostring(want.Hint), want.Target)
+		)
+	end
+
+	-- own_legendary (Epics make it).
+	check("Legendary with 1 Epic and nothing to fuse says pull", "own_legendary", { Epic = 1 }, RICH, {
+		Line = "Pull from the Gacha for more orbs (1 / 2 Epic)",
+		Target = "GachaStation",
+	})
+	check("Legendary with 1 Epic and 3 Rares says fuse the Rares", "own_legendary", { Epic = 1, Rare = 3 }, RICH, {
+		Line = "Fuse Rares to make Epics (1 / 2 Epic)",
+		Target = "FusionMachine",
+	})
+	check("Legendary with 3 Epics says fuse them, with the odds hint", "own_legendary", { Epic = 3 }, RICH, {
+		Line = ("Fuse your 3 Epics: %s"):format(percent("Epic", 3)),
+		Hint = ("More Epics = better odds (6 → %s)"):format(percent("Epic", 6)),
+		Target = "FusionMachine",
+	})
+	check("Legendary with 6 Epics has no odds hint", "own_legendary", { Epic = 6 }, RICH, {
+		Line = ("Fuse your 6 Epics: %s"):format(percent("Epic", 6)),
+		Target = "FusionMachine",
+	})
+	check("Legendary with 9 Epics fuses 6", "own_legendary", { Epic = 9 }, RICH, {
+		Line = ("Fuse your 6 Epics: %s"):format(percent("Epic", 6)),
+		Target = "FusionMachine",
+	})
+	-- The earn-cash line needs no free pulls to hide behind.
+	if PlayerDataService.GetTutorialFreePulls(player) > 0 then
+		print("[SelfTest] SKIP goal steps earn-cash: the tester still has tutorial free pulls")
+	else
+		local cost = TycoonConfig.GetGachaPullCost(PlayerDataService.GetGachaPulls(player), PlayerDataService.GetSteadyIncomePerSecond(player))
+		check("Legendary with 1 Epic and $0 says earn cash, arrow at UPGRADES", "own_legendary", { Epic = 1 }, 0, {
+			Line = ("Earn cash for your next pull (%s)"):format(NumberFormat.Money(cost)),
+			Target = "ui:Upgrades",
+		})
+	end
+
+	-- One case for each of the other tier goals.
+	check("Rare with 3 Commons", "own_rare", { Common = 3 }, RICH, {
+		Line = ("Fuse your 3 Commons: %s"):format(percent("Common", 3)),
+		Hint = ("More Commons = better odds (6 → %s)"):format(percent("Common", 6)),
+		Target = "FusionMachine",
+	})
+	check("Rare with 1 Common says pull", "own_rare", { Common = 1 }, RICH, {
+		Line = "Pull from the Gacha for more orbs (1 / 2 Common)",
+		Target = "GachaStation",
+	})
+	check("Epic with 1 Rare and 4 Commons", "own_epic", { Rare = 1, Common = 4 }, RICH, {
+		Line = "Fuse Commons to make Rares (1 / 2 Rare)",
+		Target = "FusionMachine",
+	})
+	check("Epic with 2 Rares", "own_epic", { Rare = 2 }, RICH, {
+		Line = ("Fuse your 2 Rares: %s"):format(percent("Rare", 2)),
+		Hint = ("More Rares = better odds (6 → %s)"):format(percent("Rare", 6)),
+		Target = "FusionMachine",
+	})
+	check("Mythic with 2 Legendaries", "own_mythic", { Legendary = 2 }, RICH, {
+		Line = ("Fuse your 2 Legendaries: %s"):format(percent("Legendary", 2)),
+		Hint = ("More Legendaries = better odds (6 → %s)"):format(percent("Legendary", 6)),
+		Target = "FusionMachine",
+	})
+	check("Mythic with 1 Legendary and 2 Epics", "own_mythic", { Legendary = 1, Epic = 2 }, RICH, {
+		Line = "Fuse Epics to make Legendaries (1 / 2 Legendary)",
+		Target = "FusionMachine",
+	})
+	-- Goals that aren't "own a tier" carry no step.
+	result(GoalService.ComputeStep(player, goalsById.claim_base, {}, RICH) == nil, "goal steps: a goal that isn't 'own a tier' has no step")
 end
 
 -- The gacha price cap (TycoonConfig.GetGachaPullCost): the cap and the
@@ -3050,6 +3177,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- quest / power-up refusals (the junk fuzz above covered their remotes).
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
+		runGoalStepsSelfTest(player, result)
 		runSecretPitySelfTest(player, result)
 		runGiftSessionSelfTest(player, result)
 		-- Claiming "Fuse a Mythic" there granted the Slap Glove: the real
@@ -3521,6 +3649,7 @@ function DebugService:Start()
 	FriendService = require(script.Parent.FriendService)
 	NotifyService = require(script.Parent.NotifyService)
 	RivalService = require(script.Parent.RivalService)
+	GoalService = require(script.Parent.GoalService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
 		local applied: { [number]: boolean } = {}

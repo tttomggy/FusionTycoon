@@ -44,6 +44,7 @@ local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
@@ -182,6 +183,8 @@ export type PendingOffline = {
 export type GoalProgress = {
 	Current: number,
 	Target: number,
+	-- An "own a tier" goal's next action (GoalSteps); nil for other goals.
+	Step: GoalSteps.Step?,
 }
 
 -- What SyncTycoon sends to the client. One builder (GetTycoonSnapshot) so the

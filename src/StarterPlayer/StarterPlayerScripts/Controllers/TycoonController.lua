@@ -11,6 +11,7 @@ local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
+local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local InventoryController = require(script.Parent.InventoryController)
 
@@ -26,7 +27,7 @@ local secretPity = 0 -- the server's Secret pity meter (snapshot SecretPity)
 local luckBase = 1 -- the server's luck without the admin-luck event (snapshot LuckBase)
 local serverLuck = 1 -- the server's whole luck at the last sync (snapshot Luck)
 local goalIndex: number? = nil
-local goalProgress: { Current: number, Target: number }? = nil
+local goalProgress: GoalProgress? = nil
 local hasSynced = false
 local rebirths = 0
 local indexFound: { [string]: boolean } = {}
@@ -39,6 +40,9 @@ local carriedUids: { [string]: boolean } = {}
 local tipsSeen: { [string]: boolean } = {}
 -- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
 -- PullsDone: pulls since the current step began (the pull step's "0/2").
+-- Progress toward the current goal; Step is an "own a tier" goal's next
+-- action (GoalSteps), nil for other goals.
+export type GoalProgress = { Current: number, Target: number, Step: GoalSteps.Step? }
 export type TutorialView = { Step: number, Done: boolean, FreePulls: number, PullsDone: number, Replay: boolean, ReplayHint: boolean }
 local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, PullsDone = 0, Replay = false, ReplayHint = false }
 -- os.clock() when this client watched the tutorial finish (nil: it was not
@@ -117,6 +121,27 @@ local pendingAutoFuse: boolean? = nil
 local goalPath: string = "Auto"
 local pendingGoalPath: string? = nil
 
+-- The wire Step as GoalSteps.Step, or nil if it is missing or malformed.
+local function sanitizeGoalStep(raw: any): GoalSteps.Step?
+	if typeof(raw) ~= "table" or typeof(raw.Kind) ~= "string" or typeof(raw.Tier) ~= "string" or typeof(raw.Target) ~= "string" then
+		return nil
+	end
+	local function number(value: any): number?
+		return if typeof(value) == "number" then value else nil
+	end
+	return {
+		Kind = raw.Kind,
+		Tier = raw.Tier,
+		Owned = number(raw.Owned) or 0,
+		Lower = if typeof(raw.Lower) == "string" then raw.Lower else nil,
+		Count = number(raw.Count),
+		Chance = number(raw.Chance),
+		BestChance = number(raw.BestChance),
+		Cost = number(raw.Cost),
+		Target = raw.Target,
+	}
+end
+
 local function applySfx()
 	SoundKit.SetVolume(if sfxMuted then 0 else sfxVolume)
 end
@@ -184,7 +209,7 @@ function TycoonController.GetGoalIndex(): number?
 	return goalIndex
 end
 
-function TycoonController.GetGoalProgress(): { Current: number, Target: number }?
+function TycoonController.GetGoalProgress(): GoalProgress?
 	return goalProgress
 end
 
@@ -548,7 +573,7 @@ local function onSyncTycoon(snapshot: any)
 	goalProgress = if typeof(progress) == "table"
 			and typeof(progress.Current) == "number"
 			and typeof(progress.Target) == "number"
-		then { Current = progress.Current, Target = progress.Target }
+		then { Current = progress.Current, Target = progress.Target, Step = sanitizeGoalStep(progress.Step) }
 		else nil
 	-- Remote tables with numeric keys can arrive keyed by strings; normalise.
 	pedestalDisplays = {}
