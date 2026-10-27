@@ -438,6 +438,62 @@ look, never the odds.
   probe `FuseOdds`), and "hud goal tracker shows 3 lines" (no clipping,
   on screen, 👣 toggle >= 44 px, at the desktop and phone layouts).
 
+#### Loop coach (always one "do this now")
+
+Pull -> Fuse -> Earn -> Upgrade (+ Steal on the side road) as ONE next step,
+under every goal, after the tutorial. Rules and text are
+`Shared/Config/LoopCoach.lua` (pure; `/selftest` and the HUD read it too);
+`GoalService.BuildCoach` runs it on every sync (the `OnSync` hook) and
+ships `GoalProgress.Coach = { Step, Target, <the numbers its line needs>,
+Takes, Lit }` inside the `SyncTycoon` snapshot (no new remote;
+`TycoonController.sanitizeCoach` validates it). Absent while
+`TutorialService.IsActive`.
+
+| Priority | Step | Doable when | 2nd line | Arrow |
+|---|---|---|---|---|
+| 1 | Fuse | a tier the player may fuse (`CanFuseTierFor`) has >= 2 orbs (highest tier, N = min(owned, 6)) | `Fuse your 3 Rares: 57%` | Fusion Machine |
+| 2 | Pull | cash >= the next pull price | `Pull from the Gacha ($250)` | Gacha Pad |
+| 3 | Upgrade | cash >= a generator / Multiplier level (`LoopCoach.PickUpgrade`: the most +$/s per $) | `Upgrade your Ember Forge: +$12/s` | that station (`Generator_<id>` / `MultiplierStation`) |
+| 4 | Steal | a rival lab holds an orb and `HeistService.GetRivalStealsLeft` > 0 | `Steal a free orb from Dr. Fizz!` | `NearestRivalPedestal` (client picks the lab's best pedestal) |
+| 5 | Earn | otherwise | `Your orbs earn $10/s: next pull in 0:42` (no income: `Earn cash for your next pull ($250)`) | none |
+
+- **Hold (hysteresis):** `LoopCoach.Resolve` keeps the shown step for
+  `HoldSeconds` (3) per player; a switch inside the window is refused while
+  the held step is still doable, and a held step that is gone (the pair was
+  fused, the cash was spent) is dropped at once. Cash ticking past a price
+  can't flicker the arrow.
+- **Who owns the 2nd line and the arrow (`Takes`):** the goal keeps its
+  title. "Own a tier" goals keep GOAL_STEPS' lines (they are the Fuse /
+  Pull rows above) until their step is `Earn`; any other goal hands over
+  when `LoopCoach.GoalBlocked` says it can't be done now (no cash for the
+  generator / Multiplier / pull / Rebirth it needs, nothing to fuse for
+  `first_fusion`). `GoalMarkerController.PlanGoalArrow` is the one place
+  that picks the arrow: coach (when `Takes`) > the goal's step > the goal's
+  `Target`; a running tip (`SetTipActive`, TutorialController) takes the
+  coach's arrow and gives it back when it ends. One arrow, ever.
+- **Loop strip** (HudController, top of the goal card): `🎰 → 🔮 → 💰 →
+  ⬆️` and `🏃` after a gap; `Lit` is the step to light (the coach's, or the
+  goal's own while the goal points: `GoalConfig.Goals[i].Loop`, a tier
+  goal's Fuse / Pull). Five cells >= 44 px wide and tall (the track is as
+  wide as the card; the green chips are 22 / 18 px tall, so the card grows
+  by at most 20 px, the card's vertical padding gives some back), tap =
+  `AnnouncementController.ShowLine(LoopCoach.Explain[step])`. Shown after
+  the tutorial only (a coach exists).
+- **Loop-closing lines** (`LoopCoachController`, once per session per kind,
+  never during the tutorial, through `AnnouncementController.ShowLine` =
+  TopStack): a fusion that raised the pedestal income (`Your new orb earns
+  $X/s more!`), the first affordable pull after being broke after a fuse
+  (`More cash = more pulls = more fusions!`), the first delivered rival
+  steal (`Free orb! Fuse it with yours.`).
+- `/selftest`: "loop coach" (server, stubbed `LoopCoach.Input` through
+  `GoalService.BuildCoach`: every step's line and target, the priority
+  order, the 3 s hold, nothing during the tutorial, `Takes` / `Lit` per
+  goal, `PickUpgrade`), "goal arrow" (client: coach / tip / goal step /
+  goal target), "loop moments" (client planners), "hud loop strip" (client,
+  both layouts: each step lights its own chip, 5 cells >= 44 px inside the
+  card and clear of each other, the card grows <= 20 px); the strip is also
+  in the left-column overlap and fit checks.
+
 *Board bug fixed (Oct 13), kept for the lesson:* `buildTile` / `buildChip`
 returned their frames but never parented them, so the first board drew only
 its header and price pill. The selftest read the controller's own table and

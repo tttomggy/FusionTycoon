@@ -134,6 +134,8 @@ local function tierWord(tier: string, plural: boolean): string
 	return ('<font color="%s">%s</font>'):format(UITheme.ToHex(UITheme.GetTierLight(tier)), word)
 end
 
+GoalSteps.TierWord = tierWord
+
 -- RichText lines for the tracker: the action, and the small odds hint.
 function GoalSteps.Format(step: Step): Lines
 	if step.Kind == "Fuse" then

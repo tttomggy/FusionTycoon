@@ -21,6 +21,13 @@
 	every sync): fuse your N orbs of the tier below, fuse a lower tier up
 	first, pull from the Gacha, or earn cash for a pull. Their `Target` is the
 	fallback (the Fusion Machine) for a client that has no step yet.
+
+	The LoopCoach (Shared/Config/LoopCoach: Pull -> Fuse -> Earn -> Upgrade,
+	+ Steal) runs under every goal after the tutorial. The goal keeps its
+	title; when its own step can't be done right now (not enough cash for
+	the upgrade, nothing to fuse, an "own a tier" goal's Earn) the coach
+	takes the 2nd line and the arrow (LoopCoach.GoalBlocked). `Loop` tells the
+	loop strip which icon a goal IS while the goal is the one pointing.
 ]]
 local GoalConfig = {}
 
@@ -35,29 +42,33 @@ export type GoalDef = {
 	-- `Target` while it lasts.
 	Kind: string?,
 	Tier: string?,
+	-- The LoopCoach step this goal IS ("Pull" | "Fuse" | "Upgrade" | "Steal"):
+	-- the loop strip lights it while the goal (not the coach) is pointing.
+	-- nil: the goal is no step of the loop, the strip shows the coach's.
+	Loop: string?,
 }
 
 GoalConfig.Goals = {
 	{ Id = "claim_base", Text = "Claim your base", Reward = 50, Target = "ClaimStation" },
-	{ Id = "upgrade_basic", Text = "Upgrade your Basic Generator", Reward = 60, Target = "Generator_basic_generator" },
-	{ Id = "basic_lv5", Text = "Get Basic Generator to LV 5", Reward = 100, Unit = "Basic LV", Target = "Generator_basic_generator" },
-	{ Id = "gacha_pull", Text = "Pull from the Gacha Pad", Reward = 150, Target = "GachaStation" },
+	{ Id = "upgrade_basic", Text = "Upgrade your Basic Generator", Reward = 60, Target = "Generator_basic_generator", Loop = "Upgrade" },
+	{ Id = "basic_lv5", Text = "Get Basic Generator to LV 5", Reward = 100, Unit = "Basic LV", Target = "Generator_basic_generator", Loop = "Upgrade" },
+	{ Id = "gacha_pull", Text = "Pull from the Gacha Pad", Reward = 150, Target = "GachaStation", Loop = "Pull" },
 	-- Automatic now (your best items fill the pedestals): it completes with
 	-- the first pull. Kept (not removed) so saved GoalIndex values still line up.
 	{ Id = "display_item", Text = "Your best orb goes on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
-	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine" },
+	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine", Loop = "Fuse" },
 	{ Id = "own_rare", Text = "Fuse Commons into a Rare", Reward = 400, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Rare" },
-	{ Id = "upgrade_multiplier", Text = "Upgrade your Multiplier", Reward = 1500, Target = "MultiplierStation" },
+	{ Id = "upgrade_multiplier", Text = "Upgrade your Multiplier", Reward = 1500, Target = "MultiplierStation", Loop = "Upgrade" },
 	{ Id = "own_epic", Text = "Fuse Rares into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Epic" },
-	{ Id = "unlock_ember_forge", Text = "Unlock the Ember Forge", Reward = 5000, Unit = "Basic LV", Target = "Generator_ember_forge" },
+	{ Id = "unlock_ember_forge", Text = "Unlock the Ember Forge", Reward = 5000, Unit = "Basic LV", Target = "Generator_ember_forge", Loop = "Upgrade" },
 	{ Id = "own_legendary", Text = "Fuse Epics into a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine", Kind = "OwnTier", Tier = "Legendary" },
-	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation" },
+	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation", Loop = "Upgrade" },
 	{ Id = "own_mythic", Text = "Fuse Legendaries into a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine", Kind = "OwnTier", Tier = "Mythic" },
 	-- Checked after the rebirth resets the run, so the reward lands in the new run.
 	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
 	-- Heist (unlocks at Rebirth 1): defend first, then steal.
 	{ Id = "first_shield", Text = "Lock your lab with the LOCK button", Reward = 10000, Target = "LockConsole" },
-	{ Id = "first_steal", Text = "Steal an item from another lab", Reward = 50000, Target = "NearestEnemyPedestal" },
+	{ Id = "first_steal", Text = "Steal an item from another lab", Reward = 50000, Target = "NearestEnemyPedestal", Loop = "Steal" },
 } :: { GoalDef }
 
 function GoalConfig.GetGoal(index: number): GoalDef?

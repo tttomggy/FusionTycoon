@@ -16,7 +16,7 @@ calls left in `Services/`.
 | `ItemService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LightingService` | `:Init()` | — | `--!strict` |
 | `DebugService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `EventService` | `--!strict` |
-| `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService`, `TutorialService`, `HeistService`, `RivalService` (all Start; the coach reads the tutorial flag, the rival steal allowance and the rival labs' orbs) | `--!strict` |
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start); `RivalService` registers a slot reclaimer with it (`SetSlotReclaimer`), never required | `--!nonstrict` ⚠ |
 | `RivalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` (`HeistService` requires it and registers `OnDespawn`; no cycle) | `--!strict` |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |

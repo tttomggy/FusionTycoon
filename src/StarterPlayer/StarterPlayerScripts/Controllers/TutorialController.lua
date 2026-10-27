@@ -813,11 +813,13 @@ local function endTip()
 	TutorialHand.SetContextual(nil, nil)
 	TutorialHand.SetTarget(nil)
 	GoalMarkerController.SetTutorialTarget(nil, nil, false)
+	GoalMarkerController.SetTipActive(false) -- the loop coach gets the arrow back
 	applyPath()
 end
 
 local function startTip(id: string)
 	tipShowing = id
+	GoalMarkerController.SetTipActive(true) -- a tip owns the arrow while it runs
 	tipShownAt = os.clock()
 	TycoonController.MarkTipSeen(id)
 	if id == "tipRival" then

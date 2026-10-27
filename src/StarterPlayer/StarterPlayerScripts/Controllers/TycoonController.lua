@@ -12,6 +12,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local InventoryController = require(script.Parent.InventoryController)
 
@@ -42,7 +43,8 @@ local tipsSeen: { [string]: boolean } = {}
 -- PullsDone: pulls since the current step began (the pull step's "0/2").
 -- Progress toward the current goal; Step is an "own a tier" goal's next
 -- action (GoalSteps), nil for other goals.
-export type GoalProgress = { Current: number, Target: number, Step: GoalSteps.Step? }
+-- Coach: the core loop's "do this now" (LoopCoach), nil during the tutorial.
+export type GoalProgress = { Current: number, Target: number, Step: GoalSteps.Step?, Coach: LoopCoach.Wire? }
 export type TutorialView = { Step: number, Done: boolean, FreePulls: number, PullsDone: number, Replay: boolean, ReplayHint: boolean }
 local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, PullsDone = 0, Replay = false, ReplayHint = false }
 -- os.clock() when this client watched the tutorial finish (nil: it was not
@@ -139,6 +141,35 @@ local function sanitizeGoalStep(raw: any): GoalSteps.Step?
 		BestChance = number(raw.BestChance),
 		Cost = number(raw.Cost),
 		Target = raw.Target,
+	}
+end
+
+-- The wire Coach as LoopCoach.Wire, or nil if it is missing or malformed.
+local function sanitizeCoach(raw: any): LoopCoach.Wire?
+	if typeof(raw) ~= "table" or typeof(raw.Step) ~= "string" or LoopCoach.Icons[raw.Step] == nil then
+		return nil
+	end
+	local function number(value: any): number?
+		return if typeof(value) == "number" then value else nil
+	end
+	local function text(value: any): string?
+		return if typeof(value) == "string" then value else nil
+	end
+	local lit = text(raw.Lit)
+	return {
+		Step = raw.Step,
+		Target = text(raw.Target),
+		Tier = text(raw.Tier),
+		Count = number(raw.Count),
+		Chance = number(raw.Chance),
+		Cost = number(raw.Cost),
+		Name = text(raw.Name),
+		Gain = number(raw.Gain),
+		Rival = text(raw.Rival),
+		Income = number(raw.Income),
+		Seconds = number(raw.Seconds),
+		Takes = raw.Takes == true,
+		Lit = if lit and LoopCoach.Icons[lit] then lit else raw.Step,
 	}
 end
 
@@ -573,7 +604,12 @@ local function onSyncTycoon(snapshot: any)
 	goalProgress = if typeof(progress) == "table"
 			and typeof(progress.Current) == "number"
 			and typeof(progress.Target) == "number"
-		then { Current = progress.Current, Target = progress.Target, Step = sanitizeGoalStep(progress.Step) }
+		then {
+			Current = progress.Current,
+			Target = progress.Target,
+			Step = sanitizeGoalStep(progress.Step),
+			Coach = sanitizeCoach(progress.Coach),
+		}
 		else nil
 	-- Remote tables with numeric keys can arrive keyed by strings; normalise.
 	pedestalDisplays = {}

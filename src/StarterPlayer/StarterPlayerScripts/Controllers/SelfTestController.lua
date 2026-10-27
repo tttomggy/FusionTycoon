@@ -1159,6 +1159,73 @@ local function testTopStack(): { string }
 	return lines
 end
 
+-- The goal arrow's owner (GoalMarkerController.PlanGoalArrow): the coach's
+-- target once it has taken over, nothing for its Earn, nothing while a tip
+-- runs (then the coach gets it back), the goal's own step or target
+-- otherwise. One arrow on screen, ever.
+local function testCoachArrow(): { string }
+	local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+	local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
+	local marker = require(script.Parent.GoalMarkerController) :: any
+	local lines: { string } = {}
+	local goal: any = nil
+	for _, candidate in GoalConfig.Goals do
+		if candidate.Id == "own_legendary" then
+			goal = candidate
+		end
+	end
+	local function coach(step: string, target: string?, takes: boolean): any
+		return { Step = step, Target = target, Takes = takes, Lit = step }
+	end
+	local goalStep = { Kind = "Fuse", Tier = "Epic", Owned = 3, Target = "FusionMachine" }
+	local function check(name: string, progress: any, tip: boolean, wantTarget: string?, wantText: string)
+		local target, text = marker.PlanGoalArrow(goal, progress, tip)
+		table.insert(
+			lines,
+			if target == wantTarget and text == wantText
+				then ("PASS goal arrow: " .. name)
+				else ("FAIL goal arrow: %s (target %s '%s', wanted %s '%s')"):format(name, tostring(target), text, tostring(wantTarget), wantText)
+		)
+	end
+	local upgrade = coach("Upgrade", "Generator_ember_forge", true)
+	check("the coach's upgrade station once it has taken over", { Current = 1, Target = 2, Step = goalStep, Coach = upgrade }, false, "Generator_ember_forge", LoopCoach.ArrowText.Upgrade)
+	check("a tip owns the arrow while it runs", { Current = 1, Target = 2, Step = goalStep, Coach = upgrade }, true, nil, "")
+	check("the coach gets the arrow back when the tip ends", { Current = 1, Target = 2, Step = goalStep, Coach = upgrade }, false, "Generator_ember_forge", LoopCoach.ArrowText.Upgrade)
+	check("Earn points at nothing", { Current = 1, Target = 2, Step = goalStep, Coach = coach("Earn", nil, true) }, false, nil, LoopCoach.ArrowText.Earn)
+	check("the goal's own step keeps the arrow while the coach waits", { Current = 1, Target = 2, Step = goalStep, Coach = coach("Pull", "GachaStation", false) }, false, "FusionMachine", goal.Text)
+	check("no step and no coach: the goal's own target", { Current = 1, Target = 2 }, false, goal.Target, goal.Text)
+	check("no coach during the tutorial: the goal's step", { Current = 1, Target = 2, Step = goalStep }, true, "FusionMachine", goal.Text)
+	return lines
+end
+
+-- The loop-closing announcements' timing (LoopCoachController.Plan*): the
+-- "new orb earns" line only for a pedestal that gained income, "more cash"
+-- only once a pull was unaffordable and is affordable again after a fuse.
+local function testLoopMoments(): { string }
+	local controller = require(script.Parent.LoopCoachController) :: any
+	local lines: { string } = {}
+	local function check(name: string, ok: boolean, detail: string?)
+		table.insert(lines, if ok then "PASS loop moments: " .. name else ("FAIL loop moments: %s (%s)"):format(name, detail or ""))
+	end
+	local line, keep = controller.PlanNewOrb({ Before = 10, At = 0 }, 14, 1, false)
+	check("a gained pedestal income says what it earns", line == controller.NewOrbLine(4) and keep == nil, tostring(line))
+	line, keep = controller.PlanNewOrb({ Before = 10, At = 0 }, 10, 1, false)
+	check("no gain yet: keep waiting, say nothing", line == nil and keep ~= nil)
+	line, keep = controller.PlanNewOrb({ Before = 10, At = 0 }, 10, 60, false)
+	check("an orb that never reached a pedestal gives up silently", line == nil and keep == nil)
+	line, keep = controller.PlanNewOrb(nil, 99, 1, false)
+	check("no fuse, no line", line == nil and keep == nil)
+	local say, saw = controller.PlanMoreCash(true, false, true)
+	check("still affordable since the fuse: no line", say == false and saw == false)
+	say, saw = controller.PlanMoreCash(true, false, false)
+	check("broke after the fuse: remembered, no line", say == false and saw == true)
+	say, saw = controller.PlanMoreCash(true, true, true)
+	check("affordable again after being broke: the line", say == true)
+	say, saw = controller.PlanMoreCash(false, true, true)
+	check("no fuse yet: no line", say == false and saw == false)
+	return lines
+end
+
 -- On the phone layout, every HUD element of the left group stays inside
 -- the left 40% of the screen (deal badge, timed pills included); at both
 -- layouts the column's rects (goal card, quest tracker, cash card, SHOP /
@@ -1183,6 +1250,15 @@ local function testHudLeftColumn(): { string }
 			table.insert(lines, "FAIL hud goal tracker lines: " .. tostring(goalResult))
 		else
 			for _, line in goalResult do
+				table.insert(lines, line)
+			end
+		end
+		-- The loop strip: five >= 44 px cells, the right chip lit, +20 px at most.
+		local stripOk, stripResult = pcall(hud.SelfTestLoopStrip, if phone then "phone" else "desktop")
+		if not stripOk then
+			table.insert(lines, "FAIL hud loop strip: " .. tostring(stripResult))
+		else
+			for _, line in stripResult do
 				table.insert(lines, line)
 			end
 		end
@@ -4993,6 +5069,12 @@ local function run(payload: any)
 		end
 	end
 	for _, line in testHudLeftColumn() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testCoachArrow() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testLoopMoments() do
 		table.insert(panelLines, line)
 	end
 	for _, line in testDealTile() do

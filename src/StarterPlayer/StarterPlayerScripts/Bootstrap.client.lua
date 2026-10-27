@@ -75,6 +75,7 @@ local CombatController = safeRequire("CombatController", Controllers)
 local JumpPadController = safeRequire("JumpPadController", Controllers)
 local MusicController = safeRequire("MusicController", Controllers)
 local GachaBoardController = safeRequire("GachaBoardController", Controllers)
+local LoopCoachController = safeRequire("LoopCoachController", Controllers)
 local HudGate = safeRequire("HudGate", UI)
 local TopStack = safeRequire("TopStack", UI)
 
@@ -103,6 +104,7 @@ safeInit("CombatController", CombatController) -- weapons: the bar, swings, ragd
 safeInit("MusicController", MusicController) -- the background playlist (Settings -> Music)
 safeInit("JumpPadController", JumpPadController) -- the 2nd floor's jump pads launch your own character
 safeInit("GachaBoardController", GachaBoardController) -- the Gacha odds card above your pad (+ its E / R / ? buttons)
+safeInit("LoopCoachController", LoopCoachController) -- the loop-closing lines (new orb earns, more cash, free orb)
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

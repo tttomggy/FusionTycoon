@@ -26,7 +26,12 @@
 
 	An "own a tier" goal's target follows its next action (GoalSteps, in
 	GoalProgress.Step): the Fusion Machine, the Gacha Pad or the UPGRADES
-	button; GoalConfig's Target is the fallback.
+	button; GoalConfig's Target is the fallback. When the goal can't be done
+	right now the LoopCoach (GoalProgress.Coach, Takes) owns the arrow
+	instead: the Gacha Pad, the Fusion Machine, a station to upgrade, the
+	nearest rival lab's best pedestal, or no arrow at all (Earn). A running
+	tip (TutorialController: SetTipActive) takes the coach's arrow while it
+	runs, then the coach gets it back. PlanGoalArrow is that decision.
 
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
@@ -39,6 +44,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
@@ -66,6 +72,11 @@ local TARGET_WARN_SECONDS = 10
 local localPlayer = Players.LocalPlayer
 
 local currentGoalIndex: number? = nil
+-- The caption the world marker was built with (the goal's text, or the
+-- coach's one word); a change rebuilds it.
+local currentMarkerText: string? = nil
+-- A tip (TutorialController) is running: the coach's arrow waits.
+local tipActive = false
 local currentTarget: Instance? = nil
 local currentUiButton: string? = nil
 
@@ -258,6 +269,7 @@ local function clearWorldMarker()
 	placedCenter = nil
 	movingTarget = nil
 	currentTarget = nil
+	currentMarkerText = nil
 end
 
 local PULSE_SCALE = 1.25
@@ -454,6 +466,28 @@ local function setUiTarget(name: string?)
 	end
 end
 
+-- Where the goal arrow points and what it says: (target name, caption).
+-- A target name of nil means no arrow. Pure (/selftest runs it):
+--   coach has taken over (Takes)  -> the coach's target + its one word, or
+--                                    nothing while a tip is running (the
+--                                    tip has the arrow) or on Earn
+--   an "own a tier" goal's step   -> that step's target, the goal's text
+--   anything else                 -> the goal's own target and text
+local function planGoalArrow(goal: GoalConfig.GoalDef, progress: TycoonController.GoalProgress?, tipRunning: boolean): (string?, string)
+	local coach = if progress then progress.Coach else nil
+	if coach and coach.Takes then
+		if tipRunning then
+			return nil, ""
+		end
+		return coach.Target, LoopCoach.ArrowText[coach.Step] or goal.Text
+	end
+	if progress and progress.Step then
+		return progress.Step.Target, goal.Text
+	end
+	return goal.Target, goal.Text
+end
+GoalMarkerController.PlanGoalArrow = planGoalArrow
+
 local function refresh()
 	local layer = tutorialLayer
 	if not override and layer then
@@ -495,9 +529,17 @@ local function refresh()
 	end
 
 	-- An "own a tier" goal's next action points somewhere of its own (the
-	-- Fusion Machine, the Gacha Pad, UPGRADES) and follows every sync.
+	-- Fusion Machine, the Gacha Pad, UPGRADES) and follows every sync; the
+	-- coach points instead when it has taken over (PlanGoalArrow).
 	local progress = TycoonController.GetGoalProgress()
-	local targetName = if progress and progress.Step then progress.Step.Target else goal.Target
+	local targetName, markerText = planGoalArrow(goal, progress, tipActive)
+	if not targetName then
+		-- Nothing to point at (the coach's Earn, or a tip has the arrow).
+		clearWorldMarker()
+		setUiTarget(nil)
+		currentGoalIndex = index
+		return
+	end
 	if targetName:sub(1, 3) == "ui:" then
 		clearWorldMarker()
 		setUiTarget(targetName:sub(4))
@@ -508,9 +550,11 @@ local function refresh()
 
 	local target = resolveTarget(targetName)
 	checkTargetExists(targetName, target)
-	-- Inside your own walls only (the steal goal is the one exception).
-	local origin = if targetName == "NearestEnemyPedestal" then nil else getPlotOrigin()
-	if target and not origin and targetName ~= "NearestEnemyPedestal" then
+	-- Inside your own walls only (the steal targets are the exception: they
+	-- stand in another lab by definition).
+	local foreign = targetName == "NearestEnemyPedestal" or targetName == "NearestRivalPedestal"
+	local origin = if foreign then nil else getPlotOrigin()
+	if target and not origin and not foreign then
 		target = nil -- no plot origin yet: can't check, so don't guess
 	end
 	if target and origin and not getBounds(target, origin) and getBounds(target) then
@@ -526,10 +570,11 @@ local function refresh()
 		local center = getBounds(target, origin)
 		moved = center == nil or (center.Position - placedCenter).Magnitude > PLACE_MOVE_STUDS
 	end
-	if target ~= currentTarget or index ~= currentGoalIndex or moved or (target and not placedCenter) then
+	if target ~= currentTarget or index ~= currentGoalIndex or markerText ~= currentMarkerText or moved or (target and not placedCenter) then
 		currentGoalIndex = index
 		if target then
-			showWorldMarker(target, goal.Text, nil, nil, origin)
+			showWorldMarker(target, markerText, nil, nil, origin)
+			currentMarkerText = markerText
 		else
 			-- Not built yet (e.g. stations appear after claiming); retried.
 			clearWorldMarker()
@@ -555,6 +600,15 @@ local function update()
 	if distanceText then
 		distanceText.Text = ("%d studs"):format(math.floor(distance + 0.5))
 	end
+end
+
+-- A tip is running (or ended): the coach's arrow steps aside (or returns).
+function GoalMarkerController.SetTipActive(active: boolean)
+	if tipActive == active then
+		return
+	end
+	tipActive = active
+	refresh()
 end
 
 -- Points the marker at `target` instead of the goal until cleared (nil).

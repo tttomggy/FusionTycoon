@@ -31,6 +31,19 @@ again), `/cash <amount>`, `/resetmultiplier`.
    Gacha for more orbs (0 / 2 Common)` with one Common, `Fuse your 3
    Commons: 68%` + `More Commons = better odds (6 → 100%)` with three);
    the arrow follows it (Gacha Pad / Fusion Machine).
+   After the tutorial a **loop strip** `🎰 → 🔮 → 💰 → ⬆️   🏃` sits above
+   the goal text with the coach's current step lit (green, a light pulse),
+   the card at most 20 px taller than without it; tapping an icon announces
+   what it is (`Fuse 2+ same orbs into a better one`). With a goal you can't
+   do yet (no cash for the upgrade, nothing to fuse) the 2nd line is the
+   coach's (`Pull from the Gacha ($250)`, `Upgrade your Ember Forge: +$12/s`,
+   `Steal a free orb from Dr. Fizz!`, `Your orbs earn $10/s: next pull in
+   0:42`) and there is one arrow only (none on the countdown). During the
+   tutorial there is no strip and no coach line. After a fusion puts a
+   better orb on a pedestal: `Your new orb earns $X/s more!`; the first
+   time a pull is affordable again: `More cash = more pulls = more
+   fusions!`; the first delivered rival steal: `Free orb! Fuse it with
+   yours.` (each once per session).
 6. Rejoin (stop and Play) with saving enabled. The tracker resumes at the
    same goal and no reward is paid twice.
 

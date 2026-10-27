@@ -45,6 +45,7 @@ local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local ShopState = require(ReplicatedStorage.Shared.Modules.ShopState)
 local DealConfig = require(ReplicatedStorage.Shared.Config.DealConfig)
 local CombatConfig = require(ReplicatedStorage.Shared.Config.CombatConfig)
@@ -185,6 +186,9 @@ export type GoalProgress = {
 	Target: number,
 	-- An "own a tier" goal's next action (GoalSteps); nil for other goals.
 	Step: GoalSteps.Step?,
+	-- The core loop's "do this now" (LoopCoach, via GoalService.BuildCoach);
+	-- nil during the tutorial.
+	Coach: LoopCoach.Wire?,
 }
 
 -- What SyncTycoon sends to the client. One builder (GetTycoonSnapshot) so the

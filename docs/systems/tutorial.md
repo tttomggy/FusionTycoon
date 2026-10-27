@@ -63,6 +63,17 @@ leaves; kids don't read cards. So the mandatory part is four steps,
 - **Funnel analytics** (`AnalyticsKit.FunnelSteps`) are milestones, not
   tutorial steps, and are unchanged.
 
+### After the tutorial: the loop coach
+
+The goal tracker's loop strip and the coach's lines (`GoalProgress.Coach`,
+`docs/systems/items-and-fusion.md` "Loop coach") exist only after the
+tutorial: `GoalService.BuildCoach` returns nil while
+`TutorialService.IsActive`, so the strip is hidden and the tutorial's own
+layer owns the arrow. Tips take the arrow while they run
+(`GoalMarkerController.SetTipActive`, from `startTip` / `endTip`), then the
+coach gets it back. The three loop-closing lines (`LoopCoachController`) also
+wait for the tutorial to end.
+
 ### One-time tips (what the removed steps became)
 
 `TutorialConfig.Tips` (ids in `TipConfig.Ids`, saved like the others; marked

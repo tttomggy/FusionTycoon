@@ -5,7 +5,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
 
 ```
 src/ReplicatedStorage/Shared/
-    Config/      shared config tables (PlotLayout, StreetLayout — the street
+    Config/      shared config tables (LoopCoach — the core loop's "do this now": rules + text; PlotLayout, StreetLayout — the street
                  and speed belts, TycoonConfig, FusionConfig, RebirthConfig —
                  rebirth requirement/income/luck, MutationConfig — Golden/
                  Diamond/Rainbow, IndexConfig — the collection book,
@@ -79,8 +79,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   (banners), WorldLabelController (hides owner-only labels,
                   and any label within 7 studs of the camera),
                   WorldAnimationController (FT_Hover spin/bob, client-only),
-                  GoalMarkerController (points at the current goal, or
-                  a heist override), HeistController (steal prompt, carried
+                  GoalMarkerController (points at the current goal, the
+                  loop coach's step, or a heist override),
+                  LoopCoachController (the loop-closing toasts), HeistController (steal prompt, carried
                   orbs, heist banners, shield fences),
                   BeltController (client-only belt chevrons),
                   GeneratorController (world Buy/Upgrade prompts, upgrade

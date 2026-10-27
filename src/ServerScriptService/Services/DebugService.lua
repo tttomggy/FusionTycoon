@@ -46,6 +46,7 @@ local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local SoundConfig = require(ReplicatedStorage.Shared.Config.SoundConfig)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
@@ -1887,6 +1888,158 @@ local function runGoalStepsSelfTest(player: Player, result: (boolean, string, st
 	result(GoalService.ComputeStep(player, goalsById.claim_base, {}, RICH) == nil, "goal steps: a goal that isn't 'own a tier' has no step")
 end
 
+-- The LoopCoach (Shared/Config/LoopCoach through GoalService.BuildCoach) on
+-- stubbed states: each step from its situation, the priority order (fuse
+-- beats pull beats upgrade beats steal beats earn), the 3 s hold, nothing
+-- during the tutorial, and who owns the tracker's 2nd line (Takes) and which
+-- strip icon is lit. Pure: nothing of the tester's is changed.
+local function runLoopCoachSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local goalsById: { [string]: any } = {}
+	for _, goal in GoalConfig.Goals do
+		goalsById[goal.Id] = goal
+	end
+	local UPGRADE: LoopCoach.Upgrade = { Name = "Ember Forge", Target = "Generator_ember_forge", Cost = 400, Gain = 12.5 }
+	local function stub(overrides: { [string]: any }?): LoopCoach.Input
+		local input: any = {
+			Counts = {},
+			Rebirths = 0,
+			FusionBonus = 0,
+			Cash = 0,
+			PullCost = 250,
+			Income = 10,
+			Upgrade = nil,
+			Rival = nil,
+			StealsLeft = RivalConfig.StealsPerHour,
+			Levels = { basic_generator = 1 },
+			MultiplierLevel = 0,
+		}
+		local given: { [string]: any } = overrides or {}
+		for key, value in given do
+			input[key] = value
+		end
+		return input
+	end
+	local function pick(input: LoopCoach.Input): LoopCoach.Result
+		return LoopCoach.Pick(LoopCoach.Candidates(input))
+	end
+	local function percent(tier: string, count: number): string
+		return FusionConfig.FormatPercent(FusionConfig.GetFusionChance(tier, count, 0) * 100) .. "%"
+	end
+	local function check(name: string, input: LoopCoach.Input, step: string, line: string, target: string?)
+		local picked = pick(input)
+		local text = LoopCoach.Plain(LoopCoach.Format(picked))
+		result(
+			picked.Step == step and text == line and picked.Target == target,
+			"loop coach: " .. name,
+			("step %s '%s' target %s; wanted %s '%s' %s"):format(picked.Step, text, tostring(picked.Target), step, line, tostring(target))
+		)
+	end
+
+	-- Each step from its own situation.
+	check("2+ same orbs: fuse them with the odds", stub({ Counts = { Rare = 3 } }), "Fuse", ("Fuse your 3 Rares: %s"):format(percent("Rare", 3)), "FusionMachine")
+	check("the highest fusable tier is fused first", stub({ Counts = { Common = 4, Epic = 2 } }), "Fuse", ("Fuse your 2 Epics: %s"):format(percent("Epic", 2)), "FusionMachine")
+	check("9 orbs fuse 6 at a time", stub({ Counts = { Rare = 9 } }), "Fuse", ("Fuse your 6 Rares: %s"):format(percent("Rare", 6)), "FusionMachine")
+	check("a tier locked behind a rebirth is not fused", stub({ Counts = { Mythic = 3 }, Cash = 300 }), "Pull", ("Pull from the Gacha (%s)"):format(NumberFormat.Money(250)), "GachaStation")
+	check("an affordable pull", stub({ Cash = 300 }), "Pull", ("Pull from the Gacha (%s)"):format(NumberFormat.Money(250)), "GachaStation")
+	check(
+		"an affordable upgrade names the station and the income it adds",
+		stub({ Cash = 500, PullCost = 1000, Upgrade = UPGRADE }),
+		"Upgrade",
+		("Upgrade your Ember Forge: +%s/s"):format(NumberFormat.Money(12.5)),
+		"Generator_ember_forge"
+	)
+	check("a rival lab with an orb", stub({ Cash = 0, Rival = "Dr. Fizz" }), "Steal", "Steal a free orb from Dr. Fizz!", "NearestRivalPedestal")
+	check(
+		"nothing to do: the countdown to the next pull",
+		stub({ Cash = 100 }),
+		"Earn",
+		("Your orbs earn %s/s: next pull in 0:15"):format(NumberFormat.Money(10)),
+		nil
+	)
+	check("no income: just earn cash", stub({ Cash = 100, Income = 0 }), "Earn", ("Earn cash for your next pull (%s)"):format(NumberFormat.Money(250)), nil)
+
+	-- Priority: fuse > pull > upgrade > steal > earn.
+	local everything = stub({ Counts = { Rare = 3 }, Cash = 1e9, Upgrade = UPGRADE, Rival = "Dr. Fizz" })
+	result(pick(everything).Step == "Fuse", "loop coach: with everything doable, fuse wins")
+	everything.Counts = {}
+	result(pick(everything).Step == "Pull", "loop coach: no pair to fuse, pull wins")
+	everything.Cash, everything.PullCost = 500, 1000
+	result(pick(everything).Step == "Upgrade", "loop coach: pull unaffordable, upgrade wins")
+	everything.Upgrade = nil
+	result(pick(everything).Step == "Steal", "loop coach: nothing to buy, steal wins")
+	everything.StealsLeft = 0
+	result(pick(everything).Step == "Earn", "loop coach: past StealsPerHour, earn")
+
+	-- Hysteresis: a switch inside 3 s is refused while the held step is
+	-- still doable; a held step that is gone is dropped at once.
+	local hold: LoopCoach.Hold = { Step = nil, ChangedAt = 0 }
+	local broke, canPull, canFuse = stub({ Cash = 100 }), stub({ Cash = 300 }), stub({ Cash = 300, Counts = { Rare = 2 } })
+	local function resolve(input: LoopCoach.Input, now: number): string
+		return LoopCoach.Resolve(hold, LoopCoach.Candidates(input), now).Step
+	end
+	result(resolve(broke, 0) == "Earn", "loop coach: the first step is shown at once")
+	result(resolve(canPull, 1) == "Earn" and resolve(canPull, 2.9) == "Earn", "loop coach: pull becomes affordable at 1 s: still Earn until 3 s (no flicker)")
+	result(resolve(canPull, 3) == "Pull", "loop coach: ... then Pull")
+	result(resolve(canFuse, 3.5) == "Pull" and resolve(canFuse, 5.9) == "Pull", "loop coach: a pair appears 0.5 s later: Pull is held for 3 s")
+	result(resolve(canFuse, 6) == "Fuse", "loop coach: ... then Fuse")
+	result(resolve(canPull, 6.1) == "Pull", "loop coach: the pair is fused away: Fuse is dropped at once, not held")
+
+	-- Nothing during the tutorial; the same state after it gives a coach.
+	local live = stub({ Cash = 300 })
+	result(
+		GoalService.BuildCoach(player, goalsById.own_rare, nil, { Input = live, TutorialActive = true, Hold = { Step = nil, ChangedAt = 0 } }) == nil,
+		"loop coach: nothing is published during the tutorial"
+	)
+	local after = GoalService.BuildCoach(player, goalsById.own_rare, nil, { Input = live, TutorialActive = false, Hold = { Step = nil, ChangedAt = 0 } })
+	result(after ~= nil and after.Step == "Pull", "loop coach: the same state after the tutorial publishes the coach")
+
+	-- Who owns the 2nd line (Takes), which icon is lit (Lit).
+	local function coachFor(goalId: string, step: any, input: LoopCoach.Input): LoopCoach.Wire?
+		return GoalService.BuildCoach(player, goalsById[goalId], step, { Input = input, TutorialActive = false, Hold = { Step = nil, ChangedAt = 0 } })
+	end
+	local earnStep = { Kind = "Earn", Tier = "Epic", Owned = 1, Cost = 250, Target = "ui:Upgrades" }
+	local fuseStep = { Kind = "Fuse", Tier = "Epic", Owned = 3, Count = 3, Chance = 0.45, Target = "FusionMachine" }
+	local pullStep = { Kind = "Pull", Tier = "Epic", Owned = 1, Target = "GachaStation" }
+	local c1 = coachFor("own_legendary", earnStep, stub({ Cash = 100 }))
+	result(c1 ~= nil and c1.Takes and c1.Lit == "Earn", "loop coach: a tier goal that can only earn hands the line and the arrow to the coach")
+	local c2 = coachFor("own_legendary", fuseStep, stub({ Cash = 100 }))
+	result(c2 ~= nil and not c2.Takes and c2.Lit == "Fuse", "loop coach: a tier goal that can fuse keeps its line; the strip lights Fuse")
+	local c3 = coachFor("own_legendary", pullStep, stub({ Cash = 300, Counts = { Rare = 3 } }))
+	result(c3 ~= nil and not c3.Takes and c3.Lit == "Pull" and c3.Step == "Fuse", "loop coach: the goal says Pull while the coach would fuse: the strip follows the goal")
+	local c4 = coachFor("upgrade_basic", nil, stub({ Cash = 5 }))
+	result(c4 ~= nil and c4.Takes, "loop coach: 'Upgrade your Basic Generator' with no cash: the coach takes over")
+	local c5 = coachFor("upgrade_basic", nil, stub({ Cash = 5000 }))
+	result(c5 ~= nil and not c5.Takes and c5.Lit == "Upgrade", "loop coach: ... with the cash, the goal keeps the line and Upgrade is lit")
+	local c6 = coachFor("first_fusion", nil, stub({ Cash = 5 }))
+	result(c6 ~= nil and c6.Takes, "loop coach: 'Fuse at your Fusion Machine' with nothing to fuse: the coach takes over")
+	local c7 = coachFor("first_fusion", nil, stub({ Counts = { Common = 2 } }))
+	result(c7 ~= nil and not c7.Takes and c7.Lit == "Fuse", "loop coach: ... with a pair, the goal keeps the line")
+	local c8 = coachFor("claim_base", nil, stub({ Cash = 300 }))
+	result(c8 ~= nil and not c8.Takes and c8.Lit == c8.Step, "loop coach: a goal that is no loop step shows the coach's icon")
+
+	-- The upgrade the coach names: affordable, and it adds income.
+	local inputs: TycoonConfig.IncomeInputs = {
+		GeneratorLevels = { basic_generator = 1 },
+		PedestalItems = {},
+		CashMultiplierLevel = 0,
+		Rebirths = 0,
+		IndexMultiplier = 1,
+	}
+	local none = LoopCoach.PickUpgrade(inputs, 0)
+	result(none == nil, "loop coach: no cash, no upgrade named")
+	local picked = LoopCoach.PickUpgrade(inputs, 100)
+	result(
+		picked ~= nil and picked.Target == "Generator_basic_generator" and picked.Cost <= 100 and picked.Gain > 0,
+		"loop coach: with $100 the Basic Generator is named, with the income it adds",
+		if picked then ("%s cost %s gain %s"):format(picked.Target, tostring(picked.Cost), tostring(picked.Gain)) else "nil"
+	)
+	local rich = LoopCoach.PickUpgrade(inputs, 1e12)
+	result(
+		rich ~= nil and rich.Cost <= 1e12 and (rich.Target == "MultiplierStation" or rich.Target:sub(1, 10) == "Generator_"),
+		"loop coach: a rich player is named an upgrade that exists"
+	)
+end
+
 -- The gacha price cap (TycoonConfig.GetGachaPullCost): the cap and the
 -- early climb, steady income ignoring everything temporary or bought, and
 -- the x10 price being the sum of the next ten. Pure maths on the tester's
@@ -3178,6 +3331,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
 		runGoalStepsSelfTest(player, result)
+		runLoopCoachSelfTest(player, result)
 		runSecretPitySelfTest(player, result)
 		runGiftSessionSelfTest(player, result)
 		-- Claiming "Fuse a Mythic" there granted the Slap Glove: the real

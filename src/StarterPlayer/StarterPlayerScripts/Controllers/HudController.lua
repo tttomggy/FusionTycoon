@@ -30,6 +30,7 @@ local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
@@ -144,6 +145,14 @@ local goalHintLabel: TextLabel
 local goalHasStep = false
 local goalHasHint = false
 local goalPathButton: TextButton? = nil
+-- The loop strip (🎰 → 🔮 → 💰 → ⬆️  🏃): one cell per LoopCoach step, the
+-- coach's current one lit. Shown after the tutorial only (a coach is there).
+type StripCell = { Cell: TextButton, Chip: Frame, Icon: TextLabel, Pulse: Tween? }
+local goalStrip: Frame
+local goalStripTrack: Frame
+local stripCells: { [string]: StripCell } = {}
+local stripArrows: { TextLabel } = {}
+local stripShown = false
 local goalPadding: UIPadding
 local goalHeader: Frame
 -- Phone: NEXT GOAL is one line, the goal text and its reward (no caption,
@@ -155,6 +164,18 @@ local goalPhoneMode = false
 local goalHasCount = false
 local GOAL_PHONE_LINE_HEIGHT = 22
 local GOAL_PHONE_REWARD_WIDTH = 64
+-- The strip: a row of icon chips (visual height) over >= 44 px tap cells that
+-- reach past the row, so the card grows by at most STRIP_GROWTH: the row and
+-- the list gap, less what the card's vertical padding gives back.
+local STRIP_CELL = UITheme.MinTapSize
+local STRIP_CHIP_WIDTH = 30
+local STRIP_HEIGHT = { Desktop = 22, Phone = 18 }
+local STRIP_PAD_TRIM = { Desktop = 4, Phone = 2 } -- off each of the card's top / bottom padding
+local STRIP_ICON_SIZE = { Desktop = 15, Phone = 12 }
+local STRIP_PULSE_SCALE = 1.08
+local STRIP_PULSE_SECONDS = 0.7
+local STRIP_UNLIT_TRANSPARENCY = 0.4
+local STRIP_GROWTH = 20 -- px the strip may add to the card (the spec)
 
 local buttonRow: Frame
 local upgradesButton: TextButton? = nil
@@ -199,6 +220,139 @@ end
 
 --[[ Goal tracker ---------------------------------------------------------- ]]
 
+local function setStripLit(step: string?)
+	for name, cell in stripCells do
+		local lit = name == step
+		UIKit.SetSelectedFill(cell.Chip, lit, Colors.Panel3)
+		cell.Icon.TextTransparency = if lit then 0 else STRIP_UNLIT_TRANSPARENCY
+		local pulse = cell.Chip:FindFirstChild("LitPulse") :: UIScale?
+		if lit and not pulse then
+			local scale = Instance.new("UIScale")
+			scale.Name = "LitPulse"
+			scale.Parent = cell.Chip
+			local tween = TweenService:Create(
+				scale,
+				TweenInfo.new(STRIP_PULSE_SECONDS, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
+				{ Scale = STRIP_PULSE_SCALE }
+			)
+			cell.Pulse = tween
+			tween:Play()
+		elseif not lit and pulse then
+			local running = cell.Pulse
+			if running then
+				running:Cancel()
+				cell.Pulse = nil
+			end
+			pulse:Destroy()
+		end
+	end
+end
+
+-- Positions the strip for the layout: five >= 44 px cells across the card's
+-- full width (the track reaches past the card's side padding), the main road
+-- first, the side road at the right end.
+local function layoutStrip(isPhone: boolean)
+	local layout = if isPhone then LAYOUT.Phone else LAYOUT.Desktop
+	local height = if isPhone then STRIP_HEIGHT.Phone else STRIP_HEIGHT.Desktop
+	local width = layout.GoalWidth
+	goalStrip.Size = UDim2.new(1, 0, 0, height)
+	goalStripTrack.Size = UDim2.fromOffset(width, height)
+	local function place(step: string, x: number)
+		local cell = stripCells[step]
+		cell.Cell.Position = UDim2.new(0, x, 0.5, 0)
+		cell.Chip.Size = UDim2.fromOffset(STRIP_CHIP_WIDTH, height)
+		cell.Icon.TextSize = if isPhone then STRIP_ICON_SIZE.Phone else STRIP_ICON_SIZE.Desktop
+	end
+	for index, step in LoopCoach.Road do
+		place(step, (index - 1) * STRIP_CELL)
+	end
+	place(LoopCoach.SideRoad, width - STRIP_CELL)
+	for index, arrow in stripArrows do
+		arrow.Position = UDim2.new(0, index * STRIP_CELL, 0.5, 0)
+		arrow.Size = UDim2.fromOffset(STRIP_CELL - STRIP_CHIP_WIDTH, height)
+	end
+end
+
+local function buildLoopStrip(body: Frame)
+	local z = body.ZIndex + 1
+	local row = Instance.new("Frame")
+	row.Name = "LoopStrip"
+	row.BackgroundTransparency = 1
+	row.LayoutOrder = -1
+	row.Visible = false
+	row.ZIndex = z
+	row.Parent = body
+	goalStrip = row
+	-- The track is as wide as the card (not the padded content): five 44 px
+	-- cells need 220 px, the phone's padded content is 212.
+	local track = Instance.new("Frame")
+	track.Name = "Track"
+	track.BackgroundTransparency = 1
+	track.AnchorPoint = Vector2.new(0.5, 0)
+	track.Position = UDim2.fromScale(0.5, 0)
+	track.ZIndex = z
+	track.Parent = row
+	goalStripTrack = track
+
+	local steps: { string } = table.clone(LoopCoach.Road)
+	table.insert(steps, LoopCoach.SideRoad)
+	for _, step in steps do
+		local cell = Instance.new("TextButton")
+		cell.Name = step
+		cell.Text = ""
+		cell.AutoButtonColor = false
+		cell.BackgroundTransparency = 1
+		cell.AnchorPoint = Vector2.new(0, 0.5)
+		cell.Size = UDim2.fromOffset(STRIP_CELL, STRIP_CELL)
+		cell.ZIndex = z + 1
+		cell.Parent = track
+		local chip = Instance.new("Frame")
+		chip.Name = "Chip"
+		chip.AnchorPoint = Vector2.new(0.5, 0.5)
+		chip.Position = UDim2.fromScale(0.5, 0.5)
+		chip.BorderSizePixel = 0
+		chip.ZIndex = z + 2
+		chip.Parent = cell
+		UIKit.Corner(chip, 8)
+		UIKit.Stroke(chip, 1.5)
+		local icon = UIKit.Label({
+			Name = "Icon",
+			Text = LoopCoach.Icons[step],
+			Font = Fonts.Body,
+			TextSize = STRIP_ICON_SIZE.Desktop,
+			Size = UDim2.fromScale(1, 1),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z + 3,
+			Parent = chip,
+		})
+		stripCells[step] = { Cell = cell, Chip = chip, Icon = icon, Pulse = nil }
+		-- One line on what the step is (the same slot every banner uses).
+		cell.Activated:Connect(function()
+			UIKit.SelectFeedback(chip)
+			local announcements = require(script.Parent.AnnouncementController) :: any
+			announcements.ShowLine(LoopCoach.Explain[step], "LoopStrip")
+		end)
+	end
+	-- The arrows between the main road's icons sit in the chips' side margins,
+	-- so they never cover a tap cell's chip (and, as labels, take no taps).
+	for index = 1, #LoopCoach.Road - 1 do
+		local arrow = UIKit.Label({
+			Name = "Arrow" .. index,
+			Text = "→",
+			Font = Fonts.BodyHeavy,
+			TextSize = 12,
+			TextColor3 = Colors.Muted,
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z + 4,
+			Parent = track,
+		})
+		table.insert(stripArrows, arrow)
+	end
+	setStripLit(nil)
+	layoutStrip(false)
+end
+
 local function buildGoalTracker()
 	local body, holder = UIKit.Panel({
 		Name = "GoalTracker",
@@ -236,6 +390,7 @@ local function buildGoalTracker()
 	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Padding = UDim.new(0, 6)
 	layout.Parent = body
+	buildLoopStrip(body)
 
 	local headerRow = Instance.new("Frame")
 	goalHeader = headerRow
@@ -378,7 +533,12 @@ local function applyGoalLayout(isPhone: boolean)
 	goalStepLabel.Visible = goalHasStep
 	goalHintLabel.Visible = goalHasHint
 	goalPhoneLine.Visible = isPhone
+	layoutStrip(isPhone)
 	local vertical, horizontal = if isPhone then 6 else 12, if isPhone then 10 else 14
+	if stripShown then
+		-- The strip's row gives the card its vertical padding back (<= STRIP_GROWTH net).
+		vertical -= if isPhone then STRIP_PAD_TRIM.Phone else STRIP_PAD_TRIM.Desktop
+	end
 	goalPadding.PaddingTop = UDim.new(0, vertical)
 	goalPadding.PaddingBottom = UDim.new(0, vertical)
 	goalPadding.PaddingLeft = UDim.new(0, horizontal)
@@ -392,6 +552,7 @@ export type GoalView = {
 	Target: number,
 	Unit: string?, -- e.g. "Rare"; nil hides the count line
 	Lines: GoalSteps.Lines?, -- an "own a tier" goal's next action (RichText); nil hides both lines
+	StripLit: string?, -- the loop strip icon to light (LoopCoach step); nil hides the strip
 }
 
 -- The goal on the tracker now (/selftest puts it back after its samples).
@@ -426,6 +587,13 @@ function HudController.SetGoal(goal: GoalView?)
 	goalHintLabel.Text = if lines and lines.Hint then lines.Hint else ""
 	goalStepLabel.Visible = goalHasStep
 	goalHintLabel.Visible = goalHasHint
+	local showStrip = goal.StripLit ~= nil
+	goalStrip.Visible = showStrip
+	if showStrip ~= stripShown then
+		stripShown = showStrip
+		applyGoalLayout(goalPhoneMode)
+	end
+	setStripLit(goal.StripLit)
 end
 
 -- Completion flourish: flash the border Goal-coloured and pop the panel.
@@ -2361,6 +2529,7 @@ local function selfTestGoalView(): GoalView
 			BestChance = 0.45,
 			Target = GoalSteps.Targets.Fuse,
 		}),
+		StripLit = "Fuse",
 	}
 end
 
@@ -2411,6 +2580,86 @@ function HudController.SelfTestGoalLines(scaleName: string): { string }
 		if #problems == 0
 			then ("PASS hud goal tracker shows 3 lines (%s, card %.0f x %.0f px, 👣 %.0f px)"):format(scaleName, size.X, size.Y, tap.X)
 			else ("FAIL hud goal tracker 3 lines (%s): %s"):format(scaleName, table.concat(problems, "; ")),
+	}
+end
+
+-- /selftest: the loop strip (the tracker's icon row). Each step lights only
+-- its own chip; the five cells are >= 44 px, inside the card and clear of
+-- each other; the card grows by at most STRIP_GROWTH px for the strip. The
+-- caller forces the layout first.
+function HudController.SelfTestLoopStrip(scaleName: string): { string }
+	local goalWas = goalHolder.Visible
+	local previous = lastGoalView
+	selfTestHold = true
+	goalHolder.Visible = true
+	local view = selfTestGoalView()
+	view.StripLit = nil
+	HudController.SetGoal(view)
+	applyLayout(layoutIsPhone)
+	task.wait(0.4)
+	local function cardHeight(): number
+		return goalHolder.AbsoluteSize.Y / UIKit.EffectiveScale(goalHolder)
+	end
+	local without = cardHeight()
+	view.StripLit = "Fuse"
+	HudController.SetGoal(view)
+	task.wait(0.4)
+	local with = cardHeight()
+	local problems: { string } = {}
+	if not goalStrip.Visible then
+		table.insert(problems, "strip hidden after the tutorial")
+	end
+	if with - without > STRIP_GROWTH + 0.5 then
+		table.insert(problems, ("card grew %.1f px for the strip (max %d)"):format(with - without, STRIP_GROWTH))
+	end
+
+	-- Every step lights its own chip and no other.
+	local steps: { string } = table.clone(LoopCoach.Road)
+	table.insert(steps, LoopCoach.SideRoad)
+	for _, lit in steps do
+		view.StripLit = lit
+		HudController.SetGoal(view)
+		for name, cell in stripCells do
+			local fill = cell.Chip:FindFirstChild("SelectFill") :: UIGradient?
+			local on = fill ~= nil and fill.Enabled
+			if on ~= (name == lit) then
+				table.insert(problems, ("lit %s: the %s chip is %s"):format(lit, name, if on then "lit" else "dark"))
+			end
+		end
+	end
+
+	-- Taps: >= 44 px, inside the card, never overlapping a neighbour.
+	local scale = UIKit.EffectiveScale(goalHolder)
+	local card = goalHolder.AbsolutePosition
+	local cardSize = goalHolder.AbsoluteSize
+	local smallest = math.huge
+	for index, a in steps do
+		local ca = stripCells[a].Cell
+		local size = ca.AbsoluteSize / scale
+		smallest = math.min(smallest, size.X, size.Y)
+		if ca.AbsolutePosition.X < card.X - 1 or ca.AbsolutePosition.X + ca.AbsoluteSize.X > card.X + cardSize.X + 1 then
+			table.insert(problems, a .. " cell leaves the card")
+		end
+		for other = index + 1, #steps do
+			local cb = stripCells[steps[other]].Cell
+			local overlapX = math.min(ca.AbsolutePosition.X + ca.AbsoluteSize.X, cb.AbsolutePosition.X + cb.AbsoluteSize.X) - math.max(ca.AbsolutePosition.X, cb.AbsolutePosition.X)
+			if overlapX > 1 then
+				table.insert(problems, ("%s / %s taps overlap by %.0f px"):format(a, steps[other], overlapX))
+			end
+		end
+	end
+	if smallest < UITheme.MinTapSize - 1 then
+		table.insert(problems, ("a tap cell is %.0f px"):format(smallest))
+	end
+
+	HudController.SetGoal(previous)
+	goalHolder.Visible = goalWas
+	selfTestHold = false
+	applyLayout(layoutIsPhone)
+	return {
+		if #problems == 0
+			then ("PASS hud loop strip (%s: 5 cells >= %.0f px, card +%.0f px for the strip, each step lights its own chip)"):format(scaleName, smallest, with - without)
+			else ("FAIL hud loop strip (%s): %s"):format(scaleName, table.concat(problems, "; ")),
 	}
 end
 
@@ -2790,13 +3039,23 @@ local function refreshGoal()
 		HudController.SetGoal(nil)
 		return
 	end
+	-- The goal's own next action, or the coach's when the goal can't be done
+	-- right now (a goal keeps its title either way).
+	local coach = progress.Coach
+	local lines: GoalSteps.Lines? = nil
+	if coach and coach.Takes then
+		lines = { Line = LoopCoach.Format(coach) }
+	elseif progress.Step then
+		lines = GoalSteps.Format(progress.Step)
+	end
 	HudController.SetGoal({
 		Text = goal.Text,
 		Reward = goal.Reward,
 		Current = progress.Current,
 		Target = progress.Target,
 		Unit = goal.Unit,
-		Lines = if progress.Step then GoalSteps.Format(progress.Step) else nil,
+		Lines = lines,
+		StripLit = if coach then coach.Lit else nil,
 	})
 end
 
