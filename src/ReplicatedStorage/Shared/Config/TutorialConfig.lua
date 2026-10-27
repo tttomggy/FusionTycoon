@@ -173,6 +173,31 @@ function TutorialConfig.GetStep(index: number): Step?
 	return TutorialConfig.Steps[index]
 end
 
+--[[ The banner clock ----------------------------------------------------------------
+	A step's clock counts only the seconds its instruction is REALLY on screen:
+	the bar shown and in place (not slid out under a centred card) and nothing
+	the player opened covering it. A Timed step ("You're ready!") that started
+	while the FUSION SUCCESS card was still up used to run out behind it and
+	finish the moment the card closed, so the banner never showed. Pure: also
+	/selftest.
+]]
+
+-- Visible seconds an instruction stays up before it can change or advance:
+-- BannerMinSeconds, and a Timed step its Seconds if that is longer.
+function TutorialConfig.GetBannerHold(step: Step): number
+	return math.max(TutorialConfig.BannerMinSeconds, step.Seconds or 0)
+end
+
+-- One frame of the clock: `dt` counts only while the banner is visible.
+function TutorialConfig.AdvanceBannerClock(visibleSeconds: number, dt: number, visible: boolean): number
+	return if visible then visibleSeconds + dt else visibleSeconds
+end
+
+-- May a Timed step ask the server to advance, given its visible seconds?
+function TutorialConfig.TimedStepReady(step: Step, visibleSeconds: number): boolean
+	return step.Kind == "Timed" and visibleSeconds >= TutorialConfig.GetBannerHold(step)
+end
+
 function TutorialConfig.IndexOf(id: string): number?
 	for index, step in TutorialConfig.Steps do
 		if step.Id == id then

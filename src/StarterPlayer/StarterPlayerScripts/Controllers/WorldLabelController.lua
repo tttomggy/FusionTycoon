@@ -20,6 +20,11 @@
 	is a Steal for everyone at HeistConfig.MinRebirthsVsRivals (0) while its
 	pedestal is Filled and not BeingStolen.
 
+	A RIVAL pedestal whose orb was stolen keeps its normal empty cap and
+	shows a small "back in 1:12" chip, counted down here from the pedestal's
+	RespawnAt attribute (RivalService clock = unix seconds =
+	Workspace:GetServerTimeNow()); the chip goes when the orb is back.
+
 	It also hides every plot BillboardGui (pedestal and pad labels) drawn
 	within HIDE_NEAR_STUDS of the camera, showing it again past
 	SHOW_FAR_STUDS (the gap stops flicker), so a label can't fill the screen
@@ -31,6 +36,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
+local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -248,6 +254,53 @@ local function updateStealPrompts()
 	end
 end
 
+--[[ Rival respawn countdown --------------------------------------------------------- ]]
+
+local RESPAWN_CHIP_NAME = "RespawnChip"
+local respawnChips: { [BasePart]: BillboardKit.Chip } = {}
+
+local function formatBackIn(seconds: number): string
+	local whole = math.max(0, math.ceil(seconds))
+	return ("back in %d:%02d"):format(whole // 60, whole % 60)
+end
+
+-- One pass over the rival pedestals (the StealPrompts carrying a RivalId).
+local function updateRespawnChips()
+	local now = Workspace:GetServerTimeNow()
+	local seen: { [BasePart]: boolean } = {}
+	for prompt in stealPrompts do
+		local pedestal = prompt.Parent
+		local respawnAt = if pedestal then pedestal:GetAttribute("RespawnAt") else nil
+		if pedestal and pedestal:IsA("BasePart") and typeof(respawnAt) == "number" and typeof(prompt:GetAttribute("RivalId")) == "number" then
+			seen[pedestal] = true
+			local text = formatBackIn(respawnAt - now)
+			local chip = respawnChips[pedestal]
+			if not chip then
+				local baseSize = (pedestal:GetAttribute("BaseSize") :: Vector3?) or pedestal.Size
+				local p = PlotLayout.Pedestal
+				chip = BillboardKit.Chip(pedestal, {
+					Name = RESPAWN_CHIP_NAME,
+					Text = text,
+					Studs = Vector2.new(p.RespawnChipStuds.X, p.RespawnChipStuds.Y),
+					StudsOffset = Vector3.new(0, p.RespawnChipOffsetY - baseSize.Y / 2, 0),
+					MaxDistance = BillboardKit.PEDESTAL_MAX_DISTANCE,
+				})
+				respawnChips[pedestal] = chip
+			end
+			local shown = chip :: BillboardKit.Chip
+			if shown.Label.Text ~= text then
+				shown.Label.Text = text
+			end
+		end
+	end
+	for pedestal, chip in respawnChips do
+		if not seen[pedestal] then
+			chip.Gui:Destroy()
+			respawnChips[pedestal] = nil
+		end
+	end
+end
+
 local function trackStealPrompt(prompt: ProximityPrompt)
 	if stealPrompts[prompt] ~= nil then
 		return
@@ -302,6 +355,7 @@ function WorldLabelController.Init()
 		if stealCheckAccumulator >= STEAL_CHECK_SECONDS then
 			stealCheckAccumulator = 0
 			updateStealPrompts()
+			updateRespawnChips()
 		end
 	end)
 end

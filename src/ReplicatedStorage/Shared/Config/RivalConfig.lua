@@ -70,6 +70,24 @@ RivalConfig.PatrolPoints = {
 	Vector3.new(0, 0, 5),
 } :: { Vector3 }
 RivalConfig.GuardHome = Vector3.new(0, 0, 10) -- plot-local; where it spawns and returns
+-- Staying upright: the self-heal stands a guard up when its root's up-vector
+-- is more than UprightLimitDegrees off vertical for GuardDownSeconds without
+-- a stun; /selftest holds every guard to GuardUprightSelfTestDegrees.
+RivalConfig.UprightLimitDegrees = 45
+RivalConfig.GuardDownSeconds = 1 -- tilted this long (not stunned) before the self-heal; also the GettingUp grace
+RivalConfig.GuardUprightSelfTestDegrees = 20
+RivalConfig.GuardNameDistance = 60 -- the guard's name label (MaxDistance)
+
+-- What a rival lab's decorative factory line shows (generator id -> level).
+-- Below max everywhere (no generator lights), above the first Neon band so the
+-- line reads as a running lab; it is a picture, nothing pays from it.
+RivalConfig.GeneratorLevels = {
+	basic_generator = 12,
+	ember_forge = 9,
+	flare_reactor = 6,
+	core_engine = 3,
+	singularity_core = 1,
+} :: { [string]: number }
 
 -- Limits
 RivalConfig.StealsPerHour = 12 -- delivered rival steals per player in any rolling hour
@@ -109,6 +127,11 @@ function RivalConfig.PickTier(band: number, roll: number): string
 		end
 	end
 	return last
+end
+
+-- "Dr. Fizz's Lab" -> "Dr. Fizz" (the guard's name label).
+function RivalConfig.GetShortName(labName: string): string
+	return (labName:gsub("'s Lab$", ""))
 end
 
 -- The sign / log name of the nth rival lab.

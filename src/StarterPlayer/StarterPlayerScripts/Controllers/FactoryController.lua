@@ -6,7 +6,8 @@
 	(TycoonConfig.GetPassiveCashPerSecond); balls never touch cash, so
 	nothing is lost to physics and the server does no ball work.
 
-	For every claimed plot within ACTIVE_RADIUS of the camera (yours and
+	For every claimed plot (and every rival lab, whose line is decorative:
+	same balls, Value 0) within ACTIVE_RADIUS of the camera (yours and
 	other players', so the street looks alive), each owned generator drops a
 	ball every lerp(2.0, 0.5, (level - 1) / 24) seconds:
 
@@ -361,8 +362,9 @@ local function step(dt: number)
 	table.clear(movedParts)
 	table.clear(movedCFrames)
 	for _, state in plots do
-		local active = state.Model:GetAttribute("Claimed") == true
-			and (state.Origin.Position - cameraPosition).Magnitude <= ACTIVE_RADIUS
+		-- A claimed lab, or a rival lab (a picture of a line; Value is 0, no pops).
+		local running = state.Model:GetAttribute("Claimed") == true or state.Model:GetAttribute("Rival") == true
+		local active = running and (state.Origin.Position - cameraPosition).Magnitude <= ACTIVE_RADIUS
 		if active then
 			spawnDue(state, now)
 			moveBalls(state, now)

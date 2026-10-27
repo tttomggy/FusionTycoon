@@ -28,6 +28,11 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
+local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
+local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
+local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
+local PortalKit = require(ReplicatedStorage.Shared.Modules.PortalKit)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
@@ -1013,8 +1018,83 @@ local function modelledTutorialSeconds(): number
 	return total
 end
 
+-- "You're ready!" must be SEEN: a Timed step's clock counts only the seconds its
+-- banner is really on screen (TutorialConfig.AdvanceBannerClock /
+-- TimedStepReady, the same primitives TutorialController runs every frame).
+-- The scenario of the bug: the finish step starts while the FUSION SUCCESS big
+-- card is still open, which holds for 5 s here (an injected clock: 0.1 s
+-- frames, no waiting), then closes.
+local function runTimedBannerSelfTest(result: (boolean, string, string?) -> ())
+	local index = TutorialConfig.IndexOf("finish")
+	local step = if index then TutorialConfig.GetStep(index) else nil
+	if not step or step.Kind ~= "Timed" then
+		result(false, "tutorial: the finish step is a Timed step")
+		return
+	end
+	local hold = TutorialConfig.GetBannerHold(step)
+	result(hold >= TutorialConfig.BannerMinSeconds and hold >= (step.Seconds or 0), "tutorial: a Timed banner stays up max(Seconds, BannerMinSeconds) visible seconds", ("%.1f s"):format(hold))
+
+	local function run(coveredSeconds: number): (number?, number, boolean)
+		local dt = 0.1
+		local visibleSeconds, clock = 0, 0
+		local readyWhileCovered = false
+		for _ = 1, 600 do
+			local visible = clock >= coveredSeconds
+			visibleSeconds = TutorialConfig.AdvanceBannerClock(visibleSeconds, dt, visible)
+			clock += dt
+			if TutorialConfig.TimedStepReady(step, visibleSeconds) then
+				if not visible then
+					readyWhileCovered = true
+				end
+				return clock, visibleSeconds, readyWhileCovered
+			end
+		end
+		return nil, visibleSeconds, readyWhileCovered
+	end
+
+	local uncoveredAt, uncoveredVisible = run(0)
+	result(uncoveredAt ~= nil and math.abs(uncoveredAt - hold) <= 0.25, "tutorial: with nothing in the way the finish step is ready after its hold", ("%s s"):format(tostring(uncoveredAt)))
+	local doneAt, visibleAtDone, wasCovered = run(5)
+	result(not wasCovered, "tutorial: the finish step never completes behind the open fusion card")
+	result(
+		doneAt ~= nil and visibleAtDone >= hold - 0.01 and doneAt >= 5 + hold - 0.15,
+		"tutorial: with the fusion card open for 5 s, \"You're ready!\" is visible for its full hold before Done",
+		("done at %s s, %.1f visible s (hold %.1f)"):format(tostring(doneAt), visibleAtDone, hold)
+	)
+	result(uncoveredVisible >= hold - 0.01, "tutorial: an uncovered finish step also shows its full hold")
+
+	-- tipRival starts RivalTipAfterDoneSeconds after Done (the end of "You're
+	-- ready!"), never sooner, even with everything else in place.
+	local function tipAt(sinceDone: number): string?
+		return TutorialConfig.PlanTip({
+			Done = true,
+			Replay = false,
+			Quiet = true,
+			Showing = false,
+			SinceGone = math.huge,
+			SinceDone = sinceDone,
+			Seen = {},
+			Cash = 0,
+			UpgradeCost = nil,
+			MultiplierLevel = 1,
+			MultiplierCost = nil,
+			NewIndex = false,
+			EventChip = false,
+			RebirthProgress = 0,
+			RivalLab = true,
+		})
+	end
+	local rivalAfter = TutorialConfig.RivalTipAfterDoneSeconds
+	result(
+		tipAt(rivalAfter - 0.1) == nil and tipAt(rivalAfter) == "tipRival",
+		("tutorial: tipRival starts %d s after Done (the end of \"You're ready!\"), not before"):format(rivalAfter),
+		("%s at %.1f s, %s at %.1f s"):format(tostring(tipAt(rivalAfter - 0.1)), rivalAfter - 0.1, tostring(tipAt(rivalAfter)), rivalAfter)
+	)
+end
+
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	result(not TutorialService.ShouldSkipOnJoin(false), "tutorial: a live server (not Studio) never skips the tutorial on join")
+	runTimedBannerSelfTest(result)
 	result(#TutorialConfig.Steps == 4, "tutorial: four steps", ("%d steps"):format(#TutorialConfig.Steps))
 	runTutorialMigrationSelfTest(result)
 	runTipSelfTest(result)
@@ -2080,6 +2160,46 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		end
 		return nil, nil
 	end
+	local limit = RivalConfig.GuardUprightSelfTestDegrees
+	-- Every built guard's root is within `limit` degrees of vertical. Returns
+	-- (ok, how many guards were measured, the ones past the limit).
+	local function guardsUpright(): (boolean, number, string)
+		local measured = 0
+		local bad: { string } = {}
+		for _, view in RivalService.GetRivals() do
+			local angle = RivalService.GetGuardUprightDegrees(view.Id)
+			if angle then
+				measured += 1
+				if angle > limit then
+					table.insert(bad, ("%s %.0f deg"):format(view.Name, angle))
+				end
+			end
+		end
+		return #bad == 0, measured, table.concat(bad, ", ")
+	end
+	local function guardHumanoid(rivalId: number): Humanoid?
+		local model = RivalService.GetGuardModel(rivalId)
+		return if model then model:FindFirstChildOfClass("Humanoid") else nil
+	end
+	-- The gate sign's board relative to its slot (the same for every lab).
+	local function signRelative(plot: Model, origin: CFrame): CFrame?
+		local gate = plot:FindFirstChild("SignGate")
+		local board = gate and gate:FindFirstChild("SignBoard")
+		return if board and board:IsA("BasePart") then origin:ToObjectSpace(board.CFrame) else nil
+	end
+	local function sameOrientation(a: CFrame, b: CFrame): boolean
+		return (a.Position - b.Position).Magnitude < 0.05 and a.LookVector:Dot(b.LookVector) > 0.999 and a.UpVector:Dot(b.UpVector) > 0.999
+	end
+	-- Enabled lights in `root`, on the pedestals or everywhere else.
+	local function countLights(root: Instance, onPedestals: boolean): number
+		local count = 0
+		for _, descendant in root:GetDescendants() do
+			if descendant:IsA("Light") and descendant.Enabled and (descendant:FindFirstAncestor("Pedestals") ~= nil) == onPedestals then
+				count += 1
+			end
+		end
+		return count
+	end
 
 	local ok, err = pcall(function()
 		PlayerDataService.SetRebirths(player, 0)
@@ -2104,8 +2224,64 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			if plot:GetAttribute("Rival") ~= true or plot:GetAttribute("OwnerUserId") ~= nil or plot:GetAttribute("Claimed") == true then
 				table.insert(shapeBad, view.Name .. " attributes")
 			end
-			if plot:FindFirstChild("FusionMachine", true) then
-				table.insert(shapeBad, view.Name .. " has a Fusion Machine")
+			-- Decoration mode (group 1): the lab's pictures are all there.
+			local names = {
+				"FusionMachine",
+				"GachaStation",
+				"MultiplierStation",
+				PortalKit.MODEL_NAME,
+				FactoryKit.BELT_NAME,
+				FactoryKit.COLLECTOR_NAME,
+			}
+			for _, generator in TycoonConfig.Generators do
+				table.insert(names, GeneratorKit.GetModelName(generator.Id))
+			end
+			for _, name in names do
+				if not plot:FindFirstChild(name) then
+					table.insert(shapeBad, ("%s has no %s"):format(view.Name, name))
+				end
+			end
+			for _, generator in TycoonConfig.Generators do
+				local model = plot:FindFirstChild(GeneratorKit.GetModelName(generator.Id))
+				local level = model and model:GetAttribute("Level")
+				if not (typeof(level) == "number" and level >= 1) then
+					table.insert(shapeBad, ("%s %s is not running"):format(view.Name, generator.Id))
+				end
+			end
+			-- ... and nothing to press: zero prompts but the 4 steal prompts, no
+			-- Highlights, no live owner-only label, no label on the stations.
+			local stealPrompts, otherPrompts, highlights, ownerLabels = 0, 0, 0, 0
+			for _, descendant in plot:GetDescendants() do
+				if descendant:IsA("ProximityPrompt") then
+					if descendant.Name == "StealPrompt" then
+						stealPrompts += 1
+					else
+						otherPrompts += 1
+					end
+				elseif descendant:IsA("Highlight") then
+					highlights += 1
+				elseif descendant:IsA("BillboardGui") and descendant:GetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE) == true and descendant.Enabled then
+					ownerLabels += 1
+				end
+			end
+			if stealPrompts ~= RivalConfig.PedestalCount or otherPrompts > 0 then
+				table.insert(shapeBad, ("%s has %d steal prompts and %d other prompts"):format(view.Name, stealPrompts, otherPrompts))
+			end
+			if highlights > 0 or ownerLabels > 0 then
+				table.insert(shapeBad, ("%s has %d Highlights, %d live owner-only labels"):format(view.Name, highlights, ownerLabels))
+			end
+			for _, stationName in { "GachaStation", "MultiplierStation", "FusionMachine" } do
+				local station = plot:FindFirstChild(stationName)
+				if station and station:FindFirstChildWhichIsA("BillboardGui", true) then
+					table.insert(shapeBad, ("%s %s carries a label (no prices on a rival lab)"):format(view.Name, stationName))
+				end
+			end
+			-- The gate sign: upright and turned like a player's (relative to the slot).
+			local g = PlotLayout.Gate
+			local relative = signRelative(plot, view.Origin)
+			local nominal = CFrame.new(0, g.BoardCenterY, PlotLayout.SIGN_Z)
+			if not relative or not sameOrientation(relative, nominal) or relative.UpVector.Y < 0.999 then
+				table.insert(shapeBad, view.Name .. " sign is not upright and square to its slot")
 			end
 			for index = 1, RivalConfig.PedestalCount do
 				local pedestal = pedestals and pedestals:FindFirstChild("Pedestal" .. index)
@@ -2132,7 +2308,7 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				table.insert(shapeBad, view.Name .. " sign reads " .. tostring(title))
 			end
 		end
-		result(#shapeBad == 0, "rivals: each lab is ownerless, 4 filled steal pedestals, no Fusion Machine, a RIVAL LAB sign", table.concat(shapeBad, "; "))
+		result(#shapeBad == 0, "rivals: each lab is ownerless, with 4 filled steal pedestals, a RIVAL LAB sign, the Fusion Machine, Gacha, Multiplier, factory line and portal as pictures, and zero prompts but the 4 steal prompts", table.concat(shapeBad, "; "))
 		local tiersBad: { string } = {}
 		for _, view in rivals do
 			for index = 1, RivalConfig.PedestalCount do
@@ -2143,6 +2319,70 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 		result(#tiersBad == 0, "rivals: with the lowest player at Rebirth 0 every orb is a Common, Rare or Epic", table.concat(tiersBad, "; "))
+
+		-- Guards (group 2 / 3): built async, so give the rigs a moment.
+		waitUntil(function()
+			for _, view in RivalService.GetRivals() do
+				if RivalService.GetGuardModel(view.Id) == nil then
+					return false
+				end
+			end
+			return true
+		end, 10)
+		local upright, measured, uprightDetail = guardsUpright()
+		if measured == 0 then
+			result(true, "rivals: guards stand upright after spawn (skipped: no guard rig built)")
+		else
+			result(upright, "rivals: every guard's root is within 20 deg of vertical after spawn", uprightDetail)
+			local rigBad: { string } = {}
+			for _, view in rivals do
+				local humanoid = guardHumanoid(view.Id)
+				local model = RivalService.GetGuardModel(view.Id)
+				local guardRoot = model and model:FindFirstChild("HumanoidRootPart")
+				if humanoid and model and guardRoot and guardRoot:IsA("BasePart") then
+					for _, humanoidState in { Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Physics, Enum.HumanoidStateType.Seated } do
+						if humanoid:GetStateEnabled(humanoidState) then
+							table.insert(rigBad, ("%s can enter %s"):format(view.Name, humanoidState.Name))
+						end
+					end
+					if humanoid.BreakJointsOnDeath or humanoid.RequiresNeck or guardRoot.Anchored or humanoid.HipHeight <= 0 or humanoid.PlatformStand then
+						table.insert(rigBad, ("%s: BreakJointsOnDeath %s, RequiresNeck %s, Anchored %s, HipHeight %.2f, PlatformStand %s"):format(
+							view.Name,
+							tostring(humanoid.BreakJointsOnDeath),
+							tostring(humanoid.RequiresNeck),
+							tostring(guardRoot.Anchored),
+							humanoid.HipHeight,
+							tostring(humanoid.PlatformStand)
+						))
+					end
+					-- The name over its head: the rival's, in a world label (60 studs).
+					local head = model:FindFirstChild("Head")
+					local nameGui = head and head:FindFirstChild("GuardName")
+					local nameText = nameGui and nameGui:FindFirstChild("Text", true)
+					if
+						not (nameGui and nameGui:IsA("BillboardGui") and nameText and nameText:IsA("TextLabel"))
+						or nameText.Text ~= RivalConfig.GetShortName(view.Name)
+						or nameGui.MaxDistance ~= RivalConfig.GuardNameDistance
+						or nameGui.AlwaysOnTop
+						or nameGui.LightInfluence ~= 0
+						or humanoid.DisplayDistanceType ~= Enum.HumanoidDisplayDistanceType.None
+					then
+						table.insert(rigBad, view.Name .. " name label is not the rival's name / 60 studs / world-label rules")
+					end
+				end
+			end
+			result(#rigBad == 0, "rivals: guards can't fall over or ragdoll, hip height from the rig, named after their rival", table.concat(rigBad, "; "))
+			-- Self-heal: a guard laid on its side stands itself up (1 s tilted,
+			-- GettingUp, 1 s more, then the pivot).
+			local first = rivals[1]
+			if first and RivalService.SelfTestLayDown(first.Id) then
+				local laidDown = RivalService.GetGuardUprightDegrees(first.Id) or 0
+				local stood = waitUntil(function()
+					return (RivalService.GetGuardUprightDegrees(first.Id) or 90) <= limit
+				end, 5)
+				result(laidDown > RivalConfig.UprightLimitDegrees and stood, "rivals: a guard laid on its side stands up again by itself within 5 s", ("laid at %.0f deg, stood %s"):format(laidDown, tostring(stood)))
+			end
+		end
 
 		-- 2. A real player is never refused a plot: fill every slot with
 		-- stand-in players, then one more displaces the farthest rival.
@@ -2195,6 +2435,22 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		else
 			result(true, "rivals: displacement (skipped: the server could not be filled)", ("%d free, %d rivals, %d stand-ins"):format(#TycoonService.GetFreeSlots(), #rivalsFull, made))
 		end
+		-- The gate sign stands like a player's: same CFrame relative to its slot.
+		local standPlot = if standIns[1] then TycoonService.GetPlotForPlayer(standIns[1]) else nil
+		local standSlot = if standPlot then standPlot:GetAttribute("SlotIndex") else nil
+		local referenceSign = if standPlot and typeof(standSlot) == "number" then signRelative(standPlot, PlotLayout.GetSlotCFrame(standSlot)) else nil
+		if referenceSign then
+			local signBad: { string } = {}
+			for _, view in RivalService.GetRivals() do
+				local rivalSign = signRelative(view.Plot, view.Origin)
+				if not rivalSign or not sameOrientation(rivalSign, referenceSign) then
+					table.insert(signBad, view.Name)
+				end
+			end
+			result(#signBad == 0, "rivals: each gate sign has the same orientation relative to its slot as a player plot's", table.concat(signBad, ", "))
+		else
+			result(true, "rivals: sign orientation vs a player plot (skipped: no stand-in plot was built)")
+		end
 		for _, stand in standIns do
 			TycoonService.SelfTestRemovePlot(stand)
 		end
@@ -2229,6 +2485,15 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			if not plot or not view or not pedestal or not index then
 				result(false, "rivals: a rival with an orb and the tester's lab", "none")
 			else
+				-- Light budget: a rival lab adds at most what one claimed player lab adds
+				-- (its floor lights, and the pedestals' orb lights: 4 of them).
+				local rivalFloor, playerFloor = countLights(view.Plot, false), countLights(plot, false)
+				local rivalOrbs = countLights(view.Plot, true)
+				result(
+					rivalFloor <= playerFloor and rivalOrbs <= RivalConfig.PedestalCount,
+					"rivals: a rival lab's lights stay within one claimed player lab's",
+					("floor %d vs %d, orb lights %d (max %d)"):format(rivalFloor, playerFloor, rivalOrbs, RivalConfig.PedestalCount)
+				)
 				putNextTo(pedestal)
 				local orb = RivalService.GetOrb(view.Id, index)
 				local before = inventoryCount()
@@ -2271,6 +2536,11 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 					RivalService.GetOrb(view.Id, index) == nil and respawnAt ~= nil and math.abs((respawnAt :: number) - (fakeNow + RivalConfig.RespawnSeconds)) < 0.001,
 					"rivals: a delivered orb leaves its pedestal with a 90 s respawn timer"
 				)
+				result(
+					pedestal:GetAttribute("RespawnAt") == respawnAt and pedestal:GetAttribute("Filled") == false and pedestal:FindFirstChild("PedestalVisualElements") == nil,
+					"rivals: the stolen orb's pedestal shows the empty cap and carries RespawnAt for the client's \"back in\" chip",
+					("RespawnAt %s, Filled %s"):format(tostring(pedestal:GetAttribute("RespawnAt")), tostring(pedestal:GetAttribute("Filled")))
+				)
 				-- The respawn, on the injected clock.
 				fakeNow += RivalConfig.RespawnSeconds - 0.5
 				RivalService.Step()
@@ -2278,7 +2548,10 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				fakeNow += 1
 				RivalService.Step()
 				local back = RivalService.GetOrb(view.Id, index)
-				result(early and back ~= nil and pedestal:GetAttribute("Filled") == true, "rivals: the orb is back after 90 s (injected clock), not before")
+				result(
+					early and back ~= nil and pedestal:GetAttribute("Filled") == true and pedestal:GetAttribute("RespawnAt") == nil,
+					"rivals: the orb is back after 90 s (injected clock), not before, and the countdown goes"
+				)
 				if added[1] then
 					PlayerDataService.RemoveItemsByUid(player, { added[1].Uid })
 				end
@@ -2307,10 +2580,43 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 					)
 				end
 
-				-- A hit stuns the guard: no tag while it is down.
+				-- A chase across the street's speed belts: the thief stands on the far
+				-- side of the street, the guard runs the belts for a few seconds, and
+				-- its root stays upright the whole way.
+				if guardRoot and guardRoot:IsA("BasePart") then
+					putNextTo(pedestal)
+					if HeistService.TryRivalSteal(player, view.Id, index) then
+						local farSide = if view.Origin.Position.Z < 0 then 1 else -1
+						character:PivotTo(CFrame.new(view.Origin.Position.X, StreetLayout.STREET_TOP_Y + 4, farSide * 12))
+						local worst = 0
+						local chaseUntil = os.clock() + 6
+						while os.clock() < chaseUntil do
+							worst = math.max(worst, RivalService.GetGuardUprightDegrees(view.Id) or 0)
+							task.wait(0.2)
+						end
+						HeistService.FailCarriesFor(player, "Failed")
+						result(worst <= limit, "rivals: a guard chasing across the speed belts stays within 20 deg of vertical", ("worst %.0f deg"):format(worst))
+					else
+						result(true, "rivals: guard upright over a chase (skipped: the grab was refused)")
+					end
+					character:PivotTo(home)
+				end
+
+				-- A hit stuns the guard: no tag while it is down; a second hit mid-stun
+				-- is one stun; afterwards PlatformStand is off and it stands upright.
 				if guardRoot and guardRoot:IsA("BasePart") then
 					RivalService.StunGuard(view.Id, guardRoot.Position + Vector3.new(0, 0, 3))
 					result(RivalService.IsGuardStunned(view.Id) and RivalService.GetGuardRoot(view.Id) == nil, "rivals: a weapon hit stuns the guard (it can't tag while down)")
+					task.wait(0.5)
+					RivalService.StunGuard(view.Id, guardRoot.Position + Vector3.new(0, 0, -3))
+					task.wait(RivalConfig.GuardStunSeconds + 0.6)
+					local humanoid = guardHumanoid(view.Id)
+					local afterStun = RivalService.GetGuardUprightDegrees(view.Id) or 0
+					result(
+						not RivalService.IsGuardStunned(view.Id) and humanoid ~= nil and not humanoid.PlatformStand and afterStun <= limit,
+						"rivals: after a stun (and a second hit) the guard is off PlatformStand and within 20 deg of vertical",
+						("PlatformStand %s, %.0f deg"):format(tostring(humanoid and humanoid.PlatformStand), afterStun)
+					)
 				end
 
 				-- 5. StealsPerHour.

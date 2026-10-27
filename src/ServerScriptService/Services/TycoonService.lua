@@ -613,8 +613,14 @@ local function bestTier(items: { PlayerDataService.InventoryItem }): string
 	return best
 end
 
-local function createGachaStation(plot: Model, origin: CFrame, player: Player)
+-- `player` nil = a rival lab's picture of the station: the pad and its
+-- hologram only, no label, no prompts, no handlers.
+local function createGachaStation(plot: Model, origin: CFrame, owner: Player?)
 	local pad = buildStation(plot, origin, "GachaStation", PlotLayout.GACHA_STATION, World.AccentGold, "Capsule", { Word = "PULL" })
+	if not owner then
+		return
+	end
+	local player: Player = owner
 	-- The small far-view label (name + price, NO odds lines): the odds card
 	-- pops up above YOUR pad when you walk close (GachaBoardController draws
 	-- it and hides this label while it is up).
@@ -811,8 +817,13 @@ end
 
 --[[ Multiplier station --------------------------------------------------------------- ]]
 
-local function createMultiplierStation(plot: Model, origin: CFrame, player: Player)
+-- `owner` nil: a rival lab's picture, the pad only (see createGachaStation).
+local function createMultiplierStation(plot: Model, origin: CFrame, owner: Player?)
 	local pad = buildStation(plot, origin, "MultiplierStation", PlotLayout.MULTIPLIER_STATION, World.AccentViolet, "Chevrons", { Word = "BOOST" })
+	if not owner then
+		return
+	end
+	local player: Player = owner
 	local padLabel = BillboardKit.Pad(pad, {
 		Name = "MultiplierLabel",
 		Title = "MULTIPLIER",
@@ -1027,8 +1038,23 @@ end
 -- The belt, the collector (with its owner-only generator-income label) and the five
 -- generators, built once on claim. The generators are restyled from the
 -- player's levels on every sync; the cash balls are client-side.
-local function createFactoryLine(plot: Model, origin: CFrame, player: Player)
+--
+-- `owner` nil: a rival lab's picture of a running line: the belt, collector
+-- and generators at RivalConfig.GeneratorLevels, no prompts or labels (the
+-- client drops balls on it like on a player's; nothing pays).
+local function createFactoryLine(plot: Model, origin: CFrame, owner: Player?)
 	local collector = FactoryKit.Build(origin, plot)
+	if not owner then
+		for _, generator in TycoonConfig.Generators do
+			local model = GeneratorKit.Build(origin, generator.Id, plot, true)
+			local level = RivalConfig.GeneratorLevels[generator.Id]
+			if model and level then
+				GeneratorKit.SetState(model, math.min(level, generator.MaxLevel - 1), true, 1)
+			end
+		end
+		return
+	end
+	local player: Player = owner
 	local c = PlotLayout.Collector
 	collectorLabelByUserId[player.UserId] = BillboardKit.Pad(collector, {
 		Name = "CollectorLabel",
@@ -1050,9 +1076,14 @@ end
 -- The portal in the back-right corner, with its owner-only progress label.
 -- Its prompt only opens the client's Rebirth panel; RebirthService handles
 -- the actual request.
-local function createRebirthPortal(plot: Model, origin: CFrame, player: Player)
+-- `owner` nil: a rival lab's portal, the model only.
+local function createRebirthPortal(plot: Model, origin: CFrame, owner: Player?)
 	local P = PlotLayout.RebirthPortal
-	local model = PortalKit.Build(origin, plot)
+	local model = PortalKit.Build(origin, plot, owner == nil)
+	if not owner then
+		return
+	end
+	local player: Player = owner
 	local label = BillboardKit.ProgressPad(model.PrimaryPart :: BasePart, {
 		Name = "RebirthLabel",
 		Title = "REBIRTH",
@@ -1718,8 +1749,9 @@ end
 
 -- Builds rival `rivalId`'s lab on a slot ReserveSlot gave RivalService: the
 -- player plot's shell, walls, sign gate and pedestals (the first
--- RivalConfig.PedestalCount), no generators / stations / Fusion Machine, no
--- owner. Returns nil when the template is missing.
+-- RivalConfig.PedestalCount) plus the Fusion Machine, Gacha / Multiplier
+-- pads, factory line and portal as pictures (decoration mode: no prompts,
+-- labels or handlers), no owner. Returns nil when the template is missing.
 function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: string): Model?
 	local template = ReplicatedStorage:FindFirstChild("TycoonTemplate")
 	if not template or not template:IsA("Model") then
@@ -1753,6 +1785,13 @@ function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: 
 		strip.Color = World.AccentRival
 	end
 	createPedestals(plot, origin, nil, rivalId)
+	-- The rest of a lab, as pictures (decoration mode: models and visuals, no
+	-- prompts, remotes, owner-only labels or cash).
+	FusionMachineService.Build(origin, PlotLayout.FUSION_MACHINE, plot, true)
+	createGachaStation(plot, origin, nil)
+	createMultiplierStation(plot, origin, nil)
+	createFactoryLine(plot, origin, nil)
+	createRebirthPortal(plot, origin, nil)
 	plot.Parent = getPlotsFolder()
 	return plot
 end

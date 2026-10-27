@@ -10,8 +10,9 @@
 	Labs
 	  * Up to RivalConfig.MaxRivals, in the free slots nearest to the real
 	    players' labs. Built by TycoonService.BuildRivalPlot (the player plot
-	    code: shell, walls, sign gate, pedestals; no generators, stations or
-	    Fusion Machine, no owner). Slots are TycoonService's table: a real
+	    code: shell, walls, sign gate, pedestals, plus the Fusion Machine,
+	    stations, factory line and portal as decoration-mode pictures: no
+	    prompts, no labels, no owner). Slots are TycoonService's table: a real
 	    player is never refused a plot because of a rival. With no slot free
 	    TycoonService calls DespawnFarthest (registered in :Start), and the
 	    lab farthest from every player's lab goes first; a carry from it
@@ -25,8 +26,10 @@
 	    respawn clock is injectable: SetClock, /selftest).
 
 	Guard
-	  * One blocky R15 NPC per lab (HumanoidDescription rig), server-side. It
-	    patrols the lab; HeistService calls BeginCarry on a grab and it
+	  * One blocky R15 NPC per lab (HumanoidDescription rig), server-side, named
+	    after its rival. It stays upright (no FallingDown / Ragdoll / Physics /
+	    Seated, a self-heal for a root tilted past 45 deg). It patrols the
+	    lab; HeistService calls BeginCarry on a grab and it
 	    chases the carrier at RivalConfig.GuardSpeed along PathfindingService
 	    paths (recomputed at most every GuardPathSeconds), gives up GuardLeash
 	    studs past its gate and walks home. HeistService owns the tag: the
@@ -91,6 +94,8 @@ type Guard = {
 	Target: Player?,
 	StunUntil: number,
 	Stunned: boolean,
+	TiltedSince: number?, -- os.clock() the root's up-vector went past the limit (not stunned)
+	GetUpAt: number?, -- os.clock() of the GettingUp attempt; still down a second later = pivot it
 	PatrolIndex: number,
 	PauseUntil: number,
 	Waypoints: { PathWaypoint },
@@ -168,7 +173,16 @@ local WALK_ANIMATION = "rbxassetid://507777826"
 local IDLE_ANIMATION = "rbxassetid://507766666"
 local GUARD_KNOCKBACK = 40
 local GUARD_KICK = 25
-local GUARD_DISPLAY_NAME = "Lab Guard"
+-- States the guard must never fall into (a belt, a knock or a stun must not
+-- lay it on its side); PlatformStand is the stun's own, ended in recoverGuard.
+local DISABLED_STATES = {
+	Enum.HumanoidStateType.FallingDown,
+	Enum.HumanoidStateType.Ragdoll,
+	Enum.HumanoidStateType.Physics,
+	Enum.HumanoidStateType.Seated,
+}
+local GUARD_NAME_OFFSET = Vector3.new(0, 2.4, 0) -- above the head
+local GUARD_NAME_STUDS = Vector2.new(5.4, 1.1)
 
 --[[ Small helpers ------------------------------------------------------------- ]]
 
@@ -285,6 +299,8 @@ local function showPedestal(rival: Rival, index: number)
 		end
 	end
 	pedestal:SetAttribute("Filled", orb ~= nil)
+	-- The client's "back in 1:12" chip (WorldLabelController) counts down to this.
+	pedestal:SetAttribute("RespawnAt", if orb == nil then ped.RespawnAt else nil)
 	pedestal:SetAttribute("BeingStolen", ped.Carried)
 end
 
@@ -340,6 +356,61 @@ local function loadTrack(humanoid: Humanoid, id: string, looped: boolean): Anima
 	return nil
 end
 
+-- Degrees between the root's up-vector and vertical (0 = standing).
+local function uprightAngle(root: BasePart): number
+	return math.deg(math.acos(math.clamp(root.CFrame.UpVector.Y, -1, 1)))
+end
+
+-- The HipHeight the rig's own legs call for: the gap from the root's bottom to
+-- the soles. (A HumanoidDescription rig can come in with a wrong one, which
+-- sinks it into the floor or holds it in the air.) nil when the rig has no foot.
+local function rigHipHeight(rig: Model, root: BasePart): number?
+	local foot = rig:FindFirstChild("LeftFoot")
+	if not foot or not foot:IsA("BasePart") then
+		return nil
+	end
+	local height = (root.Position.Y - root.Size.Y / 2) - (foot.Position.Y - foot.Size.Y / 2)
+	return if height > 0 then height else nil
+end
+
+-- Puts the whole guard back on its feet where it is, facing `facing` (flat),
+-- and stills it; it drops the last stud onto the floor under its HipHeight.
+local function pivotUpright(guard: Guard, facing: Vector3)
+	local position = guard.Root.Position
+	local look = Vector3.new(facing.X, 0, facing.Z)
+	if look.Magnitude < 0.01 then
+		look = Vector3.new(0, 0, 1)
+	end
+	for _, part in guard.Model:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.AssemblyLinearVelocity = Vector3.zero
+			part.AssemblyAngularVelocity = Vector3.zero
+		end
+	end
+	guard.Model:PivotTo(CFrame.lookAt(position + Vector3.new(0, 2, 0), position + Vector3.new(0, 2, 0) + look))
+end
+
+-- The guard's name over its head, in the rival accent ("Dr. Fizz"), instead of
+-- the stock overhead name. A world label: not on top, no light influence, a MaxDistance.
+local function buildGuardName(rig: Model, humanoid: Humanoid, labName: string)
+	local shortName = RivalConfig.GetShortName(labName)
+	humanoid.DisplayName = shortName
+	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	humanoid.HealthDisplayType = Enum.HumanoidHealthDisplayType.AlwaysOff
+	local head = rig:FindFirstChild("Head")
+	if not head or not head:IsA("BasePart") then
+		return
+	end
+	BillboardKit.Chip(head, {
+		Name = "GuardName",
+		Text = shortName,
+		Gradient = UITheme.Gradients.Rival,
+		Studs = GUARD_NAME_STUDS,
+		StudsOffset = GUARD_NAME_OFFSET,
+		MaxDistance = RivalConfig.GuardNameDistance,
+	})
+end
+
 -- Builds the rival's guard (yields: the rig comes from a HumanoidDescription),
 -- unless the lab went in the meantime. A failed rig leaves the lab guardless.
 local function buildGuard(rival: Rival)
@@ -361,12 +432,24 @@ local function buildGuard(rival: Rival)
 		rig:Destroy()
 		return
 	end
-	humanoid.DisplayName = GUARD_DISPLAY_NAME
+	buildGuardName(rig, humanoid, rival.Name)
 	humanoid.WalkSpeed = RivalConfig.GuardPatrolSpeed
 	humanoid.BreakJointsOnDeath = false
 	humanoid.RequiresNeck = false
 	humanoid.MaxHealth = math.huge
 	humanoid.Health = math.huge
+	for _, humanoidState in DISABLED_STATES do
+		humanoid:SetStateEnabled(humanoidState, false)
+	end
+	local hipHeight = rigHipHeight(rig, root)
+	if hipHeight then
+		humanoid.HipHeight = hipHeight
+	end
+	for _, part in rig:GetDescendants() do
+		if part:IsA("BasePart") then
+			part.Anchored = false
+		end
+	end
 	rig:SetAttribute("RivalGuard", rival.Id)
 	local home = rival.Origin:PointToWorldSpace(RivalConfig.GuardHome + Vector3.new(0, 3, 0))
 	rig:PivotTo(CFrame.new(home) * rival.Origin.Rotation)
@@ -382,6 +465,8 @@ local function buildGuard(rival: Rival)
 		Target = nil,
 		StunUntil = 0,
 		Stunned = false,
+		TiltedSince = nil,
+		GetUpAt = nil,
 		PatrolIndex = 1,
 		PauseUntil = 0,
 		Waypoints = {},
@@ -461,15 +546,45 @@ local function followPath(guard: Guard, fallback: Vector3)
 	end
 end
 
+-- Ends a stun: PlatformStand off, upright, GettingUp. The ONE place a stun ends
+-- (guardStep, once StunUntil has passed - a second hit just moves StunUntil on;
+-- Despawn calls it too so a lab that goes mid-stun leaves nothing stood down).
 local function recoverGuard(guard: Guard)
 	guard.Stunned = false
+	guard.TiltedSince = nil
+	guard.GetUpAt = nil
 	guard.Humanoid.PlatformStand = false
 	-- Back on its feet: keep the facing, drop the tumble.
-	local position = guard.Root.Position
-	local look = guard.Root.CFrame.LookVector
-	guard.Root.AssemblyAngularVelocity = Vector3.zero
-	guard.Root.CFrame = CFrame.lookAt(position + Vector3.new(0, 2, 0), position + Vector3.new(look.X, 2, look.Z))
+	pivotUpright(guard, guard.Root.CFrame.LookVector)
 	guard.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+end
+
+-- Self-heal, once per tick while the guard is NOT stunned: a root tilted more
+-- than the limit for GuardDownSeconds gets GettingUp, and if it is still down a
+-- second later it is pivoted upright where it lies.
+local function healGuard(guard: Guard, t: number, facing: Vector3)
+	if guard.Humanoid.PlatformStand then
+		guard.Humanoid.PlatformStand = false -- only a stun sets it, and a stun has ended
+	end
+	if uprightAngle(guard.Root) <= RivalConfig.UprightLimitDegrees then
+		guard.TiltedSince = nil
+		guard.GetUpAt = nil
+		return
+	end
+	local since = guard.TiltedSince
+	if since == nil then
+		guard.TiltedSince = t
+	elseif t - since > RivalConfig.GuardDownSeconds then
+		local tried = guard.GetUpAt
+		if tried == nil then
+			guard.GetUpAt = t
+			guard.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+		elseif t - tried >= RivalConfig.GuardDownSeconds then
+			pivotUpright(guard, facing)
+			guard.TiltedSince = nil
+			guard.GetUpAt = nil
+		end
+	end
 end
 
 local function guardStep(rival: Rival)
@@ -485,6 +600,7 @@ local function guardStep(rival: Rival)
 	if guard.Stunned then
 		recoverGuard(guard)
 	end
+	healGuard(guard, t, rival.Origin.LookVector)
 	local humanoid = guard.Humanoid
 	local position = guard.Root.Position
 
@@ -679,6 +795,29 @@ function RivalService.GetGuardMode(rivalId: number): string?
 	return if guard then guard.Mode else nil
 end
 
+-- Degrees the guard's root is off vertical (0 = standing), nil with no guard
+-- (/selftest holds it to RivalConfig.GuardUprightSelfTestDegrees).
+function RivalService.GetGuardUprightDegrees(rivalId: number): number?
+	local rival = state.rivals[rivalId]
+	local guard = rival and rival.Guard
+	if not guard or guard.Root.Parent == nil then
+		return nil
+	end
+	return uprightAngle(guard.Root)
+end
+
+-- /selftest: lays the guard on its side where it stands, as a bad fall would
+-- (the self-heal must stand it up again by itself).
+function RivalService.SelfTestLayDown(rivalId: number): boolean
+	local rival = state.rivals[rivalId]
+	local guard = rival and rival.Guard
+	if not guard or guard.Root.Parent == nil then
+		return false
+	end
+	guard.Model:PivotTo(guard.Root.CFrame * CFrame.Angles(0, 0, math.rad(90)) + Vector3.new(0, 1, 0))
+	return true
+end
+
 -- The rival id whose guard model `part` belongs to (CombatService), or nil.
 function RivalService.GuardOfPart(part: Instance): number?
 	local current: Instance? = part
@@ -803,6 +942,9 @@ function RivalService.Despawn(rivalId: number): boolean
 	local guard = rival.Guard
 	rival.Guard = nil
 	if guard then
+		if guard.Stunned then
+			recoverGuard(guard) -- the stun ends on this path too
+		end
 		guard.Model:Destroy()
 	end
 	rival.Plot:Destroy()

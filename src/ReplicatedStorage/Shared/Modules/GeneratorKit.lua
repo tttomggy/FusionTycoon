@@ -57,8 +57,8 @@ type Parts = {
 	LevelText: TextLabel,
 	IncomeText: TextLabel,
 	Lock: Frame,
-	Label: BillboardKit.GeneratorLabel,
-	Prompt: ProximityPrompt,
+	Label: BillboardKit.GeneratorLabel?, -- nil on a decorative generator (a rival lab's)
+	Prompt: ProximityPrompt?,
 }
 
 local LIP_DEPTH = 0.05 -- how far the spout's Neon lip stands proud of its face
@@ -194,7 +194,10 @@ end
 
 -- Builds generator `id` at its PlotLayout spot and parents it to `parent`
 -- (complete, last). Call SetState right after to give it its look.
-function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model?
+-- `decorative` (a rival lab's picture of a factory line): the model and its
+-- screen only, no prompt and no owner-only label; SetState then only takes
+-- an owned (level >= 1) look.
+function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance, decorative: boolean?): Model?
 	local spot = PlotLayout.GENERATORS[id]
 	local generator = TycoonConfig.GetGeneratorById(id)
 	if not spot or not generator then
@@ -297,7 +300,7 @@ function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model
 	local nameText, levelText, incomeText, lock = buildScreen(body, generator.Name)
 
 	local labelOffset = GeneratorKit.GetCoreOffset(spot) + Vector3.new(0, diameter / 2 + g.LabelAboveCore, 0)
-	local label = BillboardKit.GeneratorLabel(body, labelOffset, g.LabelMaxDistance)
+	local label = if decorative then nil else BillboardKit.GeneratorLabel(body, labelOffset, g.LabelMaxDistance)
 
 	partsByModel[model] = {
 		Body = body,
@@ -312,7 +315,7 @@ function GeneratorKit.Build(origin: CFrame, id: string, parent: Instance): Model
 		IncomeText = incomeText,
 		Lock = lock,
 		Label = label,
-		Prompt = newPrompt(body, id),
+		Prompt = if decorative then nil else newPrompt(body, id),
 	}
 	model.PrimaryPart = body
 	model.Destroying:Connect(function()
@@ -363,6 +366,7 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean, m
 	local g = PlotLayout.Generator
 	local tierColor = GeneratorKit.GetTierColor(generator.Tier)
 	local prompt = parts.Prompt
+	local label = parts.Label
 
 	if not unlocked then
 		setGhost(parts, Colors.Faint, g.GhostLockedTransparency)
@@ -371,9 +375,11 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean, m
 		local requirement = generator.UnlockRequirement
 		local required = requirement and TycoonConfig.GetGeneratorById(requirement.GeneratorId)
 		local detail = if requirement and required then ("%s LV %d"):format(required.Name, requirement.Level) else ""
-		parts.Label.Set("LOCKED", detail, Colors.Muted)
-		parts.Label.Gui.Enabled = true
-		prompt.Enabled = false
+		if label and prompt then
+			label.Set("LOCKED", detail, Colors.Muted)
+			label.Gui.Enabled = true
+			prompt.Enabled = false
+		end
 		return
 	end
 
@@ -384,11 +390,13 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean, m
 	if level <= 0 then
 		setGhost(parts, tierColor, g.GhostBuyTransparency)
 		parts.LevelText.Text = "LV 0"
-		parts.Label.Set("BUY", cost, Colors.Cash)
-		parts.Label.Gui.Enabled = true
-		prompt.ActionText = "Buy"
-		prompt.ObjectText = ("%s · %s"):format(generator.Name, cost)
-		prompt.Enabled = true
+		if label and prompt then
+			label.Set("BUY", cost, Colors.Cash)
+			label.Gui.Enabled = true
+			prompt.ActionText = "Buy"
+			prompt.ObjectText = ("%s · %s"):format(generator.Name, cost)
+			prompt.Enabled = true
+		end
 		return
 	end
 
@@ -411,10 +419,12 @@ function GeneratorKit.SetState(model: Model, level: number, unlocked: boolean, m
 	parts.LevelText.Text = if isMax then "MAX" else ("LV %d"):format(level)
 	parts.IncomeText.Text = ("%s/s"):format(NumberFormat.Money(TycoonConfig.GetGeneratorCashPerSecond(generator, level) * multiplier))
 	parts.IncomeText.Visible = true
-	parts.Label.Gui.Enabled = false
-	prompt.ActionText = "Upgrade"
-	prompt.ObjectText = if isMax then "MAX" else ("LV %d → %d · %s"):format(level, level + 1, cost)
-	prompt.Enabled = not isMax
+	if label and prompt then
+		label.Gui.Enabled = false
+		prompt.ActionText = "Upgrade"
+		prompt.ObjectText = if isMax then "MAX" else ("LV %d → %d · %s"):format(level, level + 1, cost)
+		prompt.Enabled = not isMax
+	end
 end
 
 return GeneratorKit

@@ -2292,8 +2292,15 @@ built once). `/selftest rivals` first; then by hand:
   `RIVAL LAB` / `steal me!` with a lab name pill ("DR. FIZZ'S LAB"), vermilion
   wall strips, four orbs (only Common / Rare / Epic at Rebirth 0, now and then a
   Golden) with name + `+$X/s` labels, no EMPTY `+` pill anywhere, and one blocky
-  vermilion guard walking between the pedestals. No generators, stations,
-  Fusion Machine or LOCK console in them.
+  vermilion guard walking between the pedestals. Each lab is a full-looking
+  lab: Fusion Machine, Gacha and Multiplier pads, the factory line with its
+  cash balls running, the rebirth portal (no prices, no prompts; only the LOCK
+  console is missing). The guard stands upright and wears its rival's name
+  ("Dr. Fizz", not "Lab Guard"), readable from ~60 studs.
+- [ ] After a delivered steal the pedestal shows the empty cap and a small
+  `back in 1:12` chip counting down; the orb returns with the chip gone. Chase
+  a guard across the speed belts and knock it with a Bat: it never lies on its
+  side (it stands up by itself within ~2 s if it ever does).
 - [ ] At Rebirth 0: walk to an orb, the prompt reads `Steal` with the orb name
   and `+$X/s` (no "Unlocks at Rebirth 1" teaser), hold E 1.5 s: `YOU GRABBED
   …! RUN HOME!`, the pedestal shows the red STOLEN! ring, the guard runs at you.
@@ -2307,6 +2314,9 @@ built once). `/selftest rivals` first; then by hand:
   and stops chasing; you can't hit it while carrying.
 - [ ] Join a second player: the rival nearest to nobody can despawn only when
   every slot is full; both players always get a plot (12 slots).
+- [ ] Fuse your 2 orbs and leave the FUSION SUCCESS card open for ~10 s
+  without tapping: when it closes, "You're ready!" slides in and stays 2 s
+  (never skipped), the HUD pieces pop in one by one while it is up.
 - [ ] After the tutorial ("You're ready!") wait ~20 s: lime arrows lead to the
   nearest rival lab's best pedestal and the big STEAL button appears at it; a
   delivered steal (or 3 min) ends it; it never shows twice (`/tips reset`

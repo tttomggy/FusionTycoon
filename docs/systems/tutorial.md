@@ -28,6 +28,22 @@ leaves; kids don't read cards. So the mandatory part is four steps,
   `WelcomeSeconds = 2`. The Tutorial 4 rules below (one step at a time, in
   order; the presenter follows the server) are unchanged; only these numbers
   differ from the ones quoted there.
+- **The banner clock counts only visible seconds** (Rival labs 2: "You're
+  ready!" never showed). A step's clock is `TutorialController.bannerVisibleSeconds`:
+  it advances (`TutorialConfig.AdvanceBannerClock`) only while the bar is shown,
+  slid in (`TutorialBanner.IsCovered()` false) and `screenQuiet()` (no explain
+  card, big result card, event info or tutorial card), reset whenever a new
+  instruction goes up. A Timed step may ask the server to advance only when
+  `TutorialConfig.TimedStepReady` (visible >= `GetBannerHold` =
+  `max(Seconds, BannerMinSeconds)`); every step's "stays up at least
+  `BannerMinSeconds`" before "✓ Nice!" is the same visible clock (and "Nice!"
+  waits for the bar to be in front of the player). Before, `finish` started
+  while the FUSION SUCCESS card was up, its elapsed time ran out behind it and
+  `sendAdvance` fired the frame the card closed. The `finish` HUD keys pop in
+  once the banner is visible (a Timed step sets `begun` from `stepFrame`).
+  `/selftest` ("tutorial: ... fusion card open for 5 s") runs the clock on an
+  injected 0.1 s frame loop and checks the full hold is visible before Done and
+  `tipRival` waits `RivalTipAfterDoneSeconds` after it.
 - **Pedestals have no step.** When the first pull lands on a pedestal,
   `TutorialController.pedestalFrame` shows the "+$X/s" pops over the pedestals
   for 4 s and one `TopStack` line (`AnnouncementController.ShowLine`,

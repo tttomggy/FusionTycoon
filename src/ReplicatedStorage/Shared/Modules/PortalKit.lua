@@ -69,7 +69,7 @@ local function buildSwirlFace(sheet: BasePart, face: Enum.NormalId)
 end
 
 -- Builds the portal into `parent` (complete, then parented) and returns it.
-function PortalKit.Build(origin: CFrame, parent: Instance): Model
+function PortalKit.Build(origin: CFrame, parent: Instance, decorative: boolean?): Model
 	local P = PlotLayout.RebirthPortal
 	local model = Instance.new("Model")
 	model.Name = PortalKit.MODEL_NAME
@@ -141,16 +141,19 @@ function PortalKit.Build(origin: CFrame, parent: Instance): Model
 	light.Brightness = P.LightBrightnessIdle
 	light.Parent = sheet
 
-	local prompt = Instance.new("ProximityPrompt")
-	prompt.Name = PortalKit.PROMPT_NAME
-	prompt.ActionText = "Rebirth"
-	prompt.ObjectText = "Portal"
-	prompt.HoldDuration = P.PromptHoldSeconds
-	prompt.MaxActivationDistance = P.PromptDistance
-	prompt.RequiresLineOfSight = false
-	prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
-	prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
-	prompt.Parent = base
+	-- A rival lab's portal is a picture: nobody rebirths there.
+	if not decorative then
+		local prompt = Instance.new("ProximityPrompt")
+		prompt.Name = PortalKit.PROMPT_NAME
+		prompt.ActionText = "Rebirth"
+		prompt.ObjectText = "Portal"
+		prompt.HoldDuration = P.PromptHoldSeconds
+		prompt.MaxActivationDistance = P.PromptDistance
+		prompt.RequiresLineOfSight = false
+		prompt.Exclusivity = Enum.ProximityPromptExclusivity.OnePerButton
+		prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
+		prompt.Parent = base
+	end
 
 	model.PrimaryPart = base
 	model.Parent = parent

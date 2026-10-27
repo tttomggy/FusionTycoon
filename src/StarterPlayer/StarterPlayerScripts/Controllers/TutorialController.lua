@@ -107,8 +107,9 @@ local runnerRunning = false
 local lastPlayed: number? = nil -- the last step played to its end
 local begun = 0 -- the highest step begun (HudGate reveals up to it)
 local guideUp = false -- the banner, path and hand are live for `presented`
-local bannerShownAt = 0
-local stepStart = 0 -- os.clock() the presented step's banner came in
+local bannerVisibleSeconds = 0 -- seconds the presented instruction has really been on screen (see tickBannerClock)
+local bannerClockAt = 0
+local clock = os.clock -- /selftest injects its own (SelfTestSetClock)
 local advanceSentFor: number? = nil
 local replayHintShown = false
 local wasActive = false
@@ -281,6 +282,29 @@ local function screenQuiet(): boolean
 		and not TutorialCards.IsOpen()
 end
 
+-- The instruction is really in front of the player: shown, slid in (not out
+-- under a centred card) and the screen quiet.
+local function bannerVisibleNow(): boolean
+	return TutorialBanner.IsShown() and not TutorialBanner.IsCovered() and screenQuiet()
+end
+
+-- Every frame: the presented instruction's clock counts only the visible
+-- seconds (TutorialConfig.AdvanceBannerClock). A hitch is capped, so one
+-- long frame cannot stand in for a second on screen.
+local MAX_CLOCK_STEP = 0.5
+local function tickBannerClock()
+	local now = clock()
+	local dt = math.clamp(now - bannerClockAt, 0, MAX_CLOCK_STEP)
+	bannerClockAt = now
+	bannerVisibleSeconds = TutorialConfig.AdvanceBannerClock(bannerVisibleSeconds, dt, bannerVisibleNow())
+end
+
+-- A new instruction goes up: its clock starts from nothing.
+local function resetBannerClock()
+	bannerVisibleSeconds = 0
+	bannerClockAt = clock()
+end
+
 -- The server moved past a step the player was never shown, and it is a step
 -- the server skips when the save already satisfies it (TutorialConfig `Skip`:
 -- the Multiplier already bought): nothing is left to teach or to do.
@@ -334,8 +358,7 @@ local function beginGuidance(index: number)
 		return
 	end
 	local t = TycoonController.GetTutorial()
-	stepStart = os.clock()
-	bannerShownAt = stepStart
+	resetBannerClock()
 	advanceSentFor = nil
 	TutorialBanner.Show(bannerText(step), step.Sub, step.Icon, index, #TutorialConfig.Steps)
 	TutorialBanner.SetSkip(if t.Replay then function()
@@ -401,12 +424,15 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 		return false
 	end
 	presented = index
-	begun = math.max(begun, index)
+	-- A Timed step reveals its HUD pieces once its banner is really on screen
+	-- (stepFrame), so "You're ready!" is up while they pop in one by one.
+	if step.Kind ~= "Timed" then
+		begun = math.max(begun, index)
+	end
 	if serverSkipped(index, step) then
 		-- The server skipped it (already satisfied): present the server's step.
 		return true, true
 	end
-	stepStart = os.clock()
 	advanceSentFor = nil
 	local already = isStepDone(index)
 
@@ -443,7 +469,8 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 	if already then
 		-- Done ahead of time: the bar says so and moves on.
 		TutorialBanner.Show(step.Banner, nil, step.Icon, index, #TutorialConfig.Steps)
-		bannerShownAt = os.clock()
+		resetBannerClock()
+		begun = math.max(begun, index)
 		hasBanner = true
 	else
 		beginGuidance(index)
@@ -461,10 +488,13 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 	stopGuidance()
 	if hasBanner then
 		if not already then
-			local remaining = TutorialConfig.BannerMinSeconds - (os.clock() - bannerShownAt)
-			if remaining > 0 then
-				task.wait(remaining)
-			end
+			-- The instruction stays up its minimum VISIBLE time (a card on top
+			-- does not count), and is in front of the player when "✓ Nice!"
+			-- replaces it.
+			waitFor(mine, function()
+				return bannerVisibleSeconds >= TutorialConfig.BannerMinSeconds
+			end, CARD_MAX_SECONDS)
+			waitFor(mine, bannerVisibleNow, QUIET_TIMEOUT)
 			if runnerSeq ~= mine then
 				return false
 			end
@@ -622,8 +652,10 @@ local function stepFrame()
 		return
 	end
 	local index = presented :: number
-	local elapsed = os.clock() - stepStart
 	local here = rootPosition()
+	if tutorialStep.Kind == "Timed" and bannerVisibleNow() then
+		begun = math.max(begun, index)
+	end
 
 	-- The distance on the banner: only while there is a way to go.
 	local marked = GoalMarkerController.GetMarkedPosition()
@@ -657,8 +689,9 @@ local function stepFrame()
 	TutorialHand.SetTarget(handTarget(tutorialStep, showButton))
 
 	-- Completion that isn't a server-confirmed action: the last step is Timed
-	-- (the server re-checks its own clock). Nothing ends while a card is up.
-	if tutorialStep.Kind == "Timed" and elapsed >= (tutorialStep.Seconds or 0) and screenQuiet() then
+	-- (the server re-checks its own clock). Its clock is the VISIBLE seconds
+	-- of the banner, so nothing ends behind a card (TutorialConfig.TimedStepReady).
+	if TutorialConfig.TimedStepReady(tutorialStep, bannerVisibleSeconds) then
 		sendAdvance(index)
 	end
 end
@@ -914,6 +947,17 @@ function TutorialController.GetPresentedStep(): TutorialConfig.Step?
 	return presentedStep()
 end
 
+-- /selftest: the seconds the presented instruction has really been visible,
+-- and a clock to count them on (nil puts os.clock back).
+function TutorialController.GetBannerVisibleSeconds(): number
+	return bannerVisibleSeconds
+end
+
+function TutorialController.SelfTestSetClock(injected: (() -> number)?)
+	clock = injected or os.clock
+	bannerClockAt = clock()
+end
+
 function TutorialController.GetBannerText(): string
 	return TutorialBanner.GetText()
 end
@@ -938,7 +982,9 @@ function TutorialController.Init()
 		end
 	end)
 	TycoonController.TycoonChanged:Connect(onTycoonChanged)
+	resetBannerClock()
 	RunService.RenderStepped:Connect(function()
+		tickBannerClock()
 		stepFrame()
 		pedestalFrame()
 		tipFrame()

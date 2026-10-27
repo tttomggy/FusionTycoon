@@ -216,7 +216,9 @@ end
 
 -- Builds one machine for a plot at plot-local `localPos` (floor top y = 0).
 -- Returns the machine Model (already parented to `parent`).
-function FusionMachineService.Build(originCFrame: CFrame, localPos: Vector3, parent: Instance): Model
+-- `decorative` (a rival lab's machine): the models and visuals only, no
+-- FusePrompt (nobody fuses there).
+function FusionMachineService.Build(originCFrame: CFrame, localPos: Vector3, parent: Instance, decorative: boolean?): Model
 	local machine = Instance.new("Model")
 	machine.Name = FusionMachineService.MACHINE_NAME
 	local base = PartKit.At(originCFrame, localPos, 0)
@@ -225,7 +227,9 @@ function FusionMachineService.Build(originCFrame: CFrame, localPos: Vector3, par
 	buildPylons(machine, base)
 	local core = buildCore(machine, base)
 	buildRing(machine, core)
-	buildPromptAnchor(machine, base)
+	if not decorative then
+		buildPromptAnchor(machine, base)
+	end
 
 	machine.PrimaryPart = core
 	machine.Parent = parent

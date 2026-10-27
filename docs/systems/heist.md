@@ -126,8 +126,8 @@ number); the steal itself is `HeistService`'s, same flow.
 - **Labs.** Up to `MaxRivals = 3`, in the free slots nearest the real
   players' labs (`RivalService.Step`, every `FillSeconds`). Built by
   `TycoonService.BuildRivalPlot` = the player plot's code (`buildShell`,
-  walls, `PlotKit.BuildSignGate`, `createPedestals`; no generators,
-  stations, Fusion Machine, claim button or spawn): plot name
+  walls, `PlotKit.BuildSignGate`, `createPedestals`, no claim button or spawn)
+  **plus the rest of a lab in decoration mode** (below): plot name
   `PlotNaming.GetRivalPlotName` (`Rival_<id>`), attributes `Rival`,
   `RivalId`, `RivalName`, `SlotIndex`, **no** `OwnerUserId` / `Claimed`, so
   FactoryController and the shield code ignore it. Pedestals 1-4 only
@@ -135,6 +135,29 @@ number); the steal itself is `HeistService`'s, same flow.
   `RivalId` instead of `OwnerUserId`. The gate sign reads `RIVAL LAB` /
   `steal me!` with the lab's name in the pill, in `World.AccentRival` /
   `Gradients.Rival` (wall strips and the sign strip too).
+- **Decoration mode (a lab worth robbing).** The same builders a player's lab
+  uses, with a `decorative` / nil-owner path that skips every prompt, remote,
+  owner-only label and cash handler (no second copy of any geometry; PlotLayout
+  stays the source): `FusionMachineService.Build(.., decorative)` (no
+  FusePrompt; the odds board stays), `createGachaStation` /
+  `createMultiplierStation` (owner nil: pad + hologram only, no label, so no
+  "$X / pull"), `createFactoryLine` (owner nil: belt, collector and the five
+  `GeneratorKit.Build(.., decorative)` generators at
+  `RivalConfig.GeneratorLevels`, all below max so no generator light; no
+  prompt, no label), `createRebirthPortal` (`PortalKit.Build(.., decorative)`,
+  no prompt, no label). `FactoryController` runs a rival plot like a claimed
+  one (attribute `Rival`; its balls have Value 0, nothing pops or pays), and a
+  Power Surge's chips go over a rival's generators too. A rival lab has **zero
+  ProximityPrompts but its 4 steal prompts**, no Highlight, no live owner-only
+  label. Lights: a rival adds what a claimed lab's floor has (machine core,
+  portal, collector) plus its 4 orb lights, nothing more.
+- **Stolen orb = empty cap + countdown.** A rival pedestal whose orb was
+  delivered keeps the normal empty cap and carries the attribute `RespawnAt`
+  (`RivalService` clock = unix seconds, set in `showPedestal`, cleared when the
+  orb is back). `WorldLabelController` draws a small `back in 1:12` chip
+  (`BillboardKit.Chip`, `PlotLayout.Pedestal.RespawnChip*`) over it, counted
+  down from `Workspace:GetServerTimeNow()`; a carried (not yet delivered) orb
+  shows the red STOLEN! ring as before.
 - **Slots are shared.** `TycoonService` owns `occupiedSlots`
   (`GetFreeSlots`, `ReserveSlot`, `ReleaseSlot`). A real player always gets a
   plot: `takeSlot` asks the registered reclaimer when none is free
@@ -173,13 +196,28 @@ number); the steal itself is `HeistService`'s, same flow.
   last, pruned to the hour on use, 64 kept): leaving and rejoining, or hopping
   servers, does not reset it. Hence `RivalService.Now()` is the wall clock.
 - **The guard.** One blocky R15 NPC per lab (`HumanoidDescription` rig in
-  `World.AccentRival` / `CapsuleWhite` / `Structure`, name "Lab Guard",
-  server-owned, default locomotion clips). Patrols the stops in
+  `World.AccentRival` / `CapsuleWhite` / `Structure`, server-owned, default
+  locomotion clips). Its name over the head is the **rival's** (`Dr. Fizz`,
+  `RivalConfig.GetShortName`) as a `BillboardKit.Chip` in `Gradients.Rival`
+  (`GuardName` on the Head, MaxDistance `GuardNameDistance` 60); the stock
+  overhead name is off. Patrols the stops in
   `RivalConfig.PatrolPoints`. A grab (`RivalService.BeginCarry`) sends it
   after the thief at `GuardSpeed` (13 vs the carrier's 12): PathfindingService
   paths recomputed at most every `GuardPathSeconds` (0.5 s) in a task, so the
   one guard loop (`GuardTickSeconds`, 0.1 s, all labs) never yields. Gives
-  up `GuardLeash` (60) studs past its gate and walks home. **The tag is
+  up `GuardLeash` (60) studs past its gate and walks home.
+  **It stays on its feet:** `FallingDown`, `Ragdoll`, `Physics` and `Seated`
+  are disabled on its Humanoid, `BreakJointsOnDeath` / `RequiresNeck` off,
+  `HipHeight` taken from the rig's legs (root bottom to sole), every part
+  unanchored, network owner nil. The stun's `PlatformStand` ends in ONE place
+  (`recoverGuard`: PlatformStand off, pivoted upright, `GettingUp`), reached
+  from the tick once `StunUntil` has passed (a second hit only moves
+  `StunUntil`) and from `Despawn` for a lab that goes mid-stun. **Self-heal**
+  (`healGuard`, every tick while not stunned): a root more than
+  `UprightLimitDegrees` (45) off vertical for > `GuardDownSeconds` (1) gets
+  `ChangeState(GettingUp)`; still down a second later, the model is pivoted
+  upright where it lies. `RivalService.GetGuardUprightDegrees` /
+  `SelfTestLayDown` are the /selftest hooks. **The tag is
   HeistService's**: after `TagGraceSeconds`, the guard's root within
   `TagDistance` of the carrier ends the carry `Saved` (the thief's toast:
   "The lab guard got you!"). Weapons work on it
@@ -205,8 +243,17 @@ number); the steal itself is `HeistService`'s, same flow.
   ~0:41 (target >= 0:35). It does NOT come sooner: a rival orb is a Common /
   Rare / Epic the gacha gives anyway; the value is the steal in minute 3.
 - **`/selftest rivals`** (also section 16 of the full run): a solo server
-  fills its labs (ownerless, 4 steal pedestals, no Fusion Machine, the RIVAL
-  LAB sign, only Common / Rare / Epic at Rebirth 0); a stand-in player joining
+  fills its labs (ownerless, 4 steal pedestals, the RIVAL LAB sign, the Fusion
+  Machine / Gacha / Multiplier / factory line / portal models with the five
+  generators running and zero ProximityPrompts but the 4 steal prompts, no
+  Highlight, no live owner-only label, none on the stations, the gate sign
+  upright and square to its slot like a stand-in player's; only Common / Rare /
+  Epic at Rebirth 0); every guard within 20 deg of vertical after spawn, after a
+  6 s chase across the speed belts (thief on the far side of the street) and
+  after a stun plus a second hit (PlatformStand off), a guard laid on its side
+  standing up by itself within 5 s, the rig flags (no FallingDown / Ragdoll /
+  Physics / Seated, HipHeight, unanchored) and the name label; the light
+  budget; `RespawnAt` on a delivered pedestal and gone when the orb is back; a stand-in player joining
   a full server displaces the farthest rival and gets its slot (stand-ins via
   `TycoonService.SelfTestCreatePlot`); the Rebirth rule; a Rebirth 0 steal end
   to end (grab, second grab refused, delivery creates the orb, the 90 s timer,
@@ -217,7 +264,8 @@ number); the steal itself is `HeistService`'s, same flow.
   Golden; `PickTier` skipping a listed banned tier. Run it in Studio: the
   steal parts need the tester's character and a claimed lab.
 - **Not covered by code in this repo's checks**: the guard's pathing and
-  animation and the client visuals were not run in Studio when this was
-  written (`luau-lsp analyze` is clean and the pure rules were run in the
+  animation, the decorated labs' look and the client countdown chip were not
+  run in Studio when this was written (Rival labs 2 as well: the parser was
+  StyLua's, `luau-lsp` was not available) (`luau-lsp analyze` is clean and the pure rules were run in the
   Luau CLI). Check `docs/UI_TEST.md`-style: walk to a rival lab at Rebirth 0,
   hold E, run home, get tagged once, wait 90 s.
