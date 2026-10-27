@@ -38,8 +38,9 @@ local carriedUids: { [string]: boolean } = {}
 -- One-time tips/cards already seen (saved; TipConfig ids).
 local tipsSeen: { [string]: boolean } = {}
 -- The first-time tutorial (snapshot Tutorial; TutorialService owns it).
-export type TutorialView = { Step: number, Done: boolean, FreePulls: number, Replay: boolean, ReplayHint: boolean }
-local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, Replay = false, ReplayHint = false }
+-- PullsDone: pulls since the current step began (the pull step's "0/2").
+export type TutorialView = { Step: number, Done: boolean, FreePulls: number, PullsDone: number, Replay: boolean, ReplayHint: boolean }
+local tutorial: TutorialView = { Step = 0, Done = false, FreePulls = 0, PullsDone = 0, Replay = false, ReplayHint = false }
 -- os.clock() when this client watched the tutorial finish (nil: it was not
 -- running when the player joined, or it is running again after a reset).
 local tutorialDoneAt: number? = nil
@@ -612,6 +613,7 @@ local function onSyncTycoon(snapshot: any)
 			Step = if typeof(rawTutorial.Step) == "number" then rawTutorial.Step else 0,
 			Done = rawTutorial.Done == true,
 			FreePulls = if typeof(rawTutorial.FreePulls) == "number" then rawTutorial.FreePulls else 0,
+			PullsDone = if typeof(rawTutorial.PullsDone) == "number" then rawTutorial.PullsDone else 0,
 			Replay = rawTutorial.Replay == true,
 			ReplayHint = rawTutorial.ReplayHint == true,
 		}

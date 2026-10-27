@@ -18,6 +18,7 @@ local WeaponAnims = require(ReplicatedStorage.Shared.Anim.WeaponAnims)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local DebugConfig = require(ReplicatedStorage.Shared.Config.DebugConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
+local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local GachaConfig = require(ReplicatedStorage.Shared.Config.GachaConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
@@ -208,6 +209,7 @@ local SELFTEST_PROBE_TIMEOUT = 10 -- one combat / gacha probe
 local SELFTEST_EFFECTS_TIMEOUT = 30
 local SELFTEST_STEP_TIMEOUT = 75 -- one tutorial step probe: the presenter (30 s cap) + its card, bar, hand and HUD waits
 local SELFTEST_SLOT_COUNT = 200
+local TUTORIAL_BUDGET_SECONDS = 45 -- Tutorial 5: claim to Done, walking excluded
 local selfTestReports: { [number]: { any } } = {}
 
 local NUMBER_FORMAT_CASES: { { any } } = {
@@ -316,6 +318,15 @@ local function askClient(target: Player, payload: { [string]: any }): any?
 		selfTestReports[target.UserId] = nil
 	end
 	return report
+end
+
+-- The tutorial timed run: waits (up to PRESENT_WAIT + slack) for the real
+-- presenter to have `stepId`'s banner up. Returns the client's report.
+local function askPresented(target: Player, stepId: string): any?
+	probeCounter += 1
+	local probeId = probeCounter
+	RemoteEvents.SelfTest:FireClient(target, { Stage = "TutorialProbe", Kind = "Presented", StepId = stepId, ProbeId = probeId })
+	return waitForReport(target, "TutorialProbe", SELFTEST_STEP_TIMEOUT, probeId)
 end
 
 -- The root position `target`'s own client sees (nil when it never answers);
@@ -811,8 +822,188 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 	)
 end
 
+-- The saved layouts of the older tutorials, case by case, through the same
+-- sanitiser a load uses (PlayerDataService.SelfTestMigrateTutorial).
+local function runTutorialMigrationSelfTest(result: (boolean, string, string?) -> ())
+	local function migrate(raw: { [string]: any }, pulls: number?, fusions: number?): any
+		return PlayerDataService.SelfTestMigrateTutorial(raw, pulls, fusions)
+	end
+	local function lands(label: string, state: any, id: string?, detail: string?)
+		local ok: boolean
+		if id == nil then
+			ok = state.Done == true
+		else
+			ok = state.Done == false and state.Step == TutorialConfig.IndexOf(id)
+		end
+		result(ok, "tutorial migration: " .. label .. " -> " .. (id or "Done"), ("%sstep %d, done %s, Ver %d"):format(if detail then detail .. "; " else "", state.Step, tostring(state.Done), state.Ver))
+	end
+
+	-- Tutorial 1 (no Ver, 14 steps).
+	lands("Tutorial 1 claim", migrate({ Step = 2 }), "claim")
+	lands("Tutorial 1 pull", migrate({ Step = 4 }), "pull")
+	lands("Tutorial 1 fuse", migrate({ Step = 6 }), "fuse")
+	lands("Tutorial 1 multiplier", migrate({ Step = 8 }), nil)
+	lands("Tutorial 1 last step", migrate({ Step = 14 }), nil)
+	-- Tutorial 2 (Ver 2, 10 steps).
+	lands("Tutorial 2 upgrade", migrate({ Ver = 2, Step = 2 }), "pull")
+	lands("Tutorial 2 pull2", migrate({ Ver = 2, Step = 4 }), "pull")
+	lands("Tutorial 2 pedestals", migrate({ Ver = 2, Step = 5 }), "fuse")
+	lands("Tutorial 2 fuse", migrate({ Ver = 2, Step = 6 }), "fuse")
+	lands("Tutorial 2 multiplier", migrate({ Ver = 2, Step = 7 }), nil)
+	-- Tutorial 3 (Ver 3, 11 steps), every step.
+	lands("v3 claim", migrate({ Ver = 3, Step = 1 }), "claim")
+	local upgrade = migrate({ Ver = 3, Step = 2, Base = 7 }, 5, 0)
+	lands("v3 upgrade", upgrade, "pull")
+	result(upgrade.Base == 5, "tutorial migration: v3 upgrade -> the pull step counts from the save's pull counter", ("Base %d, save has 5 pulls"):format(upgrade.Base))
+	local pull = migrate({ Ver = 3, Step = 3, Base = 4, PullsGranted = true, FreePulls = 2 }, 4, 0)
+	lands("v3 pull (2 free pulls left)", pull, "pull")
+	result(pull.Base == 4 and pull.FreePulls == 2, "tutorial migration: v3 pull keeps its base and its 2 free pulls", ("Base %d, free %d"):format(pull.Base, pull.FreePulls))
+	local pull2 = migrate({ Ver = 3, Step = 4, Base = 5, PullsGranted = true, FreePulls = 1 }, 5, 0)
+	lands("v3 pull2 (1 free pull left)", pull2, "pull")
+	result(pull2.Base == 4, "tutorial migration: v3 pull2 counts the pull already made (2 pulls from the step's start)", ("Base %d, want 4"):format(pull2.Base))
+	local usedUp = migrate({ Ver = 3, Step = 4, Base = 5, PullsGranted = true, FreePulls = 0 }, 6, 3)
+	lands("v3 pull2 (free pulls used up)", usedUp, "fuse")
+	result(usedUp.Base == 3, "tutorial migration: ... and the fuse counts from the save's fusions", ("Base %d, save has 3 fusions"):format(usedUp.Base))
+	lands("v3 pull (free pulls used up)", migrate({ Ver = 3, Step = 3, PullsGranted = true, FreePulls = 0 }), "fuse")
+	lands("v3 pedestals", migrate({ Ver = 3, Step = 5 }), "fuse")
+	local fuse = migrate({ Ver = 3, Step = 6, Base = 2 }, 9, 5)
+	lands("v3 fuse", fuse, "fuse")
+	result(fuse.Base == 2, "tutorial migration: v3 fuse keeps its base", ("Base %d"):format(fuse.Base))
+	for step, name in { [7] = "index", [8] = "multiplier", [9] = "events", [10] = "rebirth", [11] = "finish" } do
+		lands("v3 " .. name, migrate({ Ver = 3, Step = step }), nil)
+	end
+	local finished = migrate({ Ver = 3, Step = 11, Done = true })
+	result(finished.Done and finished.Step == #TutorialConfig.Steps, "tutorial migration: a finished save stays finished", ("step %d, done %s"):format(finished.Step, tostring(finished.Done)))
+	local current = migrate({ Ver = TutorialConfig.DataVersion, Step = 3, Base = 1 }, 99, 99)
+	result(current.Step == 3 and current.Base == 1 and current.Ver == TutorialConfig.DataVersion, "tutorial migration: a current-layout save is not touched", ("step %d, base %d"):format(current.Step, current.Base))
+	local fresh = migrate({})
+	result(fresh.Step == 0 and not fresh.Done, "tutorial migration: a save without a tutorial is 'not decided yet' (step 0)")
+end
+
+-- The one-time tips (TutorialConfig.PlanTip), pure: never during the
+-- tutorial, once each, one at a time.
+local function runTipSelfTest(result: (boolean, string, string?) -> ())
+	local function state(change: { [string]: any }?): TutorialConfig.TipState
+		local base: TutorialConfig.TipState = {
+			Done = true,
+			Replay = false,
+			Quiet = true,
+			Showing = false,
+			SinceGone = math.huge,
+			SinceDone = math.huge,
+			Seen = {},
+			Cash = 0,
+			UpgradeCost = 100,
+			MultiplierLevel = 0,
+			MultiplierCost = 1000,
+			NewIndex = false,
+			EventChip = false,
+			RebirthProgress = 0,
+		}
+		if change then
+			for key, value in change do
+				(base :: any)[key] = value
+			end
+		end
+		return base
+	end
+	local triggers: { [string]: { [string]: any } } = {
+		tipUpgrade = { Cash = 100 },
+		tipMultiplier = { Cash = 1000, UpgradeCost = 1e9 },
+		tipIndex = { NewIndex = true },
+		tipEvent = { EventChip = true },
+		tipRebirth = { RebirthProgress = 0.5 },
+	}
+	local everything: { [string]: any } = { Cash = 1000, NewIndex = true, EventChip = true, RebirthProgress = 1 }
+	for _, tip in TutorialConfig.Tips do
+		result(TipConfig.IsValid(tip.Id), ("tips: %s is a saved tip id (TipConfig)"):format(tip.Id))
+		result(TutorialConfig.PlanTip(state(triggers[tip.Id])) == tip.Id, ("tips: %s fires on its own trigger"):format(tip.Id), tostring(TutorialConfig.PlanTip(state(triggers[tip.Id]))))
+		result(TutorialConfig.PlanTip(state(nil)) == nil, ("tips: %s does not fire without it"):format(tip.Id))
+		local ran = table.clone(triggers[tip.Id])
+		ran.Done = false
+		result(TutorialConfig.PlanTip(state(ran)) == nil, ("tips: %s never fires during the tutorial"):format(tip.Id))
+	end
+	local running = table.clone(everything)
+	running.Done = false
+	result(TutorialConfig.PlanTip(state(running)) == nil, "tips: none fires while the tutorial runs, whatever is true")
+	local replay = table.clone(everything)
+	replay.Replay = true
+	result(TutorialConfig.PlanTip(state(replay)) == nil, "tips: none fires during a replay")
+	local busy = table.clone(everything)
+	busy.Quiet = false
+	result(TutorialConfig.PlanTip(state(busy)) == nil, "tips: none fires with a card or overlay open")
+	local showing = table.clone(everything)
+	showing.Showing = true
+	result(TutorialConfig.PlanTip(state(showing)) == nil, "tips: at most one on screen")
+	local early = table.clone(everything)
+	early.SinceDone = TutorialConfig.TipAfterDoneSeconds - 0.1
+	result(TutorialConfig.PlanTip(state(early)) == nil, "tips: the first waits a moment after the tutorial ends")
+	local gap = table.clone(everything)
+	gap.SinceGone = TutorialConfig.TipGapSeconds - 0.1
+	local gapDone = table.clone(everything)
+	gapDone.SinceGone = TutorialConfig.TipGapSeconds
+	result(TutorialConfig.PlanTip(state(gap)) == nil and TutorialConfig.PlanTip(state(gapDone)) ~= nil, ("tips: a second one waits %d s after the first is gone"):format(TutorialConfig.TipGapSeconds))
+	local order: { string } = {}
+	local seen: { [string]: boolean } = {}
+	for _ = 1, #TutorialConfig.Tips + 2 do
+		local plan = everything
+		local planned = TutorialConfig.PlanTip(state({ Cash = plan.Cash, NewIndex = plan.NewIndex, EventChip = plan.EventChip, RebirthProgress = plan.RebirthProgress, Seen = seen }))
+		if not planned then
+			break
+		end
+		table.insert(order, planned)
+		seen[planned] = true
+	end
+	local want: { string } = {}
+	for _, tip in TutorialConfig.Tips do
+		table.insert(want, tip.Id)
+	end
+	result(table.concat(order, ",") == table.concat(want, ","), "tips: each fires once, in order, and never again", table.concat(order, ","))
+	result(
+		TutorialConfig.PlanTip(state({ Cash = 1e9, MultiplierLevel = 1, UpgradeCost = 1e12 })) == nil,
+		"tips: the Multiplier tip is for level 0 only"
+	)
+	result(TutorialConfig.PlanTip(state({ RebirthProgress = 0.49 })) == nil, "tips: the Rebirth tip waits for 50%")
+	local maxed = state({ Cash = 1e9 })
+	maxed.UpgradeCost = nil
+	maxed.MultiplierCost = nil
+	result(TutorialConfig.PlanTip(maxed) == nil, "tips: nothing fires when everything is maxed")
+	-- The HUD reveal table points at real steps, and nothing stays hidden after the last one.
+	local lastStep = #TutorialConfig.Steps
+	local bad: { string } = {}
+	for _, key in TutorialConfig.HudKeys do
+		local at = TutorialConfig.HudReveal[key]
+		if at == nil or TutorialConfig.IndexOf(at) == nil then
+			table.insert(bad, key .. " -> " .. tostring(at))
+		elseif not TutorialConfig.IsHudShown(key, lastStep, false, false) then
+			table.insert(bad, key .. " hidden at the last step")
+		end
+	end
+	result(#bad == 0, "tutorial: every HUD key reveals at a real step, nothing hidden after the last", table.concat(bad, ", "))
+end
+
+-- The presenter's waits for a straight run, from the config (claim -> Done,
+-- walking excluded): each step's instruction stays up at least
+-- BannerMinSeconds (a Timed step its Seconds), then "Nice!" and the settle;
+-- the claim's welcome splash outlasts those two.
+local function modelledTutorialSeconds(): number
+	local total = TutorialConfig.FirstStepDelay
+	for _, step in TutorialConfig.Steps do
+		local hold = math.max(TutorialConfig.BannerMinSeconds, step.Seconds or 0)
+		local after = TutorialConfig.NiceSeconds + TutorialConfig.SettleSeconds
+		if step.Id == "claim" then
+			after = math.max(after, TutorialConfig.WelcomeSeconds)
+		end
+		total += hold + after
+	end
+	return total
+end
+
 local function runTutorialSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	result(not TutorialService.ShouldSkipOnJoin(false), "tutorial: a live server (not Studio) never skips the tutorial on join")
+	result(#TutorialConfig.Steps == 4, "tutorial: four steps", ("%d steps"):format(#TutorialConfig.Steps))
+	runTutorialMigrationSelfTest(result)
+	runTipSelfTest(result)
 	-- No lab yet: claim one through the real claim path, release it after.
 	local claimState, releaseClaim, claimWhy = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
@@ -820,11 +1011,6 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 		return
 	end
 	local saved = PlayerDataService.SelfTestSwapTutorial(player, nil)
-	-- The Multiplier step is skipped by the server when the Pad is already
-	-- bought (a tester's save often has it): the drive needs it at level 0 so
-	-- the step is reached and probed; the level is put back after.
-	local savedMultiplier = PlayerDataService.GetCashMultiplierLevel(player)
-	PlayerDataService.SetCashMultiplierLevel(player, 0)
 	local popups = 0
 	local watch = RemoteEvents.ShopAnalytics.OnServerEvent:Connect(function(sender: Player, payload: unknown)
 		local event = typeof(payload) == "table" and (payload :: any).Event
@@ -832,18 +1018,6 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			popups += 1
 		end
 	end)
-
-	-- A save from Tutorial 1 (its 14 steps, no Ver) resumes at the matching step.
-	local function migrates(oldId: number, newId: string): boolean
-		local step = PlayerDataService.SelfTestMigrateTutorial({ Step = oldId, Done = false })
-		return step == TutorialConfig.IndexOf(newId)
-	end
-	result(
-		migrates(2, "claim") and migrates(4, "pull") and migrates(6, "fuse") and migrates(8, "multiplier") and migrates(13, "rebirth") and migrates(14, "finish"),
-		"tutorial: a Tutorial 1 save resumes at the matching step"
-	)
-	local doneStep = PlayerDataService.SelfTestMigrateTutorial({ Step = 9, Done = true })
-	result(doneStep == 9, "tutorial: a finished Tutorial 1 save stays finished")
 
 	TutorialService.DebugReset(player)
 	PlayerDataService.SyncTycoon(player)
@@ -854,6 +1028,16 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local home = if root and root:IsA("BasePart") then root.CFrame else nil
+	local function fuseTwoCommons()
+		local commons = {}
+		local owned: { any } = PlayerDataService.GetInventory(player) or {}
+		for _, item in owned do
+			if item.Tier == TutorialConfig.FreePullTier and #commons < 2 and not PlayerDataService.IsItemCarried(player, item.Uid) then
+				table.insert(commons, item.Uid)
+			end
+		end
+		FusionService.HandleFusionRequest(player, { Uids = commons })
+	end
 	local order: { string } = {}
 	local stuck: string? = nil
 	for _ = 1, #TutorialConfig.Steps + 2 do
@@ -871,41 +1055,26 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			-- The server's clock: refused before its Seconds, allowed after.
 			result(not TutorialService.Advance(player, index), ("tutorial: %s is refused before its %ds"):format(step.Id, step.Seconds or 0))
 		end
-		-- What the real client shows for this step: the banner, no card, the
-		-- HUD set of the table, the weapon bar off at Rebirth 0.
+		-- What the real client shows for this step: the banner, the card (only
+		-- Fusing), the HUD set of the table, the weapon bar off at Rebirth 0.
 		tutorialProbe(player, { Kind = "Step", StepIndex = index, StepId = step.Id }, result)
-		if step.Id == "upgrade" then
-			PlayerDataService.AddCash(player, 1e6)
-			TycoonService.HandleUpgradeRequest(player, "basic_generator")
-		elseif step.Id == "pull" or step.Id == "pull2" then
+		if step.Id == "pull" then
+			-- The step needs BOTH free pulls: one is not enough, and the pull
+			-- count in the snapshot ("0/2" -> "1/2") follows.
 			TycoonService.TutorialPull(player)
-			if step.Id == "pull" then
-				-- A single pull of a Common opens the big card ("COMMON ORB!").
-				tutorialProbe(player, { Kind = "BigCard", Expect = "COMMON ORB!" }, result)
-			end
+			PlayerDataService.SyncTycoon(player)
+			local mid = tutorial()
+			result(mid ~= nil and mid.Step == index and not mid.Done, "tutorial: one free pull does not finish the pull step", ("step %s"):format(tostring(mid and mid.Step)))
+			-- A single pull of a Common opens the big card ("COMMON ORB!").
+			tutorialProbe(player, { Kind = "BigCard", Expect = "COMMON ORB!" }, result)
+			TycoonService.TutorialPull(player)
 		elseif step.Id == "fuse" then
-			local commons = {}
-			local owned: { any } = PlayerDataService.GetInventory(player) or {}
-			for _, item in owned do
-				if item.Tier == TutorialConfig.FreePullTier and #commons < 2 and not PlayerDataService.IsItemCarried(player, item.Uid) then
-					table.insert(commons, item.Uid)
-				end
-			end
-			FusionService.HandleFusionRequest(player, { Uids = commons })
+			fuseTwoCommons()
 			-- The tutorial fusion (Common x2 -> Rare) now opens the big card too:
 			-- the step flow waits for it like the pull's. (The server-driven
 			-- fusion has no client request, so the client feeds the same
 			-- result through ResultController.)
 			tutorialProbe(player, { Kind = "BigCard", Expect = "RARE ORB!", FakeFusion = true }, result)
-		elseif step.Id == "multiplier" then
-			-- The "come back with $X" branch: the skip after SkipSeconds.
-			PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
-			-- The step has been up for the whole client probe above (seconds):
-			-- "at once" means a step that has only just begun.
-			TutorialService.DebugBackdate(player, 0)
-			result(not TutorialService.Advance(player, index), "tutorial: the Multiplier Pad can't be skipped at once")
-			TutorialService.DebugBackdate(player, 10)
-			TutorialService.Advance(player, index)
 		elseif step.Kind == "Action" then
 			-- claim: only reached on an unclaimed plot (claimed skips it).
 			stuck = step.Id .. " (needs a claimed lab)"
@@ -921,37 +1090,89 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 			break
 		end
 	end
-	if home and root and root:IsA("BasePart") then
-		root.CFrame = home
-	end
 	local t = tutorial()
 	result(t ~= nil and t.Done == true and stuck == nil, "tutorial: every step completes in order", ("%s; stuck at %s"):format(table.concat(order, " > "), tostring(stuck)))
 	task.wait(1)
 	watch:Disconnect()
 	result(popups == 0, "tutorial: no shop or deal pop-up while it runs", ("%d shown"):format(popups))
 
-	-- A step the server skips (the Multiplier Pad already bought) is skipped by
-	-- the presenter too: it goes from the Index to the Lab weather, no card or
-	-- banner for the Multiplier (the probe's "caught up" line fails if it waits).
-	local indexStep, multiplierStep, eventsStep = TutorialConfig.IndexOf("index"), TutorialConfig.IndexOf("multiplier"), TutorialConfig.IndexOf("events")
-	if indexStep and multiplierStep and eventsStep then
-		PlayerDataService.SetCashMultiplierLevel(player, 1)
-		TutorialService.DebugSetStep(player, indexStep)
+	-- The straight run, timed: the real client presents each step (waits at
+	-- their config values), the actions are simulated the moment its banner is
+	-- up and the last step is advanced by the client itself. The lab is
+	-- already claimed here, so the claim step is skipped: its waits come from
+	-- the model, and the model's total must agree with the measured steps.
+	local modelled = modelledTutorialSeconds()
+	result(modelled < TUTORIAL_BUDGET_SECONDS, ("tutorial: a straight run's waits total under %d s"):format(TUTORIAL_BUDGET_SECONDS), ("%.1f s modelled, claim to Done, walking excluded"):format(modelled))
+	TutorialService.DebugReset(player)
+	PlayerDataService.SyncTycoon(player)
+	local started = os.clock()
+	local timedStuck: string? = nil
+	local doneAt: number? = nil
+	for _ = 1, #TutorialConfig.Steps + 2 do
+		local now = tutorial()
+		if not now or now.Done then
+			doneAt = doneAt or os.clock()
+			break
+		end
+		local index = now.Step
+		local step = TutorialConfig.GetStep(index)
+		if not step or step.Id == "claim" then
+			timedStuck = "claim (needs a claimed lab)"
+			break
+		end
+		local report = askPresented(player, step.Id)
+		if not report or not (report.Data and report.Data.Up) then
+			timedStuck = step.Id .. " (never presented)"
+			break
+		end
+		if step.Id == "pull" then
+			for _ = 1, TutorialConfig.FreePulls do
+				TycoonService.TutorialPull(player)
+			end
+		elseif step.Id == "fuse" then
+			fuseTwoCommons()
+		else
+			-- Timed: the client asks the server itself once its Seconds are up.
+			local waitUntil = os.clock() + (step.Seconds or 0) + 8
+			while os.clock() < waitUntil do
+				local current = tutorial()
+				if not current or current.Done or current.Step ~= index then
+					break
+				end
+				task.wait(0.1)
+			end
+		end
 		PlayerDataService.SyncTycoon(player)
-		tutorialProbe(player, { Kind = "Step", StepIndex = indexStep, StepId = "index" }, result)
-		TutorialService.DebugBackdate(player, 10)
-		TutorialService.Advance(player, indexStep)
-		PlayerDataService.SyncTycoon(player)
-		local skipped = tutorial()
-		result(skipped ~= nil and skipped.Step == eventsStep, "tutorial: the server skips the Multiplier step when the Pad is already bought", ("at step %s"):format(tostring(skipped and skipped.Step)))
-		tutorialProbe(player, { Kind = "Step", StepIndex = eventsStep, StepId = "events" }, result)
+		local after = tutorial()
+		if after and after.Done then
+			doneAt = os.clock()
+			break
+		end
+		if after and after.Step == index then
+			timedStuck = step.Id
+			break
+		end
 	end
-	PlayerDataService.SetCashMultiplierLevel(player, savedMultiplier)
+	local measured = if doneAt then doneAt - started else nil
+	local claimWaits = TutorialConfig.BannerMinSeconds + math.max(TutorialConfig.NiceSeconds + TutorialConfig.SettleSeconds, TutorialConfig.WelcomeSeconds)
+	result(
+		timedStuck == nil and measured ~= nil and measured + claimWaits < TUTORIAL_BUDGET_SECONDS,
+		("tutorial: a straight run on the real presenter ends in under %d s"):format(TUTORIAL_BUDGET_SECONDS),
+		("pull -> Done %s s measured (result cards close by themselves, nobody taps), plus about %.1f s for the claim step; stuck: %s"):format(
+			if measured then ("%.1f"):format(measured) else "?",
+			claimWaits,
+			tostring(timedStuck)
+		)
+	)
+	print(("[SelfTest] tutorial time: %.1f s modelled (claim to Done, config waits); pull -> Done %s s measured on the real presenter"):format(modelled, if measured then ("%.1f"):format(measured) else "?"))
 
-	TutorialService.DebugSetStep(player, 6)
+	if home and root and root:IsA("BasePart") then
+		root.CFrame = home
+	end
+	TutorialService.DebugSetStep(player, 3)
 	local resumeOk, resumeDetail = PlayerDataService.SelfTestTutorialRoundTrip(player)
 	local resumed = tutorial()
-	result(resumeOk and resumed ~= nil and resumed.Step == 6, "tutorial: a save left mid-way resumes at its step", resumeDetail)
+	result(resumeOk and resumed ~= nil and resumed.Step == 3, "tutorial: a save left mid-way resumes at its step", resumeDetail)
 
 	PlayerDataService.SelfTestSwapTutorial(player, saved)
 	PlayerDataService.SyncTycoon(player)
@@ -1807,6 +2028,12 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	elseif only == "gacha" then
 		print("[SelfTest] == 12. gacha card ==")
 		runGachaCardSelfTest(player, result)
+		return
+	elseif only == "tutorial" then
+		print("[SelfTest] == 9. tutorial ==")
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the tutorial", Report = false, Suppress = true }, result)
+		runTutorialSelfTest(player, result)
+		tutorialProbe(player, { Kind = "ClearScreen", Label = "the tutorial's end", Report = false }, result)
 		return
 	elseif only == "cards" then
 		print("[SelfTest] == cards ==")

@@ -217,6 +217,16 @@ function TutorialBanner.SetSub(sub: string?)
 	end
 end
 
+-- Changes the instruction in place (no slide): the pull step's live "0/2".
+function TutorialBanner.SetText(text: string)
+	if completing or text == baseText then
+		return
+	end
+	baseText = text
+	render()
+	popPulse(1.06)
+end
+
 function TutorialBanner.SetDistance(studs: number?)
 	if completing then
 		return

@@ -5,13 +5,15 @@
 	The mandatory first-time tutorial (TutorialService on the server,
 	TutorialController on the client), and the "?" help slideshows.
 
-	Tutorial 2: it works like the egg games' tutorials. ONE instruction at a
-	time as a big banner at the top centre ("Upgrade your generator · 8m",
-	the live distance), a dotted lime path from your feet to the target,
-	chevrons on the floor at the target, one pointing hand 👆 on the exact
-	button to press, and a big contextual button near the bottom ("PULL")
-	once you stand at a world target. No OK cards. The HUD builds up as you
-	go (HudReveal).
+	Tutorial 5: under a minute, four steps (claim, pull 2, fuse, ready). It
+	works like the egg games' tutorials: ONE instruction at a time as a big
+	banner at the top centre ("Pull 2 free orbs · 8m", the live distance), a
+	dotted lime path from your feet to the target, one pointing hand 👆 on
+	the exact button to press, and a big contextual button near the bottom
+	("PULL") once you stand at a world target. The only card is Fusing. The
+	HUD builds up as you go (HudReveal). What the old steps taught (upgrade,
+	pedestals, Index, Multiplier Pad, weather, Rebirth) is Tips: one-time
+	hints after the tutorial.
 
 	Each step:
 	  Id         stable name (TutorialService's predicates, analytics)
@@ -19,31 +21,28 @@
 	                      (TutorialService's predicate, checked in every sync)
 	             "Timed"  done by itself once Seconds have passed (the client
 	                      asks, the server checks the clock)
-	             "Open"   done when the player opens that UI (chip, panel), or
-	                      after Seconds (whichever is first)
 	  Banner     the instruction, at most 6 words (the distance is added)
 	  Sub        an optional second line, one short sentence
 	  Target     world target (GoalMarkerController names): path + chevrons
 	  PromptName the ProximityPrompt at the target the contextual button
 	             triggers; Prompt is the button's word ("PULL")
-	  Hand       HUD element the hand points at ("EventChip", "Rebirth")
-	  Seconds    Timed / Open: how long
-	  Skip       "Claimed" | "Upgraded" | "MultiplierBought": skipped when the
-	             save already has it (a resumed or returning player)
-	  SkipSeconds  an Action step the player may leave after this long when
-	             it is out of reach (the Multiplier Pad: "Come back with $X")
+	  Hand       HUD element the hand points at ("Index", "Rebirth")
+	  Seconds    Timed: how long
+	  Skip       "Claimed": skipped when the save already has it (a resumed
+	             or returning player)
 
 	Saved as PlayerData.Tutorial = { Ver, Step, Done, FreeFuse, FreePulls,
 	PullsGranted, Base, Replay, ReplayHint }; Step 0 = not decided yet (the
 	first sync decides: new player -> 1, a save with real progress -> Done).
-	A save from Tutorial 1 (no Ver) has its step mapped by MigrateStep.
+	A save from an older layout (Ver < DataVersion) has its step mapped by
+	MigrateOld (PlayerDataService.sanitizeTutorial).
 ]]
 local RebirthConfig = require(script.Parent.RebirthConfig)
 local NumberFormat = require(script.Parent.Parent.Modules.NumberFormat)
 
 local TutorialConfig = {}
 
-export type Kind = "Action" | "Timed" | "Open"
+export type Kind = "Action" | "Timed"
 
 export type Card = {
 	Icon: string,
@@ -75,18 +74,16 @@ export type Step = {
 	Prompt: string?,
 	Hand: string?,
 	Seconds: number?,
+	Count: number?, -- the banner says "<Banner> 0/Count" and the step needs Count actions
 	Skip: string?,
-	SkipSeconds: number?,
 	Icon: string?, -- the objective bar's 48 px step icon
 	Card: ExplainCard?, -- opens first (never at the claim), then the banner
-	CardEnds: boolean?, -- OK on the card completes the step
 	CardDelay: number?, -- seconds after the step starts before the card opens
-	HoldSeconds: number?, -- CardEnds: after OK the banner stays this long (at least) before the step ends
 }
 
--- The saved layout version (Tutorial 3 = 3, 11 steps; 2 = Tutorial 2's 10;
--- no Ver = Tutorial 1's 14 steps).
-TutorialConfig.DataVersion = 3
+-- The saved layout version (Tutorial 5 = 4, 4 steps; 3 = Tutorial 3's 11;
+-- 2 = Tutorial 2's 10; no Ver = Tutorial 1's 14 steps).
+TutorialConfig.DataVersion = 4
 
 -- Old saves with real progress skip it (with a one-time "replay in ⚙" toast).
 TutorialConfig.ProgressRebirths = 1
@@ -103,16 +100,18 @@ TutorialConfig.ObjectiveWidth = 600
 TutorialConfig.ObjectiveMarginPhone = 32 -- both sides together (16 each)
 TutorialConfig.StepDelay = 0.4 -- the default ✓ hold (Banner.Complete without a time)
 TutorialConfig.WelcomeSeconds = 2 -- "WELCOME TO YOUR LAB!" auto-fades, no button
+TutorialConfig.FirstStepDelay = 1 -- after joining: the world settles, then the first banner
 
--- Pacing (Tutorial 4). The client plays the steps ONE AT A TIME, in order
--- (TutorialController), whatever the server's step already is:
+-- Pacing (Tutorial 5: kids don't read cards, a minute is all we get). The
+-- client plays the steps ONE AT A TIME, in order (TutorialController),
+-- whatever the server's step already is:
 --   done -> "✓ Nice!" NiceSeconds -> the bar slides out -> SettleSeconds of
 --   nothing new -> the next step's explain card (never before the player has
 --   closed whatever the step opened).
-TutorialConfig.NiceSeconds = 1.2
-TutorialConfig.SettleSeconds = 0.8
-TutorialConfig.CardReadSeconds = 1.5 -- an explain card's OK is off this long (fill bar)
-TutorialConfig.BannerMinSeconds = 3 -- an instruction stays up at least this long before it can change
+TutorialConfig.NiceSeconds = 0.6
+TutorialConfig.SettleSeconds = 0.3
+TutorialConfig.CardReadSeconds = 0 -- an explain card's OK is live at once (> 0: off this long, fill bar)
+TutorialConfig.BannerMinSeconds = 1.5 -- an instruction stays up at least this long before it can change
 TutorialConfig.AlreadyDoneText = "Already done ✓" -- a step whose action was done early
 
 -- The arrow path (client-only: a flat ">" of two thin Neon bars per arrow,
@@ -134,142 +133,39 @@ TutorialConfig.Steps = {
 		Skip = "Claimed",
 	},
 	{
-		Id = "upgrade",
-		Kind = "Action",
-		Icon = "⚡",
-		Card = {
-			Icon = "⚡",
-			Title = "Generators",
-			Body = "Generators make your money. Upgrading them makes more.",
-			Model = "Generator_basic_generator",
-		},
-		Banner = "Upgrade your generator",
-		Target = "Generator_basic_generator",
-		PromptName = "GeneratorPrompt",
-		Prompt = "UPGRADE",
-		Skip = "Upgraded",
-	},
-	{
+		-- Both free pulls in one step; no card (the banner and its sub line say it).
 		Id = "pull",
 		Kind = "Action",
 		Icon = "🎰",
-		Card = {
-			Icon = "🎰",
-			Title = "The Gacha Pad",
-			Body = "The Gacha Pad gives you orbs. Rarer orbs earn way more!",
-			Model = "GachaStation",
-		},
-		Banner = "Pull an orb",
+		Banner = "Pull 2 free orbs",
 		Sub = "Your first 2 are free!",
+		Count = TutorialConfig.FreePulls,
 		Target = "GachaStation",
 		PromptName = "PullPrompt",
 		Prompt = "PULL",
-	},
-	{
-		Id = "pull2",
-		Kind = "Action",
-		Icon = "🎰",
-		Banner = "Pull one more!",
-		Target = "GachaStation",
-		PromptName = "PullPrompt",
-		Prompt = "PULL",
-	},
-	{
-		Id = "pedestals",
-		Kind = "Open",
-		Icon = "🏛",
-		Card = {
-			Icon = "🏛",
-			Title = "Pedestals",
-			Body = "Pedestals show your best orbs. Every orb on display earns cash every second.",
-			Model = "Pedestal1",
-		},
-		CardEnds = true,
-		HoldSeconds = 4, -- after OK the pedestals earn on screen for at least 4 s
-		Banner = "Your orbs make money!",
-		Target = "Pedestal1",
-		Seconds = 30,
 	},
 	{
 		Id = "fuse",
 		Kind = "Action",
 		Icon = "🔮",
+		-- The one card worth reading: the orb diagram. Its OK is live at once.
 		Card = {
 			Icon = "🔮",
 			Title = "Fusing",
 			Body = "Fusing turns 2 orbs of the same tier into 1 better orb. Common + Common → Rare!",
 			Orbs = { "Common", "+", "Common", "→", "Rare" },
 		},
-		Banner = "Fuse 2 orbs",
+		Banner = "Fuse your 2 orbs",
 		Target = "FusionMachine",
 		PromptName = "FusePrompt",
 		Prompt = "FUSE",
-	},
-	{
-		Id = "index",
-		Kind = "Open",
-		Icon = "📖",
-		Card = {
-			Icon = "📖",
-			Title = "The Index",
-			Body = "The Index collects every orb you find. Each new one boosts your income forever.",
-		},
-		CardEnds = true,
-		CardDelay = 1, -- after INDEX pops in
-		Banner = "Open your Index",
-		Hand = "Index",
-		Seconds = 30,
-	},
-	{
-		Id = "multiplier",
-		Kind = "Action",
-		Icon = "✖️",
-		Card = {
-			Icon = "✖️",
-			Title = "Multiplier Pad",
-			Body = "The Multiplier Pad multiplies ALL your money.",
-			Model = "MultiplierStation",
-		},
-		Banner = "Make more money",
-		Target = "MultiplierStation",
-		PromptName = "UpgradePrompt",
-		Prompt = "BUY",
-		Skip = "MultiplierBought",
-		SkipSeconds = 3,
-	},
-	{
-		Id = "events",
-		Kind = "Open",
-		Icon = "🌦",
-		Card = {
-			Icon = "🌦",
-			Title = "Lab weather",
-			Body = "Lab weather changes every 15 min. Each one gives a bonus. Tap the top chip to see it.",
-		},
-		Banner = "Lab weather!",
-		Sub = "Every 15 min. Tap it to see what to do",
-		Hand = "EventChip",
-		Seconds = 6,
-	},
-	{
-		Id = "rebirth",
-		Kind = "Open",
-		Icon = "♻️",
-		Card = {
-			Icon = "♻️",
-			Title = "Rebirth",
-			Body = ("Rebirth at %s: you keep your orbs and earn faster forever."):format(NumberFormat.Money(RebirthConfig.GetCost(0))),
-		},
-		Banner = ("Reach %s to Rebirth"):format(NumberFormat.Money(RebirthConfig.GetCost(0))),
-		Hand = "Rebirth",
-		Seconds = 6,
 	},
 	{
 		Id = "finish",
 		Kind = "Timed",
 		Icon = "🎉",
 		Banner = "You're ready!",
-		Seconds = 4,
+		Seconds = 2,
 	},
 } :: { Step }
 
@@ -286,16 +182,17 @@ function TutorialConfig.IndexOf(id: string): number?
 	return nil
 end
 
--- Tutorial 1's step (its 14-step list) -> this list's step. A save in the
--- middle of the old one resumes at the nearest step here.
-local OLD_STEP_IDS = {
+-- Older saves' steps -> Tutorial 5's. Every old list is written as step ids
+-- of ITS OWN layout; the last hop (V4_FROM) maps an id to this list's step
+-- (or to Done). Old Tutorial 1/2 saves hop through Tutorial 3's ids first.
+local V1_STEP_IDS = { -- Tutorial 1's 14 steps, as Tutorial 3 step ids
 	"claim", -- welcome
 	"claim",
 	"upgrade",
 	"pull",
 	"pedestals",
 	"fuse",
-	"multiplier", -- index
+	"index", -- index
 	"multiplier",
 	"events",
 	"rebirth", -- gifts
@@ -305,18 +202,58 @@ local OLD_STEP_IDS = {
 	"finish",
 }
 
--- Tutorial 2's step (10 steps) -> this list's: "index" was added before
--- "multiplier".
+-- Tutorial 2's 10 steps, as Tutorial 3 step ids.
 local V2_STEP_IDS = { "claim", "upgrade", "pull", "pull2", "pedestals", "fuse", "multiplier", "events", "rebirth", "finish" }
 
-function TutorialConfig.MigrateV2Step(oldStep: number): number
-	local id = V2_STEP_IDS[oldStep]
-	return if id then TutorialConfig.IndexOf(id) :: number else 1
+-- Tutorial 3's 11 steps.
+local V3_STEP_IDS = { "claim", "upgrade", "pull", "pull2", "pedestals", "fuse", "index", "multiplier", "events", "rebirth", "finish" }
+
+-- Tutorial 3 step id -> the step here. "Done": the player had already seen
+-- everything that is left (Index and later were all taught after the fuse).
+-- A free-pull step whose 2 pulls are all used goes straight to "fuse".
+local V4_FROM: { [string]: string } = {
+	claim = "claim",
+	upgrade = "pull",
+	pull = "pull",
+	pull2 = "pull",
+	pedestals = "fuse",
+	fuse = "fuse",
+	index = "Done",
+	multiplier = "Done",
+	events = "Done",
+	rebirth = "Done",
+	finish = "Done",
+}
+
+local function fromV3Id(id: string?, freePullsUsedUp: boolean): (number, boolean)
+	local mapped = if id then V4_FROM[id] else nil
+	if mapped == nil then
+		return 1, false
+	elseif mapped == "Done" then
+		return #TutorialConfig.Steps, true
+	end
+	if mapped == "pull" and freePullsUsedUp then
+		mapped = "fuse"
+	end
+	return TutorialConfig.IndexOf(mapped) :: number, false
 end
 
-function TutorialConfig.MigrateStep(oldStep: number): number
-	local id = OLD_STEP_IDS[oldStep]
-	return if id then TutorialConfig.IndexOf(id) :: number else 1
+-- The step id (in Tutorial 3's list) an older save's step stands for: `ver`
+-- < 2 = Tutorial 1's 14 steps, 2 = Tutorial 2's 10, 3 = Tutorial 3's 11.
+function TutorialConfig.OldStepId(ver: number, oldStep: number): string?
+	if ver < 2 then
+		return V1_STEP_IDS[oldStep]
+	elseif ver == 2 then
+		return V2_STEP_IDS[oldStep]
+	end
+	return V3_STEP_IDS[oldStep]
+end
+
+-- (step, done) in this list for an older save at `oldStep` of layout `ver`.
+-- `freePullsUsedUp`: its free pulls were granted and are gone (it then
+-- resumes at the fuse). An unknown step starts over at the claim.
+function TutorialConfig.MigrateOld(ver: number, oldStep: number, freePullsUsedUp: boolean): (number, boolean)
+	return fromV3Id(TutorialConfig.OldStepId(ver, oldStep), freePullsUsedUp)
 end
 
 --[[ The HUD builds up ------------------------------------------------------------
@@ -329,11 +266,11 @@ end
 TutorialConfig.HudKeys = { "Upgrades", "Items", "Index", "Rebirth", "Event", "Settings", "Shop", "Goal" }
 
 TutorialConfig.HudReveal = {
-	Upgrades = "upgrade", -- the upgrade step
-	Items = "pull2", -- after the first pull
-	Index = "index", -- after the first fusion
-	Rebirth = "rebirth",
-	Event = "events",
+	Items = "pull", -- the first pull
+	Upgrades = "fuse",
+	Index = "fuse", -- the fusion fills it
+	Rebirth = "finish",
+	Event = "finish",
 	Settings = "finish",
 	Shop = "finish", -- SHOP, GIFTS, QUESTS, the deal badge, the power-ups
 	Goal = "finish", -- NEXT GOAL + the quest tracker
@@ -362,6 +299,100 @@ function TutorialConfig.IsHudShown(key: string, step: number, done: boolean, rep
 		return true
 	end
 	return step >= 1 and step >= index
+end
+
+--[[ One-time tips (what the removed steps became) --------------------------------
+	Each fires ONCE per account (TipConfig.Ids, saved like the others), only
+	after the tutorial is Done, only when no card or overlay is open, as the
+	hand on the thing plus one short TopStack line, never a card. At most one
+	on screen; the next one waits TipGapSeconds after the first is gone.
+	TutorialController runs them; PlanTip is the pure "which one now?" rule
+	(also /selftest). Hand: a HudController coach target ("Upgrades", "Index",
+	"Rebirth") or "EventChip"; Target (+ PromptName / Prompt): a world target
+	with the lit path and the big button, as the old Multiplier step.
+]]
+
+export type TipDef = {
+	Id: string,
+	Line: string,
+	Hand: string?,
+	Target: string?,
+	PromptName: string?,
+	Prompt: string?,
+}
+
+TutorialConfig.Tips = {
+	{ Id = "tipUpgrade", Hand = "Upgrades", Line = "Upgrade generators to earn faster!" },
+	{
+		Id = "tipMultiplier",
+		Target = "MultiplierStation",
+		PromptName = "UpgradePrompt",
+		Prompt = "BUY",
+		Line = "The Multiplier Pad multiplies ALL your money!",
+	},
+	{ Id = "tipIndex", Hand = "Index", Line = "New orb! Each one boosts your income forever." },
+	{ Id = "tipEvent", Hand = "EventChip", Line = "Lab weather! Tap it to see the bonus." },
+	{ Id = "tipRebirth", Hand = "Rebirth", Line = "Rebirth when the bar is full: keep your orbs, earn faster forever." },
+} :: { TipDef }
+
+TutorialConfig.TipGapSeconds = 20 -- a second tip waits this long after the first is gone
+TutorialConfig.TipAfterDoneSeconds = 3 -- ... and the first waits this long after the tutorial ends
+TutorialConfig.TipMaxSeconds = 45 -- a tip nobody follows goes by itself (it stays seen)
+TutorialConfig.RebirthTipProgress = 0.5 -- tipRebirth: cash / Rebirth cost
+-- The line under the first pull that lands on a pedestal (no step for it).
+TutorialConfig.PedestalLine = "Your orbs earn cash every second!"
+
+function TutorialConfig.GetTip(id: string): TipDef?
+	for _, tip in TutorialConfig.Tips do
+		if tip.Id == id then
+			return tip
+		end
+	end
+	return nil
+end
+
+-- What the planner needs to know (numbers and flags the client reads, so the
+-- rule itself needs no game state).
+export type TipState = {
+	Done: boolean, -- the tutorial is over
+	Replay: boolean, -- ... but a replay is running
+	Quiet: boolean, -- no card, panel or overlay is open
+	Showing: boolean, -- a tip (or hand) is on screen
+	SinceGone: number, -- seconds since the last tip went (math.huge: none yet)
+	SinceDone: number, -- seconds since the tutorial ended (math.huge: before this session)
+	Seen: { [string]: boolean },
+	Cash: number,
+	UpgradeCost: number?, -- the cheapest next generator level (nil: all maxed)
+	MultiplierLevel: number,
+	MultiplierCost: number?, -- the Multiplier Pad's next price (nil: maxed)
+	NewIndex: boolean, -- an Index entry was found since the tutorial ended
+	EventChip: boolean, -- the event chip is on screen
+	RebirthProgress: number, -- cash / the Rebirth cost
+}
+
+-- The tip to show now, or nil. Never during the tutorial or a replay, never
+-- over an open card, never two at once (the second waits TipGapSeconds), and
+-- never twice (Seen).
+function TutorialConfig.PlanTip(state: TipState): string?
+	if not state.Done or state.Replay or not state.Quiet or state.Showing then
+		return nil
+	end
+	if state.SinceDone < TutorialConfig.TipAfterDoneSeconds or state.SinceGone < TutorialConfig.TipGapSeconds then
+		return nil
+	end
+	local ready: { [string]: boolean } = {
+		tipUpgrade = state.UpgradeCost ~= nil and state.Cash >= (state.UpgradeCost :: number),
+		tipMultiplier = state.MultiplierLevel == 0 and state.MultiplierCost ~= nil and state.Cash >= (state.MultiplierCost :: number),
+		tipIndex = state.NewIndex,
+		tipEvent = state.EventChip,
+		tipRebirth = state.RebirthProgress >= TutorialConfig.RebirthTipProgress,
+	}
+	for _, tip in TutorialConfig.Tips do
+		if not state.Seen[tip.Id] and ready[tip.Id] then
+			return tip.Id
+		end
+	end
+	return nil
 end
 
 --[[ "?" help ------------------------------------------------------------------ ]]

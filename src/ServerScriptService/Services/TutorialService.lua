@@ -2,7 +2,8 @@
 --[[
 	TutorialService
 	---------------
-	The mandatory first-time tutorial (TutorialConfig.Steps, Tutorial 2).
+	The mandatory first-time tutorial (TutorialConfig.Steps, Tutorial 5: four
+	steps, claim / pull 2 / fuse / ready).
 	Server-owned: the step lives in PlayerData.Tutorial and goes out in
 	every snapshot.
 
@@ -41,7 +42,6 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DebugConfig = require(ReplicatedStorage.Shared.Config.DebugConfig)
 local TutorialConfig = require(ReplicatedStorage.Shared.Config.TutorialConfig)
-local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local AnalyticsKit = require(script.Parent.Parent.Modules.AnalyticsKit)
 local RemoteGuard = require(script.Parent.Parent.Modules.RemoteGuard)
@@ -65,15 +65,6 @@ local enteredAt: { [Player]: number } = {}
 
 --[[ Counters and predicates ------------------------------------------------ ]]
 
-local function generatorLevels(player: Player): number
-	local total = 0
-	local generators: { [string]: number } = PlayerDataService.GetGenerators(player) or {}
-	for _, level in generators do
-		total += level
-	end
-	return total
-end
-
 local function pullCount(player: Player): number
 	local data = PlayerDataService.GetData(player)
 	return if data then data.GachaPulls + data.FreePulls else 0
@@ -86,9 +77,7 @@ end
 
 -- The counter an Action step waits on (recorded as Base when it starts).
 local COUNTERS: { [string]: (Player) -> number } = {
-	upgrade = generatorLevels,
 	pull = pullCount,
-	pull2 = pullCount,
 	fuse = function(player: Player): number
 		return PlayerDataService.GetTotalFusions(player)
 	end,
@@ -99,33 +88,17 @@ local PREDICATES: { [string]: (Player, number) -> boolean } = {
 	claim = function(player)
 		return isClaimed(player)
 	end,
-	upgrade = function(player, base)
-		return generatorLevels(player) > base
-	end,
 	pull = function(player, base)
-		return pullCount(player) > base
-	end,
-	pull2 = function(player, base)
-		return pullCount(player) > base
+		return pullCount(player) >= base + TutorialConfig.FreePulls
 	end,
 	fuse = function(player, base)
 		return PlayerDataService.GetTotalFusions(player) > base
-	end,
-	multiplier = function(player)
-		return PlayerDataService.GetCashMultiplierLevel(player) >= 1
 	end,
 }
 
 -- Already true on this save: the step is skipped on entry.
 local SKIPS: { [string]: (Player) -> boolean } = {
 	Claimed = isClaimed,
-	Upgraded = function(player)
-		local generators: { [string]: number } = PlayerDataService.GetGenerators(player) or {}
-		return (generators["basic_generator"] or 0) >= 2
-	end,
-	MultiplierBought = function(player)
-		return PlayerDataService.GetCashMultiplierLevel(player) >= 1
-	end,
 }
 
 --[[ Steps ------------------------------------------------------------------- ]]
@@ -141,6 +114,14 @@ end
 local function tutorialOf(player: Player): any
 	local data = PlayerDataService.GetData(player)
 	return data and data.Tutorial
+end
+
+-- The Pull step's 2 free pulls, once per account (a replay has none).
+local function grantFreePulls(t: any, step: TutorialConfig.Step)
+	if step.Id == "pull" and not t.PullsGranted and not t.Replay then
+		t.PullsGranted = true
+		t.FreePulls = TutorialConfig.FreePulls
+	end
 end
 
 -- Starts step `index` (or finishes when past the last); skips satisfied
@@ -210,6 +191,11 @@ local function check(player: Player)
 		end
 		enter(player, t, 1)
 	end
+	-- A save migrated onto the Pull step (an older layout) never entered it.
+	local current = TutorialConfig.GetStep(t.Step)
+	if current then
+		grantFreePulls(t, current)
+	end
 	for _ = 1, #TutorialConfig.Steps do
 		local step = TutorialConfig.GetStep(t.Step)
 		if not step or t.Done or step.Kind ~= "Action" then
@@ -243,16 +229,8 @@ function TutorialService.Advance(player: Player, stepIndex: number): boolean
 	local allowed = false
 	if t.Replay then
 		allowed = true -- SKIP
-	elseif step.Kind == "Open" then
-		allowed = true
 	elseif step.Kind == "Timed" then
 		allowed = elapsed >= (step.Seconds or 0) - TIMED_SLACK
-	elseif step.Id == "multiplier" then
-		-- Out of reach right now ("Come back with $X"): leave after SkipSeconds.
-		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(PlayerDataService.GetCashMultiplierLevel(player))
-		allowed = cost ~= nil
-			and PlayerDataService.GetCash(player) < cost
-			and elapsed >= (step.SkipSeconds or 0) - TIMED_SLACK
 	end
 	if not allowed then
 		return false

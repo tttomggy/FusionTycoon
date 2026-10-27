@@ -1755,22 +1755,29 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 		end
 		local shownAt, readyAt = TutorialExplain.GetReadTimes()
 		local delay = if readyAt > 0 then readyAt - shownAt else -1
+		-- CardReadSeconds 0 (Tutorial 5): OK is live the moment the card opens.
+		local liveAtOnce = TutorialConfig.CardReadSeconds <= 0
 		table.insert(lines, {
-			Ok = (not seenEarly or lockedAtOpen) and delay >= TutorialConfig.CardReadSeconds - 0.2 and delay <= TutorialConfig.CardReadSeconds + 0.5,
+			Ok = (liveAtOnce and not lockedAtOpen or (not liveAtOnce and (not seenEarly or lockedAtOpen)))
+				and delay >= TutorialConfig.CardReadSeconds - 0.2
+				and delay <= TutorialConfig.CardReadSeconds + 0.5,
 			Name = ("tutorial %s: the card's OK turns on after %.1f s"):format(stepId, TutorialConfig.CardReadSeconds),
 			Detail = ("grey when first seen (%.2f s after it opened): %s, turned on after %.2f s"):format(firstSeen - shownAt0, tostring(lockedAtOpen), delay),
+		})
+		-- A tap anywhere on the card is OK: the tap area covers the card body.
+		local tapArea = TutorialExplain.GetTapArea()
+		table.insert(lines, {
+			Ok = tapArea ~= nil and tapArea.Active ~= false and (tooSmall or (tapArea.AbsoluteSize.X > 0 and tapArea.AbsoluteSize.Y > 0)),
+			Name = ("tutorial %s: a tap anywhere on the card counts as OK"):format(stepId),
 		})
 		TutorialExplain.PressOk()
 		task.wait(0.2)
 		table.insert(lines, dimLine(stepId .. " (after OK)"))
 		local banner = TutorialBanner.IsShown()
 		table.insert(lines, {
-			Ok = step.CardEnds == true or banner,
+			Ok = banner,
 			Name = ("tutorial %s: the banner takes over after OK"):format(stepId),
 		})
-		if step.CardEnds then
-			return lines
-		end
 	else
 		table.insert(lines, { Ok = not cardOpen, Name = ("tutorial %s: no card"):format(stepId) })
 	end
@@ -1796,8 +1803,10 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 	end
 	local text = TutorialBanner.GetBaseText()
 	local words = #text:split(" ")
+	-- A step with a Count carries its live "0/2" after the instruction.
+	local bannerOk = if step.Count then text:match("^" .. step.Banner:gsub("%p", "%%%0") .. " %d+/%d+$") ~= nil else text == step.Banner
 	table.insert(lines, {
-		Ok = text == step.Banner and words <= 6,
+		Ok = bannerOk and words <= 6,
 		Name = ("tutorial %s: the banner reads its instruction in 6 words or fewer"):format(stepId),
 		Detail = ("%q (%d words)"):format(text, words),
 	})
@@ -4275,6 +4284,26 @@ local function probeTutorial(payload: any)
 			return probeSwing(tostring(payload.Weapon))
 		elseif payload.Kind == "Step" then
 			return probeStep(payload.StepIndex, payload.StepId)
+		elseif payload.Kind == "Presented" then
+			-- The timed run: answers the moment the real presenter has the step's
+			-- banner up (no checks, no waits of its own). Data.Seconds: how long it took.
+			local TutorialController = require(script.Parent.TutorialController) :: any
+			local TutorialBanner = require(UI.TutorialBanner) :: any
+			local TutorialExplain = require(UI.TutorialExplain) :: any
+			local started = os.clock()
+			local function up(): boolean
+				local current = TutorialController.GetPresentedStep()
+				return current ~= nil and current.Id == payload.StepId and TutorialBanner.IsShown()
+			end
+			while not up() and os.clock() - started < PRESENT_WAIT do
+				-- The player taps the explain card at once (its OK is live).
+				if TutorialExplain.IsOpen() and TutorialExplain.IsOkReady() then
+					TutorialExplain.PressOk()
+				end
+				task.wait(0.05)
+			end
+			reportData = { Seconds = os.clock() - started, Up = up() }
+			return {}
 		elseif payload.Kind == "BigCard" then
 			return probeBigCard(payload.Expect, payload.FakeFusion == true)
 		elseif payload.Kind == "ClearScreen" then

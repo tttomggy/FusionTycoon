@@ -534,6 +534,17 @@ showFusionBanner = function(newItem: any, sourceLine: string?)
 	})
 end
 
+-- One plain line on the announcement slot (Tutorial 5: the pedestal hint and
+-- the one-time tips; 2.5 s, queued like any banner, never a card). The same
+-- Key replaces its queued twin. Returns nothing: the line is not tracked.
+function AnnouncementController.ShowLine(text: string, key: string?)
+	enqueue({
+		Text = UIKit.EscapeRichText(text),
+		AccentColor = Colors.Goal,
+		Key = key,
+	})
+end
+
 -- Rainbow Storm's server-wide hype banner (every client sees the event at
 -- once; this is the big rainbow kit on top of the event's own banner).
 function AnnouncementController.ShowEventHype(text: string)

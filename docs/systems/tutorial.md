@@ -10,6 +10,87 @@ hand. Only the Done state changes (no rewards, free pulls untouched).
 still run it afterwards in that session, and `runTutorialSelfTest` swaps the
 tutorial state as before so it still drives every step.
 
+## Tutorial 5: under a minute (4 steps, the rest is tips)
+
+Players join and leave during the tutorial and Roblox ranks first-60-second
+leaves; kids don't read cards. So the mandatory part is four steps,
+`TutorialConfig.Steps` (DataVersion 4):
+
+| # | Id | What | Card |
+|---|---|---|---|
+| 1 | `claim` | Claim your lab | none (then the welcome splash) |
+| 2 | `pull` | `Pull 2 free orbs 0/2` (live count in the banner, `Step.Count`; the snapshot's `Tutorial.PullsDone`); done after the 2nd free pull (predicate: pull counter >= `Base` + 2) | none (banner + "Your first 2 are free!") |
+| 3 | `fuse` | `Fuse your 2 orbs` at the machine (the first fusion always succeeds) | the Fusing orb diagram, its OK live at once; a tap anywhere on the card is OK (`TutorialExplain` `TapAnywhere`) |
+| 4 | `finish` | `You're ready!` 2 s (Timed), the HUD finishes popping in | none |
+
+- **Pacing** (`TutorialConfig`): `CardReadSeconds = 0`, `NiceSeconds = 0.6`,
+  `SettleSeconds = 0.3`, `BannerMinSeconds = 1.5`, `FirstStepDelay = 1`,
+  `WelcomeSeconds = 2`. The Tutorial 4 rules below (one step at a time, in
+  order; the presenter follows the server) are unchanged; only these numbers
+  differ from the ones quoted there.
+- **Pedestals have no step.** When the first pull lands on a pedestal,
+  `TutorialController.pedestalFrame` shows the "+$X/s" pops over the pedestals
+  for 4 s and one `TopStack` line (`AnnouncementController.ShowLine`,
+  `TutorialConfig.PedestalLine`, 2.5 s, non-blocking).
+- **HUD reveal** (`TutorialConfig.HudReveal`): `Items` at `pull`, `Upgrades` +
+  `Index` at `fuse`, `Rebirth`, `Event`, `Settings`, `Shop`, `Goal` at
+  `finish` (one by one, `HudRevealDelay`). `/selftest` checks every key points
+  at a real step and nothing is hidden at the last one.
+- **Saves.** `DataVersion = 4`; `PlayerDataService.sanitizeTutorial` maps an
+  older mid-tutorial save through `TutorialConfig.OldStepId` /
+  `MigrateOld` (Tutorial 1 and 2 saves hop through Tutorial 3's step ids):
+  `claim` -> `claim`; `upgrade`, `pull`, `pull2` -> `pull` (their free pulls
+  all used -> `fuse`); `pedestals`, `fuse` -> `fuse`; `index` and later ->
+  Done. `Base` is re-based onto the new step's counter (pulls, or fusions),
+  and a save landing on `pull` that never had its free pulls is granted them
+  on its first sync (`TutorialService.check`).
+- **Funnel analytics** (`AnalyticsKit.FunnelSteps`) are milestones, not
+  tutorial steps, and are unchanged.
+
+### One-time tips (what the removed steps became)
+
+`TutorialConfig.Tips` (ids in `TipConfig.Ids`, saved like the others; marked
+seen when they START). Each fires ONCE per account, only after the tutorial is
+Done (not in a replay), only with no card / panel / overlay open, as the hand
+plus one `TopStack` line, never a card. `TutorialConfig.PlanTip(state)` is the
+pure "which one now?" rule (also `/selftest`); `TutorialController.tipFrame`
+feeds it and runs the hand.
+
+| Tip id | When | Hand on | Line |
+|---|---|---|---|
+| `tipUpgrade` | cash >= the cheapest generator upgrade (`TycoonConfig.GetCheapestUpgrade`) | UPGRADES | Upgrade generators to earn faster! |
+| `tipMultiplier` | Multiplier Pad level 0 and cash >= its next price | the pad: lit path + the big BUY button | The Multiplier Pad multiplies ALL your money! |
+| `tipIndex` | a new Index entry found after the tutorial ended (the baseline is the count when it ended / when you joined) | INDEX | New orb! Each one boosts your income forever. |
+| `tipEvent` | the event chip is on screen (the `event_<Id>` pulse stays) | the event chip | Lab weather! Tap it to see the bonus. |
+| `tipRebirth` | cash / Rebirth cost >= 50% | REBIRTH | Rebirth when the bar is full: keep your orbs, earn faster forever. |
+
+- At most one tip (or `giftHand` / `questHand`, which share the slot) is up; the
+  next waits `TipGapSeconds` (20 s) after it is gone, and the first
+  `TipAfterDoneSeconds` (3 s) after the tutorial ends. A tip goes when the
+  player opens what it points at (UPGRADES / INDEX / REBIRTH panel, the event
+  card, the pad bought) or after `TipMaxSeconds` (45 s); it stays seen.
+- The "?" help slideshows keep the full explanations. NEXT GOAL is unchanged.
+- **Nothing pops up during the tutorial** (guards checked): the Daily card
+  (`DailyController` waits on `IsTutorialActive`), shop side cards / Starter /
+  deals (`offerBlocked` "Tutorial", the deal tile), the gift and quest hands
+  and all tips (need `Done`), the notify opt-in (tutorial guard + 5 min),
+  events' `Quiet`, big toasts (`SetBigHold`). The drive counts shop / deal
+  pop-ups (must be 0).
+- **`/selftest tutorial`** (alone, or section 9): the migration map case by
+  case, the tips (fire once, never during the tutorial, one at a time, 20 s
+  apart), a fresh save through the 4 steps with the real predicates, the real
+  client's banner / card / HUD set per step, and the time: it logs `tutorial
+  time: X s modelled (claim to Done, config waits); pull -> Done Y s measured
+  on the real presenter` (the lab is already claimed, so the claim step is the
+  model's; result cards close by themselves because nobody taps) and fails
+  over 45 s (`TUTORIAL_BUDGET_SECONDS`).
+
+The Tutorial 2 / 3 / 4 sections below describe the machinery (objective bar,
+path, hand, contextual button, HUD gate, presenter); where they name the
+11-step list, its banners, the 1.5 s card read time, the Pedestals / Index /
+Multiplier / weather / Rebirth steps, `Open` steps or `HoldSeconds`, Tutorial 5
+replaced them with the above.
+
 Moved out of CLAUDE.md (verbatim). Read this file when a task touches this system.
 
 - **Tutorial 2** (mandatory, first time; `TutorialConfig` steps + HUD

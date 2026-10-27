@@ -2,13 +2,16 @@
 --[[
 	TutorialController
 	------------------
-	Drives the first-time tutorial on the client (Tutorial 2; the steps are
+	Drives the first-time tutorial on the client (Tutorial 5: four steps,
+	claim / pull 2 / fuse / ready, under a minute; the steps are
 	TutorialConfig.Steps, the server owns the step, TutorialService, and
 	sends it in the snapshot). One instruction at a time; a step that
-	introduces something opens one big explain card first (UI/TutorialExplain):
+	introduces something opens one big explain card first (UI/TutorialExplain:
+	only Fusing has one, its OK is live at once):
 
 	  1. THE OBJECTIVE BAR (UI/TutorialBanner), top centre under the Roblox
-	     top bar: icon, the step's instruction, "3 / 11", and while it has a
+	     top bar: icon, the step's instruction ("Pull 2 free orbs 0/2": a
+	     step with `Count` shows the live count), "2 / 4", and while it has a
 	     world target the live distance (a lime "24m" pill).
 	  2. THE PATH (Effects/TutorialPath): small lime arrows from your feet to
 	     the target, the goal arrow's bouncing pill (GoalMarkerController's
@@ -20,23 +23,26 @@
 	     Pad's PULL sends RequestGachaPull instead (the card's E key: the pad's
 	     own prompts are off).
 	  4. THE HAND 👆: one for the whole UI, on the exact button to press: the
-	     big button; in the Fuse panel AUTO-FILL then FUSE; the event chip;
-	     REBIRTH. Never a rectangle.
+	     big button; in the Fuse panel AUTO-FILL then FUSE. Never a rectangle.
 	  5. Done: "Action" steps only when the server confirms the real action
-	     (the snapshot's Step moves on); "Timed" / "Open" steps ask the
-	     server (TutorialAdvance, re-checked) after their Seconds or once the
-	     chip / panel was opened. Then the banner shows "✓ Nice!" and the
+	     (the snapshot's Step moves on); "Timed" steps ask the
+	     server (TutorialAdvance, re-checked) after their Seconds. Then the banner shows "✓ Nice!" and the
 	     Step sound; the next step starts after a pause (Tutorial 4: ONE
 	     step at a time, in order, see "Presenting a step" below).
 
-	The only card is the welcome splash after the claim ("WELCOME TO YOUR
-	LAB!", fades by itself). The HUD builds up as it goes (UI/HudGate): this
-	file only tells it nothing: the gate reads the same saved step.
+	Besides the Fusing card there is the welcome splash after the claim
+	("WELCOME TO YOUR LAB!", fades by itself). The HUD builds up as it goes
+	(UI/HudGate): this file only tells it nothing: the gate reads the same
+	saved step. The pedestals have no step: when the first pull lands on one,
+	its "+$X/s" shows for a few seconds with one TopStack line.
 
-	After it, two just-in-time hands, once each: the first time a gift is
-	ready (GIFTS) and the first claimable quest (QUESTS). While it runs
+	After it, the one-time TIPS (TutorialConfig.Tips; the tip runner below):
+	a hand on the thing plus one TopStack line, once per account, at most one
+	at a time, 20 s apart, never a card: UPGRADES (cash >= the cheapest
+	upgrade), the Multiplier Pad, INDEX (a new entry), the event chip, REBIRTH
+	(50%), and the old giftHand / questHand. While the tutorial runs
 	(TycoonController.IsTutorialActive) shop side cards, deal pop-ups, the
-	Daily card and one-time tips wait; held tips show at the end. An old save
+	Daily card and big tips wait; held tips show at the end. An old save
 	that skipped it gets "replay it in ⚙ Settings" once.
 ]]
 local Players = game:GetService("Players")
@@ -58,9 +64,11 @@ local TutorialExplain = require(UI.TutorialExplain)
 local TutorialHand = require(UI.TutorialHand)
 local HudGate = require(UI.HudGate)
 local FusePanel = require(UI.FusePanel)
-local RebirthPanel = require(UI.RebirthPanel)
 local GiftsPanel = require(UI.GiftsPanel)
 local QuestsPanel = require(UI.QuestsPanel)
+local UpgradesPanel = require(UI.UpgradesPanel)
+local IndexPanel = require(UI.IndexPanel)
+local RebirthPanel = require(UI.RebirthPanel)
 local EventInfoCard = require(UI.EventInfoCard)
 local TutorialPath = require(script.Parent.Parent.Effects.TutorialPath)
 local TycoonController = require(script.Parent.TycoonController)
@@ -70,13 +78,14 @@ local HudController = require(script.Parent.HudController)
 local EventController = require(script.Parent.EventController)
 local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
+local AnnouncementController = require(script.Parent.AnnouncementController)
 
 local TutorialController = {}
 
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
-local FIRST_STEP_DELAY = 1 -- after joining: let the world settle, then the first banner
+local PEDESTAL_POP_SECONDS = 4 -- "+$X/s" over the pedestal the first pull landed on
 local ARRIVE_STUDS = 8 -- inside this the distance is dropped (you're there)
 local PEDESTAL_POP_OFFSET = 6 -- studs above a pedestal for "+$X/s"
 local RESEND_SECONDS = 2
@@ -104,9 +113,10 @@ local advanceSentFor: number? = nil
 local replayHintShown = false
 local wasActive = false
 local pedestalPops: { BillboardGui } = {}
-local lastSub: string? = nil
+local pedestalPopUntil = 0 -- os.clock() the "+$X/s" pops go
+local pedestalHintShown = false -- the pedestal line was shown for this run of the tutorial
+local tipPressing: TutorialConfig.TipDef? = nil -- a world tip (the Multiplier Pad): its path and big button are up
 local pressing = false
-local openSeen = false -- an Open step's card / panel has been up (it ends when it is closed)
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
 
@@ -131,15 +141,6 @@ local function sendAdvance(stepIndex: number)
 	end)
 end
 
--- Multiplier: the level-1 price while it is out of reach right now.
-local function multiplierShortfall(): number?
-	local cost = TycoonConfig.GetCashMultiplierUpgradeCost(TycoonController.GetCashMultiplierLevel())
-	if cost and TycoonController.GetCash() < cost then
-		return cost
-	end
-	return nil
-end
-
 local function rootPosition(): Vector3?
 	local character = localPlayer.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -149,7 +150,7 @@ end
 --[[ World prompts ------------------------------------------------------------------------ ]]
 
 -- The step's ProximityPrompt at its target, once built.
-local function findPrompt(step: TutorialConfig.Step): ProximityPrompt?
+local function findPrompt(step: { Target: string?, PromptName: string? }): ProximityPrompt?
 	if not step.Target or not step.PromptName then
 		return nil
 	end
@@ -179,7 +180,7 @@ local function inReach(prompt: ProximityPrompt): boolean
 end
 
 -- The big button: the real prompt, triggered from the client.
-local function pressPrompt(step: TutorialConfig.Step)
+local function pressPrompt(step: { Target: string?, PromptName: string? })
 	if pressing then
 		return
 	end
@@ -205,7 +206,7 @@ local function pressPrompt(step: TutorialConfig.Step)
 	end)
 end
 
---[[ "+$X/s" over each pedestal's orb (the pedestals step) --------------------------------- ]]
+--[[ "+$X/s" over each pedestal's orb (when the first pull lands on one) --------------------- ]]
 
 local function clearPedestalPops()
 	for _, gui in pedestalPops do
@@ -214,7 +215,7 @@ local function clearPedestalPops()
 	table.clear(pedestalPops)
 end
 
-local function showPedestalPops()
+local function showPedestalPops(): number
 	clearPedestalPops()
 	local multiplier = TycoonController.GetIncomeMultiplier()
 	local byUid: { [string]: any } = {}
@@ -248,6 +249,7 @@ local function showPedestalPops()
 			table.insert(pedestalPops, gui)
 		end
 	end
+	return #pedestalPops
 end
 
 --[[ Presenting a step -------------------------------------------------------------------- ]]
@@ -302,11 +304,21 @@ local function stopGuidance()
 	TutorialHand.SetTarget(nil)
 	TutorialPath.SetEnabled(false)
 	GoalMarkerController.SetTutorialTarget(nil, nil, TycoonController.IsTutorialActive())
-	clearPedestalPops()
 end
 
 local function labName(): string
 	return ("%s'S LAB"):format(localPlayer.DisplayName:upper())
+end
+
+-- The instruction as shown: a step with a Count (the pull step) carries its
+-- live "0/2" after the words.
+local function bannerText(step: TutorialConfig.Step): string
+	local count = step.Count
+	if not count then
+		return step.Banner
+	end
+	local done = if step.Id == "pull" then TycoonController.GetTutorial().PullsDone else 0
+	return ("%s %d/%d"):format(step.Banner, math.clamp(done, 0, count), count)
 end
 
 -- The banner, path and goal arrow for step `index` (after its explain card).
@@ -316,14 +328,10 @@ local function beginGuidance(index: number)
 		return
 	end
 	local t = TycoonController.GetTutorial()
-	openSeen = false
 	stepStart = os.clock()
 	bannerShownAt = stepStart
 	advanceSentFor = nil
-	lastSub = step.Sub
-	-- The event card gets its "OK, got it" while this step runs.
-	EventInfoCard.SetTutorialOk(step.Id == "events")
-	TutorialBanner.Show(step.Banner, step.Sub, step.Icon, index, #TutorialConfig.Steps)
+	TutorialBanner.Show(bannerText(step), step.Sub, step.Icon, index, #TutorialConfig.Steps)
 	TutorialBanner.SetSkip(if t.Replay then function()
 		sendAdvance(index)
 	end else nil)
@@ -394,12 +402,7 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 	end
 	stepStart = os.clock()
 	advanceSentFor = nil
-	openSeen = false
-	lastSub = step.Sub
 	local already = isStepDone(index)
-	if step.Id == "pedestals" and not already then
-		showPedestalPops()
-	end
 
 	-- 1. The explain card, on a quiet screen (after CardDelay: INDEX has
 	-- popped in by then).
@@ -436,12 +439,6 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 		TutorialBanner.Show(step.Banner, nil, step.Icon, index, #TutorialConfig.Steps)
 		bannerShownAt = os.clock()
 		hasBanner = true
-	elseif step.CardEnds and not step.HoldSeconds then
-		-- OK on the card ends the step (Index).
-		waitFor(mine, function()
-			sendAdvance(index)
-			return isStepDone(index)
-		end)
 	else
 		beginGuidance(index)
 		hasBanner = true
@@ -474,10 +471,6 @@ local function playStep(index: number, mine: number): (boolean, boolean?)
 	else
 		SoundKit.Play("RevealMinor", nil)
 	end
-	if step.Id == "events" then
-		-- A card the player opened stays open: only the "OK, got it" button goes.
-		EventInfoCard.SetTutorialOk(false)
-	end
 	TutorialBanner.SetSkip(nil)
 
 	-- 4. The pause: whatever the step opened is closed, the bar is out, the
@@ -499,13 +492,15 @@ local function endTutorial()
 	stopGuidance()
 	TutorialCards.Close()
 	TutorialExplain.Close()
-	EventInfoCard.SetTutorialOk(false)
+	clearPedestalPops()
+	pedestalPopUntil = 0
+	pedestalHintShown = false
 	ToastController.FlushHeld()
 end
 
 local function runTutorial(mine: number)
 	-- The world settles first.
-	task.wait(FIRST_STEP_DELAY)
+	task.wait(TutorialConfig.FirstStepDelay)
 	while runnerSeq == mine and active do
 		local index = if lastPlayed then lastPlayed + 1 else serverStep
 		if index > #TutorialConfig.Steps then
@@ -537,7 +532,7 @@ local function abortRunner()
 	TutorialExplain.Close()
 	stopGuidance()
 	TutorialBanner.Hide()
-	EventInfoCard.SetTutorialOk(false)
+	pedestalHintShown = false
 end
 
 local function startRunner()
@@ -609,9 +604,7 @@ local function handTarget(step: TutorialConfig.Step, contextual: boolean): GuiOb
 	if contextual then
 		return TutorialHand.GetContextualButton()
 	end
-	if step.Hand == "EventChip" then
-		return EventController.GetChip()
-	elseif step.Hand then
+	if step.Hand then
 		return HudController.GetCoachTarget(step.Hand)
 	end
 	return nil
@@ -637,17 +630,14 @@ local function stepFrame()
 	end
 	TutorialBanner.SetDistance(distance)
 
-	-- The sub line: the Multiplier Pad says what to come back with.
-	local shortfall = if tutorialStep.Id == "multiplier" then multiplierShortfall() else nil
-	local sub = if shortfall then ("Come back with %s"):format(NumberFormat.Money(shortfall)) else tutorialStep.Sub
-	if sub ~= lastSub then
-		lastSub = sub
-		TutorialBanner.SetSub(sub)
+	-- The live count in the instruction ("Pull 2 free orbs 1/2").
+	if tutorialStep.Count then
+		TutorialBanner.SetText(bannerText(tutorialStep))
 	end
 
 	-- The big button, at a world target with a prompt.
 	local showButton = false
-	if tutorialStep.Prompt and not ResultController.IsBigCardOpen() and not FusePanel.IsOpen() and shortfall == nil then
+	if tutorialStep.Prompt and not ResultController.IsBigCardOpen() and not FusePanel.IsOpen() then
 		local prompt = findPrompt(tutorialStep)
 		showButton = prompt ~= nil and inReach(prompt)
 	end
@@ -660,82 +650,241 @@ local function stepFrame()
 	end
 	TutorialHand.SetTarget(handTarget(tutorialStep, showButton))
 
-	-- Completion that isn't a server-confirmed action. Nothing ends while a
-	-- card or panel is up.
-	if tutorialStep.HoldSeconds then
-		-- Pedestals: after its card the orbs earn on screen at least this long.
-		if elapsed >= tutorialStep.HoldSeconds and screenQuiet() then
-			sendAdvance(index)
-		end
-	elseif tutorialStep.Kind == "Timed" then
-		if elapsed >= (tutorialStep.Seconds or 0) and screenQuiet() then
-			sendAdvance(index)
-		end
-	elseif tutorialStep.Kind == "Open" then
-		-- Done when the player CLOSES what they opened (✕, a tap outside, the
-		-- card's OK); it stays open until then, and the Seconds fallback only
-		-- applies to a player who never opened it.
-		local open = (tutorialStep.Id == "events" and EventInfoCard.IsOpen())
-			or (tutorialStep.Id == "rebirth" and RebirthPanel.IsOpen())
-		if open then
-			openSeen = true
-		end
-		if (openSeen and not open) or (not openSeen and elapsed >= (tutorialStep.Seconds or 0)) then
-			sendAdvance(index)
-		end
-		if open then
-			TutorialHand.SetTarget(nil) -- it is already open: nothing to point at
-		end
-	elseif shortfall and elapsed >= (tutorialStep.SkipSeconds or 3) then
+	-- Completion that isn't a server-confirmed action: the last step is Timed
+	-- (the server re-checks its own clock). Nothing ends while a card is up.
+	if tutorialStep.Kind == "Timed" and elapsed >= (tutorialStep.Seconds or 0) and screenQuiet() then
 		sendAdvance(index)
 	end
 end
 
---[[ Just-in-time hands (after the tutorial) ----------------------------------------------- ]]
+--[[ The pedestal line (no step: the first pull that lands on a pedestal) --------------- ]]
 
-local JIT = {
-	{ Tip = "giftHand", Opened = GiftsPanel.IsOpen, Ready = function(): boolean
-		return GiftsPanel.GetStatus() > 0
-	end, Name = "Gifts" },
-	{ Tip = "questHand", Opened = QuestsPanel.IsOpen, Ready = function(): boolean
-		return QuestsPanel.GetReadyCount() > 0
-	end, Name = "Quests" },
-}
-
-local jitShowing: string? = nil
-
--- The first time a gift is ready (and the first claimable quest) the hand
--- points at its button once; opening the panel ends it for good.
-local function jitFrame()
-	if not TycoonController.HasSynced() or not TycoonController.GetTutorial().Done or TycoonController.GetTutorial().Replay then
+local function pedestalFrame()
+	if pedestalPopUntil > 0 and os.clock() >= pedestalPopUntil then
+		pedestalPopUntil = 0
+		clearPedestalPops()
+	end
+	if pedestalHintShown or not active or TycoonController.GetTutorial().Replay then
 		return
 	end
-	if TutorialHand.GetTarget() ~= nil and jitShowing == nil then
-		return -- the tutorial's own hand is up
+	if next(TycoonController.GetPedestalDisplays()) == nil then
+		return
 	end
-	if jitShowing then
-		for _, entry in JIT do
-			if entry.Tip == jitShowing then
-				if entry.Opened() or TycoonController.HasSeenTip(entry.Tip) then
-					TycoonController.MarkTipSeen(entry.Tip)
-					jitShowing = nil
-					TutorialHand.SetTarget(nil)
-				end
-			end
+	-- Only once the orb is in the inventory (its "+$X/s" needs it).
+	if showPedestalPops() == 0 then
+		return
+	end
+	pedestalHintShown = true
+	pedestalPopUntil = os.clock() + PEDESTAL_POP_SECONDS
+	AnnouncementController.ShowLine(TutorialConfig.PedestalLine, "PedestalHint")
+end
+
+--[[ One-time tips (after the tutorial) --------------------------------------------------- ]]
+
+-- TutorialConfig.Tips plus the two older just-in-time hands. At most one is
+-- up (a hand on the thing + one TopStack line), the next waits TipGapSeconds
+-- after it goes, each fires once per account (marked seen when it starts).
+-- Over: the player opened what it points at, or TipMaxSeconds.
+type TipRuntime = {
+	Opened: () -> boolean,
+	Hand: () -> GuiObject?,
+	Ready: (() -> boolean)?, -- the older hands decide themselves
+}
+
+local tipShowing: string? = nil
+local tipShownAt = 0
+local tipGoneAt = -math.huge -- os.clock() the last tip went
+local indexBaseline: number? = nil
+local indexFound = false -- an Index entry appeared since the tutorial ended
+local lastPlan = 0
+
+local function handOf(name: string): () -> GuiObject?
+	return function()
+		return HudController.GetCoachTarget(name)
+	end
+end
+
+local TIPS: { [string]: TipRuntime } = {
+	tipUpgrade = { Opened = UpgradesPanel.IsOpen, Hand = handOf("Upgrades") },
+	tipMultiplier = {
+		Opened = function(): boolean
+			return TycoonController.GetCashMultiplierLevel() >= 1
+		end,
+		Hand = function(): GuiObject?
+			return TutorialHand.GetContextualButton()
+		end,
+	},
+	tipIndex = { Opened = IndexPanel.IsOpen, Hand = handOf("Index") },
+	tipEvent = { Opened = EventInfoCard.IsOpen, Hand = EventController.GetChip },
+	tipRebirth = { Opened = RebirthPanel.IsOpen, Hand = handOf("Rebirth") },
+	giftHand = {
+		Opened = GiftsPanel.IsOpen,
+		Hand = handOf("Gifts"),
+		Ready = function(): boolean
+			return GiftsPanel.GetStatus() > 0
+		end,
+	},
+	questHand = {
+		Opened = QuestsPanel.IsOpen,
+		Hand = handOf("Quests"),
+		Ready = function(): boolean
+			return QuestsPanel.GetReadyCount() > 0
+		end,
+	},
+}
+local OLDER_HANDS = { "giftHand", "questHand" }
+
+local function tipQuiet(): boolean
+	return not UIKit.IsOverlayOpen() and screenQuiet()
+end
+
+local function indexCount(): number
+	local total = 0
+	for _ in TycoonController.GetIndex() do
+		total += 1
+	end
+	return total
+end
+
+local function endTip()
+	local id = tipShowing
+	if not id then
+		return
+	end
+	tipShowing = nil
+	tipPressing = nil
+	tipGoneAt = os.clock()
+	TutorialHand.SetContextual(nil, nil)
+	TutorialHand.SetTarget(nil)
+	GoalMarkerController.SetTutorialTarget(nil, nil, false)
+	TutorialPath.SetEnabled(TycoonController.GetTutorial().Done and TycoonController.IsGoalPathOn())
+end
+
+local function startTip(id: string)
+	tipShowing = id
+	tipShownAt = os.clock()
+	TycoonController.MarkTipSeen(id)
+	local def = TutorialConfig.GetTip(id)
+	if def then
+		AnnouncementController.ShowLine(def.Line, "Tip")
+		if def.Target then
+			tipPressing = def
+			GoalMarkerController.SetTutorialTarget(def.Target, def.Line, true)
+			TutorialPath.SetEnabled(true)
+		end
+	end
+end
+
+-- The Index counter: what was found before the tutorial ended is not new.
+local function trackIndex(done: boolean)
+	local count = indexCount()
+	if not done or indexBaseline == nil then
+		indexBaseline = count
+	elseif count > indexBaseline then
+		indexBaseline = count
+		indexFound = true
+	end
+end
+
+local function tipState(done: boolean, replay: boolean): TutorialConfig.TipState
+	local level = TycoonController.GetCashMultiplierLevel()
+	local _, upgradeCost = TycoonConfig.GetCheapestUpgrade(TycoonController.GetGeneratorLevels())
+	local cost = TycoonController.GetRebirthCost()
+	local seen: { [string]: boolean } = {}
+	for _, tip in TutorialConfig.Tips do
+		seen[tip.Id] = TycoonController.HasSeenTip(tip.Id)
+	end
+	local chip = EventController.GetChip()
+	local cash = TycoonController.GetCash()
+	return {
+		Done = done,
+		Replay = replay,
+		Quiet = tipQuiet(),
+		Showing = tipShowing ~= nil,
+		SinceGone = os.clock() - tipGoneAt,
+		SinceDone = TycoonController.GetSecondsSinceTutorialDone(),
+		Seen = seen,
+		Cash = cash,
+		UpgradeCost = if upgradeCost < math.huge then upgradeCost else nil,
+		MultiplierLevel = level,
+		MultiplierCost = TycoonConfig.GetCashMultiplierUpgradeCost(level),
+		NewIndex = indexFound and not seen.tipIndex,
+		EventChip = chip ~= nil and chip.Visible,
+		RebirthProgress = if cost > 0 then cash / cost else 0,
+	}
+end
+
+local function tipFrame()
+	if not TycoonController.HasSynced() then
+		return
+	end
+	local t = TycoonController.GetTutorial()
+	local now = os.clock()
+	local due = now - lastPlan >= 0.25
+	if due then
+		lastPlan = now
+		trackIndex(t.Done)
+	end
+	if not t.Done or t.Replay then
+		if tipShowing then
+			endTip()
 		end
 		return
 	end
-	if UIKit.IsOverlayOpen() then
+
+	-- A tip on screen: keep its hand on the thing, end it when followed.
+	local id = tipShowing
+	if id then
+		local runtime = TIPS[id]
+		if not runtime or runtime.Opened() or os.clock() - tipShownAt >= TutorialConfig.TipMaxSeconds then
+			endTip()
+			return
+		end
+		local pressing = tipPressing
+		if pressing then
+			local showButton = false
+			if pressing.Prompt and not ResultController.IsBigCardOpen() then
+				local prompt = findPrompt(pressing)
+				showButton = prompt ~= nil and inReach(prompt)
+			end
+			if showButton then
+				TutorialHand.SetContextual(pressing.Prompt, function()
+					pressPrompt(pressing)
+				end)
+			else
+				TutorialHand.SetContextual(nil, nil)
+			end
+		end
+		local button = runtime.Hand()
+		TutorialHand.SetTarget(if button and button.Visible and tipQuiet() then button else nil)
 		return
 	end
-	for _, entry in JIT do
-		if not TycoonController.HasSeenTip(entry.Tip) and entry.Ready() then
-			local button = HudController.GetCoachTarget(entry.Name)
-			if button and button.Visible then
-				jitShowing = entry.Tip
-				TutorialHand.SetTarget(button)
-				return
-			end
+
+	-- Plan a new one a few times a second; another hand on screen wins.
+	if not due or TutorialHand.GetTarget() ~= nil then
+		return
+	end
+	local state = tipState(t.Done, t.Replay)
+	local planned = TutorialConfig.PlanTip(state)
+	if planned then
+		if planned == "tipIndex" then
+			indexFound = false
+		end
+		startTip(planned)
+		return
+	end
+	-- The older just-in-time hands (a gift is ready, a quest can be claimed).
+	if not state.Quiet or state.SinceGone < TutorialConfig.TipGapSeconds or state.SinceDone < TutorialConfig.TipAfterDoneSeconds then
+		return
+	end
+	for _, handId in OLDER_HANDS do
+		local runtime = TIPS[handId]
+		local button = runtime.Hand()
+		if not TycoonController.HasSeenTip(handId) and (runtime.Ready :: () -> boolean)() and button and button.Visible then
+			tipShowing = handId
+			tipShownAt = now
+			TycoonController.MarkTipSeen(handId)
+			return
 		end
 	end
 end
@@ -771,7 +920,8 @@ function TutorialController.Init()
 	TycoonController.TycoonChanged:Connect(onTycoonChanged)
 	RunService.RenderStepped:Connect(function()
 		stepFrame()
-		jitFrame()
+		pedestalFrame()
+		tipFrame()
 	end)
 	onTycoonChanged()
 end

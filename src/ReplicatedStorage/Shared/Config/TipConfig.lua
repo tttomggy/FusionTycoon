@@ -21,6 +21,12 @@ TipConfig.Ids = {
 	tutorialReplay = true, -- an old save skipped the tutorial: "replay it in ⚙ Settings" once
 	giftHand = true, -- the hand on GIFTS the first time a gift is ready (TutorialController)
 	questHand = true, -- the hand on QUESTS the first time a quest can be claimed
+	-- Tutorial 5: what the removed tutorial steps became (TutorialConfig.Tips)
+	tipUpgrade = true, -- first time cash >= the cheapest generator upgrade: hand on UPGRADES
+	tipMultiplier = true, -- first time cash >= Multiplier Pad level 1: the pad
+	tipIndex = true, -- first new Index entry after the tutorial: hand on INDEX
+	tipEvent = true, -- the first event chip seen after the tutorial
+	tipRebirth = true, -- first time Rebirth progress >= 50%: hand on REBIRTH
 } :: { [string]: boolean }
 
 -- "event_<EventId>": the HUD event chip pulses until the first tap for

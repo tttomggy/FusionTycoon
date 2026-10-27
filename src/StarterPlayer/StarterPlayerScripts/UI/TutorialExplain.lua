@@ -11,10 +11,11 @@
 	    (Fuse: Common + Common -> Rare), or the big icon when there is no model;
 	  * a title;
 	  * one or two short sentences at >= 22 px saying what it is for;
-	  * a big green OK (the only way out, ✕ and a tap outside count as OK).
-	    The OK turns on after TutorialConfig.CardReadSeconds (1.5 s): until
-	    then it is grey with a fill bar running across it, and ✕ / a tap
-	    outside are ignored too, so the card cannot flash past unread.
+	  * a big green OK (✕, a tap outside and a tap anywhere on the card
+	    count as OK). TutorialConfig.CardReadSeconds is 0 (Tutorial 5: kids
+	    don't read cards): the OK is live at once. Above 0 it turns on after
+	    that long: grey with a fill bar running across it, ✕ / a tap
+	    outside ignored too.
 
 	  Show(card, model?, onOk)   opens it; OK calls onOk once
 	  Close()                    closes without calling onOk
@@ -43,6 +44,7 @@ local modal: UIKit.Modal? = nil
 local imageArea: Frame
 local bodyLabel: TextLabel
 local okButton: TextButton
+local tapArea: TextButton
 local onOk: (() -> ())? = nil
 local closingByOk = false
 local okReady = false -- the read time is over: OK, ✕ and a tap outside work
@@ -198,6 +200,24 @@ local function build()
 	imageArea.ZIndex = content.ZIndex + 1
 	imageArea.Parent = content
 
+	-- A tap anywhere on the card is OK (the OK button, built after it, sits on top).
+	tapArea = Instance.new("TextButton")
+	tapArea.Name = "TapAnywhere"
+	tapArea.BackgroundTransparency = 1
+	tapArea.Text = ""
+	tapArea.AutoButtonColor = false
+	tapArea.Size = UDim2.fromScale(1, 1)
+	tapArea.ZIndex = content.ZIndex + 1
+	tapArea.Parent = content
+	tapArea.Activated:Connect(function()
+		if okReady and m.IsOpen() then
+			closingByOk = true
+			m.Close()
+			closingByOk = false
+			finish()
+		end
+	end)
+
 	bodyLabel = UIKit.Label({
 		Name = "Body",
 		Font = Fonts.BodyHeavy,
@@ -254,9 +274,17 @@ end
 local function startReadTime()
 	readToken += 1
 	local mine = readToken
-	okReady = false
 	shownAt = os.clock()
 	readyAt = 0
+	if TutorialConfig.CardReadSeconds <= 0 then
+		-- No read time (Tutorial 5): OK is live at once, no fill bar.
+		okReady = true
+		readyAt = shownAt
+		readFill.Visible = false
+		UIKit.SetButton(okButton, { Style = "Green", TextColor3 = Colors.Text })
+		return
+	end
+	okReady = false
 	UIKit.SetButton(okButton, { Style = "Disabled", TextColor3 = Colors.Muted })
 	readFill.Size = UDim2.fromScale(0, 1)
 	readFill.Visible = true
@@ -311,6 +339,11 @@ end
 
 function TutorialExplain.GetOkButton(): TextButton?
 	return if modal then okButton else nil
+end
+
+-- /selftest: the invisible "tap anywhere" button over the card.
+function TutorialExplain.GetTapArea(): TextButton?
+	return if modal then tapArea else nil
 end
 
 -- /selftest: whether the read time is over (OK, ✕ and a tap outside work).

@@ -72,7 +72,7 @@ export type InventoryItem = {
 export type QuestState = QuestConfig.QuestState
 
 export type TutorialState = {
-	Ver: number, -- TutorialConfig.DataVersion (no Ver = Tutorial 1's step list)
+	Ver: number, -- TutorialConfig.DataVersion (no Ver = Tutorial 1's step list; sanitizeTutorial migrates older ones)
 	Step: number, -- TutorialConfig.Steps index; 0 = not decided yet
 	Done: boolean,
 	FreeFuse: boolean, -- the once-per-account guaranteed fusion was used
@@ -317,7 +317,9 @@ local SETTINGS_SYNC_DELAY_SECONDS = 0.25 -- a burst of SetSettings syncs once
 ProfileStore.SetConstant("AUTO_SAVE_PERIOD", AUTOSAVE_INTERVAL_SECONDS)
 
 -- The tutorial's saved state (TutorialConfig): Step 0 = not decided yet.
-local function sanitizeTutorial(raw: unknown): TutorialState
+-- `pulls` / `fusions` are the save's counters, to re-base a step that an
+-- older layout (Ver < DataVersion) is moved onto.
+local function sanitizeTutorial(raw: unknown, pulls: number, fusions: number): TutorialState
 	local t = if typeof(raw) == "table" then raw :: any else {}
 	local function whole(value: unknown, max: number): number
 		if typeof(value) == "number" and value == value and value >= 0 and value < math.huge then
@@ -327,13 +329,28 @@ local function sanitizeTutorial(raw: unknown): TutorialState
 	end
 	local step = whole(t.Step, 1000)
 	local done = t.Done == true
-	-- A save from Tutorial 1 (its 14 steps): resume at the matching step.
+	local base = whole(t.Base, 2 ^ 40)
+	local freePulls = whole(t.FreePulls, 10)
+	local pullsGranted = t.PullsGranted == true
+	-- A save from an older layout (Tutorial 1: no Ver, 14 steps; 2: 10; 3:
+	-- 11) resumes at the matching step here.
 	local ver = whole(t.Ver, 1000)
-	if step > 0 and not done then
-		if ver < 2 then
-			step = TutorialConfig.MigrateStep(step)
-		elseif ver == 2 then
-			step = TutorialConfig.MigrateV2Step(step)
+	if step > 0 and not done and ver < TutorialConfig.DataVersion then
+		local oldId = TutorialConfig.OldStepId(ver, step)
+		local usedUp = pullsGranted and freePulls <= 0 and (oldId == "pull" or oldId == "pull2")
+		local migrated, finished = TutorialConfig.MigrateOld(ver, step, usedUp)
+		step, done = migrated, finished
+		local at = TutorialConfig.GetStep(step)
+		if not done and at then
+			-- The counters the new step waits on, from the save.
+			if at.Id == "pull" then
+				-- Pulls of the new step so far: the second old step had one.
+				base = math.max(0, pulls - (if oldId == "pull2" then 1 else 0))
+			elseif at.Id == "fuse" and oldId ~= "fuse" then
+				base = fusions
+			elseif at.Id == "claim" then
+				base = 0
+			end
 		end
 	end
 	return {
@@ -341,9 +358,9 @@ local function sanitizeTutorial(raw: unknown): TutorialState
 		Step = math.min(step, #TutorialConfig.Steps),
 		Done = done,
 		FreeFuse = t.FreeFuse == true,
-		FreePulls = whole(t.FreePulls, 10),
-		PullsGranted = t.PullsGranted == true,
-		Base = whole(t.Base, 2 ^ 40),
+		FreePulls = freePulls,
+		PullsGranted = pullsGranted,
+		Base = base,
 		Replay = t.Replay == true,
 		ReplayHint = t.ReplayHint == true,
 	}
@@ -656,7 +673,12 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
 	end
-	data.Tutorial = sanitizeTutorial(raw.Tutorial)
+	data.Tutorial = sanitizeTutorial(
+		raw.Tutorial,
+		(if typeof(raw.GachaPulls) == "number" then math.max(0, math.floor(raw.GachaPulls)) else 0)
+			+ (if typeof(raw.FreePulls) == "number" then math.max(0, math.floor(raw.FreePulls)) else 0),
+		if typeof(raw.TotalFusions) == "number" then math.max(0, math.floor(raw.TotalFusions)) else 0
+	)
 	if typeof(raw.Weapons) == "table" then
 		for id, owned in raw.Weapons do
 			if owned == true and CombatConfig.GetWeapon(id) then
@@ -836,10 +858,10 @@ function PlayerDataService.SelfTestMigrateItem(itemId: string, tier: string, mut
 end
 
 -- /selftest: a saved Tutorial table (Tutorial 1's has no Ver) through the
--- same sanitiser a load uses: the Step it resumes at.
-function PlayerDataService.SelfTestMigrateTutorial(raw: any): (number, number)
-	local migrated = sanitizeTutorial(raw)
-	return migrated.Step, migrated.Ver
+-- same sanitiser a load uses, for a save with `pulls` pulls and `fusions`
+-- fusions: the whole migrated state.
+function PlayerDataService.SelfTestMigrateTutorial(raw: any, pulls: number?, fusions: number?): TutorialState
+	return sanitizeTutorial(raw, pulls or 0, fusions or 0)
 end
 
 -- /selftest: a copy of the quest state and power-ups, and the restore.
@@ -1993,6 +2015,8 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 				Step = data.Tutorial.Step,
 				Done = data.Tutorial.Done,
 				FreePulls = data.Tutorial.FreePulls,
+				-- The pull step's live "0/2" (pulls since the step began).
+				PullsDone = math.max(0, data.GachaPulls + data.FreePulls - data.Tutorial.Base),
 				Replay = data.Tutorial.Replay,
 				ReplayHint = data.Tutorial.ReplayHint,
 			}
