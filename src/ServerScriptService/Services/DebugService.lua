@@ -888,6 +888,16 @@ local function runTutorialMigrationSelfTest(result: (boolean, string, string?) -
 	result(fresh.Step == 0 and not fresh.Done, "tutorial migration: a save without a tutorial is 'not decided yet' (step 0)")
 end
 
+-- Studio /tutorial reset's extra: forget the tutorial-flow tips (every
+-- TutorialConfig.Tips id) and the hourly rival-steal counter.
+local function clearTutorialFlowTips(player: Player)
+	local ids: { string } = {}
+	for _, tip in TutorialConfig.Tips do
+		table.insert(ids, tip.Id)
+	end
+	PlayerDataService.ResetTutorialFlowTips(player, ids)
+end
+
 -- The one-time tips (TutorialConfig.PlanTip), pure: never during the
 -- tutorial, once each, one at a time.
 local function runTipSelfTest(result: (boolean, string, string?) -> ())
@@ -987,6 +997,42 @@ local function runTipSelfTest(result: (boolean, string, string?) -> ())
 	maxed.UpgradeCost = nil
 	maxed.MultiplierCost = nil
 	result(TutorialConfig.PlanTip(maxed) == nil, "tips: nothing fires when everything is maxed")
+	-- The steal comes first: a fresh save, tutorial Done, cash for an upgrade
+	-- and a rival lab in the world -> tipRival, and nothing else until it is
+	-- done plus the usual gap.
+	local fresh = { Cash = 100, RivalLab = true }
+	local beforeRival = TutorialConfig.PlanTip(state(fresh))
+	local rivalReady = table.clone(fresh)
+	rivalReady.SinceDone = TutorialConfig.RivalTipAfterDoneSeconds - 0.1
+	local waiting = TutorialConfig.PlanTip(state(rivalReady))
+	rivalReady.SinceDone = TutorialConfig.RivalTipAfterDoneSeconds
+	local firstTip = TutorialConfig.PlanTip(state(rivalReady))
+	result(
+		beforeRival == "tipRival" and waiting == nil and firstTip == "tipRival",
+		"tips: with a rival lab, tipUpgrade does not jump the queue; tipRival is the first tip",
+		("%s / %s / %s"):format(tostring(beforeRival), tostring(waiting), tostring(firstTip))
+	)
+	local afterRival = { Cash = 100, RivalLab = true, Seen = { tipRival = true }, SinceDone = 100, SinceGone = TutorialConfig.TipGapSeconds - 0.1 }
+	local tooSoon = TutorialConfig.PlanTip(state(afterRival))
+	afterRival.SinceGone = TutorialConfig.TipGapSeconds
+	local upgradeNow = TutorialConfig.PlanTip(state(afterRival))
+	result(
+		tooSoon == nil and upgradeNow == "tipUpgrade",
+		("tips: tipUpgrade comes only after tipRival ends + %d s"):format(TutorialConfig.TipGapSeconds),
+		tostring(tooSoon) .. " / " .. tostring(upgradeNow)
+	)
+	local noLab = state({ Cash = 100, RivalLab = false })
+	result(
+		TutorialConfig.PlanTip(noLab) == "tipUpgrade" and not TutorialConfig.RivalTipFirst(noLab) and noLab.Seen.tipRival == nil,
+		"tips: no rival lab -> tipRival is skipped (not marked seen) and the others run"
+	)
+	local pathRivalTip = TutorialConfig.GetTip("tipRival")
+	local upgradeTip = TutorialConfig.GetTip("tipUpgrade")
+	result(
+		TutorialConfig.PathOn(pathRivalTip, true, false) and TutorialConfig.PathOn(pathRivalTip, true, true) and not TutorialConfig.PathOn(upgradeTip, true, false)
+			and TutorialConfig.PathOn(upgradeTip, true, true) and not TutorialConfig.PathOn(nil, false, true),
+		"tips: a tip with its own target owns the lit path (the goal path is off while it runs); the goal path follows otherwise"
+	)
 	-- The HUD reveal table points at real steps, and nothing stays hidden after the last one.
 	local lastStep = #TutorialConfig.Steps
 	local bad: { string } = {}
@@ -1098,6 +1144,28 @@ local function runTutorialSelfTest(player: Player, result: (boolean, string, str
 	result(#TutorialConfig.Steps == 4, "tutorial: four steps", ("%d steps"):format(#TutorialConfig.Steps))
 	runTutorialMigrationSelfTest(result)
 	runTipSelfTest(result)
+	-- /tutorial reset also forgets the tutorial-flow tips and the steal counter
+	-- (not the other saved tips); the tester's own are put back after.
+	local tipData = PlayerDataService.GetData(player)
+	if tipData then
+		local savedTips = table.clone(tipData.Tips)
+		local savedSteals = table.clone(tipData.RivalSteals)
+		for _, tip in TutorialConfig.Tips do
+			tipData.Tips[tip.Id] = true
+		end
+		tipData.Tips.tutorialReplay = true
+		table.insert(tipData.RivalSteals, RivalService.Now())
+		clearTutorialFlowTips(player)
+		local left: { string } = {}
+		for _, tip in TutorialConfig.Tips do
+			if tipData.Tips[tip.Id] then
+				table.insert(left, tip.Id)
+			end
+		end
+		result(#left == 0 and #tipData.RivalSteals == 0 and tipData.Tips.tutorialReplay == true, "tutorial: /tutorial reset clears tipRival, tipUpgrade, tipMultiplier, tipIndex, tipEvent, tipRebirth and the RivalSteals counter, and nothing else", table.concat(left, ","))
+		tipData.Tips = savedTips
+		tipData.RivalSteals = savedSteals
+	end
 	-- No lab yet: claim one through the real claim path, release it after.
 	local claimState, releaseClaim, claimWhy = TycoonService.SelfTestClaim(player)
 	if claimState == "Skip" then
@@ -3198,6 +3266,9 @@ local function onPlayerChatted(player: Player, message: string)
 		local verb, rawStep = argument:match("^(%S+)%s*(%S*)$")
 		if verb == "reset" then
 			TutorialService.DebugReset(player)
+			-- Replays the whole first-minutes run: the tutorial-flow tips and
+			-- the hourly steal counter start over too (/tips reset stays as is).
+			clearTutorialFlowTips(player)
 		elseif verb == "step" and tonumber(rawStep) then
 			TutorialService.DebugSetStep(player, tonumber(rawStep) :: number)
 		else

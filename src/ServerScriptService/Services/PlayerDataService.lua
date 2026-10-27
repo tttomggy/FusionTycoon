@@ -1503,6 +1503,19 @@ function PlayerDataService.ResetTips(player: Player)
 	end
 end
 
+-- Studio /tutorial reset: forget these tip ids (the tutorial-flow tips) and
+-- the hourly rival-steal counter, so the whole first-minutes run replays.
+function PlayerDataService.ResetTutorialFlowTips(player: Player, ids: { string })
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return
+	end
+	for _, id in ids do
+		data.Tips[id] = nil
+	end
+	table.clear(data.RivalSteals)
+end
+
 -- The player's saved rival-steal times (unix seconds, oldest first). The REAL
 -- table: HeistService prunes it in place and appends on a delivery. An empty
 -- throwaway before the data has loaded.

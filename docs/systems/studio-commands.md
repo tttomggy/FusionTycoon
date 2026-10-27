@@ -17,7 +17,10 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   way to test the welcome-back card, since Studio profiles never save),
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
-  `/tips reset` (clears your seen one-time tips), `/tutorial reset` /
+  `/tips reset` (clears your seen one-time tips), `/tutorial reset` (also
+  clears the tutorial-flow tips `tipRival` / `tipUpgrade` / `tipMultiplier` /
+  `tipIndex` / `tipEvent` / `tipRebirth` and the `RivalSteals` hourly counter,
+  so the whole first-minutes run replays; `/tips reset` is unchanged) /
   `/tutorial step <n>`, `/weapons all | reset`, `/anim export` (every weapon clip as a KeyframeSequence in `ServerStorage.WeaponAnimExports`; see combat.md for Save to Roblox), `/quest complete <id>`
   (a daily id or `chain`; the warning lists today's) / `/quest reset` /
   **`/quest status`** (each quest's kind, counter base, progress, Done /

@@ -86,6 +86,15 @@ feeds it and runs the hand.
   `TipAfterDoneSeconds` (3 s) after the tutorial ends. A tip goes when the
   player opens what it points at (UPGRADES / INDEX / REBIRTH panel, the event
   card, the pad bought) or after `TipMaxSeconds` (45 s); it stays seen.
+  **The steal comes first** (`TutorialConfig.RivalTipFirst`): while `tipRival`
+  has not been shown and a rival lab is in the world, every other tip and the
+  gift / quest hands wait for it (it fires 20 s after Done; the next one waits
+  the usual `TipGapSeconds` after it ends). No rival lab (a full server) =
+  `tipRival` is skipped for the session, **not** marked seen, and the others
+  run. **One set of arrows:** a tip with its own target (`tipRival`, the
+  Multiplier Pad) owns the lit path while it runs and the goal path (👣) is
+  off (the goal card stays); `TutorialConfig.PathOn`, applied by
+  `TutorialController.applyPath`.
   `tipRival` is the exception on both counts: it waits 20 s, and it stays up
   `MaxSeconds` = 180 s unless the player **delivers** a rival steal first
   (`TycoonController.GetRivalDeliveries`, noted by `HeistController` on a

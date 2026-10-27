@@ -408,6 +408,15 @@ export type TipState = {
 	RivalLab: boolean, -- a rival lab with an orb you could grab is in the world
 }
 
+-- The steal comes first: while tipRival has not been shown and a rival lab is
+-- in the world, every other tip and hand waits for it (it starts
+-- RivalTipAfterDoneSeconds after Done, then the usual TipGapSeconds follow it).
+-- No rival lab (a full server) means it is skipped, not marked seen, and the
+-- others run.
+function TutorialConfig.RivalTipFirst(state: TipState): boolean
+	return state.RivalLab and not state.Seen.tipRival
+end
+
 -- The tip to show now, or nil. Never during the tutorial or a replay, never
 -- over an open card, never two at once (the second waits TipGapSeconds), and
 -- never twice (Seen).
@@ -418,6 +427,7 @@ function TutorialConfig.PlanTip(state: TipState): string?
 	if state.SinceDone < TutorialConfig.TipAfterDoneSeconds or state.SinceGone < TutorialConfig.TipGapSeconds then
 		return nil
 	end
+	local rivalFirst = TutorialConfig.RivalTipFirst(state)
 	local ready: { [string]: boolean } = {
 		tipUpgrade = state.UpgradeCost ~= nil and state.Cash >= (state.UpgradeCost :: number),
 		tipMultiplier = state.MultiplierLevel == 0 and state.MultiplierCost ~= nil and state.Cash >= (state.MultiplierCost :: number),
@@ -427,11 +437,22 @@ function TutorialConfig.PlanTip(state: TipState): string?
 		tipRival = state.RivalLab and state.SinceDone >= TutorialConfig.RivalTipAfterDoneSeconds,
 	}
 	for _, tip in TutorialConfig.Tips do
-		if not state.Seen[tip.Id] and ready[tip.Id] then
+		if not state.Seen[tip.Id] and ready[tip.Id] and (tip.Id == "tipRival" or not rivalFirst) then
 			return tip.Id
 		end
 	end
 	return nil
+end
+
+-- Whether the lit path is on: a running tip with its own target (tipRival,
+-- the Multiplier Pad) owns it, and the goal path (👣, the goal card's) is off
+-- while it runs, so only one set of arrows is ever on screen. Otherwise the
+-- path follows the goal once the tutorial is Done.
+function TutorialConfig.PathOn(runningTip: TipDef?, done: boolean, goalPathOn: boolean): boolean
+	if runningTip ~= nil and runningTip.Target ~= nil then
+		return true
+	end
+	return done and goalPathOn
 end
 
 --[[ "?" help ------------------------------------------------------------------ ]]

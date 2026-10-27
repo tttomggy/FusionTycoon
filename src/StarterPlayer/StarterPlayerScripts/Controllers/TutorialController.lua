@@ -116,6 +116,7 @@ local wasActive = false
 local pedestalPops: { BillboardGui } = {}
 local pedestalPopUntil = 0 -- os.clock() the "+$X/s" pops go
 local pedestalHintShown = false -- the pedestal line was shown for this run of the tutorial
+local applyPath: () -> () -- the path's on/off: a tip's own target, else the goal path (defined with the tips)
 local tipPressing: TutorialConfig.TipDef? = nil -- a world tip (the Multiplier Pad, a rival lab): its path and big button are up
 local rivalDeliveriesAtTipStart = 0 -- tipRival ends on the next delivered rival steal
 local pressing = false
@@ -556,7 +557,7 @@ local function runTutorial(mine: number)
 		endTutorial()
 		-- After the tutorial the path follows the current goal (👣).
 		local t = TycoonController.GetTutorial()
-		TutorialPath.SetEnabled(t.Done and TycoonController.IsGoalPathOn())
+		applyPath()
 	end
 end
 
@@ -597,7 +598,7 @@ local function onTycoonChanged()
 				wasActive = false
 				endTutorial()
 			end
-			TutorialPath.SetEnabled(t.Done and TycoonController.IsGoalPathOn())
+			applyPath()
 		end
 		-- A running step finishes its ✓ and pause; the runner then ends it.
 		return
@@ -781,6 +782,14 @@ local TIPS: { [string]: TipRuntime } = {
 }
 local OLDER_HANDS = { "giftHand", "questHand" }
 
+-- One set of arrows at a time: a tip with its own target (tipRival, the
+-- Multiplier Pad) owns the path while it runs and the goal path (👣) is off;
+-- otherwise the path follows the goal after the tutorial.
+function applyPath()
+	local running = if tipShowing ~= nil then tipPressing else nil
+	TutorialPath.SetEnabled(TutorialConfig.PathOn(running, TycoonController.GetTutorial().Done, TycoonController.IsGoalPathOn()))
+end
+
 local function tipQuiet(): boolean
 	return not UIKit.IsOverlayOpen() and screenQuiet()
 end
@@ -804,7 +813,7 @@ local function endTip()
 	TutorialHand.SetContextual(nil, nil)
 	TutorialHand.SetTarget(nil)
 	GoalMarkerController.SetTutorialTarget(nil, nil, false)
-	TutorialPath.SetEnabled(TycoonController.GetTutorial().Done and TycoonController.IsGoalPathOn())
+	applyPath()
 end
 
 local function startTip(id: string)
@@ -820,9 +829,9 @@ local function startTip(id: string)
 		if def.Target then
 			tipPressing = def
 			GoalMarkerController.SetTutorialTarget(def.Target, def.Line, true)
-			TutorialPath.SetEnabled(true)
 		end
 	end
+	applyPath()
 end
 
 -- The Index counter: what was found before the tutorial ended is not new.
@@ -929,6 +938,9 @@ local function tipFrame()
 	-- The older just-in-time hands (a gift is ready, a quest can be claimed).
 	if not state.Quiet or state.SinceGone < TutorialConfig.TipGapSeconds or state.SinceDone < TutorialConfig.TipAfterDoneSeconds then
 		return
+	end
+	if TutorialConfig.RivalTipFirst(state) then
+		return -- the steal comes first
 	end
 	for _, handId in OLDER_HANDS do
 		local runtime = TIPS[handId]
