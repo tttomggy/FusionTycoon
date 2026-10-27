@@ -59,7 +59,9 @@
 	lose), the guard's touch (RivalService.GetGuardRoot within TagDistance)
 	is the tag, and every other ending hands the orb back to the pedestal.
 	Limits: RivalConfig.StealsPerHour delivered steals per player in any
-	rolling hour (reason RivalAlert + seconds), and never a banned tier. A
+	rolling hour (reason RivalAlert + seconds), counted in the player's SAVED
+	PlayerData.RivalSteals (unix seconds), so leaving and rejoining or hopping
+	servers does not reset it; and never a banned tier. A
 	lab that despawns mid-carry fails its carries first (FailRivalCarries).
 
 	Follows ServiceTemplate:
@@ -137,9 +139,6 @@ type State = {
 	lastLockRequest: { [number]: number },
 	-- Studio /stealable: lab stealable even under MinRebirths.
 	debugStealable: { [number]: boolean },
-	-- RivalService-clock times of each player's DELIVERED rival steals
-	-- (pruned to StealWindowSeconds): RivalConfig.StealsPerHour.
-	rivalSteals: { [number]: { number } },
 	-- Active carries by thief UserId, and the Uid -> thief index that keeps
 	-- an item in at most one carry.
 	carries: { [number]: Carry },
@@ -158,7 +157,6 @@ local state: State = {
 	rearmAt = {},
 	lastLockRequest = {},
 	debugStealable = {},
-	rivalSteals = {},
 	carries = {},
 	carriedItems = {},
 	carryAccumulator = 0,
@@ -412,12 +410,10 @@ end
 
 --[[ Rival carries --------------------------------------------------------------- ]]
 
-local function prunedRivalSteals(userId: number): { number }
-	local log = state.rivalSteals[userId]
-	if not log then
-		log = {}
-		state.rivalSteals[userId] = log
-	end
+-- The player's saved delivered-steal times (PlayerData.RivalSteals, unix
+-- seconds), pruned to the last StealWindowSeconds in place.
+local function prunedRivalSteals(player: Player): { number }
+	local log = PlayerDataService.GetRivalSteals(player)
 	local cutoff = RivalService.Now() - RivalConfig.StealWindowSeconds
 	for index = #log, 1, -1 do
 		if log[index] <= cutoff then
@@ -430,7 +426,7 @@ end
 -- Delivered rival steals left this rolling hour, and the seconds until the
 -- next one frees up when none are left (0 otherwise).
 function HeistService.GetRivalStealsLeft(player: Player): (number, number)
-	local log = prunedRivalSteals(player.UserId)
+	local log = prunedRivalSteals(player)
 	if #log < RivalConfig.StealsPerHour then
 		return RivalConfig.StealsPerHour - #log, 0
 	end
@@ -440,14 +436,27 @@ end
 
 -- /selftest: pretend `player` already delivered `count` rival steals now.
 function HeistService.SelfTestRecordRivalSteals(player: Player, count: number)
-	local log = prunedRivalSteals(player.UserId)
+	local log = prunedRivalSteals(player)
 	for _ = 1, count do
 		table.insert(log, RivalService.Now())
 	end
 end
 
 function HeistService.SelfTestClearRivalSteals(player: Player)
-	state.rivalSteals[player.UserId] = nil
+	table.clear(PlayerDataService.GetRivalSteals(player))
+end
+
+-- /selftest: a copy of the saved times, and putting a copy back.
+function HeistService.SelfTestGetRivalSteals(player: Player): { number }
+	return table.clone(PlayerDataService.GetRivalSteals(player))
+end
+
+function HeistService.SelfTestSetRivalSteals(player: Player, times: { number })
+	local log = PlayerDataService.GetRivalSteals(player)
+	table.clear(log)
+	for _, at in times do
+		table.insert(log, at)
+	end
 end
 
 -- The ending of a rival carry. Delivered creates the orb for the thief (the
@@ -464,7 +473,7 @@ local function finishRivalCarry(thief: Player?, carry: Carry, outcome: Outcome):
 			and PlayerDataService.IsProfileActive(thief :: Player)
 		if ok and thief then
 			PlayerDataService.AddItem(thief, orb.ItemId, orb.Tier, orb.Mutation, nil)
-			table.insert(prunedRivalSteals(thief.UserId), RivalService.Now())
+			table.insert(prunedRivalSteals(thief), RivalService.Now())
 			RivalService.EndCarry(rivalId, carry.PedestalIndex, true)
 			syncBoth(thief, nil, true)
 			PlayerDataService.SaveNow(thief)
@@ -1217,7 +1226,6 @@ local function onPlayerRemoving(player: Player)
 	state.rearmAt[userId] = nil
 	state.lastLockRequest[userId] = nil
 	state.debugStealable[userId] = nil
-	state.rivalSteals[userId] = nil
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]

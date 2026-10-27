@@ -163,6 +163,10 @@ export type PlayerData = {
 	-- Onboarding funnel steps already logged (AnalyticsKit.FunnelSteps), so
 	-- each is sent once per player ever.
 	Funnel: { [string]: boolean },
+	-- Wall-clock times (unix seconds) of this player's DELIVERED rival-lab
+	-- steals, newest last: RivalConfig.StealsPerHour counts the last hour of
+	-- it. Saved, so leaving and rejoining (or another server) can't reset it.
+	RivalSteals: { number },
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -301,6 +305,7 @@ local STUDIO_STORE_NAME = "FT_StudioTest_1"
 local STUDIO_SAVES_ATTRIBUTE = "FT_StudioSaves"
 local PROFILE_KEY_PREFIX = "Player_"
 local DATA_VERSION = 1
+local RIVAL_STEALS_KEPT = 64 -- saved rival-steal times (RivalConfig.StealsPerHour is far below this)
 local AUTOSAVE_INTERVAL_SECONDS = 120 -- ProfileStore's AUTO_SAVE_PERIOD
 -- A load that can't get the profile (DataStore down, or the lock never
 -- frees) gives up after this long and kicks; nothing is overwritten.
@@ -412,6 +417,7 @@ local DEFAULT_DATA: PlayerData = {
 	BestIncome = 0,
 	FreePulls = 0,
 	Funnel = {},
+	RivalSteals = {},
 	Version = DATA_VERSION,
 }
 
@@ -705,6 +711,19 @@ local function reconcile(raw: any): PlayerData
 	if typeof(raw.BestIncome) == "number" and raw.BestIncome == raw.BestIncome and raw.BestIncome >= 0 then
 		data.BestIncome = raw.BestIncome
 	end
+	-- Rival steal times: finite, positive, at most RIVAL_STEALS_KEPT, oldest first.
+	data.RivalSteals = {}
+	if typeof(raw.RivalSteals) == "table" then
+		for _, at in raw.RivalSteals do
+			if typeof(at) == "number" and at == at and at > 0 and at < math.huge then
+				table.insert(data.RivalSteals, at)
+			end
+		end
+		table.sort(data.RivalSteals)
+		while #data.RivalSteals > RIVAL_STEALS_KEPT do
+			table.remove(data.RivalSteals, 1)
+		end
+	end
 	-- An old save's Gifts table is ignored: the playtime gifts restart every visit.
 	-- Version 1 is the first FT_Live_1 format; later versions migrate here
 	-- (raw.Version < DATA_VERSION) before the stamp below.
@@ -910,6 +929,7 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		PowerUps = data.PowerUps,
 		Armed = data.Armed,
 		Quests = data.Quests,
+		RivalSteals = data.RivalSteals,
 	})
 end
 
@@ -1481,6 +1501,14 @@ function PlayerDataService.ResetTips(player: Player)
 	if data then
 		data.Tips = {}
 	end
+end
+
+-- The player's saved rival-steal times (unix seconds, oldest first). The REAL
+-- table: HeistService prunes it in place and appends on a delivery. An empty
+-- throwaway before the data has loaded.
+function PlayerDataService.GetRivalSteals(player: Player): { number }
+	local data = state.sessionCache[player.UserId]
+	return if data then data.RivalSteals else {}
 end
 
 -- A heist delivered (HeistService).

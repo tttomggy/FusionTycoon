@@ -150,8 +150,8 @@ number); the steal itself is `HeistService`'s, same flow.
   drops (a newcomer joins) the orbs rolled for a higher band are re-rolled;
   they are never re-rolled upward. A stolen orb is back `RespawnSeconds`
   (90) after **delivery** (a failed carry puts it back at once). The
-  respawn clock and the hourly limit read `RivalService.Now()`, injectable
-  (`SetClock`) for `/selftest`; the guard runs on `os.clock()`.
+  respawn clock and the hourly limit read `RivalService.Now()` (unix seconds),
+  injectable (`SetClock`) for `/selftest`; the guard runs on `os.clock()`.
 - **Stealing.** `RequestSteal { RivalId, PedestalIndex }` (client:
   `WorldLabelController.stealMode` gives a rival prompt `Steal` for everyone
   while the pedestal is `Filled` and not `BeingStolen`). `HeistService.
@@ -169,6 +169,9 @@ number); the steal itself is `HeistService`'s, same flow.
   hour per player (`HeistService.GetRivalStealsLeft`); past it the grab is
   refused with `RivalAlert` and the client toasts "The rivals are on alert.
   Try again in N min". Counted at delivery, so being tagged costs nothing.
+  The times are **saved** (`PlayerData.RivalSteals`, unix seconds, newest
+  last, pruned to the hour on use, 64 kept): leaving and rejoining, or hopping
+  servers, does not reset it. Hence `RivalService.Now()` is the wall clock.
 - **The guard.** One blocky R15 NPC per lab (`HumanoidDescription` rig in
   `World.AccentRival` / `CapsuleWhite` / `Structure`, name "Lab Guard",
   server-owned, default locomotion clips). Patrols the stops in

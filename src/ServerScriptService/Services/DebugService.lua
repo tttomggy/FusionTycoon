@@ -2040,7 +2040,8 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 	local home = root.CFrame
 	local rebirthsBefore = PlayerDataService.GetRebirths(player)
 	local standIns: { any } = {}
-	local fakeNow = os.clock()
+	local fakeNow = RivalService.Now()
+	local savedSteals = HeistService.SelfTestGetRivalSteals(player)
 	local releaseClaim: (() -> ())? = nil
 
 	local function waitUntil(condition: () -> boolean, timeout: number): boolean
@@ -2404,7 +2405,7 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 	if releaseClaim then
 		releaseClaim()
 	end
-	HeistService.SelfTestClearRivalSteals(player)
+	HeistService.SelfTestSetRivalSteals(player, savedSteals)
 	RivalService.SetClock(nil)
 	PlayerDataService.SetRebirths(player, rebirthsBefore)
 	PlayerDataService.SyncTycoon(player)

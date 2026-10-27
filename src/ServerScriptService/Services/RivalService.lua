@@ -135,11 +135,17 @@ type State = {
 
 --[[ Private state -------------------------------------------------------- ]]
 
+-- Unix seconds. The respawn clock and the hourly limit use it so a saved
+-- rival-steal time means the same in another server or after a rejoin.
+local function wallClock(): number
+	return DateTime.now().UnixTimestampMillis / 1000
+end
+
 local state: State = {
 	rivals = {},
 	nextId = 1,
 	nameSerial = 0,
-	clock = os.clock,
+	clock = wallClock,
 	rng = Random.new(),
 	running = false,
 	guardAccumulator = 0,
@@ -585,11 +591,11 @@ function RivalService.Now(): number
 	return now()
 end
 
--- /selftest: a controllable clock for the 90 s respawn and the hourly limit
--- (nil puts os.clock back; the guard always runs on the real clock), and a
--- seeded RNG for the orb rolls.
+-- /selftest: a controllable clock (unix seconds) for the 90 s respawn and
+-- the hourly limit (nil puts the wall clock back; the guard always runs on
+-- os.clock), and a seeded RNG for the orb rolls.
 function RivalService.SetClock(clock: (() -> number)?)
-	state.clock = clock or os.clock
+	state.clock = clock or wallClock
 end
 
 function RivalService.SetRandom(rng: Random?)
