@@ -3460,7 +3460,7 @@ end
 -- (1024 x 768, 1180 x 820, 1366 x 1024: the desktop layout WITH Roblox's jump
 -- button): the same, with the jump rect an obstacle (the row sits above it
 -- when the corner is taken), and the bottom row and weapon bar clear of it.
--- Phone (844 x 390, 896 x 414): one row (or right-aligned rows when it wraps)
+-- Phone (844 x 390, 896 x 414): one row (or at most 2 right-aligned rows when it wraps)
 -- in the top-right quarter below GetCardTop, clear of TopStack, the HUD, the
 -- weapon bar and the jump button. A desktop plan never runs under 500 px tall
 -- (the game is the phone layout there). The Luck tooltip is on screen,
@@ -3606,12 +3606,16 @@ local function probeEffectsTrayViewports(): { ProbeLine }
 				if effects == 3 then
 					plan3 = plan
 				end
-				if phone and effects == 5 and viewport.Name == "844 x 390" then
-					-- Friends + Passes + 3 timed effects.
+				if phone and effects == 5 then
+					-- Friends + Passes + 3 timed effects: two rows are fine when one row of
+					-- 48 px cells does not fit beside TopStack.
+					local onScreen = plan.Rect.Position.X >= 0 and plan.Rect.Position.Y >= 0
+						and plan.Rect.Position.X + plan.Rect.Size.X <= view.X
+						and plan.Rect.Position.Y + plan.Rect.Size.Y <= view.Y
 					table.insert(lines, {
-						Ok = plan.Rows == 1 and plan.Circle >= UITheme.MinTapSize and #plan.Hits == 0,
-						Name = "passes circle: the phone tray (844 x 390) holds Friends + Passes + 3 timed effects on one row, 44 px taps, clear of the HUD",
-						Detail = ("%d rows, %d px icons, touches: %s"):format(plan.Rows, plan.Circle, table.concat(plan.Hits, ", ")),
+						Ok = plan.Rows <= 2 and plan.Circle >= UITheme.MinTapSize and #plan.Hits == 0 and onScreen,
+						Name = ("passes circle: the phone tray (%s) holds Friends + Passes + 3 timed effects in at most 2 rows, 44 px taps, on screen, clear of the HUD, TopStack and jump button"):format(viewport.Name),
+						Detail = ("%d rows, %d px icons, on screen %s, touches: %s"):format(plan.Rows, plan.Circle, tostring(onScreen), table.concat(plan.Hits, ", ")),
 					})
 				end
 				-- Every circle's centre y: one row (±1 px), or right-aligned rows when it wraps.

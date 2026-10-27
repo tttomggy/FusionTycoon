@@ -30,6 +30,7 @@ UITheme.Colors = {
 	ShieldTeal = hex("#1FB49A"), -- shield up: HUD chip, PROTECTED sign pill
 	ShieldAmber = hex("#FFBE28"), -- shield down: HUD chip
 	Goal = hex("#FFBE28"), -- goal tracker label and bar
+	Friend = hex("#3BEB7E"), -- friend-joined / friends banners
 
 	-- One-off accents the design calls for by exact value.
 	CoinText = hex("#0B3D1E"), -- "$" on the green HUD coin

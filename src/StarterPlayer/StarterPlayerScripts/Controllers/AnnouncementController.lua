@@ -259,7 +259,17 @@ end
 
 -- Hands the banner to TopStack: it builds it at the announcement slot's y,
 -- holds it, and slides it out.
+local warnedNilAccent = false
+
 local function enqueue(announcement: Announcement)
+	if announcement.AccentColor == nil then
+		-- A caller pointed at a token that does not exist: show the banner anyway.
+		if not warnedNilAccent then
+			warnedNilAccent = true
+			warn(("[Announcement] nil AccentColor, using Colors.Text: %s"):format(tostring(announcement.Text)))
+		end
+		announcement.AccentColor = Colors.Text
+	end
 	local big = announcement.Big
 	local height = if big then MYTHIC_BANNER_HEIGHT else BANNER_HEIGHT
 	local banner: Frame? = nil
@@ -611,7 +621,7 @@ function AnnouncementController.ShowFriendJoined(name: string, percent: number, 
 		else "👥 %s joined: +%d%% income!"
 	enqueue({
 		Text = text:format(UIKit.EscapeRichText(name), percent),
-		AccentColor = Colors.AccentGreen,
+		AccentColor = Colors.Friend,
 	})
 end
 

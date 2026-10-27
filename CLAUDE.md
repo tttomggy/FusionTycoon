@@ -298,6 +298,12 @@ checks that no footprints overlap and everything sits inside the walls.
 
 ## Gotchas
 
+- **Run `python3 tools/theme_token_check.py` before every push** (next to the
+  Luau parser). It exits non-zero on any `UITheme.<Table>.<Key>` or
+  `local Colors = UITheme.Colors` alias use whose key the table lacks: a nil
+  colour assigned to a Gui property errors at runtime and no analyzer run
+  catches it (`Colors.AccentGreen` killed the friend banner; that token is in
+  `UITheme.World`, the UI one is `Colors.Friend`).
 - **Plots are built once per player per server session** (on join), each
   with its own Fusion Machine. Layout/pad changes do not appear in an
   already-running session — stop and restart Play.

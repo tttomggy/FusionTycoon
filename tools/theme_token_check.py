@@ -15,7 +15,9 @@ for m in re.finditer(r'^UITheme\.(\w+)\s*=\s*\{',theme,re.M):
 miss=[]
 for f in glob.glob('src/**/*.lua',recursive=True):
     s=open(f).read()
-    alias={a:b for a,b in re.findall(r'local (\w+)\s*=\s*UITheme\.(\w+)\b',s)}
+    # Only aliases assigned directly from a UITheme table (`local Colors = UITheme.Colors`),
+    # not from a key inside one (`local pair = UITheme.Gradients[name]` / `.Gradients.Violet`).
+    alias={a:b for a,b in re.findall(r'local (\w+)\s*=\s*UITheme\.(\w+)\s*(?:$|--)',s,re.M)}
     for m in re.finditer(r'UITheme\.(\w+)\.(\w+)',s):
         t,k=m.groups()
         if t in blocks and k not in blocks[t]: miss.append((f,s[:m.start()].count('\n')+1,f'UITheme.{t}.{k}'))
@@ -25,3 +27,4 @@ for f in glob.glob('src/**/*.lua',recursive=True):
             k=m.group(1)
             if k not in blocks[t]: miss.append((f,s[:m.start()].count('\n')+1,f'{a}.{k} (UITheme.{t})'))
 for x in sorted(set(miss)): print(*x)
+sys.exit(1 if miss else 0)
