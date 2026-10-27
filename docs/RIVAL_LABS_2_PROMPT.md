@@ -2,7 +2,7 @@
 
 Run `git pull` on `world-redesign`, then commit and push to `world-redesign`.
 **If your session forces another branch, say so in the FIRST line.** Reply
-in 4 lines, one per group: FIXED or WHY-NOT. Run the Luau parser and
+in 5 lines, one per group: FIXED or WHY-NOT. Run the Luau parser and
 `tools/theme_token_check.py` before pushing.
 
 ---
@@ -62,7 +62,30 @@ ProximityPrompts, no remotes, no owner-only labels, no cash.
   (verify the sign's CFrame against a player plot's in the selftest: same
   orientation relative to the slot).
 
-## 4. Selftest
+## 4. "You're ready!" never shows (Tutorial 5)
+
+Harris: after the tutorial it never says "You're ready!". `/selftest` is 0
+FAIL (the predicates pass, the player just never sees it).
+
+Likely cause (`TutorialController`, the Timed check ~line 661): the
+`finish` step starts while the FUSION SUCCESS big card is still open, the
+banner is hidden while a card is up (by design), but `elapsed` keeps
+counting from the step's start. When the card closes, `screenQuiet()` is
+true and `elapsed >= Seconds` (2) already, so `sendAdvance` fires on the
+same frame and the banner is never on screen.
+
+- A Timed step's clock counts **only while its banner is actually visible**
+  (screen quiet and the banner shown), and it must stay up at least
+  `max(step.Seconds, BannerMinSeconds)` visible seconds.
+- Check the other steps for the same pattern (any step whose time can run
+  out while hidden) and apply the same rule.
+- The `finish` HUD reveal (`HudReveal` keys at `finish`) still pops in one
+  by one while "You're ready!" is up.
+- Selftest: run the fuse step with the big card held open for 5 s (injected
+  clock), close it → "You're ready!" is visible for ≥ 2 s before Done; and
+  `tipRival` starts ~20 s after that, not before.
+
+## 5. Selftest
 
 - A rival lab has a Fusion Machine, Gacha station, Multiplier station,
   factory line and portal models, and **zero** ProximityPrompts outside its
