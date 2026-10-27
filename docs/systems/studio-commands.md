@@ -236,6 +236,7 @@ Most of the 77 were the TEST, not the game:
 
 ## /selftest notes (triage after 7dcb467: 77 → 37 FAILs)
 
+- **Panel leak check fails only on growth.** `testPanels` compares the modal Guis' instance count after the first and second close; `counts[2] > counts[1]` is a FAIL, a shrink prints nothing (a panel may drop what it no longer needs, e.g. the Index page rebuilding its cells when the found count changes).
 - **The leaks were the test's own cards.** The DailyReward card (claimable after
   00:00 UTC) sat open from the start and the tutorial presenter waits for
   `UIKit.IsOverlayOpen` (any card) before each explain card, so section 9 stalled

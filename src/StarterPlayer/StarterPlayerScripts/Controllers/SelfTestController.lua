@@ -752,8 +752,8 @@ local function countGui(): number
 end
 
 -- Opens / closes each panel twice per scale; the panels' instance count
--- after the second close must equal the count after the first (the first
--- may build the panel once, which is expected).
+-- after the second close must not exceed the count after the first (the
+-- first may build the panel once, which is expected; a shrink is fine).
 local function testPanels(): { string }
 	local lines: { string } = {}
 	for _, phone in { false, true } do
@@ -777,7 +777,8 @@ local function testPanels(): { string }
 			local scale = if phone then "phone" else "desktop"
 			if not ok then
 				table.insert(lines, ("FAIL panel %s (%s): %s"):format(spec.Name, scale, tostring(err)))
-			elseif counts[2] ~= counts[1] then
+			elseif counts[2] > counts[1] then
+				-- Only growth is a leak; a shrink is a panel dropping something it no longer needs.
 				table.insert(lines, ("FAIL panel %s (%s): %+d instances after a second open/close"):format(spec.Name, scale, counts[2] - counts[1]))
 			else
 				table.insert(lines, ("PASS panel %s (%s)"):format(spec.Name, scale))
