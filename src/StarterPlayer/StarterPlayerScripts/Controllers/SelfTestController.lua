@@ -3398,6 +3398,10 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet
 	if quiet and withToast and math.abs(quiet - withToast) > 1 then
 		table.insert(problems, ("a toast moved the card: top %.1f quiet, %.1f with an announcement"):format(quiet, withToast))
 	end
+	-- A failing live card says what the clamp itself used (its last frame).
+	if #problems > 0 then
+		table.insert(problems, Board.GetClampTrace() .. (", stable bottom now %.1f"):format(TopStack.GetStableBottom()))
+	end
 	return {
 		Ok = #problems == 0,
 		Name = name,
@@ -3424,7 +3428,11 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 		return activeProbeId == probeId
 	end
 	UIKit.SetForcedPhone(phone)
+	-- The clamp prints its numbers (GachaBoardController.SetClampDebug) while this probe runs.
+	local debugBoard = require(script.Parent.GachaBoardController) :: any
+	debugBoard.SetClampDebug(true)
 	restoreProbe = function()
+		debugBoard.SetClampDebug(false)
 		UIKit.SetForcedPhone(nil)
 	end
 	task.wait(0.4)
@@ -3439,6 +3447,7 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not card or not camera or not root or not root:IsA("BasePart") then
 		if current() then
+			debugBoard.SetClampDebug(false)
 			UIKit.SetForcedPhone(nil)
 			restoreProbe = nil
 		end
@@ -3450,6 +3459,7 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 	local savedType, savedCFrame, savedRoot = camera.CameraType, camera.CFrame, root.CFrame
 	camera.CameraType = Enum.CameraType.Scriptable
 	restoreProbe = function()
+		debugBoard.SetClampDebug(false)
 		camera.CameraType = savedType
 		camera.CFrame = savedCFrame
 		root.CFrame = savedRoot

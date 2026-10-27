@@ -21,9 +21,11 @@
 	    4 px) by sliding the billboard's SizeOffset.Y down (StackShiftFor, pure;
 	    SizeOffset.X is kept). A toast never moves the card: it draws over it for
 	    its 2.5 s. PhoneScaleFor assumes you stand at the pad's centre; standing
-	    off-centre moves the anchor, so on a phone the slide stops at the floor
-	    (weapon bar / bottom row) and the UIScale then lowers just enough, down
-	    to PhoneScaleMin (PhonePlanFor, pure).
+	    off-centre moves the anchor, so the phone clamp is two-sided: the card's
+	    top is clamp(natural top, chip row + gap, floor - height), so it slides
+	    up as well as down and stays between the chip row and the floor (weapon
+	    bar / bottom row); only a card taller than that band lowers the UIScale,
+	    down to PhoneScaleMin, and then the top wins (PhonePlanFor, pure).
 	    The anchor and the studs offsets below never change; if the clamp moves
 	    the card off its anchor, it stays clamped (readable beats anchored).
 	  * BillboardGui: Adornee = an Attachment "GachaCardAnchor" on the pad (the
@@ -1483,18 +1485,37 @@ end
 -- Distance hysteresis (Near), then Open = Near and not covered / ragdolled /
 -- carrying; and, while up, the shimmer and the zoom check. The card is
 -- adorned to the pad: it never follows the camera.
--- Pure: how many px the card slides down so its top starts StackGapPx under
--- the stack. `anchorY` is the anchor's screen y (the card's bottom edge),
+-- Pure: how many px the card slides so its top starts StackGapPx under the
+-- stack. `anchorY` is the anchor's screen y (the card's bottom edge),
 -- `cardHeight` the card as drawn (phone scale included), `stackBottom` the
--- bottom of TopStack in screen px, `viewHeight` the screen's. 0 when it
--- already clears; never more than the room left under the anchor, so the key
--- bar stays on screen (pass the floor, e.g. the weapon bar's top, as
--- `viewHeight` to cap the slide there). `gap` is the air under the stack
--- (default G.StackGapPx; the phone passes G.PhoneTopGapPx). /selftest runs it
--- at 1920 x 1080 and 1366 x 768.
-function GachaBoardController.StackShiftFor(anchorY: number, cardHeight: number, stackBottom: number, viewHeight: number, gap: number?): number
+-- bottom of TopStack in screen px, `viewHeight` the screen's. Positive =
+-- down. Without `floor` it is one-sided: 0 when the card already clears, else
+-- down by the shortfall, never more than the room left under the anchor, so
+-- the key bar stays on screen (pass the floor as `viewHeight` to cap the slide
+-- there). `gap` is the air under the stack (default G.StackGapPx; the phone
+-- passes G.PhoneTopGapPx). With `floor` (screen px; the phone: the weapon
+-- bar's top, else the bottom row's) it is two-sided: the card's top is
+-- clamp(natural top, minTop, floor - cardHeight), so it also slides UP (a
+-- negative result) when the card's bottom would pass the floor; only when the
+-- card is taller than the band does the top win. /selftest runs it at
+-- 1920 x 1080, 1366 x 768, 844 x 390 and 896 x 414.
+function GachaBoardController.StackShiftFor(
+	anchorY: number,
+	cardHeight: number,
+	stackBottom: number,
+	viewHeight: number,
+	gap: number?,
+	floor: number?
+): number
 	local minTop = math.ceil(stackBottom) + (gap or G.StackGapPx)
 	local top = anchorY - cardHeight
+	if floor then
+		local maxTop = floor - cardHeight
+		if maxTop < minTop then
+			return minTop - top -- taller than the band: the top wins
+		end
+		return math.clamp(top, minTop, maxTop) - top
+	end
 	if top >= minTop then
 		return 0
 	end
@@ -1536,33 +1557,70 @@ end
 
 -- Pure: the phone card's (UIScale, slide px) for an anchor at screen y
 -- `anchorY` (the card's bottom edge), the `baseScale` PhoneScaleFor gave, the
--- STABLE stack bottom and the floor (screen px). The card slides down just
--- enough to start G.PhoneTopGapPx under the stack, never past the floor; if
--- that is not enough it shrinks (UIScale down to G.PhoneScaleMin, bottom on
--- the floor); at the minimum the top wins and it slides on. /selftest runs it
--- at 844 x 390 and 896 x 414.
+-- STABLE stack bottom and the floor (screen px). The band is minTop (ceil of
+-- the stack bottom + G.PhoneTopGapPx) down to the floor (the weapon bar's top,
+-- else the bottom row's, never past the screen). The card slides DOWN or UP
+-- (a negative slide) to sit inside it (StackShiftFor, two-sided); if it is
+-- taller than the band the UIScale drops (down to G.PhoneScaleMin) until it
+-- fits; at the minimum the top wins. /selftest runs it at 844 x 390 and
+-- 896 x 414.
 function GachaBoardController.PhonePlanFor(anchorY: number, baseScale: number, stackBottom: number, floorPx: number, viewHeight: number): (number, number)
 	local full = GachaBoardController.PhoneFullHeight
-	local gap = G.PhoneTopGapPx
-	local minTop = math.ceil(stackBottom) + gap
-	local lowest = math.max(anchorY, math.min(floorPx, viewHeight))
-	local slide = GachaBoardController.StackShiftFor(anchorY, full * baseScale, stackBottom, lowest, gap)
-	if anchorY - full * baseScale + slide >= minTop - 0.01 then
-		return baseScale, slide
+	local minTop = math.ceil(stackBottom) + G.PhoneTopGapPx
+	local floor = math.min(floorPx, viewHeight)
+	local scale = baseScale
+	if full * scale > floor - minTop then
+		-- Rounded DOWN (4 decimals) so the fitted card never ends a hair past the floor.
+		local fit = math.floor((floor - minTop) / full * 10000) / 10000
+		scale = math.clamp(fit, G.PhoneScaleMin, baseScale)
 	end
-	local scale = math.clamp((lowest - minTop) / full, G.PhoneScaleMin, baseScale)
-	slide = lowest - anchorY
-	if lowest - full * scale < minTop then
-		slide = math.clamp(minTop - (anchorY - full * scale), 0, math.max(0, viewHeight - anchorY))
-	end
-	return scale, slide
+	return scale, GachaBoardController.StackShiftFor(anchorY, full * scale, stackBottom, viewHeight, G.PhoneTopGapPx, floor)
 end
 
--- Every frame while the card is up: slide it down (SizeOffset.Y, a fraction
--- of its own height) when its top would sit under the event chip row. The
--- phone also lowers its UIScale when the slide alone cannot clear it
--- (PhonePlanFor). The STABLE bottom is used, so a toast never moves the
--- card. The anchor, the studs offsets and SizeOffset.X are never touched.
+-- What the last clamp used and wrote, for /selftest's FAIL detail and the
+-- debug print (SetClampDebug): the numbers behind a card that is not where the
+-- rule says. `Frame` is the clamp's own counter (a stale trace means the clamp
+-- stopped running).
+local clampTrace = {
+	Frame = 0,
+	StackBottom = 0,
+	MinTop = 0,
+	AnchorY = 0,
+	DrawnHeight = 0,
+	Shift = 0,
+	SizeOffsetY = 0.5,
+	Top = 0,
+}
+local clampDebug = false
+
+-- Debug print of the clamp's numbers (the selftest turns it on around its
+-- gacha probe; off otherwise).
+function GachaBoardController.SetClampDebug(on: boolean)
+	clampDebug = on
+end
+
+-- The last clamp's numbers as one line ("clamp #N: stack ..., minTop ...").
+function GachaBoardController.GetClampTrace(): string
+	local t = clampTrace
+	return ("clamp #%d: stackBottom %.1f minTop %.1f anchorY %.1f drawnHeight %.1f shift %.2f SizeOffset.Y %.4f top %.1f"):format(
+		t.Frame,
+		t.StackBottom,
+		t.MinTop,
+		t.AnchorY,
+		t.DrawnHeight,
+		t.Shift,
+		t.SizeOffsetY,
+		t.Top
+	)
+end
+
+-- Every frame while the card is up: slide it (SizeOffset.Y, a fraction of its
+-- own height) so its top starts under the event chip row: down when it would
+-- sit under it. The phone is two-sided and also lowers its UIScale when the
+-- band is too short (PhonePlanFor): the card never leaves the band between the
+-- chip row and the weapon bar. The STABLE bottom is used, so a toast never
+-- moves the card. The anchor, the studs offsets and SizeOffset.X are never
+-- touched.
 local function clampToStack(view: CardView)
 	local camera = Workspace.CurrentCamera
 	if not camera then
@@ -1570,17 +1628,18 @@ local function clampToStack(view: CardView)
 	end
 	local shift = 0
 	local anchorY = anchorScreenY(view, camera)
+	local stackBottom = stackBottomPx()
 	if anchorY then
 		if UIKit.IsPhone() then
 			local base = GachaBoardController.PhoneScaleFor(UIKit.GetLogicalViewport())
 			local scale: number
-			scale, shift = GachaBoardController.PhonePlanFor(anchorY, base, stackBottomPx(), phoneFloorPx(camera), camera.ViewportSize.Y)
+			scale, shift = GachaBoardController.PhonePlanFor(anchorY, base, stackBottom, phoneFloorPx(camera), camera.ViewportSize.Y)
 			local gui = view.Root:FindFirstChild("PhoneScale")
 			if gui and gui:IsA("UIScale") and math.abs(gui.Scale - scale) > 0.0005 then
 				gui.Scale = scale
 			end
 		else
-			shift = GachaBoardController.StackShiftFor(anchorY, drawnHeight(view), stackBottomPx(), camera.ViewportSize.Y)
+			shift = GachaBoardController.StackShiftFor(anchorY, drawnHeight(view), stackBottom, camera.ViewportSize.Y)
 		end
 	end
 	local current = view.Billboard.SizeOffset
@@ -1588,6 +1647,18 @@ local function clampToStack(view: CardView)
 	local want = Vector2.new(current.X, 0.5 - shift / math.max(fullHeight, 1))
 	if (current - want).Magnitude > 0.0005 then
 		view.Billboard.SizeOffset = want
+	end
+	local height = drawnHeight(view)
+	clampTrace.Frame += 1
+	clampTrace.StackBottom = stackBottom
+	clampTrace.MinTop = math.ceil(stackBottom) + (if UIKit.IsPhone() then G.PhoneTopGapPx else G.StackGapPx)
+	clampTrace.AnchorY = anchorY or -1
+	clampTrace.DrawnHeight = height
+	clampTrace.Shift = shift
+	clampTrace.SizeOffsetY = view.Billboard.SizeOffset.Y
+	clampTrace.Top = if anchorY then anchorY - height + (0.5 - view.Billboard.SizeOffset.Y) * fullHeight else -1
+	if clampDebug and clampTrace.Frame % 30 == 0 then
+		print("[GachaCard] " .. GachaBoardController.GetClampTrace())
 	end
 end
 

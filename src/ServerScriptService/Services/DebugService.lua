@@ -2954,7 +2954,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		savedPlaySeconds = RewardService.GetGiftState(player).PlaySeconds
 		RewardService.SetGiftSeconds(player, 0)
 	end
-	local before = PlayerDataService.SelfTestFingerprint(player)
+	local before = PlayerDataService.SelfTestFingerprintFields(player)
 	local cashBefore = PlayerDataService.GetCash(player)
 	local serverErrors = {}
 	local logConnection = LogService.MessageOut:Connect(function(message: string, kind: Enum.MessageType)
@@ -2965,7 +2965,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	RemoteEvents.SelfTest:FireClient(player, { OtherUserId = other, Slots = slots, DealSlots = dealSlots })
 	local fuzzReport = waitForReport(player, "Fuzz")
 	logConnection:Disconnect()
-	local fingerprintAfter = PlayerDataService.SelfTestFingerprint(player)
+	local fingerprintAfter = PlayerDataService.SelfTestFingerprintFields(player)
 	if fuzzData then
 		-- Put the daily and the gift clock back (play time that ticked meanwhile stays).
 		if savedDaily then
@@ -2979,7 +2979,9 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		result(false, "remote fuzz", "no report from the client")
 	else
 		result(#serverErrors == 0, ("remote fuzz: no server errors (%d junk calls)"):format(fuzzReport.Fired or 0), table.concat(serverErrors, " | "))
-		result(fingerprintAfter == before, "remote fuzz: no state change")
+		-- Names the field(s) that moved (before -> after), so a failure says what changed.
+		local changed = PlayerDataService.SelfTestFingerprintDiff(before, fingerprintAfter)
+		result(#changed == 0, "remote fuzz: no state change", if #changed > 0 then "changed field(s): " .. table.concat(changed, " | ") else nil)
 		result(PlayerDataService.GetCash(player) >= cashBefore, "remote fuzz: no cash spent")
 		-- The fuzz's admin calls aim at a fake negative id (the tester may be a
 		-- listed admin); a non-admin is still refused by the same check the

@@ -900,13 +900,17 @@ function PlayerDataService.SelfTestRestoreQuests(player: Player, saved: any)
 end
 
 -- Everything a bad remote must NOT change (cash is checked separately: the
--- income tick only ever raises it). The visit's gift play time and Boosts tick.
-function PlayerDataService.SelfTestFingerprint(player: Player): string
+-- income tick only ever raises it), as NAMED fields: field name -> canonical
+-- string, so a failing /selftest says WHICH field moved (SelfTestFingerprintDiff).
+-- The visit's gift play time and Boosts tick. If a field here turns out to
+-- change by itself (a timer, a counter the game bumps), drop it from this table
+-- with a comment saying why; never from the fuzz.
+function PlayerDataService.SelfTestFingerprintFields(player: Player): { [string]: string }
 	local data = state.sessionCache[player.UserId]
 	if not data then
-		return ""
+		return {}
 	end
-	return canonical({
+	local fields: { [string]: any } = {
 		Inventory = data.Inventory,
 		PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays),
 		Generators = data.Generators,
@@ -930,7 +934,55 @@ function PlayerDataService.SelfTestFingerprint(player: Player): string
 		Armed = data.Armed,
 		Quests = data.Quests,
 		RivalSteals = data.RivalSteals,
-	})
+	}
+	local out: { [string]: string } = {}
+	for name, value in fields do
+		out[name] = canonical(value)
+	end
+	return out
+end
+
+-- The names of the fields that differ between two SelfTestFingerprintFields
+-- results, sorted, each with its before / after text (cut to 160 chars).
+function PlayerDataService.SelfTestFingerprintDiff(before: { [string]: string }, after: { [string]: string }): { string }
+	local names: { string } = {}
+	for name in before do
+		names[#names + 1] = name
+	end
+	for name in after do
+		if before[name] == nil then
+			names[#names + 1] = name
+		end
+	end
+	table.sort(names)
+	local function cut(text: string?): string
+		if text == nil then
+			return "(none)"
+		end
+		return if #text > 160 then text:sub(1, 160) .. "..." else text
+	end
+	local diff: { string } = {}
+	for _, name in names do
+		if before[name] ~= after[name] then
+			diff[#diff + 1] = ("%s: %s -> %s"):format(name, cut(before[name]), cut(after[name]))
+		end
+	end
+	return diff
+end
+
+-- One string over the same fields (the secret-pity check compares two).
+function PlayerDataService.SelfTestFingerprint(player: Player): string
+	local fields = PlayerDataService.SelfTestFingerprintFields(player)
+	local names: { string } = {}
+	for name in fields do
+		names[#names + 1] = name
+	end
+	table.sort(names)
+	local parts: { string } = {}
+	for _, name in names do
+		parts[#parts + 1] = name .. "=" .. fields[name]
+	end
+	return table.concat(parts, ";")
 end
 
 -- Pays offline earnings still pending into the save (leaving, shutdown):

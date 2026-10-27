@@ -144,18 +144,26 @@ in front of it and see the card over it).
   (which includes the 2.5 s announcement line), and the toast draws over the card.
   **Phone:** `PhoneScaleFor` assumes you stand at the pad's centre at the default
   camera; standing off-centre moves the anchor on screen, so the phone clamps too.
-  `PhonePlanFor` (pure) slides the card down, but never past the **floor** (the
-  weapon bar's top, else the HUD bottom row's top: `GetCardBottomFor`); when the
-  slide alone cannot clear the chip row it lowers the card's `PhoneScale` just
-  enough (never below `PhoneScaleMin`), and at the minimum the top wins. The anchor
-  and `StudsOffset` still never change; the card may leave its anchor, it stays
-  clamped (the NIGHT chip once hid the first row of orbs on PC). `/selftest`
-  measures the drawn top with no announcement and with one showing (equal within
-  1 px, once per probe), and on a phone stands the tester at the pad's centre and
-  3 studs off each side (the probe says how far from the anchor it started): top
-  >= stable bottom + gap and bottom <= the floor, at 844 x 390 and 896 x 414. When
-  the window is not that size the pure `PhonePlanFor` is asserted on the
-  projected anchor (a projection says nothing about the live drawn card).
+  The phone clamp is **two-sided** (`PhonePlanFor`, pure, through `StackShiftFor`
+  with its `floor` argument): the card's top is `clamp(natural top, minTop, floor
+  - height)`, where the band's top is the chip row (`ceil(stable bottom) +
+  PhoneTopGapPx`) and its bottom the **floor** (the weapon bar's top, else the HUD
+  bottom row's top: `GetCardBottomFor`). So it slides up as well as down (a
+  negative slide, a `SizeOffset.Y` above 0.5) and never leaves the band; only a
+  card taller than the band lowers its `PhoneScale` (never below `PhoneScaleMin`),
+  and at the minimum the top wins. Without `floor` `StackShiftFor` stays
+  one-sided, which is what the desktop uses. The anchor and `StudsOffset` still
+  never change; the card may leave its anchor, it stays clamped (the NIGHT chip
+  once hid the first row of orbs on PC). `/selftest` measures the drawn top with
+  no announcement and with one showing (equal within 1 px, once per probe), and
+  on a phone stands the tester at the pad's centre and 3 studs off each side
+  (the probe says how far from the anchor it started): top >= stable bottom + gap
+  and bottom <= the floor, at 844 x 390 and 896 x 414. When the window is not
+  that size the pure `PhonePlanFor` is asserted on the projected anchor (a
+  projection says nothing about the live drawn card). A failing desktop line
+  appends `GachaBoardController.GetClampTrace()` (what the last clamp frame used:
+  stack bottom, minTop, anchor y, drawn height, shift, `SizeOffset.Y`, top), and
+  the probe turns on `SetClampDebug` (a `[GachaCard]` print every 30 frames).
   **Phone variant** (`applyVariant`, `PlotLayout.Gacha.Phone*`): not the desktop
   card shrunk evenly. No mutation line (the (i) panel has it); the %, the pills,
   the (i) mark and the key captions are 25-26 px so they read >= 13 px at

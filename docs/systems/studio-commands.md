@@ -192,7 +192,11 @@ Most of the 77 were the TEST, not the game:
 - Auto pull test: passive income is paused (`TycoonService.SelfTestFreezeIncome`)
   and cash set to exactly two cycles, or a rich save paid for 90 pulls.
 - The remote fuzz parks the daily claim and the visit's gift clock first (a junk
-  `ClaimDaily` is a real claim after 00:00 UTC).
+  `ClaimDaily` is a real claim after 00:00 UTC). Its "no state change" check
+  compares NAMED fields (`PlayerDataService.SelfTestFingerprintFields`) and a
+  failure lists each field that moved with its before -> after text
+  (`SelfTestFingerprintDiff`); a field that ticks by itself is dropped from the
+  table with a comment, never from the fuzz.
 - Section 11 also runs `runGiftSessionSelfTest`: a fresh join is 0 s with no
   claims; a claim before its minutes is refused (`NotYet`); gift 1 claims once
   at 5 min then reads `Claimed`; after `RewardService.SelfTestRejoin` (drops
