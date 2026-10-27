@@ -1059,6 +1059,10 @@ export type SignSurface = {
 	Set: (title: string, detail: string) -> (),
 	-- A teal pill between title and detail ("🛡 PROTECTED · NEW LAB"); nil hides it.
 	SetPill: (text: string?) -> (),
+	-- Recolours the sign's panel (both faces): a rival lab's UITheme.Gradients.Rival.
+	SetGradient: (pair: UITheme.GradientPair) -> (),
+	-- Recolours the pill (the rival lab's name sits in it).
+	SetPillColor: (color: Color3) -> (),
 }
 
 -- The plot sign's content on BOTH the Front and Back faces of `board`: the
@@ -1067,6 +1071,7 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 	local titles: { TextLabel } = {}
 	local details: { TextLabel } = {}
 	local pills: { TextLabel } = {}
+	local panelGradients: { UIGradient } = {}
 	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
 		local gui = newSurface(board, "Sign" .. face.Name, face, pixelsPerStud)
 		local panel = Instance.new("Frame")
@@ -1075,6 +1080,7 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 		panel.Size = UDim2.fromScale(1, 1)
 		panel.Parent = gui
 		gradient(panel, UITheme.Gradients.Violet.Top, UITheme.Gradients.Violet.Bottom)
+		table.insert(panelGradients, panel:FindFirstChildOfClass("UIGradient") :: UIGradient)
 
 		local title = scaledLabel(panel, "Title", Fonts.Display, Colors.Text, 0.08, 0.52)
 		textStroke(title, 4)
@@ -1115,6 +1121,16 @@ function BillboardKit.SignSurface(board: BasePart, pixelsPerStud: number): SignS
 			for _, detail in details do
 				detail.Position = UDim2.fromScale(detail.Position.X.Scale, if shown then 0.7 else 0.64)
 				detail.Size = UDim2.fromScale(detail.Size.X.Scale, if shown then 0.24 else 0.26)
+			end
+		end,
+		SetGradient = function(pair: UITheme.GradientPair)
+			for _, panelGradient in panelGradients do
+				panelGradient.Color = ColorSequence.new(pair.Top, pair.Bottom)
+			end
+		end,
+		SetPillColor = function(color: Color3)
+			for _, pill in pills do
+				pill.BackgroundColor3 = color
 			end
 		end,
 	}

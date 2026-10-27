@@ -231,15 +231,15 @@ function PlotKit.ApplyLabLook(plot: Instance, pink: boolean, vip: boolean)
 	end
 end
 
--- Violet once claimed, Unclaimed before.
-function PlotKit.SetWallStripsClaimed(plot: Instance, claimed: boolean)
+-- Violet once claimed (or `accent`: a rival lab's AccentRival), Unclaimed before.
+function PlotKit.SetWallStripsClaimed(plot: Instance, claimed: boolean, accent: Color3?)
 	local walls = plot:FindFirstChild("Walls")
 	if not walls then
 		return
 	end
 	for _, strip in walls:GetChildren() do
 		if strip:IsA("BasePart") and strip:HasTag(PlotKit.WALL_STRIP_TAG) then
-			strip.Color = if claimed then World.AccentViolet else World.Unclaimed
+			strip.Color = if claimed then accent or World.AccentViolet else World.Unclaimed
 		end
 	end
 end

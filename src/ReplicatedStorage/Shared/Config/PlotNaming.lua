@@ -10,4 +10,9 @@ function PlotNaming.GetPlotName(userId: number): string
 	return ("Tycoon_%d"):format(userId)
 end
 
+-- A rival lab (RivalService) has no user id; it is named by its rival id.
+function PlotNaming.GetRivalPlotName(rivalId: number): string
+	return ("Rival_%d"):format(rivalId)
+end
+
 return PlotNaming

@@ -91,6 +91,7 @@ UITheme.World = {
 	CapsuleWhite = hex("#F4F1FF"), -- bottom half of the gacha capsule hologram
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
 	AccentPink = hex("#FF5CC8"), -- the Neon Pink Lab (LabStyle): wall + sign strips, cash balls
+	AccentRival = hex("#FF5A36"), -- rival labs (RivalService): wall + sign strips, the guard's tint
 	-- Combat (CombatService tools, CombatController FX)
 	WeaponWood = hex("#C98A4B"), -- the Bat
 	WeaponWoodDark = hex("#9E6A36"), -- the Bat's dents
@@ -124,6 +125,7 @@ UITheme.Gradients = {
 	Teal = { Top = hex("#5CF2D6"), Bottom = hex("#1FB49A") }, -- INDEX button
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
+	Rival = { Top = hex("#FF8A5C"), Bottom = hex("#D12E1B") }, -- the rival labs' gate sign (World.AccentRival)
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 	ShopFeatured = { Top = hex("#FFB347"), Bottom = hex("#E0306E") }, -- the shop's featured banner (warm)
 	Pink = { Top = hex("#FF8AD8"), Bottom = hex("#E02F9E") }, -- the HUD GIFTS button, the shop's Deal

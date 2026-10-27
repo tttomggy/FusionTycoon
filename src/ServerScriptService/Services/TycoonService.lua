@@ -15,6 +15,11 @@
 	:Start() resolves FusionMachineService and WorldService and registers the
 	factory-line OnSync hook. PlayerDataService is a leaf
 	(requires no services), so its module-scope require can't form a cycle.
+
+	Rival labs (RivalService) are built by the SAME plot code: BuildRivalPlot
+	runs the shell, the sign gate and the pedestals with no owner. Slots are
+	shared: a real player always gets one (takeSlot asks the slot reclaimer,
+	RivalService's despawn of its farthest lab, when none is free).
 ]]
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
@@ -28,6 +33,7 @@ local PlotLayout = require(Config.PlotLayout)
 local StreetLayout = require(Config.StreetLayout)
 local FusionConfig = require(Config.FusionConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local FloorKit = require(ReplicatedStorage.Shared.Modules.FloorKit)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
@@ -125,6 +131,9 @@ local EXPECTED_TEMPLATE_PART_NAMES = { "Floor", "ClaimButton", "PlotOrigin", "Sp
 --[[ State --------------------------------------------------------------------- ]]
 
 local occupiedSlots: { [number]: boolean } = {}
+-- RivalService's "free a slot": despawns the rival lab farthest from every
+-- player and returns true. Registered, never required (it requires us).
+local slotReclaimer: (() -> boolean)? = nil
 local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
 local originByUserId: { [number]: CFrame } = {}
@@ -331,6 +340,20 @@ local function claimSlotIndex(): number?
 	return nil
 end
 
+-- A slot for a real player: the first free one, else the slot of the rival
+-- lab RivalService gives up. A rival never costs a player their plot.
+local function takeSlot(): number?
+	local index = claimSlotIndex()
+	if index then
+		return index
+	end
+	local reclaimer = slotReclaimer
+	if reclaimer and reclaimer() then
+		return claimSlotIndex()
+	end
+	return nil
+end
+
 -- Resolves the touching Player only for an actual character limb.
 local function getTouchingPlayer(hit: BasePart): Player?
 	local character = hit.Parent
@@ -354,7 +377,7 @@ local function stripTemplateLeftovers(plot: Model)
 	end
 end
 
-local function validatePlotClone(plot: Model, player: Player)
+local function validatePlotClone(plot: Model, ownerName: string)
 	local missing = {}
 	for _, name in EXPECTED_TEMPLATE_PART_NAMES do
 		if not plot:FindFirstChild(name, true) then
@@ -365,7 +388,7 @@ local function validatePlotClone(plot: Model, player: Player)
 		warn((
 			"TycoonService: %s's cloned plot is missing %s. TycoonTemplate was likely incomplete or mid-sync "
 				.. "when it was cloned; plots are cloned once per session, so restart Play after fixing it."
-		):format(player.Name, table.concat(missing, ", ")))
+		):format(ownerName, table.concat(missing, ", ")))
 	end
 end
 
@@ -415,7 +438,7 @@ end
 
 --[[ Plot shell: floor, walkway, walls, gate ramp, spawn ---------------------------- ]]
 
-local function buildShell(plot: Model, origin: CFrame, player: Player)
+local function buildShell(plot: Model, origin: CFrame, player: Player?)
 	local plotOrigin = findPart(plot, "PlotOrigin")
 	if plotOrigin then
 		plotOrigin.CFrame = origin
@@ -435,7 +458,10 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 
 	-- Spawn on the street in front of the gate; RespawnLocation picks it.
 	local spawn = plot:FindFirstChildWhichIsA("SpawnLocation", true)
-	if spawn then
+	if spawn and not player then
+		-- A rival lab: nobody respawns here.
+		spawn:Destroy()
+	elseif spawn and player then
 		spawn.Size = PlotLayout.SPAWN_SIZE
 		spawn.CFrame = PartKit.At(origin, PlotLayout.SPAWN_POSITION, StreetLayout.STREET_TOP_Y + PlotLayout.SPAWN_SIZE.Y / 2)
 		spawn.Transparency = 1
@@ -453,7 +479,7 @@ local function buildShell(plot: Model, origin: CFrame, player: Player)
 		if character then
 			character:PivotTo(spawn.CFrame + Vector3.new(0, spawn.Size.Y / 2 + PlotLayout.SPAWN_CHARACTER_CLEARANCE, 0))
 		end
-	else
+	elseif player then
 		warn(("TycoonService: no SpawnLocation in %s's plot"):format(player.Name))
 	end
 end
@@ -882,12 +908,14 @@ end
 -- The folder is built complete and parented LAST, so it replicates to the
 -- client in one piece (parenting it first let it arrive before its children,
 -- and the client wired only the pedestals it could see at that moment).
-local function createPedestals(plot: Model, origin: CFrame, player: Player)
+local function createPedestals(plot: Model, origin: CFrame, player: Player?, rivalId: number?)
 	local folder = Instance.new("Folder")
 	folder.Name = "Pedestals"
 
 	local p = PlotLayout.Pedestal
-	for index = 1, PlotLayout.PEDESTAL_COUNT do
+	-- A rival lab (no owner, `player` nil) keeps its first RivalConfig.PedestalCount.
+	local count = if rivalId then RivalConfig.PedestalCount else PlotLayout.PEDESTAL_COUNT
+	for index = 1, count do
 		-- 7-10 stand on the 2nd floor's deck (GetPedestalPosition's y).
 		local base = PlotLayout.GetPedestalPosition(index)
 		local pedestal = PartKit.Part({
@@ -925,7 +953,7 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player)
 		-- owner's client enables it on a locked spot (pedestals fill
 		-- themselves, ItemService.Arrange, so nothing else needs a prompt).
 		-- The 2nd floor has no prompts at all (it unlocks with Rebirth 2).
-		if not PlotLayout.IsFloor2Pedestal(index) then
+		if not rivalId and not PlotLayout.IsFloor2Pedestal(index) then
 			local prompt = newPrompt(pedestal, "UnlockPrompt", "Unlock", "+2 Pedestals", p.PromptDistance)
 			prompt:SetAttribute(BillboardKit.OWNER_ONLY_ATTRIBUTE, true)
 			prompt.Enabled = false
@@ -938,7 +966,12 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player)
 		steal.HoldDuration = HeistConfig.GrabHoldSeconds
 		steal.Enabled = false
 		steal:SetAttribute("EnemyOnly", true)
-		steal:SetAttribute("OwnerUserId", player.UserId)
+		if rivalId then
+			-- A rival lab has no owner: the client sends this id instead.
+			steal:SetAttribute("RivalId", rivalId)
+		elseif player then
+			steal:SetAttribute("OwnerUserId", player.UserId)
+		end
 		pedestal:SetAttribute("Filled", false)
 		pedestal:SetAttribute("BeingStolen", false)
 
@@ -1579,7 +1612,7 @@ local function createPlotForPlayer(player: Player)
 		return
 	end
 
-	local slotIndex = claimSlotIndex()
+	local slotIndex = takeSlot()
 	if not slotIndex then
 		warn(("TycoonService: no free plot slot for %s (all %d taken)"):format(player.Name, PlotLayout.MAX_PLOT_SLOTS))
 		return
@@ -1596,7 +1629,7 @@ local function createPlotForPlayer(player: Player)
 	plot:SetAttribute("Claimed", false)
 	plot:SetAttribute("SlotIndex", slotIndex)
 	stripTemplateLeftovers(plot)
-	validatePlotClone(plot, player)
+	validatePlotClone(plot, player.Name)
 
 	buildShell(plot, origin, player)
 	plotSignByUserId[player.UserId] = PlotKit.BuildSignGate(origin, plot)
@@ -1633,6 +1666,110 @@ local function removePlotForPlayer(player: Player)
 		slotByUserId[player.UserId] = nil
 		WorldService.SetSlotOccupied(slotIndex, false)
 	end
+end
+
+--[[ Rival labs (RivalService) ----------------------------------------------------------
+	The same shell, sign gate and pedestal code a player's plot uses, built
+	with no owner. RivalService decides which slot and what stands on the
+	pedestals; this service only owns the slot table and the geometry.
+]]
+
+-- RivalService registers how to free a slot for a real player.
+function TycoonService.SetSlotReclaimer(reclaimer: (() -> boolean)?)
+	slotReclaimer = reclaimer
+end
+
+-- Slots nobody (player or rival) holds, lowest first.
+function TycoonService.GetFreeSlots(): { number }
+	local free = {}
+	for index = 1, PlotLayout.MAX_PLOT_SLOTS do
+		if not occupiedSlots[index] then
+			table.insert(free, index)
+		end
+	end
+	return free
+end
+
+-- The slots real players hold (RivalService keeps its labs near them).
+function TycoonService.GetPlayerSlots(): { number }
+	local slots = {}
+	for _, slot in slotByUserId do
+		table.insert(slots, slot)
+	end
+	return slots
+end
+
+-- Reserves `index` for a rival lab (false if someone holds it).
+function TycoonService.ReserveSlot(index: number): boolean
+	if occupiedSlots[index] then
+		return false
+	end
+	occupiedSlots[index] = true
+	WorldService.SetSlotOccupied(index, true)
+	return true
+end
+
+function TycoonService.ReleaseSlot(index: number)
+	if occupiedSlots[index] then
+		occupiedSlots[index] = nil
+		WorldService.SetSlotOccupied(index, false)
+	end
+end
+
+-- Builds rival `rivalId`'s lab on a slot ReserveSlot gave RivalService: the
+-- player plot's shell, walls, sign gate and pedestals (the first
+-- RivalConfig.PedestalCount), no generators / stations / Fusion Machine, no
+-- owner. Returns nil when the template is missing.
+function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: string): Model?
+	local template = ReplicatedStorage:FindFirstChild("TycoonTemplate")
+	if not template or not template:IsA("Model") then
+		warn("TycoonService: ReplicatedStorage.TycoonTemplate (a Model) not found; no rival lab " .. name)
+		return nil
+	end
+	local origin = PlotLayout.GetSlotCFrame(slotIndex)
+	local plot = template:Clone()
+	plot.Name = PlotNaming.GetRivalPlotName(rivalId)
+	plot:SetAttribute("Rival", true)
+	plot:SetAttribute("RivalId", rivalId)
+	plot:SetAttribute("RivalName", name)
+	plot:SetAttribute("SlotIndex", slotIndex)
+	stripTemplateLeftovers(plot)
+	validatePlotClone(plot, name)
+	-- Nobody claims or respawns here.
+	local claimButton = plot:FindFirstChild("ClaimButton", true)
+	if claimButton then
+		claimButton:Destroy()
+	end
+
+	buildShell(plot, origin, nil)
+	PlotKit.SetWallStripsClaimed(plot, true, World.AccentRival)
+	local sign = PlotKit.BuildSignGate(origin, plot)
+	sign.Set("RIVAL LAB", "steal me!")
+	sign.SetGradient(UITheme.Gradients.Rival)
+	sign.SetPill(name:upper())
+	sign.SetPillColor(World.AccentRival)
+	local strip = plot:FindFirstChild("SignGate") and plot.SignGate:FindFirstChild("SignStrip")
+	if strip and strip:IsA("BasePart") then
+		strip.Color = World.AccentRival
+	end
+	createPedestals(plot, origin, nil, rivalId)
+	plot.Parent = getPlotsFolder()
+	return plot
+end
+
+-- /selftest: a real player's plot for a stand-in with only UserId / Name /
+-- DisplayName (the slot logic, with no Roblox Player to join).
+function TycoonService.SelfTestCreatePlot(stand: any): Model?
+	createPlotForPlayer(stand)
+	return plotByUserId[stand.UserId]
+end
+
+function TycoonService.SelfTestRemovePlot(stand: any)
+	removePlotForPlayer(stand)
+end
+
+function TycoonService.GetSlotIndex(player: Player): number?
+	return slotByUserId[player.UserId]
 end
 
 -- Admin ResetPlayer: tears the plot down and builds a fresh unclaimed one,
