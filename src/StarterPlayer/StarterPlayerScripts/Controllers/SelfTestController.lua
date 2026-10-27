@@ -89,6 +89,13 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 			{ { OwnerUserId = localPlayer.UserId, PedestalIndex = 1 } },
 			{ { OwnerUserId = otherUserId, PedestalIndex = 99 } },
 			{ { OwnerUserId = otherUserId, PedestalIndex = NAN } },
+			-- Rival labs: { RivalId, PedestalIndex }. No such lab, junk types.
+			{ { RivalId = 999999, PedestalIndex = 1 } },
+			{ { RivalId = "x", PedestalIndex = 1 } },
+			{ { RivalId = { 1 }, PedestalIndex = 1 } },
+			{ { RivalId = 1, PedestalIndex = 99 } },
+			{ { RivalId = 1, PedestalIndex = NAN } },
+			{ { RivalId = BIG_STRING, PedestalIndex = BIG_STRING } },
 		},
 		RequestShopPurchase = { {}, { "x" }, { { Key = 5 } }, { { Key = "NoSuchProduct" } }, { { Key = BIG_STRING } } },
 		NotifyOptInAnalytics = { {}, { "x" }, { { Event = "Nope" } }, { { Event = 5 } }, { { Event = BIG_STRING } } },
@@ -145,6 +152,7 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 	}
 	for _, n in junkNumbers do
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })
+		table.insert(cases.RequestSteal, { { RivalId = n, PedestalIndex = n } })
 		table.insert(cases.ClaimGift, { { Index = n } })
 		table.insert(cases.ClaimQuest, { { Id = n } })
 		table.insert(cases.UsePowerUp, { { Key = n } })
