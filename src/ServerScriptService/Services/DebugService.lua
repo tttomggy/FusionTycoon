@@ -27,6 +27,7 @@ local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local FriendConfig = require(ReplicatedStorage.Shared.Config.FriendConfig)
@@ -60,6 +61,7 @@ type QuestServiceModule = typeof(require(script.Parent.QuestService))
 type RewardServiceModule = typeof(require(script.Parent.RewardService))
 type FriendServiceModule = typeof(require(script.Parent.FriendService))
 type NotifyServiceModule = typeof(require(script.Parent.NotifyService))
+type RivalServiceModule = typeof(require(script.Parent.RivalService))
 
 type State = {
 	connections: { RBXScriptConnection },
@@ -86,6 +88,7 @@ local QuestService: QuestServiceModule
 local RewardService: RewardServiceModule
 local FriendService: FriendServiceModule
 local NotifyService: NotifyServiceModule
+local RivalService: RivalServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
 local stealableToggles: { [number]: boolean } = {}
@@ -2022,11 +2025,405 @@ local function runFriendBoostSelfTest(player: Player, result: (boolean, string, 
 	end
 end
 
+
+-- Rival labs (RivalService + HeistService's rival path): the fill, a real
+-- player's slot, the Rebirth rule, a steal end to end (grab, deliver, the
+-- guard's tag, the 90 s respawn on an injected clock), the hourly limit, the
+-- orb rolls and a lab despawning mid-carry. Everything is put back after.
+local function runRivalSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	if not character or not root or not root:IsA("BasePart") then
+		result(true, "rivals (skipped: the tester has no character)")
+		return
+	end
+	local home = root.CFrame
+	local rebirthsBefore = PlayerDataService.GetRebirths(player)
+	local standIns: { any } = {}
+	local fakeNow = os.clock()
+	local releaseClaim: (() -> ())? = nil
+
+	local function waitUntil(condition: () -> boolean, timeout: number): boolean
+		local started = os.clock()
+		while not condition() and os.clock() - started < timeout do
+			task.wait(0.1)
+		end
+		return condition()
+	end
+	local function inventoryUids(): { [string]: boolean }
+		local uids: { [string]: boolean } = {}
+		local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+		for _, item in inventory do
+			uids[item.Uid] = true
+		end
+		return uids
+	end
+	local function inventoryCount(): number
+		local count = 0
+		for _ in inventoryUids() do
+			count += 1
+		end
+		return count
+	end
+	local function putNextTo(pedestal: BasePart)
+		character:PivotTo(pedestal.CFrame * CFrame.new(0, 3, 5))
+		task.wait(0.1)
+	end
+	local function anyOrb(): (any?, number?)
+		for _, view in RivalService.GetRivals() do
+			for index = 1, RivalConfig.PedestalCount do
+				if RivalService.GetOrb(view.Id, index) then
+					return view, index
+				end
+			end
+		end
+		return nil, nil
+	end
+
+	local ok, err = pcall(function()
+		PlayerDataService.SetRebirths(player, 0)
+		RivalService.SetClock(function()
+			return fakeNow
+		end)
+		HeistService.SelfTestClearRivalSteals(player)
+		RivalService.Step()
+
+		-- 1. The fill: a solo server gets MaxRivals labs, built like a player's.
+		local rivals = RivalService.GetRivals()
+		local freeNow = #TycoonService.GetFreeSlots()
+		result(
+			#rivals == math.min(RivalConfig.MaxRivals, #rivals + freeNow) and #rivals >= 1,
+			("rivals: the server fills %d rival lab(s) in free slots"):format(RivalConfig.MaxRivals),
+			("%d labs, %d slots free"):format(#rivals, freeNow)
+		)
+		local shapeBad: { string } = {}
+		for _, view in rivals do
+			local plot = view.Plot
+			local pedestals = plot:FindFirstChild("Pedestals")
+			if plot:GetAttribute("Rival") ~= true or plot:GetAttribute("OwnerUserId") ~= nil or plot:GetAttribute("Claimed") == true then
+				table.insert(shapeBad, view.Name .. " attributes")
+			end
+			if plot:FindFirstChild("FusionMachine", true) then
+				table.insert(shapeBad, view.Name .. " has a Fusion Machine")
+			end
+			for index = 1, RivalConfig.PedestalCount do
+				local pedestal = pedestals and pedestals:FindFirstChild("Pedestal" .. index)
+				local steal = pedestal and pedestal:FindFirstChild("StealPrompt")
+				if
+					not pedestal
+					or pedestal:GetAttribute("Filled") ~= true
+					or not steal
+					or steal:GetAttribute("RivalId") ~= view.Id
+					or steal:GetAttribute("OwnerUserId") ~= nil
+					or pedestal:FindFirstChild("UnlockPrompt")
+				then
+					table.insert(shapeBad, ("%s pedestal %d"):format(view.Name, index))
+				end
+			end
+			local title: string? = nil
+			for _, descendant in plot:GetDescendants() do
+				if descendant:IsA("TextLabel") and descendant.Name == "Title" and descendant:FindFirstAncestor("SignGate") then
+					title = descendant.Text
+					break
+				end
+			end
+			if title ~= "RIVAL LAB" then
+				table.insert(shapeBad, view.Name .. " sign reads " .. tostring(title))
+			end
+		end
+		result(#shapeBad == 0, "rivals: each lab is ownerless, 4 filled steal pedestals, no Fusion Machine, a RIVAL LAB sign", table.concat(shapeBad, "; "))
+		local tiersBad: { string } = {}
+		for _, view in rivals do
+			for index = 1, RivalConfig.PedestalCount do
+				local orb = RivalService.GetOrb(view.Id, index)
+				if not orb or orb.Tier == "Legendary" or orb.Tier == "Mythic" or orb.Tier == "Secret" then
+					table.insert(tiersBad, ("%s/%d %s"):format(view.Name, index, if orb then orb.Tier else "empty"))
+				end
+			end
+		end
+		result(#tiersBad == 0, "rivals: with the lowest player at Rebirth 0 every orb is a Common, Rare or Epic", table.concat(tiersBad, "; "))
+
+		-- 2. A real player is never refused a plot: fill every slot with
+		-- stand-in players, then one more displaces the farthest rival.
+		local freeSlots = TycoonService.GetFreeSlots()
+		local made = 0
+		for index = 1, #freeSlots do
+			local stand: any = { UserId = -9100 - index, Name = "RivalTest" .. index, DisplayName = "RivalTest" .. index }
+			if TycoonService.SelfTestCreatePlot(stand) then
+				table.insert(standIns, stand)
+				made += 1
+			end
+		end
+		local rivalsFull = RivalService.GetRivals()
+		local fullOk = #TycoonService.GetFreeSlots() == 0 and #rivalsFull >= 1
+		if fullOk then
+			local anchors: { Vector3 } = {}
+			for _, slot in TycoonService.GetPlayerSlots() do
+				table.insert(anchors, PlotLayout.GetSlotCFrame(slot).Position)
+			end
+			local expected: any = nil
+			local expectedDistance = -math.huge
+			for _, view in rivalsFull do
+				local nearest = math.huge
+				for _, anchor in anchors do
+					nearest = math.min(nearest, (view.Origin.Position - anchor).Magnitude)
+				end
+				if nearest > expectedDistance or (nearest == expectedDistance and expected ~= nil and view.Id > expected.Id) then
+					expected, expectedDistance = view, nearest
+				end
+			end
+			local extra: any = { UserId = -9099, Name = "RivalTestX", DisplayName = "RivalTestX" }
+			local plot = TycoonService.SelfTestCreatePlot(extra)
+			table.insert(standIns, extra)
+			result(
+				plot ~= nil
+					and RivalService.GetRival(expected.Id) == nil
+					and #RivalService.GetRivals() == #rivalsFull - 1
+					and plot:GetAttribute("SlotIndex") == expected.SlotIndex
+					and expected.Plot.Parent == nil,
+				"rivals: a player joining a full server displaces the farthest rival and gets its slot",
+				("expected %s (slot %d) to go; plot %s, slot %s, %d -> %d labs"):format(
+					expected.Name,
+					expected.SlotIndex,
+					tostring(plot ~= nil),
+					tostring(plot and plot:GetAttribute("SlotIndex")),
+					#rivalsFull,
+					#RivalService.GetRivals()
+				)
+			)
+		else
+			result(true, "rivals: displacement (skipped: the server could not be filled)", ("%d free, %d rivals, %d stand-ins"):format(#TycoonService.GetFreeSlots(), #rivalsFull, made))
+		end
+		for _, stand in standIns do
+			TycoonService.SelfTestRemovePlot(stand)
+		end
+		table.clear(standIns)
+		RivalService.Step()
+		result(#RivalService.GetRivals() >= 1 and #TycoonService.GetFreeSlots() >= 0, "rivals: the labs refill once the slots free up")
+
+		-- 3. The Rebirth rule: Rebirth 0 may rob a rival, not a player.
+		local isProtected = HeistService.IsProtected(player)
+		result(
+			HeistService.WhyCantSteal(0, true) == nil
+				and HeistService.WhyCantSteal(0, false) == "NeedsRebirth"
+				and HeistService.WhyCantSteal(1, false) == nil
+				and HeistConfig.MinRebirthsVsRivals == 0
+				and HeistConfig.MinRebirthsVsPlayers == 1,
+			"rivals: Rebirth 0 may steal from a rival, not from a player; Rebirth 1 may from both"
+		)
+		PlayerDataService.SetRebirths(player, 1)
+		local protectedAtOne = HeistService.IsProtected(player)
+		PlayerDataService.SetRebirths(player, 0)
+		result(isProtected and not protectedAtOne, "rivals: a Rebirth 0 lab is protected from other players, a Rebirth 1 lab is not")
+
+		-- 4. A steal end to end.
+		local state, release, why = TycoonService.SelfTestClaim(player)
+		if state == "Skip" then
+			result(true, "rivals: steal, deliver and tag (skipped: no lab for the tester)", tostring(why))
+		else
+			releaseClaim = release
+			local plot = TycoonService.GetPlotForPlayer(player)
+			local view, index = anyOrb()
+			local pedestal = view and RivalService.GetPedestal(view.Id, index :: number)
+			if not plot or not view or not pedestal or not index then
+				result(false, "rivals: a rival with an orb and the tester's lab", "none")
+			else
+				putNextTo(pedestal)
+				local orb = RivalService.GetOrb(view.Id, index)
+				local before = inventoryCount()
+				local beforeUids = inventoryUids()
+				local grabbed, reason = HeistService.TryRivalSteal(player, view.Id, index)
+				result(
+					grabbed and HeistService.IsCarrying(player) and pedestal:GetAttribute("BeingStolen") == true and RivalService.IsCarried(view.Id, index),
+					"rivals: a Rebirth 0 player grabs an orb from a rival lab",
+					tostring(reason)
+				)
+				local again = HeistService.TryRivalSteal(player, view.Id, index)
+				result(not again, "rivals: a second grab while carrying is refused")
+				-- Deliver: the tester runs home (the carry loop sees the root inside the walls).
+				local origin = plot.PrimaryPart
+				if origin then
+					character:PivotTo(origin.CFrame * CFrame.new(0, 3, 0))
+				end
+				local delivered = waitUntil(function()
+					return not HeistService.IsCarrying(player)
+				end, 3)
+				local added: { any } = {}
+				local inventoryNow: { any } = PlayerDataService.GetInventory(player) or {}
+				for _, item in inventoryNow do
+					if not beforeUids[item.Uid] then
+						table.insert(added, item)
+					end
+				end
+				result(
+					delivered
+						and #added == 1
+						and orb ~= nil
+						and added[1].ItemId == orb.ItemId
+						and added[1].Tier == orb.Tier
+						and inventoryCount() == before + 1,
+					"rivals: delivery creates the orb for the thief",
+					("delivered %s, %d new item(s)"):format(tostring(delivered), #added)
+				)
+				local respawnAt = RivalService.GetRespawnAt(view.Id, index)
+				result(
+					RivalService.GetOrb(view.Id, index) == nil and respawnAt ~= nil and math.abs((respawnAt :: number) - (fakeNow + RivalConfig.RespawnSeconds)) < 0.001,
+					"rivals: a delivered orb leaves its pedestal with a 90 s respawn timer"
+				)
+				-- The respawn, on the injected clock.
+				fakeNow += RivalConfig.RespawnSeconds - 0.5
+				RivalService.Step()
+				local early = RivalService.GetOrb(view.Id, index) == nil
+				fakeNow += 1
+				RivalService.Step()
+				local back = RivalService.GetOrb(view.Id, index)
+				result(early and back ~= nil and pedestal:GetAttribute("Filled") == true, "rivals: the orb is back after 90 s (injected clock), not before")
+				if added[1] then
+					PlayerDataService.RemoveItemsByUid(player, { added[1].Uid })
+				end
+
+				-- The guard's tag sends the orb back.
+				local guardModel = RivalService.GetGuardModel(view.Id)
+				local guardRoot = guardModel and guardModel:FindFirstChild("HumanoidRootPart")
+				if not guardRoot or not guardRoot:IsA("BasePart") then
+					result(true, "rivals: the guard's touch returns the orb (skipped: the guard rig did not build)")
+				else
+					putNextTo(pedestal)
+					local countBefore = inventoryCount()
+					local grabbedAgain = HeistService.TryRivalSteal(player, view.Id, index)
+					task.wait(HeistConfig.TagGraceSeconds + 0.3)
+					local thiefRoot = character:FindFirstChild("HumanoidRootPart")
+					if thiefRoot and thiefRoot:IsA("BasePart") then
+						guardModel:PivotTo(thiefRoot.CFrame * CFrame.new(0, 0, 3))
+					end
+					local tagged = waitUntil(function()
+						return not HeistService.IsCarrying(player)
+					end, 3)
+					result(
+						grabbedAgain and tagged and RivalService.GetOrb(view.Id, index) ~= nil and inventoryCount() == countBefore,
+						"rivals: the guard's touch sends the orb back, nothing created",
+						("grabbed %s, tagged %s"):format(tostring(grabbedAgain), tostring(tagged))
+					)
+				end
+
+				-- A hit stuns the guard: no tag while it is down.
+				if guardRoot and guardRoot:IsA("BasePart") then
+					RivalService.StunGuard(view.Id, guardRoot.Position + Vector3.new(0, 0, 3))
+					result(RivalService.IsGuardStunned(view.Id) and RivalService.GetGuardRoot(view.Id) == nil, "rivals: a weapon hit stuns the guard (it can't tag while down)")
+				end
+
+				-- 5. StealsPerHour.
+				HeistService.SelfTestClearRivalSteals(player)
+				HeistService.SelfTestRecordRivalSteals(player, RivalConfig.StealsPerHour - 1)
+				local leftAt11 = HeistService.GetRivalStealsLeft(player)
+				HeistService.SelfTestRecordRivalSteals(player, 1)
+				local leftAt12, wait = HeistService.GetRivalStealsLeft(player)
+				putNextTo(pedestal)
+				local blocked, blockedReason, blockedSeconds = HeistService.TryRivalSteal(player, view.Id, index)
+				result(
+					leftAt11 == 1 and leftAt12 == 0 and not blocked and blockedReason == "RivalAlert" and (blockedSeconds or 0) >= 1 and wait == blockedSeconds,
+					("rivals: past %d steals an hour the grab is refused with RivalAlert and the minutes left"):format(RivalConfig.StealsPerHour),
+					("left %d/%d, %s, %ss"):format(leftAt11, leftAt12, tostring(blockedReason), tostring(blockedSeconds))
+				)
+				fakeNow += RivalConfig.StealWindowSeconds + 1
+				RivalService.Step()
+				local viewNow, indexNow = anyOrb()
+				local pedestalNow = viewNow and RivalService.GetPedestal(viewNow.Id, indexNow :: number)
+				if viewNow and indexNow and pedestalNow then
+					putNextTo(pedestalNow)
+					local freed = HeistService.TryRivalSteal(player, viewNow.Id, indexNow)
+					result(freed and HeistService.GetRivalStealsLeft(player) == RivalConfig.StealsPerHour, "rivals: an hour later the limit is open again")
+
+					-- 6. A lab that despawns mid-carry fails cleanly.
+					local carriedBefore = inventoryCount()
+					local despawnOk, despawnErr = pcall(function(): string?
+						RivalService.Despawn(viewNow.Id)
+						return nil
+					end)
+					task.wait(0.2)
+					result(
+						despawnOk
+							and not HeistService.IsCarrying(player)
+							and player:GetAttribute("HeistTier") == nil
+							and RivalService.GetRival(viewNow.Id) == nil
+							and HeistService.GetRivalCarryCount() == 0
+							and inventoryCount() == carriedBefore,
+						"rivals: a lab despawning mid-carry fails the carry cleanly, no error, nothing created",
+						tostring(despawnErr)
+					)
+				else
+					result(true, "rivals: despawn mid-carry (skipped: no grabbable orb)")
+				end
+			end
+		end
+
+		-- 7. Orb rolls: no Mythic / Secret in any band over 10 000 draws, only
+		-- plain or the 5% Golden, and a banned tier is skipped even if listed.
+		local bandsBad: { string } = {}
+		for band = 0, RivalConfig.MaxBand + 1 do
+			local golden = 0
+			for _ = 1, 10000 do
+				local orb = RivalService.RollOrb(band)
+				if RivalConfig.BannedTiers[orb.Tier] or ItemConfig.GetItemById(orb.ItemId) == nil then
+					table.insert(bandsBad, ("band %d rolled %s"):format(band, orb.Tier))
+					break
+				end
+				if orb.Mutation == "Golden" then
+					golden += 1
+				elseif orb.Mutation ~= nil then
+					table.insert(bandsBad, ("band %d rolled mutation %s"):format(band, tostring(orb.Mutation)))
+					break
+				end
+			end
+			if golden < 350 or golden > 650 then
+				table.insert(bandsBad, ("band %d: %d Golden in 10000 (want ~500)"):format(band, golden))
+			end
+		end
+		result(#bandsBad == 0, "rivals: 10 000 draws per band, no Mythic / Secret, only plain or ~5% Golden", table.concat(bandsBad, "; "))
+		local weights = RivalConfig.TierWeights[0]
+		local savedMythic = weights.Mythic
+		weights.Mythic = 1000
+		local leaked = false
+		for step = 0, 999 do
+			if RivalConfig.BannedTiers[RivalConfig.PickTier(0, step / 1000)] then
+				leaked = true
+			end
+		end
+		weights.Mythic = savedMythic
+		result(not leaked, "rivals: PickTier skips a banned tier even if a band lists it")
+	end)
+	if not ok then
+		result(false, "rivals (errored)", tostring(err))
+	end
+
+	-- Put everything back.
+	for _, stand in standIns do
+		TycoonService.SelfTestRemovePlot(stand)
+	end
+	HeistService.FailCarriesFor(player, "Failed")
+	if releaseClaim then
+		releaseClaim()
+	end
+	HeistService.SelfTestClearRivalSteals(player)
+	RivalService.SetClock(nil)
+	PlayerDataService.SetRebirths(player, rebirthsBefore)
+	PlayerDataService.SyncTycoon(player)
+	local backCharacter = player.Character
+	if backCharacter then
+		backCharacter:PivotTo(home)
+	end
+	RivalService.Step()
+end
+
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
 	print(("[SelfTest] running for %s"):format(player.Name))
 	if only == "combat" then
 		print("[SelfTest] == 10. combat ==")
 		runCombatSelfTest(player, result)
+		return
+	elseif only == "rivals" then
+		print("[SelfTest] == 16. rival labs ==")
+		runRivalSelfTest(player, result)
 		return
 	elseif only == "friends" then
 		print("[SelfTest] == 14. friend boost ==")
@@ -2291,6 +2688,12 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		NotifyService.SelfTest(result)
 		-- The daily reward may open by itself again.
 		tutorialProbe(player, { Kind = "ClearScreen", Label = "the end", Report = false, Suppress = false }, result)
+	end)
+
+	-- 16. Rival labs: the fill, a real player's slot, the Rebirth rule, a
+	-- steal end to end, the limits, the rolls (also: /selftest rivals).
+	runSection("16. rival labs", result, function()
+		runRivalSelfTest(player, result)
 	end)
 end
 
@@ -2712,6 +3115,7 @@ function DebugService:Start()
 	RewardService = require(script.Parent.RewardService)
 	FriendService = require(script.Parent.FriendService)
 	NotifyService = require(script.Parent.NotifyService)
+	RivalService = require(script.Parent.RivalService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then
 		local applied: { [number]: boolean } = {}

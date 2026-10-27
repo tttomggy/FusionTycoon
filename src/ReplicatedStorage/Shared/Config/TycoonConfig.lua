@@ -50,6 +50,16 @@ local TycoonConfig = {}
 
 	Secret and Rainbow have huge spreads; judge them by order of magnitude.
 
+	Rival labs (RivalConfig, `--rivals`, 30 seeds, 12 h, --fuse=2): from minute 3 the
+	simulated player delivers one rival orb every 5 min (12 an hour, the cap;
+	band = its own rebirths, plain, 5% Golden, never Mythic / Secret). Rebirth 1
+	~0:51 with vs. ~0:50 without (-3%, seed noise), Rebirth 2 ~1:29 vs. ~1:30
+	(+1%), Rebirth 3 ~2:12 vs. ~2:11 (-1%); fastest decile Rebirth 1 ~0:41. So a
+	rival orb is a Common / Rare / Epic the gacha would have given anyway: the
+	steals are neutral for the economy (they do NOT move Rebirth 1 sooner, and
+	do not break it; Rebirth 1 stays >= 35 min), and what they buy is the
+	steal, in minute 3 instead of minute 50, which the sim cannot see.
+
 	Income is generators + pedestals only (the factory line's cash balls are
 	a client-side picture of it). If you rebalance, change the sim's
 	tunables to match and re-run it rather than eyeballing.

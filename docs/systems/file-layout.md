@@ -16,6 +16,8 @@ src/ReplicatedStorage/Shared/
                  MusicConfig — the background playlist and its fades, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
+                 RivalConfig — rival (NPC) labs: count, orb weights per
+                 Rebirth band, respawn, guard, StealsPerHour,
                  GoalConfig — the ordered onboarding goals,
                  SettingsConfig — the player's reveal-card rules,
                  ShopConfig — every pass / product and shop number,
@@ -63,6 +65,8 @@ src/ServerScriptService/
                            TutorialService the first-time tutorial;
                            QuestService quests and power-ups;
                            CombatService weapons, hits and ragdoll;
+                           RivalService the rival (NPC) labs in empty slots,
+                           their orbs and guards (the steal is HeistService's);
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards;
                            FriendService the friend boost's friend count;

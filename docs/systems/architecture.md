@@ -17,19 +17,20 @@ calls left in `Services/`.
 | `LightingService` | `:Init()` | — | `--!strict` |
 | `DebugService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `EventService` | `--!strict` |
 | `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
-| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start) | `--!nonstrict` ⚠ |
+| `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start); `RivalService` registers a slot reclaimer with it (`SetSlotReclaimer`), never required | `--!nonstrict` ⚠ |
+| `RivalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` (`HeistService` requires it and registers `OnDespawn`; no cycle) | `--!strict` |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 | `WorldService` | `:Init()` | — | `--!strict` |
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `OfflineService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
-| `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
+| `HeistService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService`, `RivalService` | `--!strict` |
 | `EventService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `AdminService` | `:Init()` `:Start()` | `PlayerDataService`, `EventService` | `--!strict` |
 | `MonetizationService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `RewardService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
-| `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService` | `--!strict` |
+| `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService`, `RivalService` | `--!strict` |
 | `QuestService` | `:Init()` `:Start()` | `PlayerDataService`, `CombatService` | `--!strict` |
 | `FriendService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `NotifyService` | `:Init()` `:Start()` | `PlayerDataService` (AdminService calls `QueueAdminAbuse`) | `--!strict` |
@@ -67,7 +68,8 @@ the file under test* — check the path on each reported line.
 
 ### Remote list
 
-Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`),
+Heist remotes: `RequestSteal` (C→S `{ OwnerUserId, PedestalIndex }`, or
+`{ RivalId, PedestalIndex }` for a rival lab),
 `MarkTipSeen` (C→S `{ Id }`), `MarkDealPopup` (C→S `{ Slot }`),
 `TutorialAdvance` (C→S `{ Step }` / `{ Replay = true }`), `RequestHit` (C→S
 `{ Weapon, Origin?, Direction? }`; melee sends only `Weapon`, the server's box
@@ -91,5 +93,6 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 only),
 `TrailerStart` (S→one admin, `/trailer`),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
-`HeistEnded { Outcome = "Rejected", Reason }`), `HeistFeed` (S→all,
-Legendary+).
+`HeistEnded { Outcome = "Rejected", Reason, Seconds? }`; a rival steal's
+carry sends only the thief `Rival = true`, `OtherUserId = 0` and the lab's
+name as `OtherName`), `HeistFeed` (S→all, Legendary+, never for rival labs).

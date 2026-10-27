@@ -319,6 +319,15 @@ function HeistService.IsShielded(player: Player): boolean
 	return (state.shieldUntil[player.UserId] or 0) > serverNow()
 end
 
+-- The Rebirth rule for a grab: a thief at `thiefRebirths` may steal from a
+-- RIVAL lab at HeistConfig.MinRebirthsVsRivals (0: anyone) and from a REAL
+-- player at MinRebirthsVsPlayers (1; the victim needs it too: IsProtected).
+-- nil = allowed. Both grab paths ask this; /selftest does too.
+function HeistService.WhyCantSteal(thiefRebirths: number, fromRival: boolean): string?
+	local needed = if fromRival then HeistConfig.MinRebirthsVsRivals else HeistConfig.MinRebirthsVsPlayers
+	return if thiefRebirths < needed then "NeedsRebirth" else nil
+end
+
 -- Under MinRebirths (and not /stealable): nobody can steal from this lab.
 function HeistService.IsProtected(player: Player): boolean
 	if state.debugStealable[player.UserId] then
@@ -830,8 +839,9 @@ function HeistService.TryRivalSteal(thief: Player, rivalId: number, pedestalInde
 	if state.carries[thief.UserId] then
 		return false, "AlreadyCarrying"
 	end
-	if PlayerDataService.GetRebirths(thief) < HeistConfig.MinRebirthsVsRivals then
-		return false, "NeedsRebirth"
+	local gate = HeistService.WhyCantSteal(PlayerDataService.GetRebirths(thief), true)
+	if gate then
+		return false, gate
 	end
 	local rival = RivalService.GetRival(rivalId)
 	local pedestal = RivalService.GetPedestal(rivalId, pedestalIndex)
@@ -949,7 +959,7 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 		return
 	end
 	-- 3. Both at MinRebirths (or the victim /stealable in Studio).
-	if PlayerDataService.GetRebirths(thief) < HeistConfig.MinRebirthsVsPlayers then
+	if HeistService.WhyCantSteal(PlayerDataService.GetRebirths(thief), false) then
 		reject(thief, "NeedsRebirth")
 		return
 	end

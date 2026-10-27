@@ -417,7 +417,7 @@ local function requestPath(guard: Guard, target: Vector3)
 		return
 	end
 	guard.PathPending = true
-	guard.LastPathAt = now()
+	guard.LastPathAt = os.clock()
 	task.spawn(function()
 		local path = PathfindingService:CreatePath({ AgentRadius = 2, AgentHeight = 5, AgentCanJump = true })
 		local from = guard.Root.Position
@@ -471,7 +471,7 @@ local function guardStep(rival: Rival)
 	if not guard or guard.Root.Parent == nil then
 		return
 	end
-	local t = now()
+	local t = os.clock() -- the guard runs on the real clock (SetClock is for orbs and limits)
 	if t < guard.StunUntil then
 		setMoving(guard, false)
 		return
@@ -586,7 +586,8 @@ function RivalService.Now(): number
 end
 
 -- /selftest: a controllable clock for the 90 s respawn and the hourly limit
--- (nil puts os.clock back), and a seeded RNG for the orb rolls.
+-- (nil puts os.clock back; the guard always runs on the real clock), and a
+-- seeded RNG for the orb rolls.
 function RivalService.SetClock(clock: (() -> number)?)
 	state.clock = clock or os.clock
 end
@@ -647,7 +648,7 @@ end
 function RivalService.GetGuardRoot(rivalId: number): BasePart?
 	local rival = state.rivals[rivalId]
 	local guard = rival and rival.Guard
-	if not guard or guard.Root.Parent == nil or now() < guard.StunUntil then
+	if not guard or guard.Root.Parent == nil or os.clock() < guard.StunUntil then
 		return nil
 	end
 	return guard.Root
@@ -663,7 +664,7 @@ end
 function RivalService.IsGuardStunned(rivalId: number): boolean
 	local rival = state.rivals[rivalId]
 	local guard = rival and rival.Guard
-	return guard ~= nil and now() < guard.StunUntil
+	return guard ~= nil and os.clock() < guard.StunUntil
 end
 
 function RivalService.GetGuardMode(rivalId: number): string?
@@ -693,7 +694,7 @@ function RivalService.StunGuard(rivalId: number, from: Vector3): boolean
 	if not guard or guard.Root.Parent == nil then
 		return false
 	end
-	guard.StunUntil = now() + RivalConfig.GuardStunSeconds
+	guard.StunUntil = os.clock() + RivalConfig.GuardStunSeconds
 	guard.Stunned = true
 	guard.Humanoid.PlatformStand = true
 	local away = guard.Root.Position - from

@@ -108,3 +108,113 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
     banners, arrows (`GoalMarkerController.SetOverride`) and fades every
     plot's shield fence, drives your LOCK console and shows GUARDED;
     HudController shows the LOCK status chip and the "?" button.
+
+## Rival labs (NPC labs: steal from minute 3, even in an empty server)
+
+PvP stealing is gated at Rebirth 1 (~50 min) and needs another Rebirth 1+
+player, and servers hold 1-3 players, so most players never saw the game's
+hook. Empty plot slots therefore hold **rival labs**: NPC-owned labs anyone
+can rob from the start. `RivalService` (server) + `RivalConfig` (every
+number); the steal itself is `HeistService`'s, same flow.
+
+- **The rule** (`HeistConfig`): `MinRebirthsVsPlayers = 1` (both thief and
+  victim, unchanged; `MinRebirths` is kept as an alias for the older
+  readers) and `MinRebirthsVsRivals = 0`. The one pure check is
+  `HeistService.WhyCantSteal(thiefRebirths, fromRival)`, used by both grab
+  paths and `/selftest`. New players are still never robbed by veterans
+  (their lab stays `Protected`).
+- **Labs.** Up to `MaxRivals = 3`, in the free slots nearest the real
+  players' labs (`RivalService.Step`, every `FillSeconds`). Built by
+  `TycoonService.BuildRivalPlot` = the player plot's code (`buildShell`,
+  walls, `PlotKit.BuildSignGate`, `createPedestals`; no generators,
+  stations, Fusion Machine, claim button or spawn): plot name
+  `PlotNaming.GetRivalPlotName` (`Rival_<id>`), attributes `Rival`,
+  `RivalId`, `RivalName`, `SlotIndex`, **no** `OwnerUserId` / `Claimed`, so
+  FactoryController and the shield code ignore it. Pedestals 1-4 only
+  (`RivalConfig.PedestalCount`), no `UnlockPrompt`; the `StealPrompt` carries
+  `RivalId` instead of `OwnerUserId`. The gate sign reads `RIVAL LAB` /
+  `steal me!` with the lab's name in the pill, in `World.AccentRival` /
+  `Gradients.Rival` (wall strips and the sign strip too).
+- **Slots are shared.** `TycoonService` owns `occupiedSlots`
+  (`GetFreeSlots`, `ReserveSlot`, `ReleaseSlot`). A real player always gets a
+  plot: `takeSlot` asks the registered reclaimer when none is free
+  (`RivalService.DespawnFarthest`), and the rival lab **farthest from every
+  player's lab** (slot centres; ties go to the newest) goes first. A carry
+  from a despawning lab fails cleanly first (`RivalService.OnDespawn` hook,
+  `HeistService.FailRivalCarries`: the orb is "back", outcome `Failed`).
+- **Orbs** are server objects. Each is rolled from `RivalConfig.TierWeights[band]`
+  with band = the **lowest Rebirth count among the real players** (clamped to
+  `MaxBand`), plain, except one `GoldenChance` (5%) Golden; **never**
+  `BannedTiers` (Mythic, Secret; `PickTier` skips them even if a band lists
+  one, and `TryRivalSteal` refuses one at grab time). If the lowest count
+  drops (a newcomer joins) the orbs rolled for a higher band are re-rolled;
+  they are never re-rolled upward. A stolen orb is back `RespawnSeconds`
+  (90) after **delivery** (a failed carry puts it back at once). The
+  respawn clock and the hourly limit read `RivalService.Now()`, injectable
+  (`SetClock`) for `/selftest`; the guard runs on `os.clock()`.
+- **Stealing.** `RequestSteal { RivalId, PedestalIndex }` (client:
+  `WorldLabelController.stealMode` gives a rival prompt `Steal` for everyone
+  while the pedestal is `Filled` and not `BeingStolen`). `HeistService.
+  TryRivalSteal` resolves the lab, pedestal, orb and distance itself and
+  rejects with the usual reasons plus `RivalGone` and `RivalAlert` (+
+  `Seconds`). A rival carry is a `Carry` with `RivalId` set, `VictimUserId`
+  0 and `ItemUid` `"rival:<id>:<index>"`: same hold, 45 s, WalkSpeed 12,
+  deliver = root inside your own walls. **The orb is created for the thief
+  on delivery** (`AddItem`, then sync + `SaveNow`); nothing belonged to a
+  saved player, so there is nothing to remove or duplicate, and every
+  other ending just hands the orb back. No victim shield, no loss cap, no
+  `TotalSteals` (the `first_steal` goal and its marker stay PvP), no
+  `HeistFeed`. The thief's `HeistEnded` carries `Rival = true`.
+- **Limit.** `StealsPerHour = 12` **delivered** rival steals per rolling
+  hour per player (`HeistService.GetRivalStealsLeft`); past it the grab is
+  refused with `RivalAlert` and the client toasts "The rivals are on alert.
+  Try again in N min". Counted at delivery, so being tagged costs nothing.
+- **The guard.** One blocky R15 NPC per lab (`HumanoidDescription` rig in
+  `World.AccentRival` / `CapsuleWhite` / `Structure`, name "Lab Guard",
+  server-owned, default locomotion clips). Patrols the stops in
+  `RivalConfig.PatrolPoints`. A grab (`RivalService.BeginCarry`) sends it
+  after the thief at `GuardSpeed` (13 vs the carrier's 12): PathfindingService
+  paths recomputed at most every `GuardPathSeconds` (0.5 s) in a task, so the
+  one guard loop (`GuardTickSeconds`, 0.1 s, all labs) never yields. Gives
+  up `GuardLeash` (60) studs past its gate and walks home. **The tag is
+  HeistService's**: after `TagGraceSeconds`, the guard's root within
+  `TagDistance` of the carrier ends the carry `Saved` (the thief's toast:
+  "The lab guard got you!"). Weapons work on it
+  (`CombatService.ApplyGuardHit`, melee box or ranged ray): it falls over for
+  `GuardStunSeconds`, can't tag while down and loses the chase, so a friend
+  can cover you (Rebirth 1+, like all weapons). It has no health.
+- **Teaching.** `tipRival` (`tutorial.md`). The red hand markers on
+  grabbable pedestals work on rival pedestals too; `stealHowTo` and the
+  `first_steal` marker skip them.
+- **Safety.** Rivals are not `Player`s: never in leaderboards, friend counts,
+  the notification queue or analytics player counts, and they never take
+  anything from anyone. No new lights or `Highlight`s (the standard
+  `PedestalVisuals`); the owner-only EMPTY pill is disabled on a rival
+  pedestal (it has no owner to hide it from). The remote fuzz sends junk
+  `RivalId` payloads.
+- **Analytics.** Funnel `FirstRivalSteal` right after `FirstFuse` (the later
+  steps renumbered; pre-launch); custom `RivalStealDelivered` /
+  `RivalStealTagged` (guard tag or a weapon knock) / `RivalStealTimeout`
+  (field: tier), `RivalGuardHit` (weapon).
+- **Economy** (`tools/econ_sim.py 30 12 --fuse=2 --rivals`; numbers in
+  TycoonConfig's header): neutral. Rebirth 1 ~0:51 with vs ~0:50 without
+  (-3%, seed noise), Rebirth 2 +1%, Rebirth 3 -1%; fastest decile Rebirth 1
+  ~0:41 (target >= 0:35). It does NOT come sooner: a rival orb is a Common /
+  Rare / Epic the gacha gives anyway; the value is the steal in minute 3.
+- **`/selftest rivals`** (also section 16 of the full run): a solo server
+  fills its labs (ownerless, 4 steal pedestals, no Fusion Machine, the RIVAL
+  LAB sign, only Common / Rare / Epic at Rebirth 0); a stand-in player joining
+  a full server displaces the farthest rival and gets its slot (stand-ins via
+  `TycoonService.SelfTestCreatePlot`); the Rebirth rule; a Rebirth 0 steal end
+  to end (grab, second grab refused, delivery creates the orb, the 90 s timer,
+  the respawn on an injected clock); the guard's tag returns the orb and
+  creates nothing (skipped if the guard rig did not build); a weapon stun;
+  `StealsPerHour` and the hour later; a despawn mid-carry with no error and
+  nothing created; 10 000 draws per band with no Mythic / Secret and ~5%
+  Golden; `PickTier` skipping a listed banned tier. Run it in Studio: the
+  steal parts need the tester's character and a claimed lab.
+- **Not covered by code in this repo's checks**: the guard's pathing and
+  animation and the client visuals were not run in Studio when this was
+  written (`luau-lsp analyze` is clean and the pure rules were run in the
+  Luau CLI). Check `docs/UI_TEST.md`-style: walk to a rival lab at Rebirth 0,
+  hold E, run home, get tagged once, wait 90 s.

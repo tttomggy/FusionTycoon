@@ -87,7 +87,7 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
 | Monetization (shop, deals, offers, receipts) | `docs/systems/monetization.md` | MonetizationService, ShopConfig, ShopController |
 | Daily rewards & playtime gifts | `docs/systems/rewards.md` | RewardService, DailyConfig, GiftConfig |
 | Leaderboards, analytics, Admin Abuse | `docs/systems/leaderboards-analytics-admin.md` | LeaderboardService, AnalyticsKit, AdminService |
-| Heist, LOCK, shields | `docs/systems/heist.md` | HeistService, HeistConfig, HeistController |
+| Heist, LOCK, shields, rival (NPC) labs | `docs/systems/heist.md` | HeistService, HeistConfig, HeistController, RivalService, RivalConfig |
 | File tree | `docs/systems/file-layout.md` | |
 | Service table, remote list | `docs/systems/architecture.md` | |
 

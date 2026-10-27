@@ -63,12 +63,23 @@ feeds it and runs the hand.
 | `tipIndex` | a new Index entry found after the tutorial ended (the baseline is the count when it ended / when you joined) | INDEX | New orb! Each one boosts your income forever. |
 | `tipEvent` | the event chip is on screen (the `event_<Id>` pulse stays) | the event chip | Lab weather! Tap it to see the bonus. |
 | `tipRebirth` | cash / Rebirth cost >= 50% | REBIRTH | Rebirth when the bar is full: keep your orbs, earn faster forever. |
+| `tipRival` | a rival lab with an orb is in the world and `RivalTipAfterDoneSeconds` (20 s) have passed since "You're ready!" (`PlanTip`'s `RivalLab` / `SinceDone`; first in `Tips`, so it wins once due) | the big STEAL button at the lit path's end (the **nearest rival lab's best pedestal**: `GoalMarkerController` target `NearestRivalPedestal`, highest tier, then nearest) | Steal from the rival lab! Hold E, then run home. |
 
 - At most one tip (or `giftHand` / `questHand`, which share the slot) is up; the
   next waits `TipGapSeconds` (20 s) after it is gone, and the first
   `TipAfterDoneSeconds` (3 s) after the tutorial ends. A tip goes when the
   player opens what it points at (UPGRADES / INDEX / REBIRTH panel, the event
   card, the pad bought) or after `TipMaxSeconds` (45 s); it stays seen.
+  `tipRival` is the exception on both counts: it waits 20 s, and it stays up
+  `MaxSeconds` = 180 s unless the player **delivers** a rival steal first
+  (`TycoonController.GetRivalDeliveries`, noted by `HeistController` on a
+  `HeistEnded { Role = "Thief", Outcome = "Delivered", Rival = true }`). It is
+  a world tip like the Multiplier Pad's (path arrows via `GoalMarkerController.
+  SetTutorialTarget`, which skips the own-plot bounds check for this target;
+  the big button's press holds the prompt for its full `HoldDuration`, 1.5 s,
+  where the Pad's button is a tap). No card. Rival labs are left out of the
+  `stealHowTo` tip and the `first_steal` marker, so the Rebirth 1 onboarding is
+  unchanged.
 - The "?" help slideshows keep the full explanations. NEXT GOAL is unchanged.
 - **Nothing pops up during the tutorial** (guards checked): the Daily card
   (`DailyController` waits on `IsTutorialActive`), shop side cards / Starter /
