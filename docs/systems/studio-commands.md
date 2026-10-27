@@ -234,6 +234,12 @@ Most of the 77 were the TEST, not the game:
   attribute changes (not only the 0.5 s poll); the probe waits for the tiles to
   show the server's luck, and says so when the client's luck never matches.
 
+## /selftest notes (triage after 5a697f8, untested in Studio)
+
+- **The server test owns the tester's position.** Client probe restores put back the camera and the forced layout only, never the character (the client owns its character, so a deferred client teleport beat the server's `onPad` and Auto pull stopped with `TooFar`). `GachaOnPad` puts the tester back where IT found them inside the probe, before it reports. DebugService also sets `root.CFrame = onPad` and waits 0.4 s after `AutoReset`, before `SetAutoPull(true)`; the Auto pull result line prints the tester's flat distance from the pad at that moment.
+- **"each x10 cycle showed the 10-pull card"** expects the server's cycle count (`#autoLog`) from the same run, not a fixed 2.
+- **Tutorial bar vs event card.** `TutorialBanner` already covers the bar for the event info card (`cardUp` → `IsCovered`). The test shows a fake "running" card, and `EventController.refreshSchedule` (every second) closes a running card whose event is not the live lineup's first, so the card could vanish mid-check with a stale rect. The check now polls up to 1.5 s for the bar to clear, prints `WARN` if the live lineup closed the card, and the FAIL line reports `IsCovered`.
+
 ## /selftest notes (triage after 7dcb467: 77 → 37 FAILs)
 
 - **Panel leak check fails only on growth.** `testPanels` compares the modal Guis' instance count after the first and second close; `counts[2] > counts[1]` is a FAIL, a shrink prints nothing (a panel may drop what it no longer needs, e.g. the Index page rebuilding its cells when the found count changes).

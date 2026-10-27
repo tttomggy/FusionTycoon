@@ -603,17 +603,32 @@ local function testPlacedCards(): { string }
 						eventInfo.SetTutorialOk(okRow)
 						eventInfo.Show(hud, if now then "Night" else "GoldenRain", now)
 						measurePlacedCards(variant)
-						task.wait(0.5) -- the bar slides out
 						local card = eventInfo.GetFrame()
 						if TutorialBanner.IsShown() and card then
 							local bar = TutorialBanner.GetFrame()
-							local barTop, barHeight = visibleRect(bar, nil, screenScale(bar))
-							local cardTop, cardHeight = visibleRect(card, card:FindFirstChild("Shadow") :: GuiObject?, screenScale(card))
-							-- Clear when the bar is above the card (the bar's bottom + 8 px) or off the screen.
-							local clear = barTop + barHeight + 8 <= cardTop or barTop + barHeight <= 0 or barTop >= cardTop + cardHeight
-							table.insert(cardLines, if clear
-								then ("PASS tutorial bar vs card (%s): bar y %d..%d, card y %d..%d, covered %s"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight, tostring(TutorialBanner.IsCovered()))
-								else ("FAIL tutorial bar vs card (%s): the objective bar (y %d..%d) overlaps the card (y %d..%d)"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight))
+							local function measureBar(): (number, number, number, number, boolean)
+								local barTop, barHeight = visibleRect(bar, nil, screenScale(bar))
+								local cardTop, cardHeight = visibleRect(card, card:FindFirstChild("Shadow") :: GuiObject?, screenScale(card))
+								-- Clear when the bar is above the card (the bar's bottom + 8 px) or off the screen.
+								local clear = barTop + barHeight + 8 <= cardTop or barTop + barHeight <= 0 or barTop >= cardTop + cardHeight
+								return barTop, barHeight, cardTop, cardHeight, clear
+							end
+							-- The bar slides out (0.2 s) once the card is open: wait for it, not a fixed time (max 1.5 s).
+							local barTop, barHeight, cardTop, cardHeight, clear = measureBar()
+							local deadline = os.clock() + 1.5
+							while not clear and eventInfo.IsOpen() and os.clock() < deadline do
+								task.wait(0.05)
+								barTop, barHeight, cardTop, cardHeight, clear = measureBar()
+							end
+							if not eventInfo.IsOpen() then
+								-- EventController closes a "running" card whose event is not the live lineup's
+								-- first (the test shows Night / GoldenRain whatever is running): the card rect is stale.
+								table.insert(cardLines, ("WARN tutorial bar vs card (%s): the live event lineup closed the card before the check"):format(variant))
+							else
+								table.insert(cardLines, if clear
+									then ("PASS tutorial bar vs card (%s): bar y %d..%d, card y %d..%d, covered %s"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight, tostring(TutorialBanner.IsCovered()))
+									else ("FAIL tutorial bar vs card (%s): the objective bar (y %d..%d) overlaps the card (y %d..%d), covered %s"):format(variant, barTop, barTop + barHeight, cardTop, cardTop + cardHeight, tostring(TutorialBanner.IsCovered())))
+							end
 						end
 						eventInfo.Hide()
 						task.wait(0.6)
@@ -3449,7 +3464,7 @@ local function gachaDesktopStack(card: any, camera: Camera, size: Vector2, quiet
 end
 
 -- The probe that is current (probeTutorial sets it) and the undo for the
--- camera / forced layout / tester it left changed. A probe the server gave up
+-- camera / forced layout it left changed (never the tester's position). A probe the server gave up
 -- on keeps running; it must never touch the next probe's layout, so its
 -- restore only runs while it is still current, and a new probe starts by
 -- running the previous probe's undo.
@@ -3497,22 +3512,23 @@ local function probeGachaOnPad(phone: boolean, probeId: number?): { ProbeLine }
 	local want = anchor.WorldPosition
 	local savedCFrame, savedRoot = camera.CFrame, root.CFrame
 	camera.CameraType = Enum.CameraType.Scriptable
-	-- Undo: the next probe starts with the tester on the pad's centre (where
-	-- this one found them, at their own height and facing) and the camera back
-	-- on Custom, whatever spot or camera this probe left.
-	local home = CFrame.new(want.X, savedRoot.Y, want.Z) * (savedRoot - savedRoot.Position)
+	-- Undo: camera and forced layout only. The SERVER test owns the tester's
+	-- position: a deferred client teleport here beat the server's own move
+	-- (the client owns its character) and left the tester off the pad.
 	restoreProbe = function()
 		debugBoard.SetClampDebug(false)
 		camera.CameraType = Enum.CameraType.Custom
 		camera.CFrame = savedCFrame
-		root.CFrame = home
-		root.AssemblyLinearVelocity = Vector3.zero
 		UIKit.SetForcedPhone(nil)
 	end
 	-- Leaves the world as it found it, but only if this probe is still the
 	-- current one (a stale probe's restore was already run by its successor).
+	-- The tester goes back where THIS probe found them, here, before the
+	-- report, never in a deferred restore.
 	local function finish(lines: { ProbeLine }): { ProbeLine }
 		if current() then
+			root.CFrame = savedRoot
+			root.AssemblyLinearVelocity = Vector3.zero
 			local undo = restoreProbe
 			restoreProbe = nil
 			if undo then

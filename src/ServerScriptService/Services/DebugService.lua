@@ -1946,6 +1946,11 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
 		-- (+2% of a cycle: the first 10 items may move the steady income a little.)
 		PlayerDataService.AddCash(player, cycle1 + cycle2 + math.floor(cycle2 * 0.02))
+		-- The server test owns the tester's spot: put them on the pad again
+		-- after the client probe, and let that replicate before Auto starts.
+		root.CFrame = onPad
+		task.wait(0.4)
+		local startOffPad = Vector3.new(root.Position.X - pad.Position.X, 0, root.Position.Z - pad.Position.Z).Magnitude
 		TycoonService.SetAutoPull(player, true)
 		local autoStarted = os.clock()
 		while TycoonService.IsAutoPulling(player) and os.clock() - autoStarted < 40 do
@@ -1969,10 +1974,10 @@ local function runGachaCardSelfTest(player: Player, result: (boolean, string, st
 		result(
 			#autoLog == 2 and autoStop ~= nil and autoStop.Reason == "InsufficientCash",
 			"gacha keys: Auto pull ran exactly 2 x10 cycles with cash for 20 pulls, then stopped (InsufficientCash)",
-			("%d cycles, stop %s, pulls %d -> %d"):format(#autoLog, if autoStop then autoStop.Reason else "none (still running)", pulls0, PlayerDataService.GetGachaPulls(player))
+			("%d cycles, stop %s, pulls %d -> %d, tester %.1f studs flat from the pad when Auto started"):format(#autoLog, if autoStop then autoStop.Reason else "none (still running)", pulls0, PlayerDataService.GetGachaPulls(player), startOffPad)
 		)
 		result(gapOk, ("gacha keys: no Auto pull cycle starts within %ds of the previous one"):format(GachaConfig.AutoPullMinSeconds), ("gap %s"):format(if #autoLog == 2 then ("%.2f s"):format(autoLog[2] - autoLog[1]) else "n/a"))
-		tutorialProbe(player, { Kind = "AutoCards", Expect = 2 }, result)
+		tutorialProbe(player, { Kind = "AutoCards", Expect = #autoLog }, result)
 		TycoonService.SetAutoPull(player, false)
 		TycoonService.SelfTestFreezeIncome(player, false)
 		PlayerDataService.SpendCash(player, PlayerDataService.GetCash(player))
