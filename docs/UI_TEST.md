@@ -2282,3 +2282,35 @@ publishing)**
 - [ ] `/selftest`: `phone panel <name>` PASS for all nine, `phone panel Upgrades
   rows` PASS at both sizes, `cards centred (… phone)` PASS at 844 × 390 and
   896 × 414.
+
+## 46. Rival labs (NPC labs, steal from minute 3)
+
+Play with 1 player (Studio Player1; restart Play after code changes: plots are
+built once). `/selftest rivals` first; then by hand:
+
+- [ ] Within ~5 s of joining, 3 labs near yours show a vermilion gate sign
+  `RIVAL LAB` / `steal me!` with a lab name pill ("DR. FIZZ'S LAB"), vermilion
+  wall strips, four orbs (only Common / Rare / Epic at Rebirth 0, now and then a
+  Golden) with name + `+$X/s` labels, no EMPTY `+` pill anywhere, and one blocky
+  vermilion guard walking between the pedestals. No generators, stations,
+  Fusion Machine or LOCK console in them.
+- [ ] At Rebirth 0: walk to an orb, the prompt reads `Steal` with the orb name
+  and `+$X/s` (no "Unlocks at Rebirth 1" teaser), hold E 1.5 s: `YOU GRABBED
+  …! RUN HOME!`, the pedestal shows the red STOLEN! ring, the guard runs at you.
+  Run home (belts help): `HEIST COMPLETE!`, the orb is in ITEMS, the pedestal is
+  bare for 90 s and the orb comes back (a new roll).
+- [ ] Let the guard touch you (after the 2 s grace): "The lab guard got you!
+  The orb went back", the orb is on its pedestal, nothing in ITEMS.
+- [ ] Past 12 delivered rival steals in an hour (`/selftest rivals` covers it,
+  or lower `StealsPerHour`): "The rivals are on alert. Try again in N min".
+- [ ] With a Rebirth 1+ friend and a Bat: hit the guard, it falls over for ~3 s
+  and stops chasing; you can't hit it while carrying.
+- [ ] Join a second player: the rival nearest to nobody can despawn only when
+  every slot is full; both players always get a plot (12 slots).
+- [ ] After the tutorial ("You're ready!") wait ~20 s: lime arrows lead to the
+  nearest rival lab's best pedestal and the big STEAL button appears at it; a
+  delivered steal (or 3 min) ends it; it never shows twice (`/tips reset`
+  brings it back). A Rebirth 1 lab is still protected from you and yours from
+  them: the PvP teaching (`stealHowTo`, HOW TO HEIST) is unchanged.
+- [ ] Analytics (Output): `funnel 7 FirstRivalSteal` once, then `custom
+  RivalStealDelivered [Tier]` / `RivalStealTagged` / `RivalStealTimeout`.
