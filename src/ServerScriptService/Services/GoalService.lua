@@ -150,6 +150,37 @@ local EVALUATORS: { [string]: Evaluator } = {
 	upgrade_multiplier = function(_player, data)
 		return yesNo(data.CashMultiplierLevel >= 1)
 	end,
+	fill_pedestals = function(_player, data)
+		local filled = 0
+		for _, uid in data.PedestalDisplays do
+			if uid ~= nil then
+				filled += 1
+			end
+		end
+		return filled >= 4, math.min(filled, 4), 4
+	end,
+	max_basic = function(_player, data)
+		local level = generatorLevel(data, "basic_generator")
+		return level >= 25, math.min(level, 25), 25
+	end,
+	-- 3 Rares at once, or already past them (an Epic: they fused the Rares).
+	own_3_rares = function(_player, data)
+		local done = countTier(data, "Rare") >= 3 or ownsTierAtLeast(data, "Epic")
+		return done, if done then 3 else countTier(data, "Rare"), 3
+	end,
+	multiplier_x1_5 = function(_player, data)
+		-- Pad LV 2 = x1.5.
+		return data.CashMultiplierLevel >= 2, math.min(data.CashMultiplierLevel, 2), 2
+	end,
+	-- 2 Epics at once, or already past them (a Legendary).
+	own_2_epics = function(_player, data)
+		local done = countTier(data, "Epic") >= 2 or ownsTierAtLeast(data, "Legendary")
+		return done, if done then 2 else countTier(data, "Epic"), 2
+	end,
+	unlock_flare_reactor = function(_player, data)
+		local done = generatorLevel(data, "flare_reactor") >= 1
+		return done, if done then 10 else generatorLevel(data, "ember_forge"), 10
+	end,
 	own_epic = ownTierGoal("Epic", "Rare", 2),
 	unlock_ember_forge = function(_player, data)
 		local done = generatorLevel(data, "ember_forge") >= 1
@@ -371,6 +402,16 @@ local function checkGoals(player: Player)
 		PlayerDataService.SetGoalIndex(player, index + 1)
 		RemoteEvents.GoalCompleted:FireClient(player, { Index = index, Reward = goal.Reward })
 	end
+end
+
+-- /selftest: a goal's evaluator on stubbed data (the data-only goals read no
+-- player). nil for an unknown id.
+function GoalService.EvaluateStub(goalId: string, data: any): (boolean?, number?, number?)
+	local evaluate = EVALUATORS[goalId]
+	if not evaluate then
+		return nil, nil, nil
+	end
+	return evaluate(nil :: any, data)
 end
 
 --[[ Lifecycle ------------------------------------------------------------ ]]

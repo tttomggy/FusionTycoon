@@ -35,6 +35,7 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
+local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
 local SettingsConfig = require(ReplicatedStorage.Shared.Config.SettingsConfig)
 local RebirthConfig = require(ReplicatedStorage.Shared.Config.RebirthConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
@@ -104,6 +105,9 @@ export type PlayerData = {
 	-- 1-based index into GoalConfig.Goals of the goal currently being
 	-- worked on; past the end means every goal is done.
 	GoalIndex: number,
+	-- GoalConfig.DataVersion the GoalIndex was saved under (no GoalVer = 1):
+	-- reconcile moves an older one onto the same goal id (GoalConfig.MigrateIndex).
+	GoalVer: number,
 	-- Every resolved fusion attempt, success or fail (drives a goal).
 	TotalFusions: number,
 	-- Heist: items delivered home, and shields raised with LOCK (the console)
@@ -387,6 +391,7 @@ local DEFAULT_DATA: PlayerData = {
 	GachaPulls = 0,
 	HasDropper2 = false,
 	GoalIndex = 1,
+	GoalVer = GoalConfig.DataVersion,
 	TotalFusions = 0,
 	TotalSteals = 0,
 	ShieldRaises = 0,
@@ -623,7 +628,8 @@ local function reconcile(raw: any): PlayerData
 		data.HasDropper2 = raw.HasDropper2
 	end
 	if typeof(raw.GoalIndex) == "number" and raw.GoalIndex >= 1 then
-		data.GoalIndex = math.floor(raw.GoalIndex)
+		local savedVersion = if typeof(raw.GoalVer) == "number" then raw.GoalVer else 1
+		data.GoalIndex = GoalConfig.MigrateIndex(math.floor(raw.GoalIndex), savedVersion)
 	end
 	if typeof(raw.TotalFusions) == "number" then
 		data.TotalFusions = raw.TotalFusions

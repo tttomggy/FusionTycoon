@@ -32,6 +32,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
@@ -99,6 +100,13 @@ function LoopCoachController.PlanMoreCash(afterFuse: boolean, sawBroke: boolean,
 	return sawBroke, sawBroke
 end
 
+-- The earnBoth announce: after the tutorial, once per account, when an orb is
+-- displayed AND some generator was upgraded past its first level (the Basic
+-- Generator starts at LV 1, so the level sum is 1 until the first upgrade).
+function LoopCoachController.PlanEarnBoth(tutorialDone: boolean, seen: boolean, displayedOrbs: number, generatorLevelSum: number): boolean
+	return tutorialDone and not seen and displayedOrbs >= 1 and generatorLevelSum >= 2
+end
+
 --[[ Live ---------------------------------------------------------------------- ]]
 
 local function pedestalIncome(): number
@@ -115,10 +123,26 @@ local function announce(kind: string, text: string)
 	AnnouncementController.ShowLine(text, "Loop" .. kind)
 end
 
+local function checkEarnBoth()
+	if not TycoonController.HasSynced() then
+		return
+	end
+	local levelSum = 0
+	for _, level in TycoonController.GetGeneratorLevels() do
+		levelSum += level
+	end
+	local seen = TycoonController.HasSeenTip("earnBoth")
+	if LoopCoachController.PlanEarnBoth(TycoonController.GetTutorial().Done, seen, #TycoonController.GetIncomeInputs().PedestalItems, levelSum) then
+		TycoonController.MarkTipSeen("earnBoth")
+		AnnouncementController.ShowLine(TipConfig.EarnBothLine, "LoopEarnBoth")
+	end
+end
+
 local function onTycoonChanged()
 	if TycoonController.IsTutorialActive() then
 		return
 	end
+	checkEarnBoth()
 	local line, pending = LoopCoachController.PlanNewOrb(state.PendingOrb, pedestalIncome(), os.clock(), state.Fired.NewOrb == true)
 	state.PendingOrb = pending
 	if line then

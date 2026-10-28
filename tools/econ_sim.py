@@ -29,6 +29,13 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # (EventConfig), then Rebirth
                                                 # 1-3 vs. the same seeds
                                                 # without events
+        python3 tools/econ_sim.py --goals=new   # onboarding goal rewards paid
+        python3 tools/econ_sim.py --goals=old   # ... with the 16-goal list
+                                                # (GoalConfig.V1Ids), then the
+                                                # current list vs. none: how
+                                                # much the goal cash moves
+                                                # Rebirth 1 (target: the new
+                                                # goals add <= ~1 min)
         python3 tools/econ_sim.py 30 12 --rivals
                                                 # rival-lab steals on (from
                                                 # minute 3, RivalConfig's
@@ -37,7 +44,7 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # without (target: Rebirth 1
                                                 # sooner, still >= 35 min)
 """
-import random, sys
+import random, re, sys
 
 TIERS = ["Common", "Rare", "Epic", "Legendary", "Mythic", "Secret"]
 GEN_TIER_MULT = {"Common": 1, "Rare": 2.5, "Epic": 6, "Legendary": 15, "Mythic": 40}
@@ -185,6 +192,25 @@ RIVAL_TIER_WEIGHTS = {
     3: {"Common": 15, "Rare": 30, "Epic": 35, "Legendary": 20},
 }
 
+# Onboarding goals (GoalConfig.lua), only with --goals=old|new. The goals are
+# paid in order, each in cash when its condition holds (GoalService). The
+# ids and rewards are read from GoalConfig.lua itself, so a reward change
+# there is picked up; "old" is the list without the goals added after
+# GoalConfig.V1Ids. Conditions mirror GoalService.EVALUATORS for the sim's
+# player (the shield and steal goals: Rebirth 1 / the first rival steal).
+GOALS = None  # None | "old" | "new"
+GOAL_FILE = __import__("os").path.join(__import__("os").path.dirname(__file__), "..", "src", "ReplicatedStorage", "Shared", "Config", "GoalConfig.lua")
+
+
+def load_goal_rewards():
+    """[(id, reward)] in the current list order, and the frozen v1 id list."""
+    text = open(GOAL_FILE, encoding="utf-8").read()
+    goals = [(m.group(1), int(m.group(2))) for m in re.finditer(r'\{ Id = "(\w+)",[^\n]*?Reward = (\d+)', text)]
+    v1_block = text.split("GoalConfig.V1Ids = {")[1].split("}")[0]
+    v1 = re.findall(r'"(\w+)"', v1_block)
+    return goals, v1
+
+
 # Quests (QuestConfig.lua), only with --quests: the average player. Each
 # session-day of QUEST_DAY_PLAY_SECONDS of play hands out 3 dailies (a
 # random 3 of the eligible pool) finished QUEST_DAILY_DONE_AT seconds in;
@@ -306,6 +332,9 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     pity = 0  # Secret pity meter (points)
     secrets = 0  # Secrets obtained, any source
     mythic_fuses = 0  # Mythic -> Secret fusions tried
+    fusion_count = 0  # fusions tried, any tier (the first_fusion goal)
+    goal_list = []
+    goal_at = 0
     late_samples = []  # (t, seconds of steady income one x10 pull costs)
     pull_spent = 0.0  # cash spent on capped pulls / earned, since the last rebirth
     earned = 0.0
@@ -482,6 +511,45 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             if DEPTH:
                 index.add((tr, rng.randrange(ITEMS_PER_TIER[tr]), "Charged"))
 
+    def owned_at_least(tier, count=1):
+        rank = TIERS.index(tier)
+        return sum(n for (tr, _), n in inv.items() if TIERS.index(tr) >= rank) >= count
+
+    def tier_count(tier):
+        return sum(n for (tr, _), n in inv.items() if tr == tier)
+
+    def goal_done(goal_id):
+        """GoalService.EVALUATORS for the sim's player."""
+        total_orbs = sum(n for n in inv.values())
+        return {
+            "claim_base": True,
+            "upgrade_basic": gen["basic"] >= 2,
+            "basic_lv5": gen["basic"] >= 5,
+            "gacha_pull": pulls >= 1,
+            "display_item": total_orbs >= 1,
+            "first_fusion": fusion_count >= 1,
+            "own_rare": owned_at_least("Rare"),
+            "fill_pedestals": total_orbs >= 4,
+            "max_basic": gen["basic"] >= 25,
+            "own_3_rares": tier_count("Rare") >= 3 or owned_at_least("Epic"),
+            "upgrade_multiplier": mult_lvl >= 1,
+            "own_epic": owned_at_least("Epic"),
+            "unlock_ember_forge": gen["ember"] >= 1,
+            "multiplier_x1_5": mult_lvl >= 2,
+            "own_2_epics": tier_count("Epic") >= 2 or owned_at_least("Legendary"),
+            "unlock_flare_reactor": gen["flare"] >= 1,
+            "own_legendary": owned_at_least("Legendary"),
+            "multiplier_x2": mult_lvl >= 4,
+            "own_mythic": owned_at_least("Mythic"),
+            "first_rebirth": rebirths >= 1,
+            "first_shield": rebirths >= 1,
+            "first_steal": (milestones.get("rival_steals", 0) >= 1) if RIVALS else rebirths >= 1,
+        }[goal_id]
+
+    if GOALS:
+        current, v1_ids = load_goal_rewards()
+        goal_list = [g for g in current if GOALS == "new" or g[0] in v1_ids]
+
     step = 1.0
     while t < horizon:
         # Session boundary: away AWAY_SECONDS, paid at the income left with.
@@ -499,6 +567,11 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
         ev_last[0], ev_last[1] = (cur if cur else (None, -1))
         if QUESTS:
             quest_step()
+        # The next goal(s), in order (GoalService.checkGoals): paid in cash.
+        while goal_at < len(goal_list) and goal_done(goal_list[goal_at][0]):
+            cash += goal_list[goal_at][1]
+            mark(f"goal_{goal_list[goal_at][0]}")
+            goal_at += 1
         while RIVALS and t >= next_steal:
             # One delivered rival steal: the orb from the band's weights.
             weights = RIVAL_TIER_WEIGHTS[min(rebirths, RIVAL_MAX_BAND)]
@@ -595,6 +668,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
                 if spare < max(n, 2):
                     break
                 t += FUSE_SECONDS
+                fusion_count += 1
                 inv[(tr, "None")] -= n
                 bonus = VOID_MOON_FUSION_BONUS if ev == "VoidMoon" else 0
                 pity_tier = SECRET_PITY_FULL > 0 and tr == "Mythic"
@@ -691,6 +765,11 @@ if __name__ == "__main__":
         QUESTS = True
     if "--rivals" in sys.argv:
         RIVALS = True
+    for a in sys.argv:
+        if a.startswith("--goals="):
+            GOALS = a.split("=")[1]
+            if GOALS not in ("old", "new"):
+                sys.exit("--goals=old|new")
     sessions = 0
     for a in sys.argv:
         if a.startswith("--share="):
@@ -747,6 +826,27 @@ if __name__ == "__main__":
         for k in [f"chain{i}" for i in range(1, len(QUEST_CHAIN) + 1)]:
             vals = sorted(r[0].get(k, 1e12) for r in runs)
             print(f"  {k:10s} median {fmt(vals[mid] if vals[mid] < 1e12 else None)}")
+    if GOALS:
+        # The same seeds with no goal cash, and with the other list.
+        saved = GOALS
+        GOALS = None
+        base = [run(s, hours * 3600) for s in range(seeds)]
+        GOALS = "old" if saved == "new" else "new"
+        other = [run(s, hours * 3600) for s in range(seeds)]
+        GOALS = saved
+        print(f"goal rewards ('{saved}' list) vs. none and vs. '{'old' if saved == 'new' else 'new'}' (same seeds), median:")
+        for k in ["rebirth1", "rebirth2", "rebirth3"]:
+            a = sorted(r[0].get(k, 1e12) for r in base)[mid]
+            b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
+            c = sorted(r[0].get(k, 1e12) for r in other)[mid]
+            if a < 1e12 and b < 1e12 and c < 1e12:
+                print(f"  {k:10s} none {fmt(a)}  {saved} {fmt(b)} ({(a - b) / 60:+.1f} min)  other {fmt(c)} ({(b - c) / 60:+.1f} min)")
+        goals_now, v1_ids = load_goal_rewards()
+        print(f"  goal cash: {sum(r for g, r in goals_now if g in v1_ids)} in the 16 old goals + "
+              f"{sum(r for g, r in goals_now if g not in v1_ids)} in the {len([g for g, r in goals_now if g not in v1_ids])} added")
+        for gid, _ in goals_now:
+            vals = sorted(r[0].get(f"goal_{gid}", 1e12) for r in runs)
+            print(f"  goal_{gid:22s} median {fmt(vals[mid] if vals[mid] < 1e12 else None)}")
     if RIVALS:
         # The same seeds without rival steals: how much the NPC labs move
         # Rebirth 1-3 (target: Rebirth 1 sooner, but not under 35 min).

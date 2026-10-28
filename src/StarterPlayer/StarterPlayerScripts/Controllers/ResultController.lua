@@ -43,6 +43,7 @@ local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local EventConfig = require(ReplicatedStorage.Shared.Config.EventConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+local FuseLadder = require(ReplicatedStorage.Shared.Modules.FuseLadder)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
@@ -50,6 +51,8 @@ local UIKit = require(script.Parent.Parent.UI.UIKit)
 local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local RevealEffects = require(script.Parent.Parent.Effects.RevealEffects)
 local FusionController = require(script.Parent.FusionController)
+local InventoryController = require(script.Parent.InventoryController)
+local GoalMarkerController = require(script.Parent.GoalMarkerController)
 local TycoonController = require(script.Parent.TycoonController)
 local ToastController = require(script.Parent.ToastController)
 local ShopController = require(script.Parent.ShopController)
@@ -61,6 +64,10 @@ local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
 
 local BIG_CARD_SIZE = Vector2.new(380, 420)
+-- A fusion card's "what next" row (FuseLadder.ResultNext) makes it taller: the
+-- line + a 44 px button, or just the line.
+local NEXT_EXTRA_FUSE = 76
+local NEXT_EXTRA_PULL = 30
 local SUNBURST_RAYS = 12
 local SUNBURST_DEGREES_PER_SECOND = 20
 local SUNBURST_RAY_LENGTH = 720
@@ -191,6 +198,9 @@ type BigCardInfo = {
 	-- A fusion success or a manual pull: its close is a moment to ask for
 	-- notifications (NotifyOptInController decides if it is time).
 	Moment: NotifyOptInController.Moment?,
+	-- A fusion success: under the orb, "Fuse 2 Rares → Epic next" with GO TO
+	-- RARE, or "Pull more orbs, then fuse 2 of these!" (FuseLadder.ResultNext).
+	Next: FuseLadder.ResultNext?,
 }
 
 local function showBigCard(info: BigCardInfo)
@@ -207,13 +217,15 @@ local function showBigCard(info: BigCardInfo)
 	local tier = info.Item.Tier :: string
 	local tierColor = FusionConfig.TierAccentColors[tier] or Colors.Text
 	local tierLight = UITheme.GetTierLight(tier)
+	local nextStep = if info.Next and info.Next.Kind ~= "None" then info.Next else nil
+	local cardExtra = if nextStep == nil then 0 elseif nextStep.Kind == "Fuse" then NEXT_EXTRA_FUSE else NEXT_EXTRA_PULL
 
 	local body, holder = UIKit.Panel({
 		Name = "BigResult",
 		Parent = screenGui,
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(BIG_CARD_SIZE.X, BIG_CARD_SIZE.Y),
+		Size = UDim2.fromOffset(BIG_CARD_SIZE.X, BIG_CARD_SIZE.Y + cardExtra),
 		Gradient = {
 			{ 0, Colors.Panel },
 			{ 0.25, Colors.ResultMid },
@@ -318,11 +330,49 @@ local function showBigCard(info: BigCardInfo)
 		Parent = body,
 	})
 
+	if nextStep then
+		UIKit.Label({
+			Name = "NextLine",
+			Text = nextStep.Line or "",
+			Font = Fonts.Display,
+			TextSize = 17,
+			TextColor3 = tierLight,
+			TextWrapped = true,
+			Position = UDim2.fromOffset(20, 334),
+			Size = UDim2.new(1, -40, 0, 22),
+			TextXAlignment = Enum.TextXAlignment.Center,
+			ZIndex = z,
+			Stroke = UITheme.Stroke.Text,
+			Parent = body,
+		})
+		if nextStep.Kind == "Fuse" then
+			local goTier = nextStep.Tier :: string
+			UIKit.Button({
+				Name = "GoToTier",
+				Parent = body,
+				Style = "Violet",
+				Text = nextStep.Button or "GO",
+				TextSize = 20,
+				AnchorPoint = Vector2.new(0.5, 0),
+				Position = UDim2.new(0.5, 0, 0, 362),
+				Size = UDim2.fromOffset(220, UITheme.MinTapSize),
+				ZIndex = z,
+				OnClick = function()
+					closeBigCard()
+					FusionController.RequestFuseTab(goTier)
+				end,
+			})
+		else
+			-- The Gacha arrow for a while, so "pull more" has somewhere to go.
+			GoalMarkerController.SetHint("GachaStation", 25)
+		end
+	end
+
 	local buttons = Instance.new("Frame")
 	buttons.Name = "Buttons"
 	buttons.BackgroundTransparency = 1
 	buttons.AnchorPoint = Vector2.new(0.5, 0)
-	buttons.Position = UDim2.new(0.5, 0, 0, 342)
+	buttons.Position = UDim2.new(0.5, 0, 0, 342 + cardExtra)
 	buttons.Size = UDim2.fromOffset(170 + 12 + 120, 52)
 	buttons.ZIndex = z
 	buttons.Parent = body
@@ -1780,6 +1830,18 @@ function ResultController.IsBigCardOpen(): boolean
 end
 
 -- The giant word on the open big card ("COMMON ORB!"), or nil (/selftest).
+-- /selftest: the open big card's "what next" line and whether it has the
+-- GO TO <TIER> button (a fusion card only).
+function ResultController.GetBigCardNext(): (string?, boolean)
+	local holder = bigHolder
+	if not holder then
+		return nil, false
+	end
+	local line = holder:FindFirstChild("NextLine", true)
+	local button = holder:FindFirstChild("GoToTier", true)
+	return if line and line:IsA("TextLabel") then line.Text else nil, button ~= nil
+end
+
 function ResultController.GetBigCardHeadline(): string?
 	local holder = bigHolder
 	local label = holder and holder:FindFirstChild("TierName", true)
@@ -1831,6 +1893,25 @@ function ResultController.GetMutationSourceLine(mutation: string?, source: unkno
 	return nil
 end
 
+-- What the fusion card says next for the orb `newItem` (just made): the
+-- player owns >= 2 of its tier -> fuse them (GO TO <TIER>), else pull more.
+-- The new orb counts even if the inventory sync hasn't brought it yet.
+function ResultController.GetFusionNext(newItem: any): FuseLadder.ResultNext
+	local tier = newItem.Tier :: string
+	local owned = 0
+	local found = false
+	for _, item in InventoryController.GetFusableItemsByTier(tier) do
+		owned += 1
+		if item.Uid == newItem.Uid then
+			found = true
+		end
+	end
+	if not found then
+		owned += 1
+	end
+	return FuseLadder.ResultNext(tier, owned, TycoonController.GetRebirths())
+end
+
 local function onFusionResolved(result: any)
 	if typeof(result) ~= "table" or not result.Success or not result.NewItem then
 		return
@@ -1865,11 +1946,14 @@ local function onFusionResolved(result: any)
 	-- Auto-Fuse): "RARE ORB!". A Rare closes by itself, like a single pull.
 	local tier = newItem.Tier :: string
 	do
+		local nextStep = ResultController.GetFusionNext(newItem)
 		showBigCard({
 			Caption = "FUSION SUCCESS",
 			Moment = "Fusion",
 			Headline = tier:upper() .. " ORB!",
-			AutoCloseSeconds = if tier == "Rare" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,
+			Next = nextStep,
+			-- (a card with a button to tap stays until it is closed)
+			AutoCloseSeconds = if tier == "Rare" and nextStep.Kind == "None" then SINGLE_PULL_AUTO_CLOSE_SECONDS else nil,
 			SourceLine = sourceLine,
 			Item = newItem,
 			Description = ("%dx %s → %s · earns %s/s on a pedestal"):format(

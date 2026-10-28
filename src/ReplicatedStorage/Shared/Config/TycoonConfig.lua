@@ -452,4 +452,12 @@ function TycoonConfig.GetGeneratorIncome(inputs: IncomeInputs): number
 		* TycoonConfig.GetIncomeMultiplier(inputs)
 end
 
+-- GetPassiveCashPerSecond split into its two earners, for "Generators $X/s ·
+-- Orbs $Y/s": the generators' share (GetGeneratorIncome) and the rest (the
+-- orbs on pedestals). The parts of the one formula, never a second one.
+function TycoonConfig.GetIncomeSplit(inputs: IncomeInputs): { Generators: number, Orbs: number }
+	local generators = TycoonConfig.GetGeneratorIncome(inputs)
+	return { Generators = generators, Orbs = math.max(0, TycoonConfig.GetPassiveCashPerSecond(inputs) - generators) }
+end
+
 return TycoonConfig

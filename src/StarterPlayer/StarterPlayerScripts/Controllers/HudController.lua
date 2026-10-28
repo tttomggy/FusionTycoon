@@ -318,7 +318,7 @@ local function buildCashCard(): Frame
 		Parent = holder,
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.new(1, 0, 1, 8),
-		Size = UDim2.fromOffset(220, 0),
+		Size = UDim2.fromOffset(260, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		Color = Colors.Panel,
 		Radius = UITheme.Radius.Row,
@@ -2509,16 +2509,26 @@ end
 function HudController.RefreshIncomeBreakdown()
 	local inputs = TycoonController.GetIncomeInputs()
 	local lines = {}
+	-- Both earners, once: the machines AND the orbs (parts of the one formula).
+	local split = TycoonConfig.GetIncomeSplit(inputs)
+	-- (required here, not at the top: this module is at the local-variable limit)
+	local splitFormat = require(ReplicatedStorage.Shared.Config.TipConfig).IncomeSplitFormat
+	table.insert(lines, splitFormat:format(NumberFormat.Money(split.Generators), NumberFormat.Money(split.Orbs)))
 	for _, part in TycoonConfig.GetIncomeBreakdown(inputs) do
 		if math.abs(part.Value - 1) > 1e-6 then
 			table.insert(lines, ("%s  %s"):format(part.Label, UIKit.Colored(NumberFormat.Multiplier(part.Value), Colors.Cash)))
 		end
 	end
-	if #lines == 0 then
+	if #lines == 1 then -- just the split line
 		table.insert(lines, "No boosts yet")
 	end
 	table.insert(lines, ("<b>Total  %s</b>"):format(UIKit.Colored(NumberFormat.Multiplier(TycoonConfig.GetIncomeMultiplier(inputs)), Colors.Cash)))
 	breakdownLabel.Text = table.concat(lines, "\n")
+end
+
+-- /selftest: the breakdown tooltip's text as drawn.
+function HudController.GetIncomeBreakdownText(): string
+	return breakdownLabel.Text
 end
 
 function HudController.ToggleIncomeBreakdown()

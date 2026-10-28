@@ -37,7 +37,8 @@ src/ReplicatedStorage/Shared/
                  (station pads + holograms), GeneratorKit (the five factory-line generators + their
                  states), FactoryKit (factory belt + collector, and the
                  ball path), PortalKit (the Rebirth Portal), GoalSteps (an "own a tier"
-                 goal's next action: rules + text), FloorKit (the 2nd
+                 goal's next action: rules + text), FuseLadder (the Fuse panel's
+                 ladder: which tab, ready, the result card's next line), FloorKit (the 2nd
                  floor), PedestalVisuals,
                  SoundKit (every sound, by SoundConfig slot),
                  WeaponKit (the five weapon models: Tool, viewport model,

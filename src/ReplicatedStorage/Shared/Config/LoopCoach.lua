@@ -55,7 +55,7 @@ LoopCoach.Icons = {
 LoopCoach.Explain = {
 	Pull = "Pull orbs at the Gacha Pad",
 	Fuse = "Fuse 2+ same orbs into a better one",
-	Earn = "Orbs on your pedestals earn cash",
+	Earn = "Orbs on pedestals and generators both earn $/s",
 	Upgrade = "Upgrade generators to earn more",
 	Steal = "Steal a free orb from a rival lab",
 } :: { [string]: string }
@@ -270,15 +270,17 @@ function LoopCoach.GoalBlocked(goalId: string, goalStep: GoalSteps.Step?, input:
 		return level < generator.MaxLevel
 			and (not TycoonConfig.IsUnlocked(generator, input.Levels) or input.Cash < TycoonConfig.GetUpgradeCost(generator, level))
 	end
-	if goalId == "upgrade_basic" or goalId == "basic_lv5" then
+	if goalId == "upgrade_basic" or goalId == "basic_lv5" or goalId == "max_basic" then
 		return cannotAfford("basic_generator")
+	elseif goalId == "unlock_flare_reactor" then
+		return cannotAfford(if (input.Levels.ember_forge or 0) < 10 then "ember_forge" else "flare_reactor")
 	elseif goalId == "unlock_ember_forge" then
 		return cannotAfford(if (input.Levels.basic_generator or 0) < 5 then "basic_generator" else "ember_forge")
 	elseif goalId == "gacha_pull" then
 		return input.Cash < input.PullCost
 	elseif goalId == "first_fusion" then
 		return candidates.Fuse == nil
-	elseif goalId == "upgrade_multiplier" or goalId == "multiplier_x2" then
+	elseif goalId == "upgrade_multiplier" or goalId == "multiplier_x1_5" or goalId == "multiplier_x2" then
 		local cost = TycoonConfig.GetCashMultiplierUpgradeCost(input.MultiplierLevel)
 		return cost ~= nil and input.Cash < cost
 	elseif goalId == "first_rebirth" then

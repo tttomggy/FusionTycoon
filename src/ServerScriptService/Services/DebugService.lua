@@ -1888,6 +1888,82 @@ local function runGoalStepsSelfTest(player: Player, result: (boolean, string, st
 	result(GoalService.ComputeStep(player, goalsById.claim_base, {}, RICH) == nil, "goal steps: a goal that isn't 'own a tier' has no step")
 end
 
+-- The goal list's saved-progress migration (GoalConfig.MigrateIndex) and the
+-- evaluators of the goals added with it, on stubbed data.
+local function runGoalMigrationSelfTest(result: (boolean, string, string?) -> ())
+	local goals = GoalConfig.Goals
+	local ids: { [string]: boolean } = {}
+	local unique = true
+	for _, goal in goals do
+		unique = unique and not ids[goal.Id]
+		ids[goal.Id] = true
+	end
+	result(unique, "goal list: every goal id is unique")
+	result(#goals - #GoalConfig.V1Ids == 6, "goal list: six goals were added to the frozen v1 list", ("%d goals, %d in v1"):format(#goals, #GoalConfig.V1Ids))
+
+	local sameGoal, ordered, bad = true, true, {}
+	local previous = 0
+	for index, oldId in GoalConfig.V1Ids do
+		local migrated = GoalConfig.MigrateIndex(index, 1)
+		local landed = goals[migrated]
+		if not landed or landed.Id ~= oldId then
+			sameGoal = false
+			table.insert(bad, ("%d (%s) -> %d (%s)"):format(index, oldId, migrated, if landed then landed.Id else "?"))
+		end
+		ordered = ordered and migrated > previous
+		previous = migrated
+	end
+	result(sameGoal, "goal migration: a v1 save at each of its 16 goals lands on the SAME goal id", table.concat(bad, "; "))
+	result(ordered, "goal migration: the old goals keep their relative order (no reordering, only inserts)")
+	result(GoalConfig.MigrateIndex(#GoalConfig.V1Ids + 1, 1) == #goals + 1, "goal migration: a v1 save that finished every goal stays finished")
+	result(GoalConfig.MigrateIndex(5, GoalConfig.DataVersion) == 5, "goal migration: a current-version save is untouched")
+	local multiplier = GoalConfig.IndexOf("upgrade_multiplier") :: number
+	result(GoalConfig.MigrateIndex(8, 1) == multiplier and multiplier > 8, "goal migration: the goals inserted before a v1 save's goal are skipped, not paid (index only moves forward)")
+
+	local function eval(goalId: string, data: { [string]: any }): (boolean, number, number)
+		local base: { [string]: any } = { Inventory = {}, Generators = {}, PedestalDisplays = {}, CashMultiplierLevel = 0 }
+		for key, value in data do
+			base[key] = value
+		end
+		local done, current, target = GoalService.EvaluateStub(goalId, base)
+		return done == true, current or -1, target or -1
+	end
+	local function orbs(tier: string, count: number): { any }
+		local list = {}
+		for index = 1, count do
+			table.insert(list, { Uid = tier .. index, Tier = tier })
+		end
+		return list
+	end
+	local function merge(...: { any }): { any }
+		local list = {}
+		for _, part in { ... } do
+			for _, item in part do
+				table.insert(list, item)
+			end
+		end
+		return list
+	end
+	local function check(goalId: string, data: { [string]: any }, wantDone: boolean, wantCurrent: number, label: string)
+		local done, current = eval(goalId, data)
+		result(done == wantDone and current == wantCurrent, ("goal %s: %s"):format(goalId, label), ("done %s current %d"):format(tostring(done), current))
+	end
+	check("fill_pedestals", { PedestalDisplays = { "a", "b", "c", "d" } }, true, 4, "4 displayed pedestals is done")
+	check("fill_pedestals", { PedestalDisplays = { "a", "b", "c" } }, false, 3, "3 displayed pedestals is 3 / 4")
+	check("max_basic", { Generators = { basic_generator = 25 } }, true, 25, "Basic LV 25 is done")
+	check("max_basic", { Generators = { basic_generator = 24 } }, false, 24, "Basic LV 24 is 24 / 25")
+	check("own_3_rares", { Inventory = orbs("Rare", 3) }, true, 3, "3 Rares is done")
+	check("own_3_rares", { Inventory = orbs("Rare", 2) }, false, 2, "2 Rares is 2 / 3")
+	check("own_3_rares", { Inventory = merge(orbs("Epic", 1), orbs("Common", 5)) }, true, 3, "an Epic and no Rares is done (they fused past it)")
+	check("multiplier_x1_5", { CashMultiplierLevel = 2 }, true, 2, "Multiplier LV 2 (x1.5) is done")
+	check("multiplier_x1_5", { CashMultiplierLevel = 1 }, false, 1, "Multiplier LV 1 is 1 / 2")
+	check("own_2_epics", { Inventory = orbs("Epic", 2) }, true, 2, "2 Epics is done")
+	check("own_2_epics", { Inventory = orbs("Epic", 1) }, false, 1, "1 Epic is 1 / 2")
+	check("own_2_epics", { Inventory = orbs("Legendary", 1) }, true, 2, "a Legendary is done (they fused past it)")
+	check("unlock_flare_reactor", { Generators = { flare_reactor = 1, ember_forge = 10 } }, true, 10, "Flare Reactor LV 1 is done")
+	check("unlock_flare_reactor", { Generators = { ember_forge = 7 } }, false, 7, "Ember LV 7 is 7 / 10")
+end
+
 -- The LoopCoach (Shared/Config/LoopCoach through GoalService.BuildCoach) on
 -- stubbed states: each step from its situation, the priority order (fuse
 -- beats pull beats upgrade beats steal beats earn), the 3 s hold, nothing
@@ -3331,6 +3407,7 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	runSection("11. progression", result, function()
 		runProgressionSelfTest(player, result)
 		runGoalStepsSelfTest(player, result)
+		runGoalMigrationSelfTest(result)
 		runLoopCoachSelfTest(player, result)
 		runSecretPitySelfTest(player, result)
 		runGiftSessionSelfTest(player, result)

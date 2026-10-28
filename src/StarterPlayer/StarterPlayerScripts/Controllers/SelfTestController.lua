@@ -2430,6 +2430,141 @@ local function testLoopNudge(): { string }
 	return lines
 end
 
+-- The fuse ladder (FuseLadder + FusePanel + the fusion card): the tab the
+-- panel opens on / jumps to with stubbed inventories (3 Commons + 2 Rares ->
+-- Rare; a fuse leaving 1 Common + 3 Rares -> Rare stays; nothing fusable ->
+-- Common; a manual pick survives until close), the ready dot (>= 2, not
+-- selected), the ladder strip's lit / next tiers, tab tap targets >= 44 px at
+-- desktop and phone, the fusion card's "Fuse 2 Rares -> Epic next" line and
+-- its GO TO button, the earnBoth rule and the income split text.
+local function testFuseLadder(): { string }
+	local FuseLadder = require(ReplicatedStorage.Shared.Modules.FuseLadder)
+	local TipConfig = require(ReplicatedStorage.Shared.Config.TipConfig)
+	local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
+	local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+	local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
+	local FusePanel = require(UI.FusePanel) :: any
+	local Coach = require(script.Parent.LoopCoachController) :: any
+	local ResultController = require(script.Parent.ResultController) :: any
+	local FusionController = require(script.Parent.FusionController) :: any
+	local HudController = require(script.Parent.HudController) :: any
+	local Marker = require(script.Parent.GoalMarkerController) :: any
+	local TycoonController = require(script.Parent.TycoonController) :: any
+	local lines: { string } = {}
+	local function check(ok: boolean, name: string, detail: string?)
+		table.insert(lines, ("%s fuse ladder: %s%s"):format(if ok then "PASS" else "FAIL", name, if ok or not detail then "" else " | " .. detail))
+	end
+
+	-- Pure rules.
+	check(FuseLadder.PickTab({ Common = 3, Rare = 2 }, 0) == "Rare", "3 Commons + 2 Rares picks Rare")
+	check(FuseLadder.PickTab({ Common = 1, Rare = 3 }, 0) == "Rare", "1 Common + 3 Rares keeps Rare")
+	check(FuseLadder.PickTab({ Common = 5, Rare = 1 }, 0) == "Common", "5 Commons + 1 Rare picks Common (a lone Rare is not a pair)")
+	check(FuseLadder.PickTab({}, 0) == "Common", "nothing fusable picks Common")
+	check(FuseLadder.PickTab({ Mythic = 4 }, 0) == "Common", "a Mythic pair is skipped before Rebirth 1 (locked)")
+	check(FuseLadder.BestOwned({ Common = 3, Epic = 1 }) == "Epic" and FuseLadder.NextAim({ Common = 3, Epic = 1 }) == "Legendary", "the strip lights Epic and aims at Legendary")
+	check(FuseLadder.NextAim({}) == "Rare", "an empty inventory aims at Rare")
+	local rare3, rare1, rare0 = FuseLadder.ResultNext("Rare", 3, 0), FuseLadder.ResultNext("Rare", 1, 0), FuseLadder.ResultNext("Secret", 5, 9)
+	check(rare3.Kind == "Fuse" and rare3.Line == "Fuse 2 Rares → Epic next" and rare3.Button == "GO TO RARE", "the card for 3 Rares: 'Fuse 2 Rares → Epic next' / GO TO RARE", tostring(rare3.Line))
+	check(rare1.Kind == "Pull" and rare1.Line == FuseLadder.PullLine, "the card for 1 Rare: the 'Pull more orbs' line")
+	check(rare0.Kind == "None" and FuseLadder.ResultNext("Mythic", 3, 0).Kind == "None", "no line for a Secret, or for Mythics before Rebirth 1")
+	check(FuseLadder.ResultNext("Legendary", 2, 0).Line == "Fuse 2 Legendaries → Mythic next", "Legendaries pluralise")
+
+	-- The panel with stubbed counts, at both layouts.
+	for _, phone in { false, true } do
+		local label = if phone then "844x390 phone" else "1920x1080"
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.4)
+		local ok, err = pcall(function()
+			FusePanel.Open()
+			task.wait(0.5)
+			local view = FusePanel.SelfTestOpenWith({ Common = 3, Rare = 2 })
+			check(view.Tier == "Rare", ("%s: 3 Commons + 2 Rares opens on Rare"):format(label), view.Tier)
+			check(view.Ready.Common == true and view.Ready.Rare == false, ("%s: the pair on Common shows the ready dot; the selected Rare tab does not"):format(label))
+			view = FusePanel.SelfTestAfterFuse({ Common = 1, Rare = 3 })
+			check(view.Tier == "Rare", ("%s: a fuse leaving 1 Common + 3 Rares stays on Rare"):format(label), view.Tier)
+			check(view.Ready.Common == false, ("%s: 1 Common is no ready dot"):format(label))
+			view = FusePanel.SelfTestAfterFuse({ Common = 3, Rare = 1 })
+			check(view.Tier == "Common", ("%s: a fuse that leaves 3 Commons + 1 Rare goes back to Common"):format(label), view.Tier)
+			view = FusePanel.SelfTestAfterFuse({ Common = 1, Rare = 1, Epic = 2 })
+			check(view.Tier == "Epic" and view.Best == "Epic" and view.Aim == "Legendary" and (view.NextText == "Next: Legendary" or not view.StripShown), ("%s: the pair of Epics leads: Epic tab, strip lit to Epic, 'Next: Legendary'"):format(label), ("%s / %s / %s / '%s'"):format(view.Tier, tostring(view.Best), tostring(view.Aim), view.NextText))
+			view = FusePanel.SelfTestOpenWith({})
+			check(view.Tier == "Common", ("%s: owning nothing opens on Common"):format(label), view.Tier)
+			view = FusePanel.SelfTestOpenWith({ Common = 3, Rare = 2 })
+			view = FusePanel.SelfTestPick("Common")
+			check(view.Tier == "Common" and view.Ready.Rare == true, ("%s: a manual tab pick, and the Rare pair now shows its dot"):format(label), view.Tier)
+			view = FusePanel.SelfTestAfterFuse({ Common = 1, Rare = 3 })
+			check(view.Tier == "Common", ("%s: a manual pick survives a fuse until the panel closes"):format(label), view.Tier)
+			view = FusePanel.SelfTestOpenWith({ Common = 3, Rare = 2 })
+			check(view.Tier == "Rare", ("%s: reopening leads up the ladder again"):format(label), view.Tier)
+			local smallest = math.huge
+			for _, height in view.TabHeights do
+				smallest = math.min(smallest, height)
+			end
+			check(smallest >= UITheme.MinTapSize - 0.5, ("%s: every tab is >= %d px tall"):format(label, UITheme.MinTapSize), ("smallest %.1f"):format(smallest))
+			if not phone then
+				check(view.StripShown and view.Best == "Rare" and view.Aim == "Epic" and view.NextText == "Next: Epic", "1920x1080: the ladder strip is shown, Rare lit, 'Next: Epic'", ("%s %s %s '%s'"):format(tostring(view.StripShown), tostring(view.Best), tostring(view.Aim), view.NextText))
+			else
+				check(true, ("844x390 phone: the ladder strip is %s (it hides where it does not fit; the dots and the jump stay)"):format(if view.StripShown then "shown" else "hidden"))
+			end
+		end)
+		if not ok then
+			check(false, label .. ": the panel probe raised", tostring(err))
+		end
+		FusePanel.SelfTestReset()
+		FusePanel.Close()
+		task.wait(0.3)
+	end
+	UIKit.SetForcedPhone(nil)
+
+	-- The fusion card's next row, live against the real inventory.
+	local ok, err = pcall(function()
+		ResultController.CloseCards()
+		local fake = fakeFusionResult()
+		local want = ResultController.GetFusionNext(fake.NewItem)
+		ResultController.SelfTestFusionResolved(fake)
+		local started = os.clock()
+		while not ResultController.IsBigCardOpen() and os.clock() - started < 2 do
+			task.wait(0.1)
+		end
+		task.wait(0.2)
+		local line, hasButton = ResultController.GetBigCardNext()
+		check(line == want.Line and hasButton == (want.Kind == "Fuse"), "the live NEW ORB card shows FuseLadder's line" .. (if hasButton then " and the GO TO RARE button" else ""), ("card '%s' button %s vs '%s' %s"):format(tostring(line), tostring(hasButton), tostring(want.Line), want.Kind))
+		check(want.Kind ~= "Pull" or Marker.GetHint() == "GachaStation", "the 'pull more' variant puts the Gacha arrow up", tostring(Marker.GetHint()))
+		ResultController.CloseCards()
+		Marker.SetHint(nil)
+		-- GO TO RARE's request opens the panel on that tab.
+		FusionController.RequestFuseTab("Rare")
+		task.wait(0.5)
+		local view = FusePanel.SelfTestView()
+		check(FusePanel.IsOpen() and view.Tier == "Rare", "GO TO RARE opens the Fuse panel on the Rare tab", view.Tier)
+		FusePanel.Close()
+		task.wait(0.3)
+	end)
+	if not ok then
+		check(false, "the fusion card probe raised", tostring(err))
+	end
+
+	-- "Machines AND orbs both earn cash!": once, after the tutorial.
+	check(Coach.PlanEarnBoth(true, false, 1, 2) == true, "earnBoth fires with an orb on a pedestal and a generator upgraded")
+	check(Coach.PlanEarnBoth(false, false, 1, 2) == false, "earnBoth is silent during the tutorial")
+	check(Coach.PlanEarnBoth(true, true, 1, 2) == false, "earnBoth is silent once seen (it is saved per account)")
+	check(Coach.PlanEarnBoth(true, false, 0, 5) == false and Coach.PlanEarnBoth(true, false, 3, 1) == false, "earnBoth needs BOTH an orb on display and an upgrade")
+	check(TipConfig.IsValid("earnBoth") and TipConfig.EarnBothLine == "Machines AND orbs both earn cash!", "the earnBoth id is a saved tip and its line is TipConfig's", TipConfig.EarnBothLine)
+	check(LoopCoach.Explain.Earn == "Orbs on pedestals and generators both earn $/s", "the loop strip's 💰 text says both earn", LoopCoach.Explain.Earn)
+
+	-- The income split: its parts are the one formula's parts, and the HUD
+	-- breakdown shows them.
+	local inputs = TycoonController.GetIncomeInputs()
+	local split = TycoonConfig.GetIncomeSplit(inputs)
+	local total = TycoonConfig.GetPassiveCashPerSecond(inputs)
+	check(math.abs(split.Generators + split.Orbs - total) <= math.max(total * 0.01, 1e-6), "Generators $/s + Orbs $/s add up to the income pill's number (within 1%)", ("%.3f + %.3f vs %.3f"):format(split.Generators, split.Orbs, total))
+	HudController.RefreshIncomeBreakdown()
+	local text = HudController.GetIncomeBreakdownText()
+	local expected = TipConfig.IncomeSplitFormat:format(NumberFormat.Money(split.Generators), NumberFormat.Money(split.Orbs))
+	check(text:find(expected, 1, true) ~= nil, "the multiplier pill's breakdown starts with 'Generators $X/s · Orbs $Y/s'", text:sub(1, 80))
+	return lines
+end
+
 local function probeBigCard(expect: string, fakeFusion: boolean?): { ProbeLine }
 	local ResultController = require(script.Parent.ResultController) :: any
 	if fakeFusion then
@@ -5444,6 +5579,9 @@ local function run(payload: any)
 		table.insert(panelLines, line)
 	end
 	for _, line in testLoopNudge() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testFuseLadder() do
 		table.insert(panelLines, line)
 	end
 	if not tooSmall then

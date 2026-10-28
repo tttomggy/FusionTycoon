@@ -438,6 +438,55 @@ look, never the odds.
   probe `FuseOdds`), and "hud goal tracker shows 3 lines" (no clipping,
   on screen, 👣 toggle >= 44 px, at the desktop and phone layouts).
 
+#### The Fuse panel leads you up the ladder (`Shared/Modules/FuseLadder`)
+
+A real player fused Common -> Rare forever and never switched to the Rare
+tab. The tabs stay (one scroll of ~100 cards would be worse); the panel now
+points at the next step. `FuseLadder` is pure (counts in, tier out; tier
+names, order and the Mythic gate come from `FusionConfig`) and `/selftest`
+runs it with stubbed inventories (`FusePanel.SelfTestOpenWith` & co.).
+
+- **Auto-jump:** the panel opens on the HIGHEST tier with >= 2 fusable orbs
+  (`FuseLadder.PickTab`; Common when nothing is fusable; a Mythic pair
+  counts only once Mythic fusion is unlocked), and jumps there again when a
+  fuse finishes (`FusionResolved` / `FuseAllResolved`, and the inventory syncs
+  that follow it for 3 s). A tab picked BY HAND (a tab tap, a ladder-strip
+  tap, the card's GO TO RARE) is left alone until the panel is reopened.
+  Switching tab still clears the chamber.
+- **Ready dots:** an unselected tab with >= 2 fusable orbs has a pulsing
+  green dot (a tween on a Frame, never a Highlight) and a white count; tabs
+  with < 2 orbs (or locked) have a muted count. Tabs stay 50 px tall (>= 44).
+- **Ladder strip** above the tabs: the six tier orbs (`UIKit.TierOrb`, the
+  `UITheme.TierOrb` colours) with `›` between. Everything up to the best tier
+  owned is lit, the rest dimmed; the NEXT tier (`FuseLadder.NextAim`: the
+  tier above the best owned) has a pulsing gold ring and `Next: Epic` at
+  the end of the row. A tap jumps to that tab (a locked Mythic toasts the
+  Rebirth it needs; Secret has no tab). Each cell's hit area is 44 x 44. The
+  strip hides when the picker column is under 420 x 250 px (a short phone):
+  the dots and the jump still work there.
+- **Fusion card** (`NEW ORB!`, `ResultController`): under the description,
+  `FuseLadder.ResultNext` adds one line. >= 2 of the new tier (the new orb
+  counts even before the inventory sync): `Fuse 2 Rares → Epic next` and a
+  44 px `GO TO RARE` button (closes the card, `FusionController.RequestFuseTab`
+  -> the panel opens on that tab; the Rare card no longer auto-closes, it has a
+  button). Otherwise `Pull more orbs, then fuse 2 of these!` and the Gacha
+  arrow for 25 s (`GoalMarkerController.SetHint`, under the idle nudge and
+  the tip, over the coach). No line for a Secret, or Mythics before Rebirth 1.
+- **The tier goals agree:** `own_epic`'s "Fuse your 2 Rares" step points at
+  the Fusion Machine, and the panel then opens on Rare (the highest pair).
+
+#### Orbs AND generators both earn money
+
+The first time an orb sits on a pedestal AND a generator was upgraded
+(after the tutorial, once per account: `TipConfig` id `earnBoth`,
+`LoopCoachController.PlanEarnBoth`) the TopStack line says `Machines AND orbs
+both earn cash!` (`TipConfig.EarnBothLine`). The loop strip's 💰 text is
+`Orbs on pedestals and generators both earn $/s` (`LoopCoach.Explain.Earn`),
+and the HUD multiplier pill's tap-tooltip starts with `Generators $X/s · Orbs
+$Y/s` (`TipConfig.IncomeSplitFormat`; `TycoonConfig.GetIncomeSplit` = the
+generators' share `GetGeneratorIncome` and the rest of
+`GetPassiveCashPerSecond`: the parts of the one formula, never a second one).
+
 #### Loop coach (always one "do this now")
 
 Pull -> Fuse -> Earn -> Upgrade (+ Steal on the side road) as ONE next step,

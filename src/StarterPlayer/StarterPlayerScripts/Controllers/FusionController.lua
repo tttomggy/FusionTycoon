@@ -39,6 +39,16 @@ local fusionResolved = Instance.new("BindableEvent")
 -- the moment a fuse is requested.
 FusionController.FusionResolved = fusionResolved.Event
 
+local fuseTabRequested = Instance.new("BindableEvent")
+-- Fires (tier) when something outside the Fuse panel (the fusion result
+-- card's GO TO RARE) wants the panel open on that tier's tab. FusePanel
+-- listens; the result card never requires it.
+FusionController.FuseTabRequested = fuseTabRequested.Event
+
+function FusionController.RequestFuseTab(tier: string)
+	fuseTabRequested:Fire(tier)
+end
+
 local core: BasePart? = nil
 local ring: BasePart? = nil
 local prompt: ProximityPrompt? = nil

@@ -80,6 +80,8 @@ local currentMarkerText: string? = nil
 -- A tip (TutorialController) is running: the coach's arrow waits.
 local tipActive = false
 local nudgeTarget: string? = nil -- LoopCoachController's idle nudge: "GachaStation" / "FusionMachine"
+local hintTarget: string? = nil -- the fusion card's "pull more orbs" arrow (SetHint): "GachaStation"
+local hintToken = 0
 local currentTarget: Instance? = nil
 local currentUiButton: string? = nil
 
@@ -541,7 +543,7 @@ local function refresh()
 	-- Fusion Machine, the Gacha Pad, UPGRADES) and follows every sync; the
 	-- coach points instead when it has taken over (PlanGoalArrow).
 	local progress = TycoonController.GetGoalProgress()
-	local targetName, markerText = planGoalArrow(goal, progress, tipActive, nudgeTarget)
+	local targetName, markerText = planGoalArrow(goal, progress, tipActive, nudgeTarget or hintTarget)
 	if not targetName then
 		-- Nothing to point at (the coach's Earn, or a tip has the arrow).
 		clearWorldMarker()
@@ -631,6 +633,28 @@ function GoalMarkerController.SetNudge(target: string?)
 	end
 	nudgeTarget = target
 	refresh()
+end
+
+-- A short-lived arrow (the fusion result card's "Pull more orbs, then fuse 2
+-- of these!" -> the Gacha Pad): shown like the idle nudge for `seconds`, or
+-- until SetHint(nil). The idle nudge, when up, wins.
+function GoalMarkerController.SetHint(target: string?, seconds: number?)
+	hintToken += 1
+	hintTarget = target
+	if target ~= nil and seconds ~= nil then
+		local token = hintToken
+		task.delay(seconds, function()
+			if hintToken == token then
+				hintTarget = nil
+				refresh()
+			end
+		end)
+	end
+	refresh()
+end
+
+function GoalMarkerController.GetHint(): string?
+	return hintTarget
 end
 
 function GoalMarkerController.GetNudge(): string?

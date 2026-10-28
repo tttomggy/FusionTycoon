@@ -21,6 +21,16 @@
 	"✨ Keeps GOLDEN ×2, might roll better" when every orb shares it, a red
 	warning box when a lower orb is mixed in (those orbs get a red ring).
 
+	The panel leads you UP the ladder (FuseLadder holds the rules):
+	  * it opens on the HIGHEST tier with >= 2 fusable orbs, and jumps there
+	    again after a fuse (Common -> Rare -> Epic ...) unless the player
+	    picked a tab themselves since opening it;
+	  * a tab with a fusable pair that isn't selected gets a pulsing dot and
+	    a white count; tabs with < 2 are muted;
+	  * the ladder strip above the tabs (the tier orbs, the best one owned lit,
+	    the NEXT one ringed and labelled "Next: Epic"; tap = that tab) hides
+	    when the column is too small (phones) - the dots and the jump stay.
+
 	After FUSE the slot orbs fly into the centre, then FusionController runs
 	the machine's charge-up and ResultController's reveal; the panel stays
 	open on the same tab with the chamber cleared. DisplayOrder sits under
@@ -40,6 +50,7 @@ local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
+local FuseLadder = require(ReplicatedStorage.Shared.Modules.FuseLadder)
 local Controllers = script.Parent.Parent.Controllers
 local InventoryController = require(Controllers.InventoryController)
 local TycoonController = require(Controllers.TycoonController)
@@ -70,6 +81,12 @@ local CHIP_CHANCE_MAX_TEXT = 18 -- the % scales down to fit ("100%" on the narro
 local FLY_SECONDS = 0.35
 local METER_HEIGHT = 36 -- the Secret meter: its label (14 px) over the bar
 local METER_BAR_HEIGHT = 10
+local LADDER_HEIGHT = 36 -- the tier-orb strip above the tabs
+local LADDER_ORB = 24
+local LADDER_CELL = 44 -- one tier's tap target (>= 44 px)
+local LADDER_MIN_SIZE = Vector2.new(420, 250) -- the picker column (px) below which the strip hides
+local JUMP_WINDOW_SECONDS = 3 -- after a fuse: inventory syncs inside this window re-pick the tab
+local DOT_SIZE = 12
 
 -- Chamber geometry (px) per layout. Height = 2 x Radius + Slot. Desktop
 -- meets the legibility floor (slots 64, silhouette 96, chance 48); the
@@ -118,6 +135,22 @@ local fuseButton: TextButton
 local autoFillHolder: Frame? = nil
 local fuseAllButton: TextButton
 local tabButtons: { [string]: TextButton } = {}
+-- Ladder UI: the strip's cells by tier, the ring on the NEXT tier, its label,
+-- and each tab's ready dot.
+local ladder: {
+	Frame: Frame?,
+	Cells: { [string]: Frame },
+	Dim: { [string]: Frame },
+	Ring: Frame?,
+	NextLabel: TextLabel?,
+	Dots: { [string]: Frame },
+	Aim: string?,
+	Best: string?,
+} = { Cells = {}, Dim = {}, Dots = {} }
+-- The tab was picked by hand since the panel opened: auto-jump leaves it alone.
+local userPicked = false
+local jumpUntil = 0 -- os.clock() until which an inventory change re-picks the tab (after a fuse)
+local countsOverride: FuseLadder.Counts? = nil -- /selftest: stubbed fusable counts
 
 local isPhone = false
 local selectedTier = FusionConfig.TierOrder[1]
@@ -151,6 +184,18 @@ local function rebirthsNeeded(tier: string): number?
 		return needed
 	end
 	return nil
+end
+
+-- Fusable orbs per tier (the tabs' counts); /selftest can stub them.
+local function fusableCounts(): FuseLadder.Counts
+	if countsOverride then
+		return countsOverride
+	end
+	local counts: FuseLadder.Counts = {}
+	for _, tier in FusionConfig.TierOrder do
+		counts[tier] = #InventoryController.GetFusableItemsByTier(tier)
+	end
+	return counts
 end
 
 -- The success bonus the roll adds: the live event's (Void Moon) and an armed
@@ -581,17 +626,49 @@ local function rebuildGrid()
 	end
 end
 
+-- The ladder strip: the best tier owned and everything below it lit, the
+-- NEXT tier ringed and labelled. Cheap enough to run on every refresh.
+local function refreshLadder(counts: FuseLadder.Counts)
+	local best = FuseLadder.BestOwned(counts)
+	local aim = FuseLadder.NextAim(counts)
+	ladder.Best, ladder.Aim = best, aim
+	local bestRank = if best then table.find(FusionConfig.TierOrder, best) :: number else 0
+	for index, tier in FusionConfig.TierOrder do
+		local dim = ladder.Dim[tier]
+		if dim then
+			dim.Visible = index > bestRank
+		end
+	end
+	local ring, nextLabel = ladder.Ring, ladder.NextLabel
+	local aimCell = if aim then ladder.Cells[aim] else nil
+	if ring then
+		ring.Parent = aimCell
+		ring.Visible = aimCell ~= nil
+	end
+	if nextLabel then
+		nextLabel.Visible = aim ~= nil
+		nextLabel.Text = if aim then ("Next: %s"):format(aim) else ""
+	end
+end
+
 local function refreshTabs()
+	local counts = fusableCounts()
 	for tier, button in tabButtons do
 		local needed = rebirthsNeeded(tier)
 		local current = tier == selectedTier
-		-- Selected = green + white; the rest the muted panel colour (white
-		-- text while fusable, Muted while locked).
-		UIKit.SetSelected(button, current, if needed then Colors.Muted else Colors.Text)
+		local ready = not needed and FuseLadder.IsReady(counts[tier] or 0)
+		-- Selected = green + white; the rest the muted panel colour: white
+		-- count while there is a pair to fuse, Muted when < 2 or locked.
+		UIKit.SetSelected(button, current, if ready then Colors.Text else Colors.Muted)
 		UIKit.SetButton(button, {
-			SubText = if needed then "🔒" else tostring(#InventoryController.GetFusableItemsByTier(tier)),
+			SubText = if needed then "🔒" else tostring(counts[tier] or 0),
 		})
+		local dot = ladder.Dots[tier]
+		if dot then
+			dot.Visible = ready and not current
+		end
 	end
+	refreshLadder(counts)
 end
 
 function refreshAll()
@@ -610,6 +687,36 @@ local function selectTier(tier: string)
 		table.clear(selected) -- switching tab clears the chamber
 	end
 	refreshAll()
+end
+
+-- The ladder's pick: the highest tier with a fusable pair (Common when
+-- nothing is). A hand-picked tab is left alone until the panel reopens.
+-- Returns whether the tab changed; the caller refreshes.
+local function jumpToBest(): boolean
+	if userPicked then
+		return false
+	end
+	local tier = FuseLadder.PickTab(fusableCounts(), TycoonController.GetRebirths())
+	if tier == selectedTier then
+		return false
+	end
+	selectedTier = tier
+	table.clear(selected)
+	return true
+end
+
+-- A tab or ladder-strip tap.
+local function pickTab(tier: string)
+	local needed = rebirthsNeeded(tier)
+	if needed then
+		ToastController.Show(("Rebirth %d to fuse %ss"):format(needed, tier), "Neutral")
+		return
+	end
+	if not tabButtons[tier] then
+		return -- Secret is the end of the ladder: no tab
+	end
+	userPicked = true
+	selectTier(tier)
 end
 
 --[[ Actions ------------------------------------------------------------------ ]]
@@ -1015,7 +1122,114 @@ local function buildChamber(column: ScrollingFrame)
 	layoutHex()
 end
 
+-- The ladder strip: one orb per tier with a › between, tap = that tab. The
+-- best tier owned is lit (the rest dimmed), the NEXT one is ringed (a pulsing
+-- stroke, never a Highlight) with "Next: Epic" at the end of the row.
+local function buildLadder(column: Frame)
+	local frame = Instance.new("Frame")
+	frame.Name = "Ladder"
+	frame.BackgroundTransparency = 1
+	frame.Size = UDim2.new(1, 0, 0, LADDER_HEIGHT)
+	frame.ZIndex = column.ZIndex + 1
+	frame.Parent = column
+	ladder.Frame = frame
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 0)
+	layout.Parent = frame
+	for index, tier in FusionConfig.TierOrder do
+		if index > 1 then
+			UIKit.Label({
+				Name = "Arrow",
+				Text = "›",
+				Font = Fonts.Display,
+				TextSize = 18,
+				TextColor3 = Colors.Faint,
+				Size = UDim2.fromOffset(12, LADDER_HEIGHT),
+				TextXAlignment = Enum.TextXAlignment.Center,
+				LayoutOrder = index * 2 - 2,
+				ZIndex = frame.ZIndex + 1,
+				Parent = frame,
+			})
+		end
+		local cell = Instance.new("Frame")
+		cell.Name = tier .. "Cell"
+		cell.BackgroundTransparency = 1
+		cell.Size = UDim2.fromOffset(LADDER_CELL, LADDER_HEIGHT)
+		cell.LayoutOrder = index * 2 - 1
+		cell.ZIndex = frame.ZIndex + 1
+		cell.Parent = frame
+		ladder.Cells[tier] = cell
+		local orb = UIKit.TierOrb(tier, LADDER_ORB)
+		orb.AnchorPoint = Vector2.new(0.5, 0.5)
+		orb.Position = UDim2.fromScale(0.5, 0.5)
+		orb.ZIndex = cell.ZIndex + 1
+		orb.Parent = cell
+		local dim = Instance.new("Frame")
+		dim.Name = "Dim"
+		dim.AnchorPoint = Vector2.new(0.5, 0.5)
+		dim.Position = UDim2.fromScale(0.5, 0.5)
+		dim.Size = UDim2.fromOffset(LADDER_ORB + 2, LADDER_ORB + 2)
+		dim.BackgroundColor3 = Colors.Panel
+		dim.BackgroundTransparency = 0.25
+		dim.BorderSizePixel = 0
+		dim.ZIndex = cell.ZIndex + 3
+		dim.Parent = cell
+		local dimCorner = Instance.new("UICorner")
+		dimCorner.CornerRadius = UDim.new(1, 0)
+		dimCorner.Parent = dim
+		ladder.Dim[tier] = dim
+		-- The tap target: >= 44 px both ways (it overlaps the strip's margins).
+		local hit = Instance.new("TextButton")
+		hit.Name = "Hit"
+		hit.Text = ""
+		hit.BackgroundTransparency = 1
+		hit.AnchorPoint = Vector2.new(0.5, 0.5)
+		hit.Position = UDim2.fromScale(0.5, 0.5)
+		hit.Size = UDim2.fromOffset(UITheme.MinTapSize, UITheme.MinTapSize)
+		hit.ZIndex = cell.ZIndex
+		hit.Parent = cell
+		hit.Activated:Connect(function()
+			pickTab(tier)
+		end)
+	end
+	local ring = Instance.new("Frame")
+	ring.Name = "NextRing"
+	ring.AnchorPoint = Vector2.new(0.5, 0.5)
+	ring.Position = UDim2.fromScale(0.5, 0.5)
+	ring.Size = UDim2.fromOffset(LADDER_ORB + 8, LADDER_ORB + 8)
+	ring.BackgroundTransparency = 1
+	ring.ZIndex = frame.ZIndex + 6
+	ring.Visible = false
+	local ringCorner = Instance.new("UICorner")
+	ringCorner.CornerRadius = UDim.new(1, 0)
+	ringCorner.Parent = ring
+	local ringStroke = Instance.new("UIStroke")
+	ringStroke.Color = Colors.Goal
+	ringStroke.Thickness = 2.5
+	ringStroke.Parent = ring
+	TweenService:Create(ringStroke, TweenInfo.new(0.7, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { Transparency = 0.75 }):Play()
+	ladder.Ring = ring
+	ladder.NextLabel = UIKit.Label({
+		Name = "Next",
+		Text = "",
+		Font = Fonts.Display,
+		TextSize = 15,
+		TextColor3 = Colors.Goal,
+		Size = UDim2.new(1, -(LADDER_CELL * #FusionConfig.TierOrder + 12 * (#FusionConfig.TierOrder - 1)), 0, LADDER_HEIGHT),
+		TextXAlignment = Enum.TextXAlignment.Right,
+		LayoutOrder = 99,
+		ZIndex = frame.ZIndex + 1,
+		Stroke = UITheme.Stroke.Text,
+		Visible = false,
+		Parent = frame,
+	})
+end
+
 local function buildPicker(column: Frame)
+	buildLadder(column)
 	-- One row of equal-width tabs (no scrolling): name on top, count under.
 	local tiers = fusableTiers()
 	local tabCount = #tiers
@@ -1045,14 +1259,29 @@ local function buildPicker(column: Frame)
 			ZIndex = tabsFrame.ZIndex + 1,
 			OnClick = function()
 				UIKit.SelectFeedback(tabButtons[tier])
-				local needed = rebirthsNeeded(tier)
-				if needed then
-					ToastController.Show(("Rebirth %d to fuse %ss"):format(needed, tier), "Neutral")
-					return
-				end
-				selectTier(tier)
+				pickTab(tier)
 			end,
 		})
+		-- The ready dot: a fusable pair is waiting on this (unselected) tab.
+		local dot = Instance.new("Frame")
+		dot.Name = "ReadyDot"
+		dot.AnchorPoint = Vector2.new(1, 0)
+		dot.Position = UDim2.new(1, -4, 0, 4)
+		dot.Size = UDim2.fromOffset(DOT_SIZE, DOT_SIZE)
+		dot.BackgroundColor3 = Colors.Cash
+		dot.BorderSizePixel = 0
+		dot.Visible = false
+		dot.ZIndex = tabButtons[tier].ZIndex + 6
+		dot.Parent = tabButtons[tier]
+		local dotCorner = Instance.new("UICorner")
+		dotCorner.CornerRadius = UDim.new(1, 0)
+		dotCorner.Parent = dot
+		local dotStroke = Instance.new("UIStroke")
+		dotStroke.Color = Colors.Text
+		dotStroke.Thickness = 1.5
+		dotStroke.Parent = dot
+		TweenService:Create(dot, TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true), { BackgroundTransparency = 0.6 }):Play()
+		ladder.Dots[tier] = dot
 	end
 
 	local gridTop = TAB_HEIGHT + UITheme.SmallShadowOffset + 10
@@ -1074,6 +1303,21 @@ local function buildPicker(column: Frame)
 	gridLayout.CellPadding = UDim2.fromOffset(8, 8)
 	gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	gridLayout.Parent = grid
+
+	-- The strip shows only where it fits (not on a short phone column); the
+	-- tabs and the grid slide up into its place.
+	local function layoutPicker()
+		local size = column.AbsoluteSize
+		local shown = size.X >= LADDER_MIN_SIZE.X and size.Y >= LADDER_MIN_SIZE.Y
+		local top = if shown then LADDER_HEIGHT + 4 else 0
+		local strip = ladder.Frame :: Frame
+		strip.Visible = shown
+		tabsFrame.Position = UDim2.fromOffset(0, top)
+		grid.Position = UDim2.fromOffset(0, top + gridTop)
+		grid.Size = UDim2.new(1, 0, 1, -(top + gridTop))
+	end
+	column:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutPicker)
+	layoutPicker()
 end
 
 local function buildBar(content: Frame)
@@ -1188,24 +1432,28 @@ end
 
 --[[ Public ------------------------------------------------------------------- ]]
 
--- Opens on the lowest tier you can fuse a pair of (or the current tab).
-function FusePanel.Open()
+-- Opens on the highest tier you can fuse a pair of (the ladder), or on
+-- `tier` when something asked for that tab (the fusion result card's
+-- GO TO RARE; that counts as picked by hand).
+function FusePanel.Open(tier: string?)
 	if not modal then
 		return
 	end
-	if #selected == 0 then
-		for _, tier in fusableTiers() do
-			if
-				not rebirthsNeeded(tier)
-				and #InventoryController.GetFusableItemsByTier(tier) >= FusionConfig.MinFusionInputs
-			then
-				selectedTier = tier
-				break
-			end
+	userPicked = false
+	jumpUntil = 0
+	if typeof(tier) == "string" and tabButtons[tier] and not rebirthsNeeded(tier) then
+		userPicked = true
+		if tier ~= selectedTier then
+			selectedTier = tier
+			table.clear(selected)
 		end
+	else
+		jumpToBest()
 	end
 	refreshAll()
-	modal.Open()
+	if not modal.IsOpen() then
+		modal.Open()
+	end
 end
 
 function FusePanel.Close()
@@ -1296,6 +1544,72 @@ function FusePanel.SelfTestMeter(tier: string): { Visible: boolean, Text: string
 	}
 end
 
+export type LadderView = {
+	Tier: string, -- the selected tab
+	Ready: { [string]: boolean }, -- the tabs showing the ready dot
+	Best: string?, -- the lit end of the strip
+	Aim: string?, -- the ringed tier
+	NextText: string, -- the strip's label ("" when hidden)
+	StripShown: boolean,
+	TabHeights: { [string]: number }, -- tab hit height in logical px
+}
+
+-- /selftest: what the ladder shows right now.
+function FusePanel.SelfTestView(): LadderView
+	local ready = {}
+	local heights = {}
+	for tier, dot in ladder.Dots do
+		ready[tier] = dot.Visible
+	end
+	for tier, button in tabButtons do
+		heights[tier] = button.AbsoluteSize.Y / math.max(UIKit.EffectiveScale(button), 0.01)
+	end
+	local strip = ladder.Frame :: Frame
+	local nextLabel = ladder.NextLabel :: TextLabel
+	return {
+		Tier = selectedTier,
+		Ready = ready,
+		Best = ladder.Best,
+		Aim = ladder.Aim,
+		NextText = if nextLabel.Visible then nextLabel.Text else "",
+		StripShown = strip.Visible,
+		TabHeights = heights,
+	}
+end
+
+-- /selftest: stub the fusable counts (nil = the real inventory), then open
+-- the panel's tab the way Open does.
+function FusePanel.SelfTestOpenWith(counts: FuseLadder.Counts?): LadderView
+	countsOverride = counts
+	userPicked = false
+	jumpToBest()
+	refreshAll()
+	return FusePanel.SelfTestView()
+end
+
+-- /selftest: a fuse finished with these stubbed counts (the auto-jump).
+function FusePanel.SelfTestAfterFuse(counts: FuseLadder.Counts): LadderView
+	countsOverride = counts
+	jumpToBest()
+	refreshAll()
+	return FusePanel.SelfTestView()
+end
+
+-- /selftest: tap a tab by hand (it sticks until the panel reopens).
+function FusePanel.SelfTestPick(tier: string): LadderView
+	pickTab(tier)
+	return FusePanel.SelfTestView()
+end
+
+-- /selftest: back to the real inventory.
+function FusePanel.SelfTestReset()
+	countsOverride = nil
+	userPicked = false
+	if modal then
+		refreshAll()
+	end
+end
+
 function FusePanel.GetSelectedCount(): number
 	return #selected
 end
@@ -1328,7 +1642,14 @@ function FusePanel.Init()
 			refreshAll()
 		end
 	end
-	InventoryController.InventoryChanged:Connect(refreshIfOpen)
+	InventoryController.InventoryChanged:Connect(function()
+		-- Right after a fuse the new orb may arrive a sync later: keep leading
+		-- the player up the ladder for a few seconds.
+		if modal.IsOpen() and os.clock() < jumpUntil then
+			jumpToBest()
+		end
+		refreshIfOpen()
+	end)
 	TycoonController.TycoonChanged:Connect(function()
 		-- Rebirths unlock Mythic; cash doesn't matter here.
 		if modal.IsOpen() then
@@ -1340,8 +1661,19 @@ function FusePanel.Init()
 			end
 		end
 	end)
-	FusionController.FusionResolved:Connect(refreshIfOpen)
-	FusionController.FuseAllResolved:Connect(refreshIfOpen)
+	-- A fuse finished: lead the player to the best tier they can fuse now.
+	local function afterFuse()
+		jumpUntil = os.clock() + JUMP_WINDOW_SECONDS
+		if modal.IsOpen() then
+			jumpToBest()
+		end
+		refreshIfOpen()
+	end
+	FusionController.FusionResolved:Connect(afterFuse)
+	FusionController.FuseAllResolved:Connect(afterFuse)
+	FusionController.FuseTabRequested:Connect(function(tier: string)
+		FusePanel.Open(tier)
+	end)
 	-- A Void Moon changes the success chance (and every event the odds line).
 	Workspace:GetAttributeChangedSignal("EventId"):Connect(function()
 		task.defer(refreshIfOpen)

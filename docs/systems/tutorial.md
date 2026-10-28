@@ -74,6 +74,33 @@ layer owns the arrow. Tips take the arrow while they run
 coach gets it back. The three loop-closing lines (`LoopCoachController`) also
 wait for the tutorial to end.
 
+### The goal list and its saved progress (`GoalConfig`)
+
+`GoalConfig.Goals` is the ordered to-do list (the goal tracker). 22 goals;
+six were added for a player who stalled between their first Rare and the
+5000-cash Multiplier: `fill_pedestals` (4 orbs on display), `max_basic`
+(Basic Generator LV 25), `own_3_rares`, then after the Ember Forge
+`multiplier_x1_5` (pad LV 2), `own_2_epics`, `unlock_flare_reactor`. The
+two "own N" goals also count as done when the player already owns the tier
+above (they fused past it), so they never block. Evaluators:
+`GoalService.EVALUATORS`; the coach's `LoopCoach.GoalBlocked` knows the new
+ids that need cash.
+
+**Saved progress is an index.** `PlayerData.GoalVer` records the
+`GoalConfig.DataVersion` the `GoalIndex` was saved under (no `GoalVer` = 1,
+the 16-goal list frozen in `GoalConfig.V1Ids`). On load,
+`GoalConfig.MigrateIndex` maps the old index to the SAME goal id's new index:
+goals inserted before the player's goal are skipped WITHOUT paying their
+reward (they are behind the player: no free cash for old saves); goals
+inserted after it come up normally; a save that finished every goal stays
+finished. Only insert goals; for the next change bump `DataVersion` and
+freeze the list that was current. `/selftest` ("goal migration") checks a v1
+save at each of its 16 goals lands on the same id.
+
+Rewards follow the economy: the six add 23 300 cash in total
+(`tools/econ_sim.py 100 2 --goals=new`: Rebirth 1 median 0:48:55 with the new
+list vs 0:49:00 with the old 16, 0:50:03 with no goal cash at all).
+
 ### One-time tips (what the removed steps became)
 
 `TutorialConfig.Tips` (ids in `TipConfig.Ids`, saved like the others; marked
