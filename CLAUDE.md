@@ -298,6 +298,12 @@ checks that no footprints overlap and everything sits inside the walls.
 
 ## Gotchas
 
+- **Run `python3 tools/compile_check.py <luau-compile>` before every push.**
+  It compiles every file with the real Luau compiler (from the luau-lang
+  releases). `luau-lsp analyze` misses compiler limits: more than 200 locals
+  in one function (a module's top level counts) killed HudController and,
+  through its requirers, most of the client (1bc04bb, 18 FAILs). Split a big
+  module before it nears ~170 top-level locals.
 - **Run `python3 tools/theme_token_check.py` before every push** (next to the
   Luau parser). It exits non-zero on any `UITheme.<Table>.<Key>` or
   `local Colors = UITheme.Colors` alias use whose key the table lacks: a nil
