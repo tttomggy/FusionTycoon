@@ -1896,7 +1896,13 @@ end
 -- What the fusion card says next for the orb `newItem` (just made): the
 -- player owns >= 2 of its tier -> fuse them (GO TO <TIER>), else pull more.
 -- The new orb counts even if the inventory sync hasn't brought it yet.
+-- Nothing while the tutorial runs: its fuse step ends on this card and the
+-- next step waits for a quiet screen, so the card must close by itself (a card
+-- with a GO TO button stays until tapped, and `finish` never came).
 function ResultController.GetFusionNext(newItem: any): FuseLadder.ResultNext
+	if TycoonController.IsTutorialActive() then
+		return { Kind = "None" }
+	end
 	local tier = newItem.Tier :: string
 	local owned = 0
 	local found = false

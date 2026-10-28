@@ -229,6 +229,10 @@ local SELFTEST_STEP_TIMEOUT = 75 -- one tutorial step probe: the presenter (30 s
 local SELFTEST_SLOT_COUNT = 200
 local TUTORIAL_BUDGET_SECONDS = 45 -- Tutorial 5: claim to Done, walking excluded
 local selfTestReports: { [number]: { any } } = {}
+-- os.clock() of the client's latest "Progress" report (one per finished stage
+-- of its long run): waitForReport counts its timeout from there, so a slow but
+-- moving client half is not cut off, and a stuck stage still is.
+local selfTestProgress: { [number]: number } = {}
 
 local NUMBER_FORMAT_CASES: { { any } } = {
 	{ 0, "$0" },
@@ -251,6 +255,10 @@ local function waitForReport(player: Player, stage: string, timeout: number?, pr
 	local started = os.clock()
 	local limit = timeout or SELFTEST_REPORT_TIMEOUT
 	while os.clock() - started < limit and player.Parent do
+		local progress = selfTestProgress[player.UserId]
+		if progress and progress > started then
+			started = progress
+		end
 		local queue = selfTestReports[player.UserId]
 		if queue then
 			for index, report in queue do
@@ -685,10 +693,30 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 	local character = player.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if character and humanoid and humanoid.Health > 0 then
+		-- The animation ids first. If the place loads NONE of them this session
+		-- (Studio could not fetch them) there is one FAIL line for that, and the
+		-- pose / track checks, which would all fail for the same reason, are
+		-- skipped with one WARN. Some ids loading and a pose failing stays a FAIL.
+		local animsDead = false
+		local idsReport = askClient(player, { Kind = "AnimationIds" })
+		if idsReport and typeof(idsReport.Lines) == "table" then
+			for _, line in idsReport.Lines do
+				result(line.Ok == true, tostring(line.Name), line.Detail)
+			end
+			animsDead = typeof(idsReport.Data) == "table" and idsReport.Data.AllFailed == true
+		else
+			result(false, "combat animation ids", "no report from the client")
+		end
+		if animsDead then
+			print("[SelfTest] WARN combat poses skipped: animations did not load this session")
+			result(true, "combat poses skipped (WARN)", "animations did not load this session")
+		end
 		local function sampleRest()
 			humanoid:UnequipTools()
 			task.wait(0.3)
-			tutorialProbe(player, { Kind = "SampleRest" }, result)
+			if not animsDead then
+				tutorialProbe(player, { Kind = "SampleRest" }, result)
+			end
 		end
 		for _, weapon in CombatConfig.Weapons do
 			sampleRest()
@@ -697,7 +725,7 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 			task.wait(0.4)
 			local problem = if tool.Parent == character then CombatService.GetGripProblem(character, tool) else "the tool did not equip"
 			result(problem == nil, ("combat: the %s is held (RightGrip weld, Handle within 1.5 studs of RightHand)"):format(weapon.Name), problem)
-			if tool.Parent == character then
+			if tool.Parent == character and not animsDead then
 				tutorialProbe(player, { Kind = "Weapon", Weapon = weapon.Id }, result)
 			end
 			tool:Destroy()
@@ -713,7 +741,9 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 			humanoid:EquipTool(second)
 			task.wait(0.5)
 			if second.Parent == character then
-				tutorialProbe(player, { Kind = "Switch", From = pair[1], To = pair[2], Weapon = pair[2] }, result)
+				if not animsDead then
+					tutorialProbe(player, { Kind = "Switch", From = pair[1], To = pair[2], Weapon = pair[2] }, result)
+				end
 			else
 				result(false, ("combat switch %s -> %s"):format(pair[1], pair[2]), "the second tool did not equip")
 			end
@@ -722,7 +752,10 @@ local function runCombatSelfTest(player: Player, result: (boolean, string, strin
 			task.wait(0.1)
 		end
 		sampleRest()
-		tutorialProbe(player, { Kind = "WeaponReleased" }, result)
+		if not animsDead then
+			tutorialProbe(player, { Kind = "WeaponReleased" }, result)
+		end
+		-- The C0 fallback needs no animation: it runs either way.
 		tutorialProbe(player, { Kind = "Fallback" }, result)
 	else
 		result(true, "combat: weapons are held (skipped: no living character)")
@@ -3283,8 +3316,8 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		result(#nextTimes < 2 or minGap >= 5, "rivals: no two labs rotate within 5 s of each other", ("%d labs, smallest gap %.1f s"):format(#nextTimes, minGap))
 		local first = RivalService.GetRivals()[1]
 		if first then
-			local before = RivalService.GetNextRotateAt(first.Id) or 0
 			RivalService.SelfTestMakeRotationDue(first.Id)
+			local before = RivalService.GetNextRotateAt(first.Id) or 0 -- after "due": a long first interval no longer beats the new one
 			fakeNow += 1
 			RivalService.Step()
 			local after = RivalService.GetNextRotateAt(first.Id) or 0
@@ -3579,7 +3612,13 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		result(done.DealHash == serverDeals, "deal schedule: client matches server")
 		for _, line in (if typeof(done.Panels) == "table" then done.Panels else {}) do
 			if typeof(line) == "string" then
-				result(line:sub(1, 4) == "PASS", line:sub(6))
+				if line:sub(1, 4) == "WARN" then
+					-- Printed, never counted as a FAIL.
+					print("[SelfTest] " .. line)
+					result(true, line:sub(6) .. " (WARN)")
+				else
+					result(line:sub(1, 4) == "PASS", line:sub(6))
+				end
 			end
 		end
 		local sounds = if typeof(done.FailedSounds) == "table" then done.FailedSounds else {}
@@ -4071,7 +4110,12 @@ function DebugService:Init()
 	table.insert(state.connections, RemoteEvents.SelfTestReport.OnServerEvent:Connect(function(player: Player, report: unknown)
 		local queue = selfTestReports[player.UserId]
 		if queue and typeof(report) == "table" then
-			table.insert(queue, report)
+			local fields = report :: any
+			if fields.Stage == "Progress" then
+				selfTestProgress[player.UserId] = os.clock()
+			else
+				table.insert(queue, report)
+			end
 		end
 	end))
 

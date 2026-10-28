@@ -1262,10 +1262,17 @@ local function testMissionBanner(): { string }
 		local body = MissionBanner.GetBody() :: Frame
 		local scale = screenScale(body)
 		local view = UIKit.GetLogicalViewport()
-		local logicalHeight = body.AbsoluteSize.Y / scale
+		-- AbsolutePosition sits below the Roblox top bar even here: visibleRect
+		-- adds the inset back (without it a phone read -8.5 for a 64 slot).
+		-- The slide-in ends when the box reaches its slot, not after a fixed wait.
+		local slideBy = os.clock() + 1.5
+		local topY, logicalHeight = visibleRect(body, nil, scale)
+		while math.abs(topY - TopStack.GetY("Mission")) > 2 and os.clock() < slideBy do
+			task.wait(0.05)
+			topY, logicalHeight = visibleRect(body, nil, scale)
+		end
 		local left = body.AbsolutePosition.X / scale
 		local right = left + body.AbsoluteSize.X / scale
-		local topY = body.AbsolutePosition.Y / scale
 		check(logicalHeight <= 100 and logicalHeight > 0, "the box is at most 100 px tall", ("%.0f px"):format(logicalHeight))
 		check(left >= 0 and right <= view.X + 1 and topY >= 0 and topY + logicalHeight <= view.Y + 1, "the box is inside the screen", ("x %.0f-%.0f of %.0f, y %.0f+%.0f of %.0f"):format(left, right, view.X, topY, logicalHeight, view.Y))
 		local wantY = TopStack.GetY("Mission")
@@ -2346,7 +2353,7 @@ local function testLoopNudge(): { string }
 	-- A fusable pair + cash: both steps; the arrow on the machine, then the pad.
 	local pair = Coach.NewNudger(0)
 	local both = Coach.NudgeTick(pair, 40, { Blocked = false, CanPull = true, FuseTier = "Epic", FuseCount = 2 })
-	check(both ~= nil and both.Line == "Fuse your 2 Epics, then pull more orbs for the next fuse!" and both.Target == "FusionMachine", "a pair and cash: the two-step line, the Fusion Machine first", both and both.Line or "none")
+	check(both ~= nil and both.Line:gsub("<[^>]+>", "") == "Fuse your 2 Epics, then pull more orbs for the next fuse!" and both.Target == "FusionMachine", "a pair and cash: the two-step line, the Fusion Machine first", both and both.Line or "none")
 	Coach.NudgeAction(pair, 45, "Fuse")
 	check(pair.Target == "GachaStation", "after the fuse the arrow moves to the Gacha Pad", tostring(pair.Target))
 	Coach.NudgeAction(pair, 46, "Pull")
@@ -2385,8 +2392,20 @@ local function testLoopNudge(): { string }
 		check(true, "live upgrade hand skipped: no unlocked generator below its max")
 		return lines
 	end
+	-- A desktop layout forced into a small real window (the 936 x 485 phone
+	-- emulator) leaves the list shorter than one row, so a row can never sit
+	-- whole inside it: the placement checks mean nothing there (a WARN).
+	local squeezed = windowProblem() ~= nil
 	for _, phone in { false, true } do
 		local label = if phone then "844x390 phone" else "1920x1080"
+		local soft = squeezed and not phone
+		local function placement(ok: boolean, name: string, detail: string?)
+			if ok or not soft then
+				check(ok, name, detail)
+			else
+				table.insert(lines, ("WARN loop nudge: %s | %s (desktop layout in a %d x %d window)"):format(name, detail or "", Workspace.CurrentCamera.ViewportSize.X, Workspace.CurrentCamera.ViewportSize.Y))
+			end
+		end
 		UIKit.SetForcedPhone(phone)
 		task.wait(0.4)
 		local openedHere = not UpgradesPanel.IsOpen()
@@ -2394,7 +2413,13 @@ local function testLoopNudge(): { string }
 			UpgradesPanel.Toggle()
 		end
 		task.wait(0.6)
-		UpgradesPanel.ScrollTo(station)
+		-- The guide scrolls every 0.1 s until the row is in; so does the probe.
+		for _ = 1, 8 do
+			if not UpgradesPanel.ScrollTo(station) then
+				break
+			end
+			task.wait(0.1)
+		end
 		task.wait(0.2)
 		local button = UpgradesPanel.GetButtonFor(station, "Upgrade") :: GuiObject?
 		local caption = UpgradesPanel.GetCaptionFor(station)
@@ -2402,7 +2427,12 @@ local function testLoopNudge(): { string }
 		if button then
 			TutorialHand.SetTarget(button)
 			TutorialHand.SetCaption(caption)
-			task.wait(0.3)
+			-- The hand places itself on a render step: wait for its first frame.
+			local waited = os.clock()
+			while TutorialHand.GetTip() == nil and os.clock() - waited < 1 do
+				task.wait(0.05)
+			end
+			task.wait(0.1)
 			local tip = TutorialHand.GetTip()
 			local rect = TutorialHand.GetRect()
 			local pos, size = button.AbsolutePosition, button.AbsoluteSize
@@ -2412,11 +2442,11 @@ local function testLoopNudge(): { string }
 				and pos.Y + size.Y <= list.AbsolutePosition.Y + list.AbsoluteSize.Y + 1
 				and pos.X >= list.AbsolutePosition.X - 1
 				and pos.X + size.X <= list.AbsolutePosition.X + list.AbsoluteSize.X + 1
-			check(inside, ("%s: the best row's button sits inside the scroll view"):format(label), ("button y %.0f+%.0f"):format(pos.Y, size.Y))
+			placement(inside, ("%s: the best row's button sits inside the scroll view"):format(label), ("button y %.0f+%.0f, list y %s"):format(pos.Y, size.Y, if list then ("%.0f+%.0f"):format(list.AbsolutePosition.Y, list.AbsoluteSize.Y) else "none"))
 			local above = tip ~= nil and math.abs(tip.X - (pos.X + size.X / 2)) <= 12 and tip.Y <= pos.Y + 1 and pos.Y - tip.Y <= 12
 			local clear = rect ~= nil and (rect.Position.Y + rect.Size.Y <= pos.Y + 1 or rect.Position.Y >= pos.Y + size.Y - 1 or rect.Position.X + rect.Size.X <= pos.X or rect.Position.X >= pos.X + size.X)
 			local onScreen = rect ~= nil and rect.Position.X >= -1 and rect.Position.Y >= -GuiService:GetGuiInset().Y - 1
-			check(above and clear and onScreen, ("%s: the hand's fingertip is within 12 px above the button and its box clears it"):format(label), tip and ("tip %.0f,%.0f vs button %.0f,%.0f"):format(tip.X, tip.Y, pos.X, pos.Y) or "no hand")
+			placement(above and clear and onScreen, ("%s: the hand's fingertip is within 12 px above the button and its box clears it"):format(label), if tip then ("tip %.0f,%.0f vs button %.0f,%.0f"):format(tip.X, tip.Y, pos.X, pos.Y) else "no hand: " .. tostring(TutorialHand.GetBlocker()))
 			check(TutorialHand.GetCaption() == caption, ("%s: the caption rides the hand"):format(label), tostring(TutorialHand.GetCaption()))
 		end
 		TutorialHand.SetTarget(nil)
@@ -2502,7 +2532,15 @@ local function testFuseLadder(): { string }
 			end
 			check(smallest >= UITheme.MinTapSize - 0.5, ("%s: every tab is >= %d px tall"):format(label, UITheme.MinTapSize), ("smallest %.1f"):format(smallest))
 			if not phone then
-				check(view.StripShown and view.Best == "Rare" and view.Aim == "Epic" and view.NextText == "Next: Epic", "1920x1080: the ladder strip is shown, Rare lit, 'Next: Epic'", ("%s %s %s '%s'"):format(tostring(view.StripShown), tostring(view.Best), tostring(view.Aim), view.NextText))
+				local stripLine = ("%s %s %s '%s'"):format(tostring(view.StripShown), tostring(view.Best), tostring(view.Aim), view.NextText)
+				if not view.StripShown and view.Best == "Rare" and view.Aim == "Epic" and windowProblem() ~= nil then
+					-- The strip hides below a 420 x 250 column; a desktop layout forced into a
+					-- small real window (the phone emulator) never gets one. Best / Aim are right.
+					local camera = Workspace.CurrentCamera
+					table.insert(lines, ("WARN fuse ladder: 1920x1080: the ladder strip is hidden: the real window is %d x %d, the column is under 420 x 250 | %s"):format(camera.ViewportSize.X, camera.ViewportSize.Y, stripLine))
+				else
+					check(view.StripShown and view.Best == "Rare" and view.Aim == "Epic" and view.NextText == "Next: Epic", "1920x1080: the ladder strip is shown, Rare lit, 'Next: Epic'", stripLine)
+				end
 			else
 				check(true, ("844x390 phone: the ladder strip is %s (it hides where it does not fit; the dots and the jump stay)"):format(if view.StripShown then "shown" else "hidden"))
 			end
@@ -2941,7 +2979,10 @@ end
 
 -- Every CombatConfig.AnimationIds entry is a well-formed rbxassetid://<digits>
 -- and loads on the local Animator (a track with a length once preloaded).
-local function probeAnimationIds(): { ProbeLine }
+-- The second value is true when ids loaded as Animations but not ONE has a
+-- length: the place cannot load them this session, and every pose check that
+-- needs a track would fail for that reason alone (the server skips those).
+local function probeAnimationIds(): ({ ProbeLine }, boolean)
 	local character = localPlayer.Character
 	local animator = character and character:FindFirstChildWhichIsA("Animator", true)
 	local problems = {}
@@ -2978,9 +3019,13 @@ local function probeAnimationIds(): { ProbeLine }
 		end
 		task.wait(0.1)
 	end
+	local created, loaded = 0, 0
 	for name, track in tracks do
+		created += 1
 		if track.Length <= 0 then
 			table.insert(problems, ("%s: no length after 5 s (not loadable by this place?)"):format(name))
+		else
+			loaded += 1
 		end
 		track:Destroy()
 	end
@@ -2990,7 +3035,7 @@ local function probeAnimationIds(): { ProbeLine }
 			Name = "combat animation ids: every AnimationIds entry is rbxassetid://<digits> and loads",
 			Detail = if #problems == 0 then ("%d ids ok"):format(count) else table.concat(problems, "; "),
 		},
-	}
+	}, created > 0 and loaded == 0
 end
 
 -- Why a GuiObject is NOT drawn (nil = drawn): both axes of AbsoluteSize > 0
@@ -5273,12 +5318,12 @@ local function probeTutorial(payload: any)
 			return probeSwitch(payload.From, payload.To)
 		elseif payload.Kind == "WeaponReleased" then
 			return probeWeaponReleased()
+		elseif payload.Kind == "AnimationIds" then
+			local idLines, allFailed = probeAnimationIds()
+			reportData = { AllFailed = allFailed }
+			return idLines
 		elseif payload.Kind == "Fallback" then
-			local lines = probeFallback()
-			for _, line in probeAnimationIds() do
-				table.insert(lines, line)
-			end
-			return lines
+			return probeFallback()
 		elseif payload.Kind == "GachaOpen" then
 			return probeGachaOpen()
 		elseif payload.Kind == "GachaCard" then
@@ -5495,109 +5540,76 @@ local function run(payload: any)
 	textFitLines = {}
 	local tooSmall = windowProblem()
 	local panelLines: { string } = {}
-	if tooSmall then
-		table.insert(panelLines, windowLine(tooSmall))
-	else
-		panelLines = testPanels()
+	-- Each stage prints its seconds and tells the server it is still moving
+	-- (its wait for "Done" counts from the latest one).
+	local function stage(name: string, probe: () -> { string }, skip: boolean?)
+		if skip then
+			return
+		end
+		local started = os.clock()
+		for _, line in probe() do
+			table.insert(panelLines, line)
+		end
+		print(("[SelfTest] client stage %s took %.1f s"):format(name, os.clock() - started))
+		RemoteEvents.SelfTestReport:FireServer({ Stage = "Progress", Name = name })
+	end
+	stage("panels", function()
+		if tooSmall then
+			return { windowLine(tooSmall) }
+		end
+		local lines = testPanels()
 		for _, line in textFitLines do
-			table.insert(panelLines, line)
+			table.insert(lines, line)
 		end
-	end
-	if modalError then
-		table.insert(panelLines, "FAIL UIKit.Modal builds: " .. modalError)
-	end
-	for _, line in hoverLines do
-		table.insert(panelLines, line)
-	end
-	for _, line in testHover("after a pedestal rebuild") do
-		table.insert(panelLines, line)
-	end
-	if not tooSmall then
+		return lines
+	end)
+	stage("modal + hover", function()
+		local lines: { string } = {}
+		if modalError then
+			table.insert(lines, "FAIL UIKit.Modal builds: " .. modalError)
+		end
+		for _, line in hoverLines do
+			table.insert(lines, line)
+		end
+		for _, line in testHover("after a pedestal rebuild") do
+			table.insert(lines, line)
+		end
+		return lines
+	end)
+	stage("placed cards", function()
 		testPlacedCards()
-		for _, line in cardLines do
-			table.insert(panelLines, line)
-		end
-	end
-	for _, line in testCardMath() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testFusionCard() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testEventGuidance() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testHudOrder() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testOrientation() do
-		table.insert(panelLines, line)
-	end
-	if not tooSmall then
-		for _, line in testPhonePanels() do
-			table.insert(panelLines, line)
-		end
-	end
-	for _, line in testHudLeftColumn() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testCoachArrow() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testLoopMoments() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testDealTile() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testPhoneHudCoverage() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testSkippedLines() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testPlain() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testBundleContents() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testDealCards() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testTopStack() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testMissionBanner() do
-		table.insert(panelLines, line)
-	end
+		return cardLines
+	end, tooSmall ~= nil)
+	stage("card math", testCardMath)
+	stage("fusion card", testFusionCard)
+	stage("event guidance", testEventGuidance)
+	stage("hud order", testHudOrder)
+	stage("orientation", testOrientation)
+	stage("phone panels", testPhonePanels, tooSmall ~= nil)
+	stage("hud left column", testHudLeftColumn)
+	stage("coach arrow", testCoachArrow)
+	stage("loop moments", testLoopMoments)
+	stage("deal tile", testDealTile)
+	stage("phone hud coverage", testPhoneHudCoverage)
+	stage("skipped lines", testSkippedLines)
+	stage("plain", testPlain)
+	stage("bundle contents", testBundleContents)
+	stage("deal cards", testDealCards)
+	stage("top stack", testTopStack)
+	stage("mission banner", testMissionBanner)
 	-- The cards above were measured live; the deal path needs the screen bare
 	-- (the daily reward card is up after 00:00 UTC until it is claimed).
 	clearScreen(true)
-	local shopController = require(script.Parent.ShopController) :: any
-	for _, line in shopController.SelfTestDealPath() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testLoopNudge() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testFuseLadder() do
-		table.insert(panelLines, line)
-	end
-	if not tooSmall then
-		for _, line in testChipJumps() do
-			table.insert(panelLines, line)
-		end
-	end
-	for _, line in testUnlockCard() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testNotifyOptIn() do
-		table.insert(panelLines, line)
-	end
-	for _, line in testMusic() do
-		table.insert(panelLines, line)
-	end
+	stage("deal path", function()
+		local shopController = require(script.Parent.ShopController) :: any
+		return shopController.SelfTestDealPath()
+	end)
+	stage("loop nudge", testLoopNudge)
+	stage("fuse ladder", testFuseLadder)
+	stage("chip jumps", testChipJumps, tooSmall ~= nil)
+	stage("unlock card", testUnlockCard)
+	stage("notify opt-in", testNotifyOptIn)
+	stage("music", testMusic)
 	local failedSounds = SoundKit.CheckAll()
 	connection:Disconnect()
 	RemoteEvents.SelfTestReport:FireServer({

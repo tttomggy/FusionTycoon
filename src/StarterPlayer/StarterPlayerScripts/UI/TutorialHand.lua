@@ -159,6 +159,26 @@ function TutorialHand.GetRect(): { Position: Vector2, Size: Vector2 }?
 	return if handRoot.Visible then rectAbs else nil
 end
 
+-- /selftest: why the hand is not showing ("not placed yet" before its first
+-- frame), nil while it shows.
+function TutorialHand.GetBlocker(): string?
+	if handRoot.Visible then
+		return nil
+	end
+	local gui = target
+	if not gui then
+		return "no target"
+	end
+	if not isOnScreen(gui) then
+		return "the target is not shown (hidden, disabled, or zero width)"
+	end
+	local centre = gui.AbsolutePosition + gui.AbsoluteSize / 2
+	if not centreVisible(gui, centre) then
+		return ("the target's centre %.0f,%.0f is off the screen or outside a scroll view"):format(centre.X, centre.Y)
+	end
+	return "not placed yet"
+end
+
 function TutorialHand.SetTarget(gui: GuiObject?)
 	target = gui
 	if not gui then

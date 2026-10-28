@@ -471,7 +471,10 @@ runs it with stubbed inventories (`FusePanel.SelfTestOpenWith` & co.).
   -> the panel opens on that tab; the Rare card no longer auto-closes, it has a
   button). Otherwise `Pull more orbs, then fuse 2 of these!` and the Gacha
   arrow for 25 s (`GoalMarkerController.SetHint`, under the idle nudge and
-  the tip, over the coach). No line for a Secret, or Mythics before Rebirth 1.
+  the tip, over the coach). No line for a Secret, or Mythics before Rebirth 1,
+  and none while the tutorial runs (`GetFusionNext` returns `None`): the
+  tutorial's `fuse` step ends on this card and the next step waits for a quiet
+  screen, so it must auto-close (triage 18: `finish` never presented).
 - **The tier goals agree:** `own_epic`'s "Fuse your 2 Rares" step points at
   the Fusion Machine, and the panel then opens on Rare (the highest pair).
 

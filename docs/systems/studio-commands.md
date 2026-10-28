@@ -150,6 +150,17 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
 
 - A probe line may carry `Warn = true`: a miss prints `[SelfTest] WARN …` and
   counts as a PASS (used for the Bat's two reach lines only, approved by eye).
+  A client panel line that starts `WARN` is the same (printed, a PASS).
+- **Triage 18.** The client's long run prints `[SelfTest] client stage <name>
+  took N s` per stage and sends a `Progress` report after each; the server's
+  wait for `Done` counts its 90 s from the latest one (a slow but moving run is
+  not cut off, a stuck stage is). Desktop layout forced into a window under
+  1000 x 600 (the phone emulator) cannot measure the Upgrades hand / the ladder
+  strip: those lines are WARN there. The hand line says why it is missing
+  (`TutorialHand.GetBlocker`). Combat: an `AnimationIds` probe runs first; if
+  no id has a length (Studio could not load them) the pose / track probes are
+  skipped with one WARN, and the id FAIL stays. `AbsolutePosition` is below the
+  58 px top bar: probes use `visibleRect`, never `AbsolutePosition.Y` alone.
 - The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
 - **Gacha card POSITION lines are WARN, not FAIL** (launch is gated on 0 FAIL; a
