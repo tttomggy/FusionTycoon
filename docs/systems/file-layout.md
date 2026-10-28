@@ -113,6 +113,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   TutorialCards (the "?" slideshows + weapon unlock card),
                   TutorialBanner (the instruction banner + welcome splash),
                   TopStack (the top-centre slots + the announcement queue),
+                  MissionBanner (the steal mission box in TopStack's Mission slot),
+                  UpgradeGuide (the coach's hand into the UPGRADES panel),
                   TutorialHand (the pointing hand + the big contextual
                   button), HudGate (the progressive HUD),
                   GoalTracker (the NEXT GOAL card + loop strip; own module because

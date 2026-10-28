@@ -292,6 +292,7 @@ local function build()
 	dotLayout.FillDirection = Enum.FillDirection.Horizontal
 	dotLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	dotLayout.Padding = UDim.new(0, 10)
+	dotLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	dotLayout.Parent = dotRow
 
 	slides = buildSlides()

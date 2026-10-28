@@ -1898,7 +1898,7 @@ local function runLoopCoachSelfTest(player: Player, result: (boolean, string, st
 	for _, goal in GoalConfig.Goals do
 		goalsById[goal.Id] = goal
 	end
-	local UPGRADE: LoopCoach.Upgrade = { Name = "Ember Forge", Target = "Generator_ember_forge", Cost = 400, Gain = 12.5 }
+	local UPGRADE: LoopCoach.Upgrade = { Name = "Ember Forge", Target = "Generator_ember_forge", StationId = "ember_forge", Cost = 400, Gain = 12.5 }
 	local function stub(overrides: { [string]: any }?): LoopCoach.Input
 		local input: any = {
 			Counts = {},

@@ -779,6 +779,51 @@ function UpgradesPanel.Toggle()
 	end
 end
 
+-- The buy button of a station's row (kind "Max": its MAX ×N button instead),
+-- or nil when the panel has no such row, it is locked or maxed (the coach's
+-- hand points at it; the Multiplier Pad has no row here).
+function UpgradesPanel.GetButtonFor(stationId: string, kind: string?): GuiObject?
+	local row = rows[stationId]
+	local generator = TycoonConfig.GetGeneratorById(stationId)
+	if not row or not generator or not modal then
+		return nil
+	end
+	local level = TycoonController.GetGeneratorLevel(stationId)
+	if level >= generator.MaxLevel or not TycoonConfig.IsUnlocked(generator, TycoonController.GetGeneratorLevels()) then
+		return nil
+	end
+	return if kind == "Max" then row.MaxButton else row.Button
+end
+
+-- The row's own "next" number as the hand's caption: "+$13.3/s".
+function UpgradesPanel.GetCaptionFor(stationId: string): string?
+	local generator = TycoonConfig.GetGeneratorById(stationId)
+	if not generator then
+		return nil
+	end
+	local perLevel = TycoonConfig.GetGeneratorCashPerSecond(generator, 1) * getMultiplier()
+	return "+" .. NumberFormat.Money(perLevel) .. "/s"
+end
+
+-- Scrolls the list so the station's row is whole inside it (a row below
+-- the fold is brought up first, then pointed at). True when it moved.
+function UpgradesPanel.ScrollTo(stationId: string): boolean
+	local row = rows[stationId]
+	if not row or not modal or not modal.IsOpen() then
+		return false
+	end
+	local list = listFrame
+	local top = row.Holder.AbsolutePosition.Y - list.AbsolutePosition.Y
+	local bottom = top + row.Holder.AbsoluteSize.Y
+	if top >= 0 and bottom <= list.AbsoluteSize.Y then
+		return false
+	end
+	local maxY = math.max(0, list.AbsoluteCanvasSize.Y - list.AbsoluteSize.Y)
+	local wanted = math.clamp(list.CanvasPosition.Y + top - 8, 0, maxY)
+	list.CanvasPosition = Vector2.new(0, wanted)
+	return true
+end
+
 -- Throttled to REFRESH_INTERVAL: a burst of syncs refreshes once now and
 -- once at the end of the window.
 function UpgradesPanel.Refresh()

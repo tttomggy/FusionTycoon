@@ -78,6 +78,8 @@ local GachaBoardController = safeRequire("GachaBoardController", Controllers)
 local LoopCoachController = safeRequire("LoopCoachController", Controllers)
 local HudGate = safeRequire("HudGate", UI)
 local TopStack = safeRequire("TopStack", UI)
+local MissionBanner = safeRequire("MissionBanner", UI)
+local UpgradeGuide = safeRequire("UpgradeGuide", UI)
 
 -- Data controllers first so their remote listeners are connected before
 -- anything else (the server syncs as soon as your save loads).
@@ -105,6 +107,8 @@ safeInit("MusicController", MusicController) -- the background playlist (Setting
 safeInit("JumpPadController", JumpPadController) -- the 2nd floor's jump pads launch your own character
 safeInit("GachaBoardController", GachaBoardController) -- the Gacha odds card above your pad (+ its E / R / ? buttons)
 safeInit("LoopCoachController", LoopCoachController) -- the loop-closing lines (new orb earns, more cash, free orb)
+safeInit("UpgradeGuide", UpgradeGuide) -- the coach's hand leads into the UPGRADES panel
+safeInit("MissionBanner", MissionBanner) -- the steal mission box in TopStack's Mission slot
 
 -- FusionController waits for this player's own plot (and its Fusion
 -- Machine) to replicate, so it gets its own thread instead of blocking.

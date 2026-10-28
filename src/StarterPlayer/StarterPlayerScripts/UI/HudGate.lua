@@ -218,6 +218,7 @@ local function newPill(root: GuiObject, note: string?, side: string?): (Frame, G
 	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 	layout.VerticalAlignment = if side == "Below" or side == "Right" then Enum.VerticalAlignment.Top else Enum.VerticalAlignment.Bottom
 	layout.Padding = UDim.new(0, 4)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
 	layout.Parent = holder
 	local badge = UIKit.Pill({
 		Name = "NewPill",

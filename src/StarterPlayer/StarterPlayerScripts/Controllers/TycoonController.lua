@@ -156,6 +156,11 @@ local function sanitizeCoach(raw: any): LoopCoach.Wire?
 		return if typeof(value) == "string" then value else nil
 	end
 	local lit = text(raw.Lit)
+	local rawTarget = raw.UpgradeTarget
+	local upgradeTarget: LoopCoach.UpgradeTarget? = nil
+	if typeof(rawTarget) == "table" and typeof(rawTarget.StationId) == "string" and typeof(rawTarget.Kind) == "string" then
+		upgradeTarget = { StationId = rawTarget.StationId, Kind = rawTarget.Kind }
+	end
 	return {
 		Step = raw.Step,
 		Target = text(raw.Target),
@@ -165,6 +170,7 @@ local function sanitizeCoach(raw: any): LoopCoach.Wire?
 		Cost = number(raw.Cost),
 		Name = text(raw.Name),
 		Gain = number(raw.Gain),
+		UpgradeTarget = upgradeTarget,
 		Rival = text(raw.Rival),
 		Income = number(raw.Income),
 		Seconds = number(raw.Seconds),

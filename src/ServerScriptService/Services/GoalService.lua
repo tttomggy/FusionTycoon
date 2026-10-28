@@ -322,6 +322,7 @@ function GoalService.BuildCoach(player: Player, goal: GoalConfig.GoalDef, step: 
 		Cost = result.Cost,
 		Name = result.Name,
 		Gain = result.Gain,
+		UpgradeTarget = result.UpgradeTarget,
 		Rival = result.Rival,
 		Income = result.Income,
 		Seconds = result.Seconds,

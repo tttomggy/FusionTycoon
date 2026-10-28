@@ -1039,28 +1039,48 @@ local function testTopStack(): { string }
 		return { "FAIL top stack: the announcement line never emptied" }
 	end
 
-	-- The slots rise strictly top to bottom, at both layouts: the same plan
-	-- the stack uses, with every slot occupied (a 89 px bar, the 44 px chip,
-	-- a 64 px line), the objective bar clear of the Roblox top bar and the
-	-- last slot inside the screen. (The live Ys alone cannot be compared:
-	-- an EMPTY objective slot has no bar to order, and the chip then keeps
-	-- its place beside the top bar at y 12, which is below nothing.)
-	for _, phone in { false, true } do
+	-- The slots rise strictly top to bottom, at the three target screens: the
+	-- same plan the stack uses, with every slot occupied (a 89 px bar, the
+	-- 44 px chip, the 93 px steal mission slot (box + shadow), a 64 px line), the objective
+	-- bar clear of the Roblox top bar, no two rects overlapping and the last
+	-- slot inside the screen. (The live Ys alone cannot be compared: an EMPTY
+	-- objective slot has no bar to order, and the chip then keeps its place
+	-- beside the top bar at y 12, which is below nothing.)
+	local STACK_VIEWS = {
+		{ Name = "1920x1080", Size = Vector2.new(1920, 1080), Phone = false },
+		{ Name = "1366x768", Size = Vector2.new(1366, 768), Phone = false },
+		{ Name = "844x390 phone", Size = Vector2.new(844, 390), Phone = true },
+	}
+	for _, stackView in STACK_VIEWS do
+		local phone = stackView.Phone
 		local cardTop = UIKit.GetCardTopFor(phone)
-		local plan = TopStack.PlanFor(cardTop, 89, 44, 64)
-		local view = (if phone then Vector2.new(844, 390) else Vector2.new(1920, 1080)) / (if phone then UITheme.PhoneScale else 1)
-		local strict = plan.Objective < plan.Chip and plan.Chip < plan.Announce and plan.Announce < plan.Status
+		local plan = TopStack.PlanFor(cardTop, 89, 44, 64, 93)
+		local view = stackView.Size / (if phone then UITheme.PhoneScale else 1)
+		local rects = {
+			{ Name = "Objective", Y = plan.Objective, Height = 89 },
+			{ Name = "Chip", Y = plan.Chip, Height = 44 },
+			{ Name = "Mission", Y = plan.Mission, Height = 93 },
+			{ Name = "Announce", Y = plan.Announce, Height = 64 },
+		}
+		local strict = plan.Objective < plan.Chip and plan.Chip < plan.Mission and plan.Mission < plan.Announce and plan.Announce < plan.Status
+		local overlap: string? = nil
+		for index = 2, #rects do
+			local above, below = rects[index - 1], rects[index]
+			if above.Y + above.Height > below.Y then
+				overlap = ("%s (%d+%d) overlaps %s (%d)"):format(above.Name, above.Y, above.Height, below.Name, below.Y)
+			end
+		end
 		local clear = plan.Objective >= cardTop and cardTop >= UIKit.TOP_BAR_HEIGHT + UIKit.CARD_TOP_GAP
 		local inside = plan.Status + 64 <= view.Y
-		local label = if phone then "phone" else "desktop"
-		table.insert(lines, if strict and clear and inside
-			then ("PASS top stack slots in order (%s: %d / %d / %d / %d)"):format(label, plan.Objective, plan.Chip, plan.Announce, plan.Status)
-			else ("FAIL top stack slots out of order (%s: %d / %d / %d / %d, bar top %d, view %d)"):format(label, plan.Objective, plan.Chip, plan.Announce, plan.Status, cardTop, view.Y))
+		local label = stackView.Name
+		table.insert(lines, if strict and clear and inside and overlap == nil
+			then ("PASS top stack slots in order, no overlap (%s: %d / %d / %d / %d / %d)"):format(label, plan.Objective, plan.Chip, plan.Mission, plan.Announce, plan.Status)
+			else ("FAIL top stack slots out of order (%s: %d / %d / %d / %d / %d, bar top %d, view %d%s)"):format(label, plan.Objective, plan.Chip, plan.Mission, plan.Announce, plan.Status, cardTop, view.Y, if overlap then ", " .. overlap else ""))
 	end
 	-- The live slots: the ones in use rise strictly and sit inside the screen.
 	local view = UIKit.GetLogicalViewport()
 	local used: { { Name: string, Y: number, Height: number } } = {}
-	for _, slot in { "Objective", "Chip", "Announce" } do
+	for _, slot in { "Objective", "Chip", "Mission", "Announce" } do
 		local height = TopStack.GetHeight(slot)
 		if height > 0 then
 			table.insert(used, { Name = slot, Y = TopStack.GetY(slot), Height = height })
@@ -1156,6 +1176,146 @@ local function testTopStack(): { string }
 	table.insert(lines, if queued == TopStack.MAX_QUEUED and order == "APDEF"
 		then "PASS top stack queue (capped at 4, A already showing, priority P next, oldest dropped)"
 		else ("FAIL top stack queue: queued %d, shown order %s (want 4, APDEF)"):format(queued, order))
+	return lines
+end
+
+-- The steal mission box (UI/MissionBanner in TopStack's Mission slot): the
+-- pure rules, then the live box. Live part: shows with an owner, <= 100 px
+-- tall, inside the screen, every text >= 12 px on screen, between the chip
+-- and the announcement line (no overlap), hidden under a modal and back
+-- after, gone after the first delivery; the gacha card's clamp still clears
+-- the stack with the box up.
+local function testMissionBanner(): { string }
+	local MissionBanner = require(UI.MissionBanner) :: any
+	local TopStack = require(UI.TopStack) :: any
+	local Board = require(script.Parent.GachaBoardController) :: any
+	local lines: { string } = {}
+	local function check(ok: boolean, name: string, detail: string?)
+		table.insert(lines, ("%s steal mission: %s%s"):format(if ok then "PASS" else "FAIL", name, if ok or not detail then "" else " | " .. detail))
+	end
+	-- Pure rules.
+	local base = { Owner = true, Done = false, Elapsed = 0, TutorialRunning = false, Down = false }
+	local function plan(changes: any): boolean
+		local state = table.clone(base)
+		for key, value in changes do
+			(state :: any)[key] = value
+		end
+		return MissionBanner.PlanShow(state)
+	end
+	check(plan({}), "shows for an owner before the first delivery")
+	check(
+		not plan({ Owner = false }) and not plan({ Done = true }) and not plan({ Elapsed = MissionBanner.MAX_SECONDS }) and not plan({ TutorialRunning = true }) and not plan({ Down = true }),
+		"hidden with no owner, after the first delivery, after 3 minutes, in a tutorial step, and while ragdolled"
+	)
+	check(plan({ Elapsed = MissionBanner.MAX_SECONDS - 1 }), "still up one second before the 3 minutes")
+	check(
+		MissionBanner.PlanStep(false, false) == 1 and MissionBanner.PlanStep(true, false) == 2 and MissionBanner.PlanStep(true, true) == 3,
+		"step 1 lit until an orb is carried, step 2 while carrying, a flash on delivery"
+	)
+	check(
+		MissionBanner.TitleFor("Dr. Fizz's Lab") == "STEAL FROM DR. FIZZ!" and MissionBanner.TitleFor(nil) == "STEAL A FREE ORB!",
+		"the title names the rival lab when known",
+		MissionBanner.TitleFor("Dr. Fizz's Lab")
+	)
+	local clear = MissionBanner.ROBLOX_BUTTONS_X / UITheme.PhoneScale
+	local narrow = MissionBanner.WidthFor(1055, true)
+	check(
+		MissionBanner.WidthFor(2000, false) == MissionBanner.MAX_WIDTH and (1055 - narrow) / 2 >= clear and MissionBanner.WidthFor(500, true) >= MissionBanner.MIN_WIDTH,
+		"520 px wide on desktop, clear of the Roblox buttons on a phone",
+		("phone width at 1055 logical: %d"):format(narrow)
+	)
+
+	-- The stack with the box up: no overlap, the gacha clamp clears it.
+	local slot = MissionBanner.HEIGHT + UITheme.ShadowOffset
+	for _, phone in { false, true } do
+		local top = UIKit.GetCardTopFor(phone)
+		local stack = TopStack.PlanFor(top, 0, 44, 0, slot)
+		local without = TopStack.PlanFor(top, 0, 44, 0)
+		check(stack.Chip + 44 <= stack.Mission and stack.Mission + slot <= stack.Announce and stack.Announce >= without.Announce + slot, ("sits between the chip and the announcement (%s)"):format(if phone then "phone" else "desktop"))
+	end
+	local gacha = PlotLayout.Gacha
+	local clampOk, clampDetail = true, {}
+	for _, viewHeight in { 1080, 768 } do
+		local stackBottom = TopStack.PlanFor(UIKit.GetCardTopFor(false), 0, 44, 0, slot).Announce
+		local cardHeight = 300
+		for _, anchorY in { viewHeight * 0.5, viewHeight * 0.3, viewHeight * 0.1 } do
+			local cardTop = anchorY - cardHeight + Board.StackShiftFor(anchorY, cardHeight, stackBottom, viewHeight)
+			if cardTop < math.ceil(stackBottom) + gacha.StackGapPx - 0.5 then
+				clampOk = false
+				table.insert(clampDetail, ("view %d anchor %.0f top %.0f < %d"):format(viewHeight, anchorY, cardTop, math.ceil(stackBottom) + gacha.StackGapPx))
+			end
+		end
+	end
+	check(clampOk, "the gacha card's clamp clears the stack with the box up", table.concat(clampDetail, "; "))
+
+	-- Live box.
+	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = false, Down = false })
+	local waited = 0
+	while not TopStack.IsMissionShown() and waited < 2 do
+		task.wait(0.05)
+		waited += 0.05
+	end
+	task.wait(0.6) -- the slide-in
+	local shown = TopStack.IsMissionShown()
+	check(shown and MissionBanner.IsRegistered(), "the box shows for an owner", ("shown %s"):format(tostring(shown)))
+	if shown then
+		local body = MissionBanner.GetBody() :: Frame
+		local scale = screenScale(body)
+		local view = UIKit.GetLogicalViewport()
+		local logicalHeight = body.AbsoluteSize.Y / scale
+		local left = body.AbsolutePosition.X / scale
+		local right = left + body.AbsoluteSize.X / scale
+		local topY = body.AbsolutePosition.Y / scale
+		check(logicalHeight <= 100 and logicalHeight > 0, "the box is at most 100 px tall", ("%.0f px"):format(logicalHeight))
+		check(left >= 0 and right <= view.X + 1 and topY >= 0 and topY + logicalHeight <= view.Y + 1, "the box is inside the screen", ("x %.0f-%.0f of %.0f, y %.0f+%.0f of %.0f"):format(left, right, view.X, topY, logicalHeight, view.Y))
+		local wantY = TopStack.GetY("Mission")
+		check(math.abs(topY - wantY) <= 2, "the box sits at TopStack's Mission y", ("y %.1f, slot %.1f"):format(topY, wantY))
+		local announceY = TopStack.GetY("Announce")
+		check(topY + logicalHeight + UITheme.ShadowOffset <= announceY + 0.5, "the box ends above the announcement line", ("bottom %.0f, announce y %.0f"):format(topY + logicalHeight + UITheme.ShadowOffset, announceY))
+		local smallest = math.huge
+		local fits = true
+		local labels: { TextLabel } = { MissionBanner.GetTitleLabel() }
+		for _, label in MissionBanner.GetStepLabels() do
+			table.insert(labels, label)
+		end
+		for _, label in labels do
+			-- A scaled label's size is read from its drawn line height.
+			local size = if label.TextScaled then label.TextBounds.Y / 1.25 else label.TextSize
+			smallest = math.min(smallest, size * scale)
+			if label.TextBounds.Y > label.AbsoluteSize.Y + 1 or label.TextBounds.X > label.AbsoluteSize.X + 1 then
+				fits = false
+			end
+		end
+		check(smallest >= 12, "every text is at least 12 px on screen", ("smallest %.1f px"):format(smallest))
+		check(fits, "every text fits its box (no cut-off)")
+		check(MissionBanner.GetLitStep() == (if Players.LocalPlayer:GetAttribute("HeistTier") ~= nil then 2 else 1), "the lit step follows the carried orb")
+	end
+
+	-- A modal hides it; closing the modal brings it back.
+	UIKit.SetOverlay("SelfTestMission", true)
+	task.wait(0.3)
+	local hiddenUnder = not TopStack.IsMissionShown()
+	UIKit.SetOverlay("SelfTestMission", false)
+	task.wait(0.3)
+	check(hiddenUnder and TopStack.IsMissionShown(), "hidden while a modal is open, back when it closes", ("hidden %s, back %s"):format(tostring(hiddenUnder), tostring(TopStack.IsMissionShown())))
+
+	-- A tutorial step / a ragdoll takes it away; the end brings it back.
+	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = true, Down = false })
+	task.wait(0.3)
+	local hiddenTutorial = not TopStack.IsMissionShown()
+	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = false, Down = true })
+	task.wait(0.3)
+	local hiddenDown = not TopStack.IsMissionShown()
+	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = false, Down = false })
+	task.wait(0.3)
+	check(hiddenTutorial and hiddenDown and TopStack.IsMissionShown(), "hidden in a tutorial step and while ragdolled, back after", ("tutorial %s, down %s, back %s"):format(tostring(hiddenTutorial), tostring(hiddenDown), tostring(TopStack.IsMissionShown())))
+
+	-- After the first delivery it is gone for good.
+	MissionBanner.SetTestState({ Owner = true, Done = true, Elapsed = 0, TutorialRunning = false, Down = false })
+	task.wait(0.3)
+	check(not TopStack.IsMissionShown() and TopStack.GetHeight("Mission") == 0, "gone after a delivered steal, the slot empty")
+	MissionBanner.SetTestState(nil)
+	task.wait(0.2)
 	return lines
 end
 
@@ -1901,6 +2061,44 @@ local function probeStep(stepIndex: number, stepId: string): { ProbeLine }
 			Ok = tapArea ~= nil and tapArea.Active ~= false and (tooSmall or (tapArea.AbsoluteSize.X > 0 and tapArea.AbsoluteSize.Y > 0)),
 			Name = ("tutorial %s: a tap anywhere on the card counts as OK"):format(stepId),
 		})
+		-- The orb diagram reads in card.Orbs order (orb, symbol, orb, symbol,
+		-- orb): the real row builder, laid out at the card's image width on
+		-- desktop and on a phone (the list layout once sorted by Name).
+		if step.Card.Orbs then
+			local wanted = table.concat(step.Card.Orbs, "|")
+			for _, rowWidth in { 488, 330 } do
+				local host = Instance.new("ScreenGui")
+				host.Name = "SelfTestOrbRow"
+				host.IgnoreGuiInset = true
+				local hostFrame = Instance.new("Frame")
+				hostFrame.BackgroundTransparency = 1
+				hostFrame.Size = UDim2.fromOffset(rowWidth, 170)
+				hostFrame.Parent = host
+				host.Parent = Players.LocalPlayer:WaitForChild("PlayerGui")
+				local row = TutorialExplain.BuildOrbRow(hostFrame, step.Card.Orbs)
+				task.wait(0.1)
+				local pieces = row:GetChildren()
+				local placed: { GuiObject } = {}
+				for _, piece in pieces do
+					if piece:IsA("GuiObject") then
+						table.insert(placed, piece)
+					end
+				end
+				table.sort(placed, function(a, b)
+					return a.AbsolutePosition.X < b.AbsolutePosition.X
+				end)
+				local seen: { string } = {}
+				for _, piece in placed do
+					table.insert(seen, tostring(piece:GetAttribute("Part")))
+				end
+				host:Destroy()
+				table.insert(lines, {
+					Ok = table.concat(seen, "|") == wanted,
+					Name = ("tutorial %s: the card's orb row reads left to right in card order (%d px wide)"):format(stepId, rowWidth),
+					Detail = ("left to right %s, wanted %s"):format(table.concat(seen, " "), table.concat(step.Card.Orbs, " ")),
+				})
+			end
+		end
 		TutorialExplain.PressOk()
 		task.wait(0.2)
 		table.insert(lines, dimLine(stepId .. " (after OK)"))
@@ -2098,6 +2296,138 @@ local function probeClearScreen(label: string, report: boolean, suppressDaily: b
 			),
 		},
 	}
+end
+
+-- The loop nudges (LoopCoachController's idle nudge, UpgradeGuide's hand
+-- into the UPGRADES panel). The nudge runs on a stub clock: 40 s idle + cash
+-- -> one line and the Gacha arrow; an action resets it; at most 3; none
+-- while a tip / the mission box / a modal / the tutorial blocks; a fusable
+-- pair + cash says both. The hand: the pure plan, then (panel opened by the
+-- test, at desktop and phone layouts) the best row's button inside the
+-- scroll view with the fingertip just above it, back on UPGRADES when the
+-- panel closes.
+local function testLoopNudge(): { string }
+	local Coach = require(script.Parent.LoopCoachController) :: any
+	local Marker = require(script.Parent.GoalMarkerController) :: any
+	local UpgradeGuide = require(UI.UpgradeGuide) :: any
+	local UpgradesPanel = require(UI.UpgradesPanel) :: any
+	local TutorialHand = require(UI.TutorialHand) :: any
+	local GoalConfig = require(ReplicatedStorage.Shared.Config.GoalConfig)
+	local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
+	local TycoonController = require(script.Parent.TycoonController) :: any
+	local lines: { string } = {}
+	local function check(ok: boolean, name: string, detail: string?)
+		table.insert(lines, ("%s loop nudge: %s%s"):format(if ok then "PASS" else "FAIL", name, if ok or not detail then "" else " | " .. detail))
+	end
+	local free = { Blocked = false, CanPull = true }
+
+	-- The idle clock (stubbed): 40 s, once per spell, again after 90 s, max 3.
+	local n = Coach.NewNudger(0)
+	local early = Coach.NudgeTick(n, 39.9, free)
+	local first = Coach.NudgeTick(n, 40, free)
+	check(early == nil and first ~= nil and first.Line == Coach.NudgeLines[1] and first.Target == "GachaStation", "40 s idle with cash -> the pull line and the Gacha arrow", first and first.Line or "none")
+	check(Coach.NudgeTick(n, 41, free) == nil and Coach.NudgeTick(n, 129, free) == nil, "once per idle spell until another 90 s have passed")
+	local second = Coach.NudgeTick(n, 130, free)
+	check(second ~= nil and first ~= nil and second.Line ~= first.Line, "the second nudge is not the same line twice in a row", second and second.Line or "none")
+	Coach.NudgeAction(n, 140, "Pull")
+	check(n.Target == nil and Coach.NudgeTick(n, 179, free) == nil, "an action clears the arrow and restarts the 40 s")
+	local third = Coach.NudgeTick(n, 180, free)
+	check(third ~= nil and third.Target == "GachaStation", "a new spell nudges again after 40 s")
+	Coach.NudgeAction(n, 200, "Upgrade")
+	check(Coach.NudgeTick(n, 1000, free) == nil and n.Total == 3, "at most 3 a session", ("total %d"):format(n.Total))
+
+	-- Nothing while something else has the player's attention.
+	local blocked = Coach.NewNudger(0)
+	local silent = Coach.NudgeTick(blocked, 40, { Blocked = true, CanPull = true }) == nil
+	local restarted = Coach.NudgeTick(blocked, 41, free) == nil and Coach.NudgeTick(blocked, 79.9, free) == nil
+	check(silent and restarted and Coach.NudgeTick(blocked, 80, free) ~= nil, "none during a tip / the mission box / a modal / the tutorial; the idle clock restarts after", ("silent %s, restarted %s"):format(tostring(silent), tostring(restarted)))
+	check(Coach.NudgeTick(Coach.NewNudger(0), 500, { Blocked = false, CanPull = false }) == nil, "none without cash for a pull (the coach's Earn line covers it)")
+
+	-- A fusable pair + cash: both steps; the arrow on the machine, then the pad.
+	local pair = Coach.NewNudger(0)
+	local both = Coach.NudgeTick(pair, 40, { Blocked = false, CanPull = true, FuseTier = "Epic", FuseCount = 2 })
+	check(both ~= nil and both.Line == "Fuse your 2 Epics, then pull more orbs for the next fuse!" and both.Target == "FusionMachine", "a pair and cash: the two-step line, the Fusion Machine first", both and both.Line or "none")
+	Coach.NudgeAction(pair, 45, "Fuse")
+	check(pair.Target == "GachaStation", "after the fuse the arrow moves to the Gacha Pad", tostring(pair.Target))
+	Coach.NudgeAction(pair, 46, "Pull")
+	check(pair.Target == nil, "the next pull clears it")
+
+	-- The arrow: under a tip, over the coach.
+	local goal = GoalConfig.Goals[1]
+	local progress: any = { Current = 0, Target = 1, Coach = { Step = "Fuse", Target = "FusionMachine", Takes = true, Lit = "Fuse" } }
+	local nudged = Marker.PlanGoalArrow(goal, progress, false, "GachaStation")
+	local coached = Marker.PlanGoalArrow(goal, progress, false, nil)
+	local tipped = Marker.PlanGoalArrow(goal, progress, true, "GachaStation")
+	check(nudged == "GachaStation" and coached == "FusionMachine" and tipped == nil, "the nudge arrow beats the coach's, a running tip beats the nudge", ("nudged %s, coached %s, tipped %s"):format(tostring(nudged), tostring(coached), tostring(tipped)))
+
+	-- The hand into the UPGRADES panel (pure).
+	local planned = {
+		off = UpgradeGuide.Plan({ Active = false, StationId = "basic_generator", PanelOpen = true, OtherOverlay = false }),
+		button = UpgradeGuide.Plan({ Active = true, StationId = "basic_generator", PanelOpen = false, OtherOverlay = false }),
+		row = UpgradeGuide.Plan({ Active = true, StationId = "ember_forge", Kind = "Upgrade", PanelOpen = true, OtherOverlay = false }),
+		other = UpgradeGuide.Plan({ Active = true, StationId = "ember_forge", PanelOpen = false, OtherOverlay = true }),
+	}
+	check(
+		planned.off.Where == "None" and planned.button.Where == "Button" and planned.row.Where == "Row" and planned.row.StationId == "ember_forge" and planned.other.Where == "None",
+		"the hand: UPGRADES button, then the best row inside the panel, back on the button when it closes",
+		("%s / %s / %s / %s"):format(planned.off.Where, planned.button.Where, planned.row.Where, planned.other.Where)
+	)
+
+	-- Live: the row's button in the open panel, at both layouts.
+	local station: string? = nil
+	for _, generator in TycoonConfig.Generators do
+		local level = TycoonController.GetGeneratorLevel(generator.Id)
+		if level > 0 and level < generator.MaxLevel and TycoonConfig.IsUnlocked(generator, TycoonController.GetGeneratorLevels()) then
+			station = generator.Id
+		end
+	end
+	if not station then
+		check(true, "live upgrade hand skipped: no unlocked generator below its max")
+		return lines
+	end
+	for _, phone in { false, true } do
+		local label = if phone then "844x390 phone" else "1920x1080"
+		UIKit.SetForcedPhone(phone)
+		task.wait(0.4)
+		local openedHere = not UpgradesPanel.IsOpen()
+		if openedHere then
+			UpgradesPanel.Toggle()
+		end
+		task.wait(0.6)
+		UpgradesPanel.ScrollTo(station)
+		task.wait(0.2)
+		local button = UpgradesPanel.GetButtonFor(station, "Upgrade") :: GuiObject?
+		local caption = UpgradesPanel.GetCaptionFor(station)
+		check(button ~= nil and caption ~= nil and caption:sub(1, 1) == "+" and caption:sub(-2) == "/s", ("%s: the row has a buy button and the '+$/s' caption"):format(label), tostring(caption))
+		if button then
+			TutorialHand.SetTarget(button)
+			TutorialHand.SetCaption(caption)
+			task.wait(0.3)
+			local tip = TutorialHand.GetTip()
+			local rect = TutorialHand.GetRect()
+			local pos, size = button.AbsolutePosition, button.AbsoluteSize
+			local list = button:FindFirstAncestorWhichIsA("ScrollingFrame")
+			local inside = list ~= nil
+				and pos.Y >= list.AbsolutePosition.Y - 1
+				and pos.Y + size.Y <= list.AbsolutePosition.Y + list.AbsoluteSize.Y + 1
+				and pos.X >= list.AbsolutePosition.X - 1
+				and pos.X + size.X <= list.AbsolutePosition.X + list.AbsoluteSize.X + 1
+			check(inside, ("%s: the best row's button sits inside the scroll view"):format(label), ("button y %.0f+%.0f"):format(pos.Y, size.Y))
+			local above = tip ~= nil and math.abs(tip.X - (pos.X + size.X / 2)) <= 12 and tip.Y <= pos.Y + 1 and pos.Y - tip.Y <= 12
+			local clear = rect ~= nil and (rect.Position.Y + rect.Size.Y <= pos.Y + 1 or rect.Position.Y >= pos.Y + size.Y - 1 or rect.Position.X + rect.Size.X <= pos.X or rect.Position.X >= pos.X + size.X)
+			local onScreen = rect ~= nil and rect.Position.X >= -1 and rect.Position.Y >= -GuiService:GetGuiInset().Y - 1
+			check(above and clear and onScreen, ("%s: the hand's fingertip is within 12 px above the button and its box clears it"):format(label), tip and ("tip %.0f,%.0f vs button %.0f,%.0f"):format(tip.X, tip.Y, pos.X, pos.Y) or "no hand")
+			check(TutorialHand.GetCaption() == caption, ("%s: the caption rides the hand"):format(label), tostring(TutorialHand.GetCaption()))
+		end
+		TutorialHand.SetTarget(nil)
+		TutorialHand.SetCaption(nil)
+		if openedHere and UpgradesPanel.IsOpen() then
+			UpgradesPanel.Toggle()
+		end
+		task.wait(0.3)
+	end
+	UIKit.SetForcedPhone(nil)
+	return lines
 end
 
 local function probeBigCard(expect: string, fakeFusion: boolean?): { ProbeLine }
@@ -5103,11 +5433,17 @@ local function run(payload: any)
 	for _, line in testTopStack() do
 		table.insert(panelLines, line)
 	end
+	for _, line in testMissionBanner() do
+		table.insert(panelLines, line)
+	end
 	-- The cards above were measured live; the deal path needs the screen bare
 	-- (the daily reward card is up after 00:00 UTC until it is claimed).
 	clearScreen(true)
 	local shopController = require(script.Parent.ShopController) :: any
 	for _, line in shopController.SelfTestDealPath() do
+		table.insert(panelLines, line)
+	end
+	for _, line in testLoopNudge() do
 		table.insert(panelLines, line)
 	end
 	if not tooSmall then

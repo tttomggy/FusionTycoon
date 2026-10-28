@@ -90,7 +90,7 @@ feeds it and runs the hand.
 | `tipIndex` | a new Index entry found after the tutorial ended (the baseline is the count when it ended / when you joined) | INDEX | New orb! Each one boosts your income forever. |
 | `tipEvent` | the event chip is on screen (the `event_<Id>` pulse stays) | the event chip | Lab weather! Tap it to see the bonus. |
 | `tipRebirth` | cash / Rebirth cost >= 50% | REBIRTH | Rebirth when the bar is full: keep your orbs, earn faster forever. |
-| `tipRival` | a rival lab with an orb is in the world and `RivalTipAfterDoneSeconds` (20 s) have passed since "You're ready!" (`PlanTip`'s `RivalLab` / `SinceDone`; first in `Tips`, so it wins once due) | the big STEAL button at the lit path's end (the **nearest rival lab's best pedestal**: `GoalMarkerController` target `NearestRivalPedestal`, highest tier, then nearest) | Steal from the rival lab! Hold E, run home, don't get caught! |
+| `tipRival` | a rival lab with an orb is in the world and `RivalTipAfterDoneSeconds` (20 s) have passed since "You're ready!" (`PlanTip`'s `RivalLab` / `SinceDone`; first in `Tips`, so it wins once due) | the big STEAL button at the lit path's end (the **nearest rival lab's best pedestal**: `GoalMarkerController` target `NearestRivalPedestal`, highest tier, then nearest) | the **steal mission box** (below; no announcement line); the bubble over the pedestal keeps one word, `STEAL!` (`TipDef.WorldLine`) |
 
 - At most one tip (or `giftHand` / `questHand`, which share the slot) is up; the
   next waits `TipGapSeconds` (20 s) after it is gone, and the first
@@ -253,13 +253,48 @@ on desktop), at the same step as before; `Upgrades` / `Items` / `Index` /
 move: `HudController.GetCoachTarget` returns the same buttons ("Index",
 "Rebirth", "Gifts", "Quests", ...), now 56 px cards.
 
+## The steal mission box (`UI/MissionBanner`)
+
+Stealing is the hook, and a small world bubble 74 studs away was never read,
+so `tipRival` (and, until the first delivered rival steal, the LoopCoach
+`Steal` step) shows ONE big box in TopStack's **Mission** slot, directly under
+the event chip: an orange fill with white text and the ink stroke, 88 px tall
+(+ the 5 px shadow), 520 px wide (a phone window too narrow to clear the Roblox
+buttons on both sides gets less, down to 300), no close button.
+
+- Title: `STEAL FROM DR. FIZZ!` (the nearest rival lab's `RivalName`
+  attribute, short name) or `STEAL A FREE ORB!` until a lab is known.
+- Three steps in one row: `1 🤚 Hold E at the glowing orb` · `2 🏃 Run home
+  with it` · `3 🛡 Don't get caught!` (15 px on desktop, 16 logical = 12.8 px on
+  a phone). Step 1 is lit until the player holds a stolen orb (`HeistTier`),
+  step 2 while carrying; a delivery flashes `GOT IT! ✔` for 1.4 s.
+- Hidden when the first rival steal is **delivered** (`TycoonController.
+  GetRivalDeliveries` this session; the tip id `rivalStealDone` makes it
+  permanent, saved like the other tips), after 3 minutes
+  (`MissionBanner.MAX_SECONDS`, per owner spell), while a tutorial step runs,
+  while the player is ragdolled or frozen (`RagdollUntil` / `FrozenUntil`;
+  back when they recover). `TopStack` hides it while any `UIKit.Modal` or
+  centred card is open (`UIKit.IsOverlayOpen`) and brings it back after, so a
+  phone big panel never sits under it. After the first delivery it never shows
+  again by itself; the coach's Steal step keeps the plain tracker line.
+- `MissionBanner.PlanShow` / `PlanStep` / `TitleFor` / `WidthFor` are pure;
+  `TutorialController` tells it when `tipRival` starts / ends
+  (`MissionBanner.SetTip`). `/selftest` "steal mission": the rules, the box
+  between the chip and the announcement (no overlap at 1920×1080, 1366×768,
+  844×390), ≤ 100 px, inside the screen, text ≥ 12 px on screen and not cut
+  off, hidden under a modal and back, hidden in a tutorial step / while
+  ragdolled, gone after a delivery, the gacha card's clamp clears the stack
+  with the box up.
+
 ## TopStack (the top-centre of the screen)
 
 `UI/TopStack` is the only thing that places anything at top centre. Slots,
 top to bottom: **objective** (the tutorial bar; `TutorialBanner` registers
 its height), **chip** (the event chip; `EventController` registers it),
-**announce** (one line, queued), **status** (the heist bars hang below
-whatever the announcement uses). Owners ask `TopStack.GetY(slot)` and
+**mission** (the steal mission box, `TopStack.SetMission({ Key, Height,
+Show(y), Hide(), Move?(y) }?)`: one at a time, not queued, shown until its
+owner clears it, `Hide`n while a modal is open), **announce** (one line,
+queued), **status** (the heist bars hang below whatever the announcement uses). Owners ask `TopStack.GetY(slot)` and
 re-place on `TopStack.OnChanged`; without an objective bar the chip keeps
 its old place (y 12) and the line sits under it.
 
@@ -272,7 +307,7 @@ same `Key` replaces its queued twin, `Valid` skips a stale item at its turn.
 `AnnouncementController` (banners, goals, fusion, rebirth, heist feed) and
 `EventController` (event start) feed it. The welcome splash waits with
 `TopStack.WhenIdle`. `TopStack.GetStableBottom()` (= `GetY("Announce")`) is the
-bottom of the objective + chip rows without the toast; a world card that must
+bottom of the objective + chip + mission rows without the toast; a world card that must
 clear the chip row (the gacha card) uses it, so a toast never moves the card.
 `GetBottom()` includes the announcement line.
 

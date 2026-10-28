@@ -28,6 +28,7 @@ TipConfig.Ids = {
 	tipEvent = true, -- the first event chip seen after the tutorial
 	tipRebirth = true, -- first time Rebirth progress >= 50%: hand on REBIRTH
 	tipRival = true, -- ~20 s after "You're ready!": arrows to the nearest rival lab's best pedestal (steal from it)
+	rivalStealDone = true, -- the first delivered rival steal: the steal mission box (MissionBanner) never shows again
 } :: { [string]: boolean }
 
 -- "event_<EventId>": the HUD event chip pulses until the first tap for

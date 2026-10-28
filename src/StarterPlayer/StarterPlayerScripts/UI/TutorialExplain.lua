@@ -10,7 +10,8 @@
 	    world object (generator, pad, pedestal, machine), or UIKit.TierOrbs
 	    (Fuse: Common + Common -> Rare), or the big icon when there is no model;
 	  * a title;
-	  * one or two short sentences at >= 22 px saying what it is for;
+	  * one or two short sentences at >= 22 px saying what it is for (an
+	    optional smaller second line, `Small`, under it);
 	  * a big green OK (✕, a tap outside and a tap anywhere on the card
 	    count as OK). TutorialConfig.CardReadSeconds is 0 (Tutorial 5: kids
 	    don't read cards): the OK is live at once. Above 0 it turns on after
@@ -39,10 +40,13 @@ local IMAGE_HEIGHT = 170
 local BODY_TEXT = 24
 local BODY_MIN = 22
 local OK_SIZE = Vector2.new(240, 64)
+local SMALL_TEXT = 18 -- the optional second line under the body
+local SMALL_HEIGHT = 26
 
 local modal: UIKit.Modal? = nil
 local imageArea: Frame
 local bodyLabel: TextLabel
+local smallLabel: TextLabel
 local okButton: TextButton
 local tapArea: TextButton
 local onOk: (() -> ())? = nil
@@ -117,42 +121,51 @@ local function modelView(source: Instance): ViewportFrame?
 	return viewport
 end
 
+-- "Common + Common → Rare" in tier orbs and symbols, in a row sorted by
+-- LayoutOrder (the default sorts by Name: the symbols came first).
+local function buildOrbRow(parent: GuiObject, parts: { string }): Frame
+	local row = Instance.new("Frame")
+	row.Name = "Orbs"
+	row.BackgroundTransparency = 1
+	row.AnchorPoint = Vector2.new(0.5, 0.5)
+	row.Position = UDim2.fromScale(0.5, 0.5)
+	row.Size = UDim2.new(1, 0, 0, 90)
+	row.Parent = parent
+	local layout = Instance.new("UIListLayout")
+	layout.FillDirection = Enum.FillDirection.Horizontal
+	layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	layout.VerticalAlignment = Enum.VerticalAlignment.Center
+	layout.Padding = UDim.new(0, 14)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = row
+	for index, part in parts do
+		local piece: GuiObject
+		if UITheme.TierOrb[part] then
+			piece = UIKit.TierOrb(part, 84)
+			piece.LayoutOrder = index
+			piece.Parent = row
+		else
+			piece = UIKit.Label({
+				Name = "Symbol",
+				Text = part,
+				Font = Fonts.Display,
+				TextSize = 48,
+				Size = UDim2.fromOffset(44, 84),
+				TextXAlignment = Enum.TextXAlignment.Center,
+				LayoutOrder = index,
+				Stroke = UITheme.Stroke.Text,
+				Parent = row,
+			})
+		end
+		piece:SetAttribute("Part", part)
+	end
+	return row
+end
+
 local function buildImage(card: TutorialConfig.ExplainCard, model: Instance?)
 	clearImage()
 	if card.Orbs then
-		-- "Common + Common → Rare" in tier orbs and symbols.
-		local row = Instance.new("Frame")
-		row.Name = "Orbs"
-		row.BackgroundTransparency = 1
-		row.AnchorPoint = Vector2.new(0.5, 0.5)
-		row.Position = UDim2.fromScale(0.5, 0.5)
-		row.Size = UDim2.new(1, 0, 0, 90)
-		row.Parent = imageArea
-		local layout = Instance.new("UIListLayout")
-		layout.FillDirection = Enum.FillDirection.Horizontal
-		layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-		layout.VerticalAlignment = Enum.VerticalAlignment.Center
-		layout.Padding = UDim.new(0, 14)
-		layout.Parent = row
-		for index, part in card.Orbs do
-			if UITheme.TierOrb[part] then
-				local orb = UIKit.TierOrb(part, 84)
-				orb.LayoutOrder = index
-				orb.Parent = row
-			else
-				UIKit.Label({
-					Name = "Symbol",
-					Text = part,
-					Font = Fonts.Display,
-					TextSize = 48,
-					Size = UDim2.fromOffset(44, 84),
-					TextXAlignment = Enum.TextXAlignment.Center,
-					LayoutOrder = index,
-					Stroke = UITheme.Stroke.Text,
-					Parent = row,
-				})
-			end
-		end
+		buildOrbRow(imageArea, card.Orbs)
 		return
 	end
 	local viewport = if model then modelView(model) else nil
@@ -230,6 +243,19 @@ local function build()
 		Parent = content,
 	})
 	UIKit.FitText(bodyLabel, BODY_TEXT, BODY_MIN)
+	smallLabel = UIKit.Label({
+		Name = "Small",
+		Font = Fonts.BodyHeavy,
+		TextSize = SMALL_TEXT,
+		TextColor3 = Colors.Muted,
+		AnchorPoint = Vector2.new(0, 1),
+		Position = UDim2.new(0, 16, 1, -(OK_SIZE.Y + UITheme.ShadowOffset + 12)),
+		Size = UDim2.new(1, -32, 0, SMALL_HEIGHT),
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+		ZIndex = content.ZIndex + 1,
+		Parent = content,
+	})
 	-- The body is "what is left above the OK": in a short card that goes
 	-- negative, so it never gets less than one line.
 	local bodyMin = Instance.new("UISizeConstraint")
@@ -309,6 +335,11 @@ function TutorialExplain.Show(card: TutorialConfig.ExplainCard, model: Instance?
 	onOk = callback
 	m.Title.Text = card.Title:upper()
 	bodyLabel.Text = card.Body
+	-- The optional small line takes its strip from the bottom of the body.
+	local small = card.Small
+	smallLabel.Visible = small ~= nil
+	smallLabel.Text = small or ""
+	bodyLabel.Size = UDim2.new(1, -32, 1, -(IMAGE_HEIGHT + OK_SIZE.Y + 26 + UITheme.ShadowOffset + (if small then SMALL_HEIGHT + 4 else 0)))
 	buildImage(card, model)
 	startReadTime()
 	if not m.IsOpen() then
@@ -325,6 +356,11 @@ function TutorialExplain.Close()
 		closingByOk = false
 	end
 	onOk = nil
+end
+
+-- /selftest: the real orb row, built into `parent` (any size).
+function TutorialExplain.BuildOrbRow(parent: GuiObject, parts: { string }): Frame
+	return buildOrbRow(parent, parts)
 end
 
 function TutorialExplain.IsOpen(): boolean

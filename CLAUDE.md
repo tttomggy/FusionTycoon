@@ -98,6 +98,9 @@ When you change a system, update its doc (not this file) unless a rule here chan
 - **All UI colours come from `UITheme`.** No `Color3.fromRGB`/`fromHex` in
   any UI file other than `UITheme.lua`; add a token instead. Fonts too
   (`UITheme.Fonts`). This covers server-built BillboardGuis (`BillboardKit`).
+- A `UIListLayout` whose children set `LayoutOrder` also sets `SortOrder =
+  Enum.SortOrder.LayoutOrder`: the default sorts by Name (the tutorial's fuse
+  diagram read `+ → ⚪ ⚪ 🔵`).
 - Build screens from `UIKit` constructors. Panel/Button return
   `(body, holder)`: position/parent the holder (it also hosts the sibling
   `Shadow`), style the body. Restyle buttons with `UIKit.SetButton`.
@@ -127,7 +130,8 @@ When you change a system, update its doc (not this file) unless a rule here chan
   a Pill with `Gradient = Gradients[UIKit.SELECTED_STYLE]`). A tap calls
   `UIKit.SelectFeedback(gui)` (UIScale 0.94 → 1 + the Toast sound).
 - **Top centre is TopStack's.** Only `UI/TopStack` places anything at top
-  centre: the tutorial objective bar, then the event chip, then ONE
+  centre: the tutorial objective bar, then the event chip, then the steal
+  mission box (`TopStack.SetMission`; `UI/MissionBanner`), then ONE
   announcement line (banners and toasts queued 2.5 s each, capped at 4,
   priority to the front), then the heist status bars. Ask
   `TopStack.GetY(slot)`, re-place on `OnChanged`, and show banners with

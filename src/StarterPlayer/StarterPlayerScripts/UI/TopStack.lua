@@ -7,9 +7,12 @@
 
 	  1. Objective  the tutorial's objective bar (nothing otherwise)
 	  2. Chip       the event chip
-	  3. Announce   ONE announcement line: banners, toasts and event starts,
+	  3. Mission    ONE persistent instruction box (the steal mission), shown
+	                until its owner clears it; hidden while a modal / centred
+	                card is open
+	  4. Announce   ONE announcement line: banners, toasts and event starts,
 	                queued and shown one at a time
-	  4. Status     live bars that stay up (the heist's GET HOME! / THIEF IN
+	  5. Status     live bars that stay up (the heist's GET HOME! / THIEF IN
 	                YOUR LAB! bars) hang below whatever the announcement uses
 
 	Nothing else places anything at top centre: every owner asks
@@ -29,6 +32,11 @@
 
 	  Announce({ Key?, Priority?, Seconds?, Height, Show(y), Hide(cut) -> seconds?,
 	             Move?(y), Valid?() -> boolean })
+
+	The mission: `SetMission({ Key, Height, Show(y), Hide(), Move?(y) }?)`
+	(nil clears). Not queued: one at a time, up until its owner clears it,
+	but TopStack calls Hide() while `UIKit.IsOverlayOpen()` and Show(y) again
+	when the overlay closes (like the tutorial banner's IsCovered).
 ]]
 local RunService = game:GetService("RunService")
 
@@ -36,7 +44,7 @@ local UIKit = require(script.Parent.UIKit)
 
 local TopStack = {}
 
-export type Slot = "Objective" | "Chip" | "Announce" | "Status"
+export type Slot = "Objective" | "Chip" | "Mission" | "Announce" | "Status"
 
 export type Item = {
 	Key: string?,
@@ -65,6 +73,17 @@ local announceHeight = 0
 local listeners: { (slot: Slot) -> () } = {}
 local lastY: { [string]: number } = {}
 
+export type Mission = {
+	Key: string,
+	Height: number, -- logical px the box uses while it shows
+	Show: (y: number) -> (),
+	Hide: () -> (),
+	Move: ((y: number) -> ())?, -- the slot moved while it showed
+}
+
+local missionItem: Mission? = nil
+local missionShown = false -- Show() ran and Hide() has not (an overlay hides it)
+
 local queue: { Item } = {}
 local current: Item? = nil
 local running = false
@@ -83,28 +102,40 @@ function TopStack.SetHeight(slot: "Objective" | "Chip", provider: () -> number)
 	heights[slot] = provider
 end
 
-export type Plan = { Objective: number, Chip: number, Announce: number, Status: number }
+export type Plan = { Objective: number, Chip: number, Mission: number, Announce: number, Status: number }
 
 -- The slots' logical y from the heights they use, top to bottom. The
 -- objective bar starts at `cardTop` (UIKit.GetCardTop: under the Roblox top
 -- bar); with it the chip and everything below sit under it, without it the
 -- chip keeps CHIP_Y beside the top bar. Pure (/selftest runs it at both
--- layouts).
-function TopStack.PlanFor(cardTop: number, objective: number, chip: number, announce: number): Plan
+-- layouts). `mission` (default 0) sits between the chip and the announcement.
+function TopStack.PlanFor(cardTop: number, objective: number, chip: number, announce: number, mission: number?): Plan
 	local gap = TopStack.GAP
+	local missionPx = mission or 0
 	local chipY = if objective > 0 then cardTop + objective + gap else TopStack.CHIP_Y
-	local announceY = if chip > 0 then chipY + chip + gap elseif objective > 0 then chipY else TopStack.CHIP_Y
+	local missionY = if chip > 0 then chipY + chip + gap elseif objective > 0 then chipY else TopStack.CHIP_Y
+	local announceY = if missionPx > 0 then missionY + missionPx + gap else missionY
 	return {
 		Objective = cardTop,
 		Chip = chipY,
+		Mission = missionY,
 		Announce = announceY,
 		Status = if announce > 0 then announceY + announce + gap else announceY,
 	}
 end
 
+local function missionHeight(): number
+	local item = missionItem
+	return if item and missionShown then item.Height else 0
+end
+
 local function computeY(slot: Slot): number
-	local plan = TopStack.PlanFor(UIKit.GetCardTop(), height("Objective"), height("Chip"), announceHeight)
-	return if slot == "Objective" then plan.Objective elseif slot == "Chip" then plan.Chip elseif slot == "Announce" then plan.Announce else plan.Status
+	local plan = TopStack.PlanFor(UIKit.GetCardTop(), height("Objective"), height("Chip"), announceHeight, missionHeight())
+	return if slot == "Objective" then plan.Objective
+		elseif slot == "Chip" then plan.Chip
+		elseif slot == "Mission" then plan.Mission
+		elseif slot == "Announce" then plan.Announce
+		else plan.Status
 end
 
 function TopStack.GetY(slot: Slot): number
@@ -113,7 +144,7 @@ end
 
 -- The logical height a slot uses right now (0: empty). /selftest.
 function TopStack.GetHeight(slot: Slot): number
-	return if slot == "Announce" then announceHeight else height(slot)
+	return if slot == "Announce" then announceHeight elseif slot == "Mission" then missionHeight() else height(slot)
 end
 
 -- Logical px from the top of the screen to the bottom of everything the
@@ -139,10 +170,21 @@ function TopStack.OnChanged(callback: (slot: Slot) -> ())
 	table.insert(listeners, callback)
 end
 
-local SLOTS: { Slot } = { "Objective", "Chip", "Announce", "Status" }
+local SLOTS = { "Objective", "Chip", "Mission", "Announce", "Status" } :: { Slot }
 
 local function poll()
-	for _, slot in SLOTS do
+	-- The mission box: up unless a modal / centred card is open.
+	local mission = missionItem
+	local wantShown = mission ~= nil and not UIKit.IsOverlayOpen()
+	if mission and wantShown ~= missionShown then
+		missionShown = wantShown
+		if wantShown then
+			mission.Show(computeY("Mission"))
+		else
+			mission.Hide()
+		end
+	end
+	for _, slot: Slot in SLOTS do
 		local y = computeY(slot)
 		local old = lastY[slot]
 		lastY[slot] = y
@@ -155,8 +197,37 @@ local function poll()
 			if slot == "Announce" and move then
 				move(y)
 			end
+			local missionMove = if mission and missionShown then mission.Move else nil
+			if slot == "Mission" and missionMove then
+				missionMove(y)
+			end
 		end
 	end
+end
+
+--[[ The mission --------------------------------------------------------------------- ]]
+
+-- Sets (or, with nil, clears) the one mission box. A different mission
+-- replaces the old one (Hide, then Show).
+function TopStack.SetMission(item: Mission?)
+	local old = missionItem
+	if old and missionShown then
+		missionShown = false
+		old.Hide()
+	end
+	missionItem = item
+	poll()
+end
+
+-- The mission set now (/selftest, owners); nil when none.
+function TopStack.GetMissionKey(): string?
+	local item = missionItem
+	return if item then item.Key else nil
+end
+
+-- Whether the box is up this moment (set and no overlay covering it).
+function TopStack.IsMissionShown(): boolean
+	return missionItem ~= nil and missionShown
 end
 
 --[[ The announcement line ---------------------------------------------------------- ]]

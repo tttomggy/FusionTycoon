@@ -47,6 +47,16 @@ pattern.
 compatibility is what allowed the migration to happen service-by-service, and
 it is retained so future additions can do the same.
 
+### Top-centre slots (UI)
+
+`UI/TopStack` owns the top centre, top to bottom: Objective (tutorial bar),
+Chip (event chip), **Mission** (the steal mission box: `TopStack.SetMission`,
+one at a time, hidden behind any modal, owner `UI/MissionBanner`), Announce
+(queued lines), Status (heist bars). `TopStack.PlanFor(cardTop, objective,
+chip, announce, mission?)` is the pure plan `/selftest` runs at 1920×1080,
+1366×768 and 844×390; `GetStableBottom()` includes the Mission slot, so the
+gacha card and every modal band clear it. Details: `docs/systems/tutorial.md`.
+
 ### Known type-checker findings (unfixed, tracked)
 
 `luau-lsp analyze` currently reports **2 pre-existing errors in one shared

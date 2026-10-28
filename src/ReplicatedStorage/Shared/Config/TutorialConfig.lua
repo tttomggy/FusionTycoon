@@ -62,6 +62,7 @@ export type ExplainCard = {
 	Body: string,
 	Model: string?,
 	Orbs: { string }?,
+	Small: string?, -- a smaller second line under Body
 }
 
 export type Step = {
@@ -152,7 +153,8 @@ TutorialConfig.Steps = {
 		Card = {
 			Icon = "🔮",
 			Title = "Fusing",
-			Body = "Fusing turns 2 orbs of the same tier into 1 better orb. Common + Common → Rare!",
+			Body = "Fuse 2 same orbs → 1 better orb!",
+			Small = "More orbs in = better odds.",
 			Orbs = { "Common", "+", "Common", "→", "Rare" },
 		},
 		Banner = "Fuse your 2 orbs",
@@ -340,6 +342,7 @@ end
 export type TipDef = {
 	Id: string,
 	Line: string,
+	WorldLine: string?, -- the world bubble's text when it differs from Line (tipRival: the mission box carries the Line)
 	Hand: string?,
 	Target: string?,
 	PromptName: string?,
@@ -356,6 +359,8 @@ TutorialConfig.Tips = {
 		PromptName = "StealPrompt",
 		Prompt = "STEAL",
 		Line = "Steal from the rival lab! Hold E, run home, don't get caught!",
+		-- The big MissionBanner (TopStack Mission slot) says it all; the bubble over the pedestal keeps one word.
+		WorldLine = "STEAL!",
 		MaxSeconds = 180, -- ends on the first delivered rival steal, or after 3 min
 	},
 	{ Id = "tipUpgrade", Hand = "Upgrades", Line = "Upgrade generators to earn faster!" },

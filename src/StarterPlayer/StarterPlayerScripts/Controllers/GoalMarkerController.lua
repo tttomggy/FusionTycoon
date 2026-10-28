@@ -31,7 +31,9 @@
 	instead: the Gacha Pad, the Fusion Machine, a station to upgrade, the
 	nearest rival lab's best pedestal, or no arrow at all (Earn). A running
 	tip (TutorialController: SetTipActive) takes the coach's arrow while it
-	runs, then the coach gets it back. PlanGoalArrow is that decision.
+	runs, then the coach gets it back. The idle nudge (LoopCoachController:
+	SetNudge) points at the Gacha Pad or the Fusion Machine over the coach
+	and the goal, under a tip. PlanGoalArrow is that decision.
 
 	Updates on every goal change and goes away after the last goal. A world
 	target that still can't be found TARGET_WARN_SECONDS after the plot is
@@ -77,6 +79,7 @@ local currentGoalIndex: number? = nil
 local currentMarkerText: string? = nil
 -- A tip (TutorialController) is running: the coach's arrow waits.
 local tipActive = false
+local nudgeTarget: string? = nil -- LoopCoachController's idle nudge: "GachaStation" / "FusionMachine"
 local currentTarget: Instance? = nil
 local currentUiButton: string? = nil
 
@@ -468,12 +471,18 @@ end
 
 -- Where the goal arrow points and what it says: (target name, caption).
 -- A target name of nil means no arrow. Pure (/selftest runs it):
+--   an idle nudge is up (no tip)  -> the nudge's target + its one word
 --   coach has taken over (Takes)  -> the coach's target + its one word, or
 --                                    nothing while a tip is running (the
 --                                    tip has the arrow) or on Earn
 --   an "own a tier" goal's step   -> that step's target, the goal's text
 --   anything else                 -> the goal's own target and text
-local function planGoalArrow(goal: GoalConfig.GoalDef, progress: TycoonController.GoalProgress?, tipRunning: boolean): (string?, string)
+local NUDGE_TEXT = { GachaStation = "Pull", FusionMachine = "Fuse" } :: { [string]: string }
+
+local function planGoalArrow(goal: GoalConfig.GoalDef, progress: TycoonController.GoalProgress?, tipRunning: boolean, nudge: string?): (string?, string)
+	if nudge ~= nil and not tipRunning then
+		return nudge, NUDGE_TEXT[nudge] or "Pull"
+	end
 	local coach = if progress then progress.Coach else nil
 	if coach and coach.Takes then
 		if tipRunning then
@@ -532,7 +541,7 @@ local function refresh()
 	-- Fusion Machine, the Gacha Pad, UPGRADES) and follows every sync; the
 	-- coach points instead when it has taken over (PlanGoalArrow).
 	local progress = TycoonController.GetGoalProgress()
-	local targetName, markerText = planGoalArrow(goal, progress, tipActive)
+	local targetName, markerText = planGoalArrow(goal, progress, tipActive, nudgeTarget)
 	if not targetName then
 		-- Nothing to point at (the coach's Earn, or a tip has the arrow).
 		clearWorldMarker()
@@ -609,6 +618,23 @@ function GoalMarkerController.SetTipActive(active: boolean)
 	end
 	tipActive = active
 	refresh()
+end
+
+function GoalMarkerController.IsTipActive(): boolean
+	return tipActive
+end
+
+-- The idle nudge's arrow: "GachaStation" / "FusionMachine" (nil clears it).
+function GoalMarkerController.SetNudge(target: string?)
+	if nudgeTarget == target then
+		return
+	end
+	nudgeTarget = target
+	refresh()
+end
+
+function GoalMarkerController.GetNudge(): string?
+	return nudgeTarget
 end
 
 -- Points the marker at `target` instead of the goal until cleared (nil).

@@ -60,6 +60,7 @@ local UI = script.Parent.Parent.UI
 local UIKit = require(UI.UIKit)
 local TutorialCards = require(UI.TutorialCards)
 local TutorialBanner = require(UI.TutorialBanner)
+local MissionBanner = require(UI.MissionBanner)
 local TutorialExplain = require(UI.TutorialExplain)
 local TutorialHand = require(UI.TutorialHand)
 local HudGate = require(UI.HudGate)
@@ -814,6 +815,9 @@ local function endTip()
 	TutorialHand.SetTarget(nil)
 	GoalMarkerController.SetTutorialTarget(nil, nil, false)
 	GoalMarkerController.SetTipActive(false) -- the loop coach gets the arrow back
+	if id == "tipRival" then
+		MissionBanner.SetTip(false)
+	end
 	applyPath()
 end
 
@@ -827,10 +831,15 @@ local function startTip(id: string)
 	end
 	local def = TutorialConfig.GetTip(id)
 	if def then
-		AnnouncementController.ShowLine(def.Line, "Tip")
+		if id == "tipRival" then
+			-- The mission box is this tip's text (no announcement line).
+			MissionBanner.SetTip(true)
+		else
+			AnnouncementController.ShowLine(def.Line, "Tip")
+		end
 		if def.Target then
 			tipPressing = def
-			GoalMarkerController.SetTutorialTarget(def.Target, def.Line, true)
+			GoalMarkerController.SetTutorialTarget(def.Target, def.WorldLine or def.Line, true)
 		end
 	end
 	applyPath()

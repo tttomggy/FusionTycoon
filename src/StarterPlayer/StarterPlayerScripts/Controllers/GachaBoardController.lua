@@ -447,6 +447,7 @@ local function buildContent(view: CardView, card: Frame)
 	local eventLayout = Instance.new("UIListLayout")
 	eventLayout.FillDirection = Enum.FillDirection.Horizontal
 	eventLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	eventLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	eventLayout.Parent = eventRow
 	view.EventPill = UIKit.Pill({ Name = "EventChip", Parent = eventRow, Text = "", Gradient = UITheme.Gradients.Violet, TextSize = 11, Height = 20 })
 	view.LuckPill = UIKit.Pill({ Name = "LuckPill", Parent = pills, Text = "", Gradient = UITheme.Gradients.Green, TextSize = 11, Height = 18 })

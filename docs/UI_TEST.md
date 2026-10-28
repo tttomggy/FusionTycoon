@@ -2079,7 +2079,8 @@ From Harris's Oct 7 playtest. New player, `/tutorial reset`.
   no big chevrons at the end. The bouncing goal arrow stays.
 - [ ] **Explain cards:** none before the claim. Then one big card before
   each of Upgrade (generator model), Pull (Gacha Pad), Pedestals (pedestal;
-  OK ends the step), Fuse (Common + Common → Rare orbs), Index (after INDEX
+  OK ends the step), Fuse (the diagram reads `⚪ + ⚪ → 🔵` left to right, under it
+  `Fuse 2 same orbs → 1 better orb!` and the smaller `More orbs in = better odds.`), Index (after INDEX
   pops in; OK ends it), Multiplier (pad), Weather, Rebirth. Each: large
   image, title, 1-2 sentences ≥ 22 px, a big green OK. Never two at once:
   card, OK, banner / path / hand, action, next card.

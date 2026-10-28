@@ -389,6 +389,7 @@ local function buildPlayers()
 	local confirmRow = Instance.new("UIListLayout")
 	confirmRow.FillDirection = Enum.FillDirection.Horizontal
 	confirmRow.Padding = UDim.new(0, GAP)
+	confirmRow.SortOrder = Enum.SortOrder.LayoutOrder
 	confirmRow.Parent = confirmActions
 	holdButton = button(confirmActions, HOLD_TEXT, 220, "Red", function() end)
 	holdButton.MouseButton1Down:Connect(startHold)

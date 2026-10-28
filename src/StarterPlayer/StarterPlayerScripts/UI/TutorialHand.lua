@@ -19,6 +19,7 @@
 	    Tapping it runs `onClick` (the controller fires the real prompt).
 
 	  SetTarget(gui?)              where the hand points (nil: no hand)
+	  SetCaption(text?)            a small pill beside the hand ("+$13.3/s")
 	  SetContextual(text?, onClick) show / hide the big button
 	  GetContextualButton()        its holder (the hand's target on world steps)
 	  IsContextualShown() / GetTarget()
@@ -58,6 +59,7 @@ local target: GuiObject? = nil
 local tipAbs: Vector2? = nil
 local rectAbs: { Position: Vector2, Size: Vector2 }? = nil
 
+local captionPill: TextLabel
 local buttonGui: ScreenGui
 local buttonHolder: Frame
 local buttonBody: TextButton
@@ -168,6 +170,17 @@ function TutorialHand.GetTarget(): GuiObject?
 	return target
 end
 
+-- A small pill beside the hand (right of the glyph, level with the
+-- fingertip's side); nil hides it.
+function TutorialHand.SetCaption(text: string?)
+	UIKit.SetPillVisible(captionPill, text ~= nil)
+	captionPill.Text = text or ""
+end
+
+function TutorialHand.GetCaption(): string?
+	return if UIKit.PillRoot(captionPill).Visible then captionPill.Text else nil
+end
+
 --[[ The contextual button ------------------------------------------------------------- ]]
 
 local function placeButton()
@@ -263,6 +276,18 @@ function TutorialHand.Init()
 		ZIndex = 2,
 		Parent = handRoot,
 	})
+	-- The caption pill rides the hand: right of the glyph, mid-height.
+	captionPill = UIKit.Pill({
+		Name = "Caption",
+		Parent = handRoot,
+		Text = "",
+		Gradient = UITheme.Gradients.Green,
+		TextSize = 16,
+		Height = 26,
+		Position = UDim2.fromOffset(HAND_SIZE + 2, HAND_SIZE / 2 - 13),
+		ZIndex = 3,
+	})
+	UIKit.SetPillVisible(captionPill, false)
 	RunService:BindToRenderStep("TutorialHand", Enum.RenderPriority.Last.Value + 1, placeHand)
 end
 

@@ -82,6 +82,7 @@ LoopCoach.HoldSeconds = 3
 export type Upgrade = {
 	Name: string, -- "Ember Forge" / "Multiplier"
 	Target: string, -- "Generator_ember_forge" / "MultiplierStation"
+	StationId: string, -- the generator id ("ember_forge") / "multiplier": the UPGRADES panel row the hand points into
 	Cost: number,
 	Gain: number, -- +$/s it adds right now
 }
@@ -112,10 +113,15 @@ export type Result = {
 	Cost: number?, -- Pull / Earn: the next pull's price
 	Name: string?, -- Upgrade: the station's name
 	Gain: number?, -- Upgrade: +$/s
+	UpgradeTarget: UpgradeTarget?, -- Upgrade: where the hand points inside the UPGRADES panel
 	Rival: string?, -- Steal: the lab's name
 	Income: number?, -- Earn: $/s now
 	Seconds: number?, -- Earn: seconds until the next pull (nil: no income)
 }
+
+-- Where the hand points inside the UPGRADES panel: the station's row and
+-- which of its buttons ("Upgrade": the buy button; "Max": the MAX ×N one).
+export type UpgradeTarget = { StationId: string, Kind: string }
 
 export type Wire = {
 	Step: string,
@@ -126,6 +132,7 @@ export type Wire = {
 	Cost: number?,
 	Name: string?,
 	Gain: number?,
+	UpgradeTarget: UpgradeTarget?, -- Upgrade only
 	Rival: string?,
 	Income: number?,
 	Seconds: number?,
@@ -143,7 +150,7 @@ function LoopCoach.PickUpgrade(inputs: TycoonConfig.IncomeInputs, cash: number):
 	local base = TycoonConfig.GetPassiveCashPerSecond(inputs)
 	local best: Upgrade? = nil
 	local bestScore = -1
-	local function consider(name: string, target: string, cost: number, changed: TycoonConfig.IncomeInputs)
+	local function consider(name: string, target: string, stationId: string, cost: number, changed: TycoonConfig.IncomeInputs)
 		if cost > cash then
 			return
 		end
@@ -151,7 +158,7 @@ function LoopCoach.PickUpgrade(inputs: TycoonConfig.IncomeInputs, cash: number):
 		local score = gain / math.max(cost, 1)
 		local current = best
 		if score > bestScore or (score == bestScore and current ~= nil and cost < current.Cost) then
-			best = { Name = name, Target = target, Cost = cost, Gain = gain }
+			best = { Name = name, Target = target, StationId = stationId, Cost = cost, Gain = gain }
 			bestScore = score
 		end
 	end
@@ -162,14 +169,14 @@ function LoopCoach.PickUpgrade(inputs: TycoonConfig.IncomeInputs, cash: number):
 			levels[generator.Id] = level + 1
 			local changed = table.clone(inputs)
 			changed.GeneratorLevels = levels
-			consider(generator.Name, "Generator_" .. generator.Id, TycoonConfig.GetUpgradeCost(generator, level), changed)
+			consider(generator.Name, "Generator_" .. generator.Id, generator.Id, TycoonConfig.GetUpgradeCost(generator, level), changed)
 		end
 	end
 	local padCost = TycoonConfig.GetCashMultiplierUpgradeCost(inputs.CashMultiplierLevel)
 	if padCost then
 		local changed = table.clone(inputs)
 		changed.CashMultiplierLevel = inputs.CashMultiplierLevel + 1
-		consider("Multiplier", "MultiplierStation", padCost, changed)
+		consider("Multiplier", "MultiplierStation", "multiplier", padCost, changed)
 	end
 	return best
 end
@@ -207,7 +214,7 @@ function LoopCoach.Candidates(input: Input): { [string]: Result }
 	end
 	local upgrade = input.Upgrade
 	if upgrade and input.Cash >= upgrade.Cost then
-		candidates.Upgrade = { Step = "Upgrade", Target = upgrade.Target, Name = upgrade.Name, Gain = upgrade.Gain, Cost = upgrade.Cost }
+		candidates.Upgrade = { Step = "Upgrade", Target = upgrade.Target, Name = upgrade.Name, Gain = upgrade.Gain, Cost = upgrade.Cost, UpgradeTarget = { StationId = upgrade.StationId, Kind = "Upgrade" } }
 	end
 	if input.Rival and input.StealsLeft > 0 then
 		candidates.Steal = { Step = "Steal", Target = LoopCoach.Targets.Steal, Rival = input.Rival }

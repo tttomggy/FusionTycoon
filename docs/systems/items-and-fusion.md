@@ -488,7 +488,35 @@ Takes, Lit }` inside the `SyncTycoon` snapshot (no new remote;
   $X/s more!`), the first affordable pull after being broke after a fuse
   (`More cash = more pulls = more fusions!`), the first delivered rival
   steal (`Free orb! Fuse it with yours.`).
-- `/selftest`: "loop coach" (server, stubbed `LoopCoach.Input` through
+- **Idle nudge** (`LoopCoachController`, client-timed): no pull, fuse, upgrade,
+  steal or Multiplier purchase for **40 s**, the tutorial done, cash for the
+  next pull and nothing else asking for attention -> one `TopStack` line
+  (`Pull more orbs! More orbs → fuse them → more cash every second.`; two
+  other wordings rotate so the same line never shows twice in a row) and the
+  goal arrow on the Gacha Pad (`GoalMarkerController.SetNudge`, over the
+  coach's arrow, under a running tip), cleared by the next action. Once per
+  idle spell, again after another 90 s, **at most 3 a session**. With a
+  fusable pair too (the coach's Fuse step) the line is `Fuse your 2 Epics, then
+  pull more orbs for the next fuse!`, the arrow on the Fusion Machine first
+  and on the Gacha Pad once the fuse landed. No cash and nothing to fuse =
+  no nudge (the coach's Earn line already counts down). Blocked time (a
+  tip, the steal mission box, a modal, a carried orb, the tutorial) restarts
+  the idle clock. The planning is pure on a `Nudger` (`NewNudger` / `NudgeTick`
+  / `NudgeAction`) so `/selftest` runs it on a stub clock.
+- **The upgrade hand leads into the panel** (`UI/UpgradeGuide`): while the coach
+  has taken over on `Upgrade` (and no tip or tutorial owns `TutorialHand`), the
+  hand is on the HUD's UPGRADES button; with `UpgradesPanel` open it scrolls the
+  best row into view (`UpgradesPanel.ScrollTo`) and points at that row's buy
+  button (`UpgradesPanel.GetButtonFor`) captioned with the row's own next
+  number (`+$13.3/s`, `TutorialHand.SetCaption`). The coach publishes
+  `Coach.UpgradeTarget = { StationId, Kind = "Upgrade" }` (the Multiplier Pad's
+  is `"multiplier"`: no row, so no in-panel hand). After the buy the coach moves
+  on and the hand goes; closing the panel puts it back on UPGRADES.
+- `/selftest`: "loop nudge" (stub clock: 40 s + cash -> one line and the Gacha
+  arrow, an action resets it, max 3, none while blocked, the pair line, the
+  arrow layers, the hand's plan, then at 1920×1080 and 844×390 the best
+  row's button inside the scroll view with the fingertip within 12 px above
+  it), "loop coach" (server, stubbed `LoopCoach.Input` through
   `GoalService.BuildCoach`: every step's line and target, the priority
   order, the 3 s hold, nothing during the tutorial, `Takes` / `Lit` per
   goal, `PickUpgrade`), "goal arrow" (client: coach / tip / goal step /
