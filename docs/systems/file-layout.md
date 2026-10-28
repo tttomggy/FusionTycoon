@@ -16,8 +16,8 @@ src/ReplicatedStorage/Shared/
                  MusicConfig — the background playlist and its fades, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
-                 RivalConfig — rival (NPC) labs: count, orb weights per
-                 Rebirth band, respawn, guard, StealsPerHour,
+                 RivalConfig — rival (NPC) labs: count, orb tiers (floor +
+                 roles + band weights), rotation, respawn, guard, StealsPerHour,
                  GoalConfig — the ordered onboarding goals,
                  SettingsConfig — the player's reveal-card rules,
                  ShopConfig — every pass / product and shop number,

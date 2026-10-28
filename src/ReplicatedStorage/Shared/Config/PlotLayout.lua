@@ -530,6 +530,7 @@ PlotLayout.Gate = {
 	BoardCenterY = 14.25,
 	BorderSize = v3(20.6, 5.1, 0.6),
 	StripSize = v3(20, 0.3, 0.9),
+	RotateChipStuds = v3(9, 1.4, 0), -- a rival lab's "fresh orbs in 1:48" chip under the board
 	SurfacePixelsPerStud = 40,
 }
 

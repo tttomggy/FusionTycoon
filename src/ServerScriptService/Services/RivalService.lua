@@ -18,10 +18,24 @@
 	    lab farthest from every player's lab goes first; a carry from it
 	    fails cleanly (HeistService.FailRivalCarries) before the plot goes.
 	  * Orbs are server objects (every client sees the same ones): plain,
-	    one RivalConfig.GoldenChance Golden, rolled from the weights of the
-	    LOWEST Rebirth count among the real players (RivalConfig.PickTier), so
-	    a new player never sees a Mythic. If that lowest count drops (a new
-	    player joins) the orbs rolled for a higher band are re-rolled.
+	    one RivalConfig.GoldenChance Golden. Each pedestal has a ROLE
+	    (RivalConfig.PlanRoles: one PlusOne, one Floor, the rest Weighted) and
+	    its tier comes from the FLOOR = the best tier owned by the least
+	    advanced real player in the server (RivalService.GetFloor, from their
+	    inventories; SetFloorProvider for /selftest): floor + 1 (never past
+	    Legendary), the floor, or a band-weighted tier at or above the floor.
+	    Never a banned tier, never four Commons for someone who owns Rares. If
+	    the floor DROPS (a weaker player joins) the orbs rolled for a higher
+	    one are re-rolled at once; a rise waits for the next rotation.
+	  * Rotation: every RivalConfig.RotateSeconds (+- jitter, labs spaced at
+	    least RotateMinGapSeconds apart) a lab re-rolls its orbs: a flash on the
+	    old orb, a shell closing on the new one. Never a pedestal that is being
+	    carried from; the whole lab waits for the next tick while its guard
+	    chases, a StealPrompt is held, or a player is within
+	    RotateKeepOutStuds of a pedestal. A pedestal waiting to respawn rolls
+	    its new orb when it comes back. The plot's NextRotateAt attribute
+	    (RivalService clock = unix seconds) feeds the gate sign's "fresh orbs in
+	    1:48" (WorldLabelController).
 	  * A stolen orb comes back after RivalConfig.RespawnSeconds (the
 	    respawn clock is injectable: SetClock, /selftest).
 
@@ -52,8 +66,10 @@ local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
+local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
@@ -81,7 +97,9 @@ type PedestalState = {
 	Orb: Orb?,
 	Carried: boolean,
 	RespawnAt: number?, -- RivalService clock time a stolen orb is back
-	Band: number, -- the band the orb was rolled for
+	Role: string, -- "PlusOne" | "Floor" | "Weighted" (RivalConfig.PlanRoles)
+	RolledRank: number, -- RivalConfig.OfferedRank of the floor the orb was rolled for
+	Holders: { [Player]: boolean }, -- players holding this pedestal's StealPrompt
 }
 
 type GuardMode = "Patrol" | "Chase" | "Home"
@@ -114,6 +132,7 @@ type Rival = {
 	Origin: CFrame,
 	Pedestals: { [number]: PedestalState },
 	Guard: Guard?,
+	NextRotateAt: number, -- RivalService clock time of the next orb rotation
 }
 
 -- What other services see of a rival lab.
@@ -136,6 +155,7 @@ type State = {
 	connections: { RBXScriptConnection },
 	-- Called with a rival's id just before it goes (HeistService fails its carries).
 	despawnHooks: { (number) -> () },
+	floorProvider: (() -> string)?, -- /selftest: the floor tier instead of the players' inventories
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -156,6 +176,7 @@ local state: State = {
 	guardAccumulator = 0,
 	connections = {},
 	despawnHooks = {},
+	floorProvider = nil,
 }
 
 -- Resolved in :Start(), never at module scope.
@@ -235,12 +256,47 @@ function RivalService.GetLowestRebirths(): number
 	return lowest or 0
 end
 
--- One rival orb for `band`: never a banned tier, plain, one GoldenChance
--- Golden. Pure but for the RNG (injectable: SetRandom).
-function RivalService.RollOrb(band: number): Orb
-	local tier = RivalConfig.PickTier(band, state.rng:NextNumber())
+-- The floor: the best tier owned by the LEAST advanced real player (a player
+-- with no orb counts as Common; nobody in is Common). Never a banned tier.
+function RivalService.GetFloor(): string
+	local provider = state.floorProvider
+	if provider then
+		return RivalConfig.ClampFloor(provider())
+	end
+	local lowest: number? = nil
+	for _, player in Players:GetPlayers() do
+		if PlayerDataService.IsDataLoaded(player) then
+			local best = 1
+			local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+			for _, item in inventory do
+				best = math.max(best, ItemConfig.Tiers[item.Tier] or 1)
+			end
+			lowest = if lowest == nil then best else math.min(lowest, best)
+		end
+	end
+	local tier: string? = nil
+	for _, name in RivalConfig.TierOrder do
+		if ItemConfig.Tiers[name] == lowest then
+			tier = name
+		end
+	end
+	return RivalConfig.ClampFloor(tier)
+end
+
+-- /selftest: stub the floor (a tier name; nil goes back to the inventories).
+function RivalService.SetFloorProvider(provider: (() -> string)?)
+	state.floorProvider = provider
+end
+
+local function roll(): number
+	return state.rng:NextNumber()
+end
+
+-- One rival orb of `tier`: plain, one GoldenChance Golden. Pure but for the
+-- RNG (injectable: SetRandom).
+function RivalService.RollOrb(tier: string): Orb
 	local def = ItemConfig.PickRandomOfTier(tier, state.rng) or ItemConfig.Items[1]
-	local mutation: string? = if state.rng:NextNumber() < RivalConfig.GoldenChance then "Golden" else nil
+	local mutation: string? = if roll() < RivalConfig.GoldenChance then "Golden" else nil
 	return {
 		ItemId = def.Id,
 		Tier = def.Tier,
@@ -304,16 +360,71 @@ local function showPedestal(rival: Rival, index: number)
 	pedestal:SetAttribute("BeingStolen", ped.Carried)
 end
 
-local function fillPedestal(rival: Rival, index: number, band: number)
+-- A transient flash at `center`: a ball from `fromSize` to `toSize` studs
+-- fading out (decorative, destroyed when done). The swap cue on a rotation.
+local function flash(center: Vector3, color: Color3, fromSize: number, toSize: number)
+	local ball = Instance.new("Part")
+	ball.Name = "RivalSwapFlash"
+	ball.Shape = Enum.PartType.Ball
+	ball.Anchored = true
+	ball.CanCollide = false
+	ball.CanQuery = false
+	ball.CanTouch = false
+	ball.CastShadow = false
+	ball.Material = Enum.Material.Neon
+	ball.Color = color
+	ball.Transparency = 0.35
+	ball.Size = Vector3.one * fromSize
+	ball.Position = center
+	ball.Parent = Workspace
+	local info = TweenInfo.new(RivalConfig.PopSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	local tween = TweenService:Create(ball, info, { Size = Vector3.one * toSize, Transparency = 1 })
+	tween.Completed:Once(function()
+		ball:Destroy()
+	end)
+	tween:Play()
+end
+
+-- Where the orb on a pedestal sits (its rest pose; clients bob it), or nil.
+local function orbCenter(pedestal: BasePart): Vector3?
+	local group = pedestal:FindFirstChild("OrbGroup", true)
+	if group and group:IsA("Model") and group.PrimaryPart then
+		return group.PrimaryPart.Position
+	end
+	return nil
+end
+
+local function tierColor(tier: string): Color3
+	return FusionConfig.TierAccentColors[tier] or UITheme.Colors.Text
+end
+
+-- Rolls the pedestal's orb from its role and the current floor. `cue`: the
+-- swap flash (a rotation), not for a first fill or a respawn.
+local function fillPedestal(rival: Rival, index: number, cue: boolean?)
 	local ped = rival.Pedestals[index]
 	if not ped then
 		return
 	end
-	ped.Orb = RivalService.RollOrb(band)
-	ped.Band = band
+	local pedestal = getPedestal(rival, index)
+	local oldOrb = ped.Orb
+	local oldCenter = if cue and pedestal and oldOrb then orbCenter(pedestal) else nil
+	local floor = RivalService.GetFloor()
+	local tier = RivalConfig.TierForRole(ped.Role, floor, RivalConfig.GetBand(RivalService.GetLowestRebirths()), roll)
+	local newOrb = RivalService.RollOrb(tier)
+	ped.Orb = newOrb
+	ped.RolledRank = RivalConfig.OfferedRank(floor)
 	ped.Carried = false
 	ped.RespawnAt = nil
+	if oldCenter and oldOrb then
+		flash(oldCenter, tierColor(oldOrb.Tier), 1.5, 5)
+	end
 	showPedestal(rival, index)
+	if cue and pedestal then
+		local newCenter = orbCenter(pedestal)
+		if newCenter then
+			flash(newCenter, tierColor(newOrb.Tier), 6, 1.5)
+		end
+	end
 end
 
 --[[ Guard ------------------------------------------------------------------------ ]]
@@ -703,6 +814,33 @@ function RivalService.GetRespawnAt(rivalId: number, index: number): number?
 	return if ped then ped.RespawnAt else nil
 end
 
+-- When the lab's next orb rotation is due (RivalService clock time).
+function RivalService.GetNextRotateAt(rivalId: number): number?
+	local rival = state.rivals[rivalId]
+	return if rival then rival.NextRotateAt else nil
+end
+
+-- /selftest: the tiers of the standing orbs, pedestal 1..PedestalCount (nil
+-- for an empty or carried one).
+function RivalService.GetTiers(rivalId: number): { string? }
+	local tiers: { string? } = {}
+	local rival = state.rivals[rivalId]
+	for index = 1, RivalConfig.PedestalCount do
+		local ped = rival and rival.Pedestals[index]
+		tiers[index] = if ped and ped.Orb then ped.Orb.Tier else nil
+	end
+	return tiers
+end
+
+-- /selftest: due now (the next Step rotates this lab if it may).
+function RivalService.SelfTestMakeRotationDue(rivalId: number)
+	local rival = state.rivals[rivalId]
+	if rival then
+		rival.NextRotateAt = now() - 1
+		rival.Plot:SetAttribute("NextRotateAt", rival.NextRotateAt)
+	end
+end
+
 function RivalService.Now(): number
 	return now()
 end
@@ -882,6 +1020,74 @@ local function pickSlot(): number?
 	return best
 end
 
+--[[ Rotation ------------------------------------------------------------------- ]]
+
+-- Counts the players holding a pedestal's StealPrompt (a grab about to
+-- happen); the prompt's hold events fire on the server too.
+local function trackHolders(rival: Rival, index: number)
+	local ped = rival.Pedestals[index]
+	local pedestal = getPedestal(rival, index)
+	local prompt = pedestal and pedestal:FindFirstChild("StealPrompt")
+	if not ped or not prompt or not prompt:IsA("ProximityPrompt") then
+		return
+	end
+	prompt.PromptButtonHoldBegan:Connect(function(holder: Player)
+		ped.Holders[holder] = true
+	end)
+	prompt.PromptButtonHoldEnded:Connect(function(holder: Player)
+		ped.Holders[holder] = nil
+	end)
+end
+
+-- Sets the lab's next rotation time (spaced from the other labs') and
+-- publishes it on the plot for the gate sign's countdown.
+local function scheduleRotation(rival: Rival, wanted: number)
+	local others: { number } = {}
+	for _, other in state.rivals do
+		if other ~= rival then
+			table.insert(others, other.NextRotateAt)
+		end
+	end
+	rival.NextRotateAt = RivalConfig.SpaceRotation(wanted, others)
+	rival.Plot:SetAttribute("NextRotateAt", rival.NextRotateAt)
+end
+
+-- Whether `rival` may swap its orbs right now (else: the next tick tries
+-- again): the guard isn't chasing, nobody holds a StealPrompt, and no player
+-- stands at a pedestal (about to grab).
+local function canRotate(rival: Rival): boolean
+	local guard = rival.Guard
+	if guard and guard.Mode == "Chase" then
+		return false
+	end
+	for index, ped in rival.Pedestals do
+		if next(ped.Holders) ~= nil then
+			return false
+		end
+		local pedestal = getPedestal(rival, index)
+		if pedestal then
+			for _, player in Players:GetPlayers() do
+				local root = getRoot(player)
+				if root and (root.Position - pedestal.Position).Magnitude <= RivalConfig.RotateKeepOutStuds then
+					return false
+				end
+			end
+		end
+	end
+	return true
+end
+
+-- Re-rolls every standing orb of the lab (not a carried one, not a pedestal
+-- waiting to respawn: that one rolls when it is back), with the swap cue.
+local function rotateLab(rival: Rival)
+	for index, ped in rival.Pedestals do
+		if ped.Orb ~= nil and not ped.Carried then
+			fillPedestal(rival, index, true)
+		end
+	end
+	scheduleRotation(rival, now() + RivalConfig.RotateDelay(roll()))
+end
+
 local function spawnRival(): Rival?
 	local slot = pickSlot()
 	if not slot or not TycoonService.ReserveSlot(slot) then
@@ -904,13 +1110,23 @@ local function spawnRival(): Rival?
 		Origin = PlotLayout.GetSlotCFrame(slot),
 		Pedestals = {},
 		Guard = nil,
+		NextRotateAt = 0,
 	}
-	state.rivals[id] = rival
-	local band = RivalConfig.GetBand(RivalService.GetLowestRebirths())
-	for index = 1, RivalConfig.PedestalCount do
-		rival.Pedestals[index] = { Orb = nil, Carried = false, RespawnAt = nil, Band = band }
-		fillPedestal(rival, index, band)
+	local labsBefore = 0
+	for _ in state.rivals do
+		labsBefore += 1
 	end
+	state.rivals[id] = rival
+	local roles = RivalConfig.PlanRoles(roll)
+	for index = 1, RivalConfig.PedestalCount do
+		rival.Pedestals[index] = { Orb = nil, Carried = false, RespawnAt = nil, Role = roles[index], RolledRank = 1, Holders = {} }
+		fillPedestal(rival, index)
+		trackHolders(rival, index)
+	end
+	-- The first rotation of the 1st / 2nd / 3rd lab is spread over the interval.
+	local fractions = RivalConfig.RotateFirstFractions
+	local fraction = fractions[math.min(labsBefore + 1, #fractions)]
+	scheduleRotation(rival, now() + RivalConfig.RotateSeconds * fraction)
 	task.spawn(buildGuard, rival)
 	return rival
 end
@@ -988,8 +1204,9 @@ end
 
 --[[ Housekeeping --------------------------------------------------------------------- ]]
 
--- One pass: refill the labs, bring back stolen orbs whose time is up, and
--- re-roll orbs that were rolled for a higher band than the server's lowest.
+-- One pass: refill the labs, bring back stolen orbs whose time is up,
+-- re-roll the orbs of a lab whose rotation is due (and the ones rolled for a
+-- higher floor than the server's lowest now), all only while canRotate.
 -- Called every FillSeconds; /selftest calls it with its own clock.
 function RivalService.Step()
 	while true do
@@ -1001,14 +1218,29 @@ function RivalService.Step()
 			break
 		end
 	end
-	local band = RivalConfig.GetBand(RivalService.GetLowestRebirths())
 	local t = now()
+	local floorRank = RivalConfig.OfferedRank(RivalService.GetFloor())
 	for _, rival in state.rivals do
 		for index, ped in rival.Pedestals do
 			if ped.Orb == nil and not ped.Carried and ped.RespawnAt ~= nil and t >= ped.RespawnAt then
-				fillPedestal(rival, index, band)
-			elseif ped.Orb ~= nil and not ped.Carried and ped.Band > band then
-				fillPedestal(rival, index, band)
+				fillPedestal(rival, index)
+			end
+		end
+		local lowered = false
+		for _, ped in rival.Pedestals do
+			lowered = lowered or (ped.Orb ~= nil and not ped.Carried and ped.RolledRank > floorRank)
+		end
+		if (t >= rival.NextRotateAt or lowered) and canRotate(rival) then
+			if t >= rival.NextRotateAt then
+				rotateLab(rival)
+			else
+				-- A weaker player joined: only the orbs rolled for a higher
+				-- floor are re-rolled; the schedule is unchanged.
+				for index, ped in rival.Pedestals do
+					if ped.Orb ~= nil and not ped.Carried and ped.RolledRank > floorRank then
+						fillPedestal(rival, index, true)
+					end
+				end
 			end
 		end
 	end

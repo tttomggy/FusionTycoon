@@ -25,6 +25,11 @@
 	RespawnAt attribute (RivalService clock = unix seconds =
 	Workspace:GetServerTimeNow()); the chip goes when the orb is back.
 
+	Every RIVAL lab's gate sign carries a "fresh orbs in 1:48" chip counted
+	down the same way from the plot's NextRotateAt attribute (the lab swaps its
+	orbs then, RivalService); past the time it reads "fresh orbs soon" until
+	the swap happens.
+
 	It also hides every plot BillboardGui (pedestal and pad labels) drawn
 	within HIDE_NEAR_STUDS of the camera, showing it again past
 	SHOW_FAR_STUDS (the gap stops flicker), so a label can't fill the screen
@@ -301,6 +306,59 @@ local function updateRespawnChips()
 	end
 end
 
+--[[ Rival rotation countdown ------------------------------------------------------- ]]
+
+local ROTATE_CHIP_NAME = "RotateChip"
+local rotateChips: { [Instance]: BillboardKit.Chip } = {}
+
+local function rotateText(untilRotate: number): string
+	if untilRotate <= 0 then
+		return "fresh orbs soon"
+	end
+	return ("fresh orbs in %d:%02d"):format(math.ceil(untilRotate) // 60, math.ceil(untilRotate) % 60)
+end
+
+-- One pass over the rival labs (plots with the Rival attribute).
+local function updateRotateChips()
+	local plots = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	if not plots then
+		return
+	end
+	local now = Workspace:GetServerTimeNow()
+	local seen: { [Instance]: boolean } = {}
+	for _, plot in plots:GetChildren() do
+		local rotateAt = plot:GetAttribute("NextRotateAt")
+		local gate = plot:FindFirstChild("SignGate")
+		local board = gate and gate:FindFirstChild("SignBoard")
+		if plot:GetAttribute("Rival") == true and typeof(rotateAt) == "number" and board and board:IsA("BasePart") then
+			seen[plot] = true
+			local text = rotateText(rotateAt - now)
+			local chip = rotateChips[plot]
+			if not chip or chip.Gui.Parent ~= board then
+				local g = PlotLayout.Gate
+				chip = BillboardKit.Chip(board, {
+					Name = ROTATE_CHIP_NAME,
+					Text = text,
+					Studs = Vector2.new(g.RotateChipStuds.X, g.RotateChipStuds.Y),
+					StudsOffset = Vector3.new(0, -(g.BoardSize.Y / 2 + g.StripSize.Y + g.RotateChipStuds.Y / 2 + 0.3), 0),
+					MaxDistance = 140,
+				})
+				rotateChips[plot] = chip
+			end
+			local shown = chip :: BillboardKit.Chip
+			if shown.Label.Text ~= text then
+				shown.Label.Text = text
+			end
+		end
+	end
+	for plot, chip in rotateChips do
+		if not seen[plot] then
+			chip.Gui:Destroy()
+			rotateChips[plot] = nil
+		end
+	end
+end
+
 local function trackStealPrompt(prompt: ProximityPrompt)
 	if stealPrompts[prompt] ~= nil then
 		return
@@ -356,6 +414,7 @@ function WorldLabelController.Init()
 			stealCheckAccumulator = 0
 			updateStealPrompts()
 			updateRespawnChips()
+			updateRotateChips()
 		end
 	end)
 end

@@ -170,15 +170,46 @@ number); the steal itself is `HeistService`'s, same flow.
   player's lab** (slot centres; ties go to the newest) goes first. A carry
   from a despawning lab fails cleanly first (`RivalService.OnDespawn` hook,
   `HeistService.FailRivalCarries`: the orb is "back", outcome `Failed`).
-- **Orbs** are server objects. Each is rolled from `RivalConfig.TierWeights[band]`
-  with band = the **lowest Rebirth count among the real players** (clamped to
-  `MaxBand`), plain, except one `GoldenChance` (5%) Golden; **never**
-  `BannedTiers` (Mythic, Secret; `PickTier` skips them even if a band lists
-  one, and `TryRivalSteal` refuses one at grab time). If the lowest count
-  drops (a newcomer joins) the orbs rolled for a higher band are re-rolled;
-  they are never re-rolled upward. A stolen orb is back `RespawnSeconds`
-  (90) after **delivery** (a failed carry puts it back at once). The
-  respawn clock and the hourly limit read `RivalService.Now()` (unix seconds),
+- **Orbs** are server objects, plain except one `GoldenChance` (5%) Golden,
+  **never** `BannedTiers` (Mythic, Secret; `RivalConfig` skips them in every
+  roll, and `TryRivalSteal` refuses one at grab time). They are worth the run
+  (a Rare owner used to carry home a Common that costs 100 cash to pull):
+  - **The floor** (`RivalService.GetFloor`) = the best tier owned by the
+    **least advanced real player in the server**, read from their inventories
+    (nobody in, or no orb: Common; a Mythic/Secret owner's floor is
+    Legendary). `SetFloorProvider` stubs it for `/selftest`.
+  - **Roles** (`RivalConfig.PlanRoles`, shuffled once per lab): one
+    **PlusOne** pedestal at floor + 1 (`PlusOneTierPedestals`; never above
+    Legendary), one **Floor** pedestal at the floor (`FloorTierPedestals`), the
+    rest **Weighted**: `TierWeights[band]` (band = the lowest Rebirth count,
+    clamped to `MaxBand`) with every tier BELOW the floor dropped
+    (`PickTierAtLeast`; stricter than "no Commons": an Epic owner is not shown
+    Rares; when the band lists nothing at or above the floor, the floor).
+    So a lab never shows four Commons to a Rare owner, and a brand-new player
+    (floor Common) sees Common / Rare / Epic with at least one Rare.
+  - A pedestal rolls its orb from its role and the floor of THAT moment: at
+    spawn, on a rotation, and when a stolen pedestal comes back.
+  - If the floor DROPS (a weaker player joins) the orbs rolled for a higher
+    floor are re-rolled at once (when the lab may rotate, below); when it
+    RISES the new floor waits for the next rotation.
+- **Rotation.** Every `RotateSeconds` (150, +- `RotateJitterSeconds` 30) a lab
+  re-rolls its standing orbs by the rules above (`RivalService.Step`, every 3
+  s, on the injectable clock). The first rotations of the 1st / 2nd / 3rd lab
+  are at 0.5 / 0.75 / 1.0 x the interval, and `RivalConfig.SpaceRotation` keeps
+  any two labs `RotateMinGapSeconds` (10) apart. A lab waits for the next tick
+  (the time stays due) while its guard is chasing, any `StealPrompt` is held
+  (`PromptButtonHoldBegan/Ended`), or a player stands within
+  `RotateKeepOutStuds` (14) of a pedestal ("about to grab"); a pedestal being
+  carried from is never touched, and one waiting to respawn rolls when it is
+  back (no extra timer). The swap cue is world-side only (no announce): a
+  flash on the old orb and a shell closing on the new one
+  (`RivalConfig.PopSeconds`, transient neon balls). The plot's `NextRotateAt`
+  attribute (RivalService clock = unix seconds) feeds the gate sign's
+  `fresh orbs in 1:48` chip (`WorldLabelController`, `PlotLayout.Gate.
+  RotateChipStuds`; `fresh orbs soon` once due and held back).
+- **Respawn and clock.** A stolen orb is back `RespawnSeconds` (90) after
+  **delivery** (a failed carry puts it back at once). The respawn clock, the
+  rotation and the hourly limit read `RivalService.Now()` (unix seconds),
   injectable (`SetClock`) for `/selftest`; the guard runs on `os.clock()`.
 - **Stealing.** `RequestSteal { RivalId, PedestalIndex }` (client:
   `WorldLabelController.stealMode` gives a rival prompt `Steal` for everyone
@@ -242,11 +273,15 @@ number); the steal itself is `HeistService`'s, same flow.
   steps renumbered; pre-launch); custom `RivalStealDelivered` /
   `RivalStealTagged` (guard tag or a weapon knock) / `RivalStealTimeout`
   (field: tier), `RivalGuardHit` (weapon).
-- **Economy** (`tools/econ_sim.py 30 12 --fuse=2 --rivals`; numbers in
-  TycoonConfig's header): neutral. Rebirth 1 ~0:51 with vs ~0:50 without
-  (-3%, seed noise), Rebirth 2 +1%, Rebirth 3 -1%; fastest decile Rebirth 1
-  ~0:41 (target >= 0:35). It does NOT come sooner: a rival orb is a Common /
-  Rare / Epic the gacha gives anyway; the value is the steal in minute 3.
+- **Economy** (`tools/econ_sim.py 100 1.5 --rivals`, 12 steals an hour from
+  minute 3, 100 seeds; numbers in TycoonConfig's header). Old rule (one roll
+  from the band's weights): Rebirth 1 0:51:20 vs 0:50:03 with no rivals, i.e.
+  neutral. New rule (floor + 1, the floor, two weighted pedestals; the sim
+  grabs a random one of the four): **Rebirth 1 0:43:41** (12.7% sooner than
+  none), Rebirth 2 1:15:32 vs 1:27:56; fastest decile Rebirth 1 **0:35:25**
+  (target >= 0:35:00, so `StealsPerHour` stays 12; at 9 an hour it is 0:45:51
+  / 0:36:00). The sim charges no run time and always steals at the cap, so it
+  is an upper bound.
 - **`/selftest rivals`** (also section 16 of the full run): a solo server
   fills its labs (ownerless, 4 steal pedestals, the RIVAL LAB sign, the Fusion
   Machine / Gacha / Multiplier / factory line / portal models with the five
@@ -265,9 +300,17 @@ number); the steal itself is `HeistService`'s, same flow.
   the respawn on an injected clock); the guard's tag returns the orb and
   creates nothing (skipped if the guard rig did not build); a weapon stun;
   `StealsPerHour` and the hour later; a despawn mid-carry with no error and
-  nothing created; 10 000 draws per band with no Mythic / Secret and ~5%
-  Golden; `PickTier` skipping a listed banned tier. Run it in Studio: the
-  steal parts need the tester's character and a claimed lab.
+  nothing created; **orb quality and rotation**: 10 000 labs per floor and
+  band (floor + 1 and the floor always present, nothing below the floor, no
+  Mythic / Secret, no four-Common lab for a Rare owner, a new player's lab has
+  a Rare and only Common / Rare / Epic), `RollOrb(tier)` is that tier with ~5%
+  Golden, `PickTier` / `PickTierAtLeast` skipping a listed banned tier; live
+  labs with the floor stubbed to Common / Rare / Epic after a rotation;
+  rotations spaced >= 5 s apart, the next one ~150 s out and `NextRotateAt`
+  advancing; a carried orb (guard chasing) and a player standing at a pedestal
+  hold the rotation, which goes through on the next tick; a risen floor waits,
+  a dropped one re-rolls at once. Run it in Studio: the steal parts need the
+  tester's character and a claimed lab.
 - **Not covered by code in this repo's checks**: the guard's pathing and
   animation, the decorated labs' look and the client countdown chip were not
   run in Studio when this was written (Rival labs 2 as well: the parser was

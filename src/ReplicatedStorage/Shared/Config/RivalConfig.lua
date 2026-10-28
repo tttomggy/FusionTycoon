@@ -10,9 +10,20 @@
 	  Fill     up to MaxRivals rival labs in free slots (RivalService). A real
 	           player is never refused a plot: with no slot free, the rival
 	           lab farthest from every player despawns first.
-	  Orbs     plain (one Golden chance), rolled from TierWeights for the
-	           LOWEST Rebirth count among the real players in the server, so a
-	           new player never sees a Mythic. Never BannedTiers.
+	  Orbs     plain (one Golden chance). Worth the run: the lab's tiers come
+	           from the FLOOR = the best tier owned by the LEAST advanced real
+	           player in the server (from their inventory): one pedestal at
+	           floor + 1 (never above Legendary), one at the floor, the other
+	           two from TierWeights (band = the lowest Rebirth count) with
+	           every tier below the floor dropped, so a Rare owner never sees
+	           four Commons and a brand-new player (floor Common) sees Common /
+	           Rare / Epic with at least one Rare. Never BannedTiers.
+	  Rotate   every RotateSeconds (+- jitter, staggered so no two labs turn
+	           over within RotateMinGapSeconds) a lab re-rolls its orbs by the
+	           same rules, unless a pedestal is being carried from, its guard
+	           is chasing, a StealPrompt is held or a player stands at a
+	           pedestal; a stolen orb's pedestal rolls its new orb when it
+	           comes back. A rise of the floor waits for the next rotation.
 	  Respawn  a stolen orb is back on its pedestal after RespawnSeconds.
 	  Guard    one NPC per lab: patrols, chases a carrier at GuardSpeed (the
 	           carrier walks at HeistConfig.CarryWalkSpeed), gives up
@@ -44,6 +55,21 @@ RivalConfig.Names = {
 
 -- Never offered by a rival, whatever the weights say.
 RivalConfig.BannedTiers = { Mythic = true, Secret = true } :: { [string]: boolean }
+
+-- The tiers a lab can show, lowest first (BannedTiers left out), and where a
+-- pedestal's tier comes from (see the header): its ROLE in the lab.
+RivalConfig.TierOrder = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" } :: { string }
+RivalConfig.PlusOneTierPedestals = 1 -- pedestals at floor + 1 (capped at the best offered tier)
+RivalConfig.FloorTierPedestals = 1 -- pedestals at the floor
+-- (the rest of the PedestalCount are "Weighted": TierWeights, floor and up)
+
+-- Rotation
+RivalConfig.RotateSeconds = 150
+RivalConfig.RotateJitterSeconds = 30 -- +- on every interval
+RivalConfig.RotateMinGapSeconds = 10 -- no two labs rotate closer than this (/selftest holds 5)
+RivalConfig.RotateKeepOutStuds = 14 -- a player this close to one of a lab's pedestals ("about to grab") holds its rotation
+RivalConfig.RotateFirstFractions = { 0.5, 0.75, 1 } :: { number } -- the 1st/2nd/3rd lab's first rotation, x RotateSeconds
+RivalConfig.PopSeconds = 0.3 -- the swap cue: a flash on the old orb, a shell closing on the new one
 
 -- Tier weights by band = the lowest Rebirth count among real players (the
 -- last band covers everything above it). No Mythic / Secret in any band.
@@ -131,6 +157,155 @@ function RivalConfig.PickTier(band: number, roll: number): string
 		end
 	end
 	return last
+end
+
+--[[ Orb tiers: floor + roles ------------------------------------------------- ]]
+
+-- The offered tiers in order (TierOrder without BannedTiers).
+function RivalConfig.OfferedTiers(): { string }
+	local list: { string } = {}
+	for _, tier in RivalConfig.TierOrder do
+		if not RivalConfig.BannedTiers[tier] then
+			table.insert(list, tier)
+		end
+	end
+	return list
+end
+
+-- The position of `tier` among the offered tiers (0: not offered).
+local function offeredRank(tier: string): number
+	for index, offered in RivalConfig.OfferedTiers() do
+		if offered == tier then
+			return index
+		end
+	end
+	return 0
+end
+
+RivalConfig.OfferedRank = offeredRank
+
+-- A player's best owned tier -> the floor: nil (nothing owned) is Common; a
+-- banned or unknown tier (a Mythic owner) is the best tier that is offered.
+function RivalConfig.ClampFloor(best: string?): string
+	local offered = RivalConfig.OfferedTiers()
+	if best == nil then
+		return offered[1]
+	end
+	local rank = offeredRank(best)
+	if rank > 0 then
+		return best
+	end
+	local order = table.find(RivalConfig.TierOrder, best)
+	return if order and order > 1 then offered[#offered] else offered[1]
+end
+
+-- One above `floor`, never past the best offered tier (so never Mythic).
+function RivalConfig.PlusOneTier(floor: string): string
+	local offered = RivalConfig.OfferedTiers()
+	return offered[math.min(offeredRank(floor) + 1, #offered)]
+end
+
+-- A weighted tier for band `band` with every tier below `floor` dropped.
+-- `roll` is uniform in [0, 1). When the band lists nothing at or above the
+-- floor the floor itself comes back.
+function RivalConfig.PickTierAtLeast(band: number, floor: string, roll: number): string
+	local weights = RivalConfig.TierWeights[RivalConfig.GetBand(band)]
+	local minRank = math.max(offeredRank(floor), 1)
+	local offered = RivalConfig.OfferedTiers()
+	local total = 0
+	for index = minRank, #offered do
+		total += weights[offered[index]] or 0
+	end
+	if total <= 0 then
+		return floor
+	end
+	local target = math.clamp(roll, 0, 1 - 1e-9) * total
+	for index = minRank, #offered do
+		local weight = weights[offered[index]] or 0
+		if weight > 0 then
+			if target < weight then
+				return offered[index]
+			end
+			target -= weight
+		end
+	end
+	return floor
+end
+
+-- The roles of a lab's pedestals, shuffled: PlusOneTierPedestals x "PlusOne",
+-- FloorTierPedestals x "Floor", the rest "Weighted". `roll` returns a uniform
+-- number in [0, 1) each call.
+function RivalConfig.PlanRoles(roll: () -> number): { string }
+	local roles: { string } = {}
+	for _ = 1, RivalConfig.PlusOneTierPedestals do
+		table.insert(roles, "PlusOne")
+	end
+	for _ = 1, RivalConfig.FloorTierPedestals do
+		table.insert(roles, "Floor")
+	end
+	while #roles < RivalConfig.PedestalCount do
+		table.insert(roles, "Weighted")
+	end
+	while #roles > RivalConfig.PedestalCount do
+		table.remove(roles)
+	end
+	for index = #roles, 2, -1 do
+		local other = math.clamp(math.floor(roll() * index) + 1, 1, index)
+		roles[index], roles[other] = roles[other], roles[index]
+	end
+	return roles
+end
+
+-- The tier of a pedestal with `role` for `floor` (a ClampFloor result) and
+-- the Rebirth band's weights.
+function RivalConfig.TierForRole(role: string, floor: string, band: number, roll: () -> number): string
+	if role == "PlusOne" then
+		return RivalConfig.PlusOneTier(floor)
+	elseif role == "Floor" then
+		return floor
+	end
+	return RivalConfig.PickTierAtLeast(band, floor, roll())
+end
+
+-- All of a lab's tiers at once, pedestal 1..PedestalCount.
+function RivalConfig.PlanTiers(floor: string, band: number, roll: () -> number): { string }
+	local tiers: { string } = {}
+	for index, role in RivalConfig.PlanRoles(roll) do
+		tiers[index] = RivalConfig.TierForRole(role, floor, band, roll)
+	end
+	return tiers
+end
+
+--[[ Rotation timing ------------------------------------------------------------ ]]
+
+-- The seconds until a lab's next rotation: RotateSeconds +- jitter (`roll` in [0, 1)).
+function RivalConfig.RotateDelay(roll: number): number
+	return RivalConfig.RotateSeconds + (math.clamp(roll, 0, 1) * 2 - 1) * RivalConfig.RotateJitterSeconds
+end
+
+-- Moves `candidate` later until it is at least RotateMinGapSeconds from every
+-- time in `others` (the other labs' next rotations).
+function RivalConfig.SpaceRotation(candidate: number, others: { number }): number
+	local gap = RivalConfig.RotateMinGapSeconds
+	local moved = true
+	local guard = 0
+	while moved and guard < 100 do
+		moved = false
+		guard += 1
+		for _, other in others do
+			if math.abs(candidate - other) < gap then
+				candidate = other + gap
+				moved = true
+			end
+		end
+	end
+	return candidate
+end
+
+-- "1:48" for a countdown (the gate sign's "fresh orbs in 1:48").
+function RivalConfig.FormatCountdown(seconds: number): string
+	local whole = math.max(0, math.ceil(seconds))
+	return ("%d:%02d"):format(whole // 60, whole % 60)
 end
 
 -- "Dr. Fizz's Lab" -> "Dr. Fizz" (the guard's name label).

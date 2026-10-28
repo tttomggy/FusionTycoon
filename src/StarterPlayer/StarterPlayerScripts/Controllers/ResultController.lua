@@ -331,13 +331,12 @@ local function showBigCard(info: BigCardInfo)
 	})
 
 	if nextStep then
-		UIKit.Label({
+		local nextLine = UIKit.Label({
 			Name = "NextLine",
 			Text = nextStep.Line or "",
 			Font = Fonts.Display,
 			TextSize = 17,
 			TextColor3 = tierLight,
-			TextWrapped = true,
 			Position = UDim2.fromOffset(20, 334),
 			Size = UDim2.new(1, -40, 0, 22),
 			TextXAlignment = Enum.TextXAlignment.Center,
@@ -345,6 +344,7 @@ local function showBigCard(info: BigCardInfo)
 			Stroke = UITheme.Stroke.Text,
 			Parent = body,
 		})
+		UIKit.FitText(nextLine, 17, 12) -- one line, shrunk to fit
 		if nextStep.Kind == "Fuse" then
 			local goTier = nextStep.Tier :: string
 			UIKit.Button({

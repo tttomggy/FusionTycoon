@@ -2742,16 +2742,34 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 		result(#shapeBad == 0, "rivals: each lab is ownerless, with 4 filled steal pedestals, a RIVAL LAB sign, the Fusion Machine, Gacha, Multiplier, factory line and portal as pictures, and zero prompts but the 4 steal prompts", table.concat(shapeBad, "; "))
+		-- A new player (floor stubbed to Common, the tester at home) sees only
+		-- Common / Rare / Epic after a rotation, and a Rare in every lab.
 		local tiersBad: { string } = {}
+		character:PivotTo(home)
+		task.wait(0.2)
+		RivalService.SetFloorProvider(function()
+			return "Common"
+		end)
 		for _, view in rivals do
+			RivalService.SelfTestMakeRotationDue(view.Id)
+		end
+		fakeNow += 1
+		RivalService.Step()
+		for _, view in rivals do
+			local hasRare = false
 			for index = 1, RivalConfig.PedestalCount do
 				local orb = RivalService.GetOrb(view.Id, index)
 				if not orb or orb.Tier == "Legendary" or orb.Tier == "Mythic" or orb.Tier == "Secret" then
 					table.insert(tiersBad, ("%s/%d %s"):format(view.Name, index, if orb then orb.Tier else "empty"))
 				end
+				hasRare = hasRare or (orb ~= nil and orb.Tier == "Rare")
+			end
+			if not hasRare then
+				table.insert(tiersBad, view.Name .. " has no Rare")
 			end
 		end
-		result(#tiersBad == 0, "rivals: with the lowest player at Rebirth 0 every orb is a Common, Rare or Epic", table.concat(tiersBad, "; "))
+		RivalService.SetFloorProvider(nil)
+		result(#tiersBad == 0, "rivals: with the lowest player at Common (Rebirth 0) every orb is a Common, Rare or Epic and every lab has a Rare", table.concat(tiersBad, "; "))
 
 		-- Guards (group 2 / 3): built async, so give the rigs a moment.
 		waitUntil(function()
@@ -3113,40 +3131,235 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 
-		-- 7. Orb rolls: no Mythic / Secret in any band over 10 000 draws, only
-		-- plain or the 5% Golden, and a banned tier is skipped even if listed.
-		local bandsBad: { string } = {}
-		for band = 0, RivalConfig.MaxBand + 1 do
+		-- 7. Orb rolls and tiers (pure): per floor over 10 000 labs, never a
+		-- Mythic / Secret, one pedestal at floor + 1 and one at the floor,
+		-- nothing below the floor; a new player's lab has a Rare and shows
+		-- only Common / Rare / Epic; a Rare owner never sees four Commons.
+		local offered = RivalConfig.OfferedTiers()
+		local pureBad: { string } = {}
+		local pureRng = Random.new(20)
+		local function pureRoll(): number
+			return pureRng:NextNumber()
+		end
+		for _, floorName in { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" } do
+			local floor = RivalConfig.ClampFloor(floorName)
+			local plusOne = RivalConfig.PlusOneTier(floor)
+			local floorRank = RivalConfig.OfferedRank(floor)
+			for band = 0, RivalConfig.MaxBand do
+				for _ = 1, 2500 do
+					local tiers = RivalConfig.PlanTiers(floor, band, pureRoll)
+					local hasFloor, hasPlus, allCommon = false, false, true
+					for _, tier in tiers do
+						if RivalConfig.BannedTiers[tier] or RivalConfig.OfferedRank(tier) < floorRank then
+							table.insert(pureBad, ("floor %s band %d rolled %s"):format(floor, band, tier))
+						end
+						hasFloor = hasFloor or tier == floor
+						hasPlus = hasPlus or tier == plusOne
+						allCommon = allCommon and tier == "Common"
+					end
+					if #tiers ~= RivalConfig.PedestalCount or not hasFloor or not hasPlus or (floor ~= "Common" and allCommon) then
+						table.insert(pureBad, ("floor %s band %d: %s"):format(floor, band, table.concat(tiers, ",")))
+					end
+					if floor == "Common" and band == 0 then
+						local hasRare = false
+						for _, tier in tiers do
+							hasRare = hasRare or tier == "Rare"
+							if tier ~= "Common" and tier ~= "Rare" and tier ~= "Epic" then
+								table.insert(pureBad, "a new player's lab showed " .. tier)
+							end
+						end
+						if not hasRare then
+							table.insert(pureBad, "a new player's lab had no Rare: " .. table.concat(tiers, ","))
+						end
+					end
+					if #pureBad > 6 then
+						break
+					end
+				end
+			end
+		end
+		result(#pureBad == 0, "rivals: 10 000 labs per floor and band: floor + 1 and the floor always present, nothing below the floor, no Mythic / Secret, no four-Common lab for a Rare owner, a new player's lab has a Rare and only Common / Rare / Epic", table.concat(pureBad, "; "))
+		result(RivalConfig.PlusOneTier("Legendary") == "Legendary" and RivalConfig.ClampFloor("Mythic") == offered[#offered], "rivals: floor + 1 is capped at Legendary and a Mythic owner's floor is Legendary")
+
+		local goldenBad: { string } = {}
+		for _, tier in offered do
 			local golden = 0
 			for _ = 1, 10000 do
-				local orb = RivalService.RollOrb(band)
-				if RivalConfig.BannedTiers[orb.Tier] or ItemConfig.GetItemById(orb.ItemId) == nil then
-					table.insert(bandsBad, ("band %d rolled %s"):format(band, orb.Tier))
+				local orb = RivalService.RollOrb(tier)
+				if orb.Tier ~= tier or ItemConfig.GetItemById(orb.ItemId) == nil then
+					table.insert(goldenBad, ("%s rolled %s"):format(tier, orb.Tier))
 					break
 				end
 				if orb.Mutation == "Golden" then
 					golden += 1
 				elseif orb.Mutation ~= nil then
-					table.insert(bandsBad, ("band %d rolled mutation %s"):format(band, tostring(orb.Mutation)))
+					table.insert(goldenBad, ("%s rolled mutation %s"):format(tier, tostring(orb.Mutation)))
 					break
 				end
 			end
 			if golden < 350 or golden > 650 then
-				table.insert(bandsBad, ("band %d: %d Golden in 10000 (want ~500)"):format(band, golden))
+				table.insert(goldenBad, ("%s: %d Golden in 10000 (want ~500)"):format(tier, golden))
 			end
 		end
-		result(#bandsBad == 0, "rivals: 10 000 draws per band, no Mythic / Secret, only plain or ~5% Golden", table.concat(bandsBad, "; "))
+		result(#goldenBad == 0, "rivals: RollOrb(tier) is that tier, plain or ~5% Golden", table.concat(goldenBad, "; "))
 		local weights = RivalConfig.TierWeights[0]
 		local savedMythic = weights.Mythic
 		weights.Mythic = 1000
 		local leaked = false
 		for step = 0, 999 do
-			if RivalConfig.BannedTiers[RivalConfig.PickTier(0, step / 1000)] then
+			if RivalConfig.BannedTiers[RivalConfig.PickTier(0, step / 1000)] or RivalConfig.BannedTiers[RivalConfig.PickTierAtLeast(0, "Common", step / 1000)] then
 				leaked = true
 			end
 		end
 		weights.Mythic = savedMythic
-		result(not leaked, "rivals: PickTier skips a banned tier even if a band lists it")
+		result(not leaked, "rivals: PickTier / PickTierAtLeast skip a banned tier even if a band lists it")
+
+		-- 8. The live labs: floor stubs, rotation, spacing, the countdown.
+		character:PivotTo(home)
+		task.wait(0.2)
+		RivalService.Step()
+		local labs = RivalService.GetRivals()
+		local function freeLabs()
+			-- Back to a plain state: nothing carried, no chase.
+			for _, view in RivalService.GetRivals() do
+				for index = 1, RivalConfig.PedestalCount do
+					RivalService.EndCarry(view.Id, index, false)
+				end
+			end
+		end
+		freeLabs()
+		local function rotateAll()
+			fakeNow += 1
+			for _, view in RivalService.GetRivals() do
+				RivalService.SelfTestMakeRotationDue(view.Id)
+			end
+			RivalService.Step()
+		end
+		local function standingTiers(viewId: number): { string }
+			local list: { string } = {}
+			for _, tier in RivalService.GetTiers(viewId) do
+				if tier then
+					table.insert(list, tier)
+				end
+			end
+			return list
+		end
+		local liveBad: { string } = {}
+		for _, floorName in { "Common", "Rare", "Epic" } do
+			RivalService.SetFloorProvider(function()
+				return floorName
+			end)
+			rotateAll()
+			for _, view in RivalService.GetRivals() do
+				local tiers = standingTiers(view.Id)
+				local hasFloor, hasPlus, below = false, false, false
+				for _, tier in tiers do
+					hasFloor = hasFloor or tier == floorName
+					hasPlus = hasPlus or tier == RivalConfig.PlusOneTier(floorName)
+					below = below or RivalConfig.OfferedRank(tier) < RivalConfig.OfferedRank(floorName) or RivalConfig.BannedTiers[tier] == true
+				end
+				if #tiers == RivalConfig.PedestalCount and (not hasFloor or not hasPlus or below) then
+					table.insert(liveBad, ("%s floor %s: %s"):format(view.Name, floorName, table.concat(tiers, ",")))
+				end
+			end
+		end
+		result(#liveBad == 0 and #labs >= 1, "rivals: after a rotation each live lab has the floor and floor + 1 and nothing below (floor Common / Rare / Epic stubbed)", table.concat(liveBad, "; "))
+
+		-- Staggered: three labs' next rotations are >= 5 s apart (the config
+		-- asks 10); the attribute the sign counts down to is the lab's.
+		RivalService.SetFloorProvider(nil)
+		local nextTimes: { number } = {}
+		local attributeOk = true
+		for _, view in RivalService.GetRivals() do
+			local at = RivalService.GetNextRotateAt(view.Id)
+			table.insert(nextTimes, at or 0)
+			attributeOk = attributeOk and view.Plot:GetAttribute("NextRotateAt") == at
+		end
+		table.sort(nextTimes)
+		local minGap = math.huge
+		for index = 2, #nextTimes do
+			minGap = math.min(minGap, nextTimes[index] - nextTimes[index - 1])
+		end
+		result(#nextTimes < 2 or minGap >= 5, "rivals: no two labs rotate within 5 s of each other", ("%d labs, smallest gap %.1f s"):format(#nextTimes, minGap))
+		local first = RivalService.GetRivals()[1]
+		if first then
+			local before = RivalService.GetNextRotateAt(first.Id) or 0
+			RivalService.SelfTestMakeRotationDue(first.Id)
+			fakeNow += 1
+			RivalService.Step()
+			local after = RivalService.GetNextRotateAt(first.Id) or 0
+			local delta = after - fakeNow
+			result(
+				attributeOk and after > before and delta >= RivalConfig.RotateSeconds - RivalConfig.RotateJitterSeconds - 0.01 and delta <= RivalConfig.RotateSeconds + RivalConfig.RotateJitterSeconds + RivalConfig.MaxRivals * RivalConfig.RotateMinGapSeconds + 0.01 and first.Plot:GetAttribute("NextRotateAt") == after,
+				"rivals: a rotation sets the next one ~150 s out (+- jitter) and the NextRotateAt attribute advances with it",
+				("next in %.1f s, attribute %s"):format(delta, tostring(first.Plot:GetAttribute("NextRotateAt")))
+			)
+
+			-- A carried-from pedestal is never re-rolled, and a chasing guard holds the lab.
+			freeLabs()
+			local index = 1
+			local orbBefore = RivalService.GetOrb(first.Id, index)
+			if orbBefore then
+				RivalService.BeginCarry(first.Id, index, player)
+				RivalService.SelfTestMakeRotationDue(first.Id)
+				fakeNow += 1
+				RivalService.Step()
+				RivalService.EndCarry(first.Id, index, false)
+				result(RivalService.GetOrb(first.Id, index) == orbBefore, "rivals: an orb being carried (the guard chasing) is not re-rolled by a rotation that falls due")
+				-- ... and the rotation comes right after, once the chase is over.
+				RivalService.SelfTestMakeRotationDue(first.Id)
+				fakeNow += 1
+				RivalService.Step()
+				result(RivalService.GetOrb(first.Id, index) ~= orbBefore, "rivals: the rotation goes through on the next tick once nothing is carried")
+			else
+				result(true, "rivals: carried-orb rotation (skipped: the first lab's first pedestal is empty)")
+			end
+
+			-- A player at a pedestal ("about to grab") holds the rotation too.
+			freeLabs()
+			local pedestal = RivalService.GetPedestal(first.Id, 1)
+			local standing = RivalService.GetOrb(first.Id, 1)
+			if pedestal and standing then
+				putNextTo(pedestal)
+				RivalService.SelfTestMakeRotationDue(first.Id)
+				fakeNow += 1
+				RivalService.Step()
+				local heldBack = RivalService.GetOrb(first.Id, 1) == standing
+				character:PivotTo(home)
+				task.wait(0.2)
+				fakeNow += 1
+				RivalService.Step()
+				result(heldBack and RivalService.GetOrb(first.Id, 1) ~= standing, "rivals: a player standing at a pedestal holds the rotation; it goes through once they leave")
+			end
+
+			-- A floor that drops re-rolls the higher orbs at once; a floor that rises waits.
+			freeLabs()
+			RivalService.SetFloorProvider(function()
+				return "Epic"
+			end)
+			rotateAll()
+			local epicOrb = RivalService.GetOrb(first.Id, 1)
+			RivalService.SetFloorProvider(function()
+				return "Legendary"
+			end)
+			fakeNow += 1
+			RivalService.Step()
+			local risen = RivalService.GetOrb(first.Id, 1) == epicOrb
+			RivalService.SetFloorProvider(function()
+				return "Common"
+			end)
+			fakeNow += 1
+			RivalService.Step()
+			local droppedTiers = standingTiers(first.Id)
+			local lowOnes = 0
+			for _, tier in droppedTiers do
+				if tier == "Common" or tier == "Rare" then
+					lowOnes += 1
+				end
+			end
+			result(risen and lowOnes >= 1, "rivals: a risen floor waits for the next rotation; a dropped one re-rolls the higher orbs now", ("risen kept %s, after the drop %s"):format(tostring(risen), table.concat(droppedTiers, ",")))
+			RivalService.SetFloorProvider(nil)
+		end
 	end)
 	if not ok then
 		result(false, "rivals (errored)", tostring(err))
