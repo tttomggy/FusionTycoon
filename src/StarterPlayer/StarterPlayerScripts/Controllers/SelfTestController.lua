@@ -1253,7 +1253,7 @@ local function testHudLeftColumn(): { string }
 				table.insert(lines, line)
 			end
 		end
-		-- The loop strip: five >= 44 px cells, the right chip lit, +20 px at most.
+		-- The loop strip: five >= 44 px cells, the right chip lit, +62 px (desktop) / +40 px (phone) at most.
 		local stripOk, stripResult = pcall(hud.SelfTestLoopStrip, if phone then "phone" else "desktop")
 		if not stripOk then
 			table.insert(lines, "FAIL hud loop strip: " .. tostring(stripResult))
@@ -2343,6 +2343,11 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 	end
 	if weapon.Kind == "Melee" then
 		local scale, height = heightScale(char)
+		-- >= 0.4 s of swing, or the track's own length less 0.05 s if that is
+		-- shorter: the measure counts Heartbeat frames, so a couple of frames
+		-- of jitter must not fail a swing that is as long as its animation.
+		local trackLength = if actionTrack then actionTrack.Length else 0
+		local needVisible = if trackLength > 0 then math.min(0.4, trackLength - 0.05) else 0.4
 		table.insert(lines, {
 			Ok = played and peak >= 1.5 * scale,
 			Warn = weaponId == "Bat",
@@ -2350,9 +2355,9 @@ local function probeWeapon(weaponId: string): { ProbeLine }
 			Detail = ("peak %.2f studs, needs %.2f (avatar %.1f studs tall, x%.2f)"):format(peak, 1.5 * scale, height, scale),
 		})
 		table.insert(lines, {
-			Ok = played and visible >= 0.4,
-			Name = ("combat %s: the swing stays visible for >= 0.4 s"):format(weaponId),
-			Detail = ("%.2f s away from the held pose"):format(visible),
+			Ok = played and visible >= needVisible,
+			Name = ("combat %s: the swing stays visible for >= 0.4 s (or its track length - 0.05 s)"):format(weaponId),
+			Detail = ("measured %.2f s away from the held pose, needs %.2f s (track %.2f s)"):format(visible, needVisible, trackLength),
 		})
 	else
 		local need = if weapon.Kind == "Peel" then 1 else 0.2

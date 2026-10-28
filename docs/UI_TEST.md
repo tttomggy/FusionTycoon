@@ -33,7 +33,7 @@ again), `/cash <amount>`, `/resetmultiplier`.
    the arrow follows it (Gacha Pad / Fusion Machine).
    After the tutorial a **loop strip** `🎰 → 🔮 → 💰 → ⬆️   🏃` sits above
    the goal text with the coach's current step lit (green, a light pulse),
-   the card at most 20 px taller than without it; tapping an icon announces
+   the card at most 62 px (desktop) / 40 px (phone) taller than without it (44 px tap cells); tapping an icon announces
    what it is (`Fuse 2+ same orbs into a better one`). With a goal you can't
    do yet (no cash for the upgrade, nothing to fuse) the 2nd line is the
    coach's (`Pull from the Gacha ($250)`, `Upgrade your Ember Forge: +$12/s`,

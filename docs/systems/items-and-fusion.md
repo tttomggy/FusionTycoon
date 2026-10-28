@@ -475,8 +475,11 @@ Takes, Lit }` inside the `SyncTycoon` snapshot (no new remote;
   ⬆️` and `🏃` after a gap; `Lit` is the step to light (the coach's, or the
   goal's own while the goal points: `GoalConfig.Goals[i].Loop`, a tier
   goal's Fuse / Pull). Five cells >= 44 px wide and tall (the track is as
-  wide as the card; the green chips are 22 / 18 px tall, so the card grows
-  by at most 20 px, the card's vertical padding gives some back), tap =
+  wide as the card; the green chips are 22 / 18 px tall). The cells are the
+  44 px tap rule, which five cells can't meet inside the old "+20 px" spec, so
+  the card may grow by **at most 62 px on desktop / 40 px on the phone**
+  (`STRIP_GROWTH` in GoalTracker; the card's vertical padding gives some
+  back), tap =
   `AnnouncementController.ShowLine(LoopCoach.Explain[step])`. Shown after
   the tutorial only (a coach exists).
 - **Loop-closing lines** (`LoopCoachController`, once per session per kind,
@@ -491,7 +494,7 @@ Takes, Lit }` inside the `SyncTycoon` snapshot (no new remote;
   goal, `PickUpgrade`), "goal arrow" (client: coach / tip / goal step /
   goal target), "loop moments" (client planners), "hud loop strip" (client,
   both layouts: each step lights its own chip, 5 cells >= 44 px inside the
-  card and clear of each other, the card grows <= 20 px); the strip is also
+  card and clear of each other, the card grows <= 62 px desktop / 40 px phone); the strip is also
   in the left-column overlap and fit checks.
 
 *Board bug fixed (Oct 13), kept for the lesson:* `buildTile` / `buildChip`

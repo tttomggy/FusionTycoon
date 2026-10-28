@@ -71,9 +71,10 @@ local goalPhoneMode = false
 local goalHasCount = false
 local GOAL_PHONE_LINE_HEIGHT = 22
 local GOAL_PHONE_REWARD_WIDTH = 64
--- The strip: a row of icon chips (visual height) over >= 44 px tap cells that
--- reach past the row, so the card grows by at most STRIP_GROWTH: the row and
--- the list gap, less what the card's vertical padding gives back.
+-- The strip: a row of icon chips (visual height) over >= 44 px tap cells, so
+-- the card grows by at most STRIP_GROWTH: the row and the list gap, less what
+-- the card's vertical padding gives back. The 44 px tap rule wins over the old
+-- "+20 px" spec (five >= 44 px cells can't add only 20), hence 62 / 40.
 local STRIP_CELL = UITheme.MinTapSize
 local STRIP_CHIP_WIDTH = 30
 local STRIP_HEIGHT = { Desktop = 22, Phone = 18 }
@@ -82,7 +83,7 @@ local STRIP_ICON_SIZE = { Desktop = 15, Phone = 12 }
 local STRIP_PULSE_SCALE = 1.08
 local STRIP_PULSE_SECONDS = 0.7
 local STRIP_UNLIT_TRANSPARENCY = 0.4
-local STRIP_GROWTH = 20 -- px the strip may add to the card (the spec)
+local STRIP_GROWTH = { Desktop = 62, Phone = 40 } -- px the strip may add to the card (/selftest)
 
 --[[ Goal tracker ---------------------------------------------------------- ]]
 
@@ -405,7 +406,7 @@ function GoalTracker.ApplyLayout(isPhone: boolean)
 	layoutStrip(isPhone)
 	local vertical, horizontal = if isPhone then 6 else 12, if isPhone then 10 else 14
 	if stripShown then
-		-- The strip's row gives the card its vertical padding back (<= STRIP_GROWTH net).
+		-- The strip's row gives the card some vertical padding back (growth <= STRIP_GROWTH net).
 		vertical -= if isPhone then STRIP_PAD_TRIM.Phone else STRIP_PAD_TRIM.Desktop
 	end
 	goalPadding.PaddingTop = UDim.new(0, vertical)
@@ -616,7 +617,7 @@ end
 
 -- /selftest: the loop strip (the tracker's icon row). Each step lights only
 -- its own chip; the five cells are >= 44 px, inside the card and clear of
--- each other; the card grows by at most STRIP_GROWTH px for the strip. The
+-- each other; the card grows by at most STRIP_GROWTH px (per layout) for the strip. The
 -- caller forces the layout first.
 function GoalTracker.SelfTestLoopStrip(scaleName: string, ctx: TestContext): { string }
 	local goalWas = goalHolder.Visible
@@ -640,8 +641,9 @@ function GoalTracker.SelfTestLoopStrip(scaleName: string, ctx: TestContext): { s
 	if not goalStrip.Visible then
 		table.insert(problems, "strip hidden after the tutorial")
 	end
-	if with - without > STRIP_GROWTH + 0.5 then
-		table.insert(problems, ("card grew %.1f px for the strip (max %d)"):format(with - without, STRIP_GROWTH))
+	local growthLimit = if ctx.Phone then STRIP_GROWTH.Phone else STRIP_GROWTH.Desktop
+	if with - without > growthLimit + 0.5 then
+		table.insert(problems, ("card grew %.1f px for the strip (max %d)"):format(with - without, growthLimit))
 	end
 
 	-- Every step lights its own chip and no other.

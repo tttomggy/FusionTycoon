@@ -2497,7 +2497,10 @@ local function refreshAll()
 	rebirthFill.Visible = rebirths > 0
 	rebirthPill.Text = ("⟳ %d · %s"):format(rebirths, NumberFormat.Multiplier(RebirthConfig.GetIncomeMultiplier(rebirths)))
 	refreshBadge()
-	GoalTracker.Refresh()
+	-- (/selftest puts a stub goal on the card and holds the real one back.)
+	if not selfTestHold then
+		GoalTracker.Refresh()
+	end
 	UpgradesPanel.Refresh()
 end
 
@@ -2594,7 +2597,9 @@ local function registerGate()
 		ForceShow = false,
 		NewSide = "Right",
 		OnShow = function()
-			GoalTracker.Refresh()
+			if not selfTestHold then
+				GoalTracker.Refresh()
+			end
 			refreshQuestRow()
 			placeQuestTracker()
 		end,
