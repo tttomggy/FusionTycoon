@@ -115,5 +115,7 @@ src/StarterPlayer/StarterPlayerScripts/
                   TopStack (the top-centre slots + the announcement queue),
                   TutorialHand (the pointing hand + the big contextual
                   button), HudGate (the progressive HUD),
+                  GoalTracker (the NEXT GOAL card + loop strip; own module because
+                  HudController's top level hit Luau's 200-locals cap),
                   QuestsPanel (the 📜 QUESTS panel)
 ```
