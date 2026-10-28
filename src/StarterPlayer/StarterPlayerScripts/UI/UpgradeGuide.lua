@@ -59,6 +59,7 @@ local owned: GuiObject? = nil -- the target this module set on the hand
 local lastCheck = 0
 local lastWhere = "None"
 local lastStation: string? = nil
+local paused = false -- /selftest owns the hand
 
 local function release()
 	if owned and TutorialHand.GetTarget() == owned then
@@ -107,6 +108,10 @@ local function frame()
 		return
 	end
 	lastCheck = now
+	if paused then
+		release()
+		return
+	end
 	local plan = UpgradeGuide.Plan(liveInput())
 	lastWhere, lastStation = plan.Where, plan.StationId
 	if plan.Where == "Row" then
@@ -124,6 +129,14 @@ end
 -- /selftest: where the hand was last sent (Where, StationId).
 function UpgradeGuide.GetLast(): (string, string?)
 	return lastWhere, lastStation
+end
+
+-- /selftest: while paused the guide leaves the hand alone (and lets go of it).
+function UpgradeGuide.SetPaused(value: boolean)
+	paused = value
+	if value then
+		release()
+	end
 end
 
 function UpgradeGuide.IsOwningHand(): boolean

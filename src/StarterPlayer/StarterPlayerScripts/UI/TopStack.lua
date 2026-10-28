@@ -225,6 +225,15 @@ function TopStack.GetMissionKey(): string?
 	return if item then item.Key else nil
 end
 
+-- /selftest: every slot's y and height, and whether a mission is set / shown.
+function TopStack.GetSummary(): string
+	local parts = {}
+	for _, slot in SLOTS do
+		table.insert(parts, ("%s y%.0f h%.0f"):format(slot, computeY(slot), TopStack.GetHeight(slot)))
+	end
+	return ("%s; mission %s, shown %s"):format(table.concat(parts, ", "), tostring(TopStack.GetMissionKey()), tostring(missionShown))
+end
+
 -- Whether the box is up this moment (set and no overlay covering it).
 function TopStack.IsMissionShown(): boolean
 	return missionItem ~= nil and missionShown

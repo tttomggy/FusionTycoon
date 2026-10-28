@@ -388,6 +388,27 @@ function MissionBanner.IsRegistered(): boolean
 	return registered
 end
 
+-- /selftest: why the box is not up (every input of "wanted" and of
+-- TopStack's show), for the state in force (the test state's overrides too).
+function MissionBanner.GetBlocker(): string
+	local now = os.clock()
+	local state = liveState(now, tipRunning or coachSteals())
+	return ("registered %s, TopStack shown %s, overlays [%s], PlanShow %s (Owner %s, Done %s, Elapsed %.0f, TutorialRunning %s, Down %s), holder visible %s at y %.0f, %s"):format(
+		tostring(registered),
+		tostring(TopStack.IsMissionShown()),
+		table.concat(UIKit.GetOpenOverlays(), ", "),
+		tostring(MissionBanner.PlanShow(state)),
+		tostring(state.Owner),
+		tostring(state.Done),
+		state.Elapsed,
+		tostring(state.TutorialRunning),
+		tostring(state.Down),
+		tostring(holder.Visible),
+		holder.AbsolutePosition.Y,
+		TopStack.GetSummary()
+	)
+end
+
 function MissionBanner.Init()
 	build()
 	lastDeliveries = TycoonController.GetRivalDeliveries()

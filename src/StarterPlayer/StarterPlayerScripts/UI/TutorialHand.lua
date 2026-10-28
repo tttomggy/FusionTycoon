@@ -57,6 +57,7 @@ local handLabel: TextLabel
 local handShadow: TextLabel
 local target: GuiObject? = nil
 local tipAbs: Vector2? = nil
+local lastChange = "never set" -- /selftest: the last SetTarget that moved or cleared the target (Studio only)
 local rectAbs: { Position: Vector2, Size: Vector2 }? = nil
 
 local captionPill: TextLabel
@@ -167,7 +168,7 @@ function TutorialHand.GetBlocker(): string?
 	end
 	local gui = target
 	if not gui then
-		return "no target"
+		return "no target (" .. lastChange .. ")"
 	end
 	if not isOnScreen(gui) then
 		return "the target is not shown (hidden, disabled, or zero width)"
@@ -180,6 +181,18 @@ function TutorialHand.GetBlocker(): string?
 end
 
 function TutorialHand.SetTarget(gui: GuiObject?)
+	if RunService:IsStudio() and target ~= nil and gui ~= target then
+		-- Who took the hand off its target (the first two frames of the stack):
+		-- /selftest prints it when the probe's hand vanishes.
+		local frames = {}
+		for line in debug.traceback("", 2):gmatch("[^\n]+") do
+			table.insert(frames, line)
+			if #frames == 2 then
+				break
+			end
+		end
+		lastChange = (if gui then "retargeted by " else "cleared by ") .. table.concat(frames, " < ")
+	end
 	target = gui
 	if not gui then
 		handRoot.Visible = false

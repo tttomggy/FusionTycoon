@@ -161,6 +161,17 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   no id has a length (Studio could not load them) the pose / track probes are
   skipped with one WARN, and the id FAIL stays. `AbsolutePosition` is below the
   58 px top bar: probes use `visibleRect`, never `AbsolutePosition.Y` alone.
+- **Triage 19.** The loop-nudge stage pauses the UPGRADES guide
+  (`UpgradeGuide.SetPaused`) and every tip (`TutorialController.SelfTestSetTipsPaused`)
+  and un-pauses even if a check raises. `TutorialHand` records who last moved or
+  cleared its target (Studio only); the `no hand: no target (...)` detail names
+  the caller. A running tip now clears only the button it set itself (it wiped
+  the Upgrades guide's row arrow every frame while a panel was open).
+  The steal mission probe prints `MissionBanner.GetBlocker()` on a failure
+  (registered, overlays, PlanShow inputs, holder, every TopStack slot). The run
+  suppresses the daily card / notification prompt from the start, and `stage()`
+  closes and reports (`WARN stage X left an overlay open`) any overlay a stage
+  leaves up.
 - The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
 - **Gacha card POSITION lines are WARN, not FAIL** (launch is gated on 0 FAIL; a

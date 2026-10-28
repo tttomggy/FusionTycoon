@@ -1257,7 +1257,7 @@ local function testMissionBanner(): { string }
 	end
 	task.wait(0.6) -- the slide-in
 	local shown = TopStack.IsMissionShown()
-	check(shown and MissionBanner.IsRegistered(), "the box shows for an owner", ("shown %s"):format(tostring(shown)))
+	check(shown and MissionBanner.IsRegistered(), "the box shows for an owner", ("shown %s | %s"):format(tostring(shown), MissionBanner.GetBlocker()))
 	if shown then
 		local body = MissionBanner.GetBody() :: Frame
 		local scale = screenScale(body)
@@ -1304,7 +1304,7 @@ local function testMissionBanner(): { string }
 	local hiddenUnder = not TopStack.IsMissionShown()
 	UIKit.SetOverlay("SelfTestMission", false)
 	task.wait(0.3)
-	check(hiddenUnder and TopStack.IsMissionShown(), "hidden while a modal is open, back when it closes", ("hidden %s, back %s"):format(tostring(hiddenUnder), tostring(TopStack.IsMissionShown())))
+	check(hiddenUnder and TopStack.IsMissionShown(), "hidden while a modal is open, back when it closes", ("hidden %s, back %s | %s"):format(tostring(hiddenUnder), tostring(TopStack.IsMissionShown()), MissionBanner.GetBlocker()))
 
 	-- A tutorial step / a ragdoll takes it away; the end brings it back.
 	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = true, Down = false })
@@ -1315,7 +1315,7 @@ local function testMissionBanner(): { string }
 	local hiddenDown = not TopStack.IsMissionShown()
 	MissionBanner.SetTestState({ Owner = true, Done = false, Elapsed = 0, TutorialRunning = false, Down = false })
 	task.wait(0.3)
-	check(hiddenTutorial and hiddenDown and TopStack.IsMissionShown(), "hidden in a tutorial step and while ragdolled, back after", ("tutorial %s, down %s, back %s"):format(tostring(hiddenTutorial), tostring(hiddenDown), tostring(TopStack.IsMissionShown())))
+	check(hiddenTutorial and hiddenDown and TopStack.IsMissionShown(), "hidden in a tutorial step and while ragdolled, back after", ("tutorial %s, down %s, back %s | %s"):format(tostring(hiddenTutorial), tostring(hiddenDown), tostring(TopStack.IsMissionShown()), MissionBanner.GetBlocker()))
 
 	-- After the first delivery it is gone for good.
 	MissionBanner.SetTestState({ Owner = true, Done = true, Elapsed = 0, TutorialRunning = false, Down = false })
@@ -5530,6 +5530,9 @@ local function run(payload: any)
 		task.wait(0.2)
 	end
 	UIKit.SetForcedPhone(nil)
+	-- No daily reward / notification prompt pops up by itself mid-run (it did
+	-- after 00:00 UTC and hid the steal mission box).
+	clearScreen(true)
 	local hoverLines = testHover("before")
 	local fired = fuzz(otherUserId)
 	-- Give the server a moment to answer every junk call before it compares.
@@ -5549,6 +5552,13 @@ local function run(payload: any)
 		local started = os.clock()
 		for _, line in probe() do
 			table.insert(panelLines, line)
+		end
+		-- A stage that leaves a modal / card up would poison the next one (the
+		-- steal mission box hides under any overlay): name it and close it.
+		if UIKit.IsOverlayOpen() then
+			local open = table.concat(UIKit.GetOpenOverlays(), ", ")
+			clearScreen(nil)
+			table.insert(panelLines, ("WARN stage %s left an overlay open (closed it): %s"):format(name, open))
 		end
 		print(("[SelfTest] client stage %s took %.1f s"):format(name, os.clock() - started))
 		RemoteEvents.SelfTestReport:FireServer({ Stage = "Progress", Name = name })
@@ -5604,7 +5614,22 @@ local function run(payload: any)
 		local shopController = require(script.Parent.ShopController) :: any
 		return shopController.SelfTestDealPath()
 	end)
-	stage("loop nudge", testLoopNudge)
+	stage("loop nudge", function()
+		-- Independent of live state: no tip and no UPGRADES guide touches the
+		-- hand while the probe owns it; both come back even if a check raises.
+		local UpgradeGuide = require(UI.UpgradeGuide) :: any
+		local TutorialController = require(script.Parent.TutorialController) :: any
+		UpgradeGuide.SetPaused(true)
+		TutorialController.SelfTestSetTipsPaused(true)
+		local ok, result = pcall(testLoopNudge)
+		UpgradeGuide.SetPaused(false)
+		TutorialController.SelfTestSetTipsPaused(false)
+		UIKit.SetForcedPhone(nil)
+		if ok then
+			return result
+		end
+		return { "FAIL loop nudge: the probe raised | " .. tostring(result) }
+	end)
 	stage("fuse ladder", testFuseLadder)
 	stage("chip jumps", testChipJumps, tooSmall ~= nil)
 	stage("unlock card", testUnlockCard)

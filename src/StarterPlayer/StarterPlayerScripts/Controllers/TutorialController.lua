@@ -121,6 +121,8 @@ local applyPath: () -> () -- the path's on/off: a tip's own target, else the goa
 local tipPressing: TutorialConfig.TipDef? = nil -- a world tip (the Multiplier Pad, a rival lab): its path and big button are up
 local rivalDeliveriesAtTipStart = 0 -- tipRival ends on the next delivered rival steal
 local pressing = false
+local tipHand: GuiObject? = nil -- the button the running tip put on the hand (only that is its to clear)
+local tipsPaused = false -- /selftest: no tip runs or starts
 
 --[[ Steps ----------------------------------------------------------------------------- ]]
 
@@ -812,7 +814,10 @@ local function endTip()
 	tipPressing = nil
 	tipGoneAt = os.clock()
 	TutorialHand.SetContextual(nil, nil)
-	TutorialHand.SetTarget(nil)
+	if tipHand ~= nil and TutorialHand.GetTarget() == tipHand then
+		TutorialHand.SetTarget(nil)
+	end
+	tipHand = nil
 	GoalMarkerController.SetTutorialTarget(nil, nil, false)
 	GoalMarkerController.SetTipActive(false) -- the loop coach gets the arrow back
 	if id == "tipRival" then
@@ -889,6 +894,12 @@ local function tipFrame()
 	if not TycoonController.HasSynced() then
 		return
 	end
+	if tipsPaused then
+		if tipShowing then
+			endTip()
+		end
+		return
+	end
 	local t = TycoonController.GetTutorial()
 	local now = os.clock()
 	local due = now - lastPlan >= 0.25
@@ -928,8 +939,19 @@ local function tipFrame()
 				TutorialHand.SetContextual(nil, nil)
 			end
 		end
+		-- Only the tip's own button is the tip's to clear: with a panel open
+		-- (tipQuiet false) the UPGRADES guide's row arrow is not (the old
+		-- unconditional SetTarget(nil) wiped it every frame).
 		local button = runtime.Hand()
-		TutorialHand.SetTarget(if button and button.Visible and tipQuiet() then button else nil)
+		if button and button.Visible and tipQuiet() then
+			tipHand = button
+			TutorialHand.SetTarget(button)
+		elseif tipHand ~= nil then
+			if TutorialHand.GetTarget() == tipHand then
+				TutorialHand.SetTarget(nil)
+			end
+			tipHand = nil
+		end
 		return
 	end
 
@@ -962,6 +984,14 @@ local function tipFrame()
 			TycoonController.MarkTipSeen(handId)
 			return
 		end
+	end
+end
+
+-- /selftest: end any running tip and start none while paused.
+function TutorialController.SelfTestSetTipsPaused(paused: boolean)
+	tipsPaused = paused
+	if paused and tipShowing then
+		endTip()
 	end
 end
 
