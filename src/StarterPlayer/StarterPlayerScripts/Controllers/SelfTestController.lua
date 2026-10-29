@@ -3791,8 +3791,9 @@ local function projectFor(camera: Camera, world: Vector3, size: Vector2): Vector
 	return Vector2.new((ndcX * 0.5 + 0.5) * size.X, (0.5 - ndcY * 0.5) * size.Y)
 end
 
--- The live card's drawn top with NO announcement up, then with one showing: a
--- toast never moves the card, so the two agree (the caller allows 1 px).
+-- The live card's drawn top with NO announcement up, then with one showing
+-- (less the anchor's drift between the two samples): a toast never moves the
+-- card, so the two agree (the caller allows 1 px).
 -- Returns (quiet, withToast, problem).
 local function gachaToastTops(): (number?, number?, string?)
 	local Board = require(script.Parent.GachaBoardController) :: any
@@ -3804,6 +3805,7 @@ local function gachaToastTops(): (number?, number?, string?)
 	end
 	waitFrames(3)
 	local quiet = Board.GetDrawnTop()
+	local quietAnchor = Board.GetDrawnAnchorY()
 	TopStack.Announce({
 		Key = "SelfTestGachaToast",
 		Priority = 5,
@@ -3821,7 +3823,16 @@ local function gachaToastTops(): (number?, number?, string?)
 	end
 	waitFrames(3)
 	local shown = TopStack.GetHeight("Announce") > 0
-	return quiet, Board.GetDrawnTop(), if shown then nil else "the test announcement never showed"
+	-- The card's top is the anchor's screen y less its height plus the clamp's
+	-- slide, so a standing tester's camera drifting a pixel or two between the
+	-- samples (198.0 vs 200.2 with the clamp's shift 0.00 in both) is not the
+	-- toast. Take the anchor's drift out; what is left is the slide and height.
+	local withToast = Board.GetDrawnTop()
+	local withAnchor = Board.GetDrawnAnchorY()
+	if withToast and quietAnchor and withAnchor then
+		withToast -= withAnchor - quietAnchor
+	end
+	return quiet, withToast, if shown then nil else "the test announcement never showed"
 end
 
 -- The gacha card on a phone `size` px big with the tester at one spot on the
@@ -5550,6 +5561,29 @@ local function run(payload: any)
 			return
 		end
 		local started = os.clock()
+		if name == "loop nudge" or name == "mission banner" then
+			-- The live state these two depend on, so a flake explains itself.
+			local TutorialController = require(script.Parent.TutorialController) :: any
+			local UpgradeGuide = require(UI.UpgradeGuide) :: any
+			local presented = TutorialController.GetPresentedStep()
+			local guideWhere, guideStation = UpgradeGuide.GetLast()
+			local camera = Workspace.CurrentCamera
+			print(
+				("[SelfTest] client state before %s: tip %s, coach step %s, overlays [%s], layout %s %dx%d, UpgradeGuide owns hand %s (last %s %s), hand target %s"):format(
+					name,
+					tostring(TutorialController.GetTipShowing()),
+					if presented then tostring(presented.Id) else "none",
+					table.concat(UIKit.GetOpenOverlays(), ", "),
+					if UIKit.IsPhone() then "phone" else "desktop",
+					camera.ViewportSize.X,
+					camera.ViewportSize.Y,
+					tostring(UpgradeGuide.IsOwningHand()),
+					tostring(guideWhere),
+					tostring(guideStation),
+					tostring(require(UI.TutorialHand).GetTarget())
+				)
+			)
+		end
 		for _, line in probe() do
 			table.insert(panelLines, line)
 		end

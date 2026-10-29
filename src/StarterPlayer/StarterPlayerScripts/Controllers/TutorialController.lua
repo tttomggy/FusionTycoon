@@ -995,6 +995,11 @@ function TutorialController.SelfTestSetTipsPaused(paused: boolean)
 	end
 end
 
+-- /selftest: the id of the tip that is up now, or nil.
+function TutorialController.GetTipShowing(): string?
+	return tipShowing
+end
+
 -- The current step's banner text and what is up (/selftest).
 function TutorialController.GetPresentedStep(): TutorialConfig.Step?
 	return presentedStep()

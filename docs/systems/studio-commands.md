@@ -172,6 +172,11 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   suppresses the daily card / notification prompt from the start, and `stage()`
   closes and reports (`WARN stage X left an overlay open`) any overlay a stage
   leaves up.
+  The loop nudge and mission banner stages print `client state before <stage>`
+  (tip, coach step, overlays, layout, UpgradeGuide ownership, hand target).
+  The gacha "a toast moved the card" check takes the anchor's screen-y drift
+  between its two samples out of the second top (the clamp's shift was 0.00 in
+  both; a camera drift of ~2 px had read as a toast).
 - The gacha card probes print `blocked by: …` (`GachaBoardController.GetBlockReason`:
   open overlays, ragdoll, carrying) so a card that stays shut names its gate.
 - **Gacha card POSITION lines are WARN, not FAIL** (launch is gated on 0 FAIL; a

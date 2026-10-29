@@ -1710,6 +1710,18 @@ function GachaBoardController.GetDrawnRect(): (number?, number?, number?)
 	return anchorY - height + slide, anchorY + slide, height / math.max(view.Billboard.Size.Y.Offset, 1)
 end
 
+-- The anchor's screen y right now (the card's bottom edge before the slide),
+-- for /selftest: the card's top is anchorY - height + slide, so a camera that
+-- drifts between two samples moves the top without the card being moved.
+function GachaBoardController.GetDrawnAnchorY(): number?
+	local view = card
+	local camera = Workspace.CurrentCamera
+	if not view or not camera then
+		return nil
+	end
+	return anchorScreenY(view, camera)
+end
+
 function GachaBoardController.GetDrawnTop(): number?
 	local top = GachaBoardController.GetDrawnRect()
 	return top
