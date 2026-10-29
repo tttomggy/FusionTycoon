@@ -15,6 +15,11 @@
 	pedestal in another lab you could steal from right now), or
 	"ui:<Button>" for a HUD button.
 
+	A goal says what the player DOES (start the text with a verb: Pull, Fuse,
+	Upgrade, Steal, Reach) and its Target is where they do it: a result that
+	happens by itself (pedestals filling) points at the action that causes it
+	(the Gacha Pad). Every goal has a Target and a Loop except GoalConfig.NoLoop.
+
 	"Own a tier" goals (own_rare / own_epic / own_legendary / own_mythic:
 	`Kind = "OwnTier", Tier = ...`) also show the NEXT ACTION under the goal
 	text and move the arrow to match (GoalSteps, computed in GoalService on
@@ -81,32 +86,46 @@ GoalConfig.V1Ids = {
 	"first_steal",
 } :: { string }
 
+-- Goals that are no step of the core loop (walk to a station, press a button):
+-- the strip shows the coach's own step for them. Every OTHER goal must name
+-- its Target and its Loop (a Pull / Fuse / Upgrade / Steal action): /selftest
+-- fails a goal that does neither, so a copy-pasted "result" goal can't slip in.
+GoalConfig.NoLoop = {
+	claim_base = true,
+	first_rebirth = true,
+	first_shield = true,
+} :: { [string]: boolean }
+
 GoalConfig.Goals = {
 	{ Id = "claim_base", Text = "Claim your base", Reward = 50, Target = "ClaimStation" },
 	{ Id = "upgrade_basic", Text = "Upgrade your Basic Generator", Reward = 60, Target = "Generator_basic_generator", Loop = "Upgrade" },
 	{ Id = "basic_lv5", Text = "Get Basic Generator to LV 5", Reward = 100, Unit = "Basic LV", Target = "Generator_basic_generator", Loop = "Upgrade" },
 	{ Id = "gacha_pull", Text = "Pull from the Gacha Pad", Reward = 150, Target = "GachaStation", Loop = "Pull" },
-	-- Automatic now (your best items fill the pedestals): it completes with
-	-- the first pull. Kept (not removed) so saved GoalIndex values still line up.
-	{ Id = "display_item", Text = "Your best orb goes on a pedestal", Reward = 200, Target = "FirstEmptyPedestal" },
+	-- Automatic now (your best items fill the pedestals), so the action is the
+	-- PULL that makes an orb: a player with a free pull (gacha_pull counts it)
+	-- has no orb yet and would stand at an empty pedestal. Kept (not removed)
+	-- so saved GoalIndex values still line up.
+	{ Id = "display_item", Text = "Pull an orb for a pedestal", Reward = 200, Target = "GachaStation", Loop = "Pull" },
 	{ Id = "first_fusion", Text = "Fuse at your Fusion Machine", Reward = 300, Target = "FusionMachine", Loop = "Fuse" },
-	{ Id = "own_rare", Text = "Fuse Commons into a Rare", Reward = 400, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Rare" },
+	{ Id = "own_rare", Text = "Fuse Commons into a Rare", Reward = 400, Unit = "Rare", Target = "FusionMachine", Loop = "Fuse", Kind = "OwnTier", Tier = "Rare" },
 	-- Cheap goals between the first Rare and the 5000-cash Multiplier, where a
 	-- real player stalled: each one is a thing to do next.
-	{ Id = "fill_pedestals", Text = "Fill all 4 pedestals", Reward = 600, Unit = "Pedestal", Target = "FirstEmptyPedestal" },
+	-- Pedestals fill BY THEMSELVES (auto-display: your best 4 orbs), so the
+	-- action is the pull, never the pedestal.
+	{ Id = "fill_pedestals", Text = "Pull orbs: fill 4 pedestals", Reward = 600, Unit = "Pedestal", Target = "GachaStation", Loop = "Pull" },
 	{ Id = "max_basic", Text = "Max your Basic Generator (LV 25)", Reward = 1500, Unit = "Basic LV", Target = "Generator_basic_generator", Loop = "Upgrade" },
 	-- (done too when the player already owns an Epic: they fused past it)
-	{ Id = "own_3_rares", Text = "Own 3 Rares at once", Reward = 1200, Unit = "Rare", Target = "FusionMachine", Loop = "Fuse" },
+	{ Id = "own_3_rares", Text = "Fuse up to 3 Rares at once", Reward = 1200, Unit = "Rare", Target = "FusionMachine", Loop = "Fuse" },
 	{ Id = "upgrade_multiplier", Text = "Upgrade your Multiplier", Reward = 1500, Target = "MultiplierStation", Loop = "Upgrade" },
-	{ Id = "own_epic", Text = "Fuse Rares into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine", Kind = "OwnTier", Tier = "Epic" },
+	{ Id = "own_epic", Text = "Fuse Rares into an Epic", Reward = 3000, Unit = "Rare", Target = "FusionMachine", Loop = "Fuse", Kind = "OwnTier", Tier = "Epic" },
 	{ Id = "unlock_ember_forge", Text = "Unlock the Ember Forge", Reward = 5000, Unit = "Basic LV", Target = "Generator_ember_forge", Loop = "Upgrade" },
 	{ Id = "multiplier_x1_5", Text = "Reach x1.5 multiplier", Reward = 4000, Unit = "LV", Target = "MultiplierStation", Loop = "Upgrade" },
 	-- (done too when the player already owns a Legendary)
-	{ Id = "own_2_epics", Text = "Own 2 Epics", Reward = 6000, Unit = "Epic", Target = "FusionMachine", Loop = "Fuse" },
+	{ Id = "own_2_epics", Text = "Fuse up to 2 Epics at once", Reward = 6000, Unit = "Epic", Target = "FusionMachine", Loop = "Fuse" },
 	{ Id = "unlock_flare_reactor", Text = "Unlock the Flare Reactor", Reward = 10000, Unit = "Ember LV", Target = "Generator_flare_reactor", Loop = "Upgrade" },
-	{ Id = "own_legendary", Text = "Fuse Epics into a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine", Kind = "OwnTier", Tier = "Legendary" },
+	{ Id = "own_legendary", Text = "Fuse Epics into a Legendary", Reward = 20000, Unit = "Epic", Target = "FusionMachine", Loop = "Fuse", Kind = "OwnTier", Tier = "Legendary" },
 	{ Id = "multiplier_x2", Text = "Reach a x2 multiplier", Reward = 100000, Unit = "LV", Target = "MultiplierStation", Loop = "Upgrade" },
-	{ Id = "own_mythic", Text = "Fuse Legendaries into a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine", Kind = "OwnTier", Tier = "Mythic" },
+	{ Id = "own_mythic", Text = "Fuse Legendaries into a Mythic", Reward = 500000, Unit = "Legendary", Target = "FusionMachine", Loop = "Fuse", Kind = "OwnTier", Tier = "Mythic" },
 	-- Checked after the rebirth resets the run, so the reward lands in the new run.
 	{ Id = "first_rebirth", Text = "Rebirth for the first time", Reward = 25000, Target = "RebirthPortal" },
 	-- Heist (unlocks at Rebirth 1): defend first, then steal.

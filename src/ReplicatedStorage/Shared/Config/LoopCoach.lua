@@ -273,11 +273,18 @@ function LoopCoach.GoalBlocked(goalId: string, goalStep: GoalSteps.Step?, input:
 	if goalId == "upgrade_basic" or goalId == "basic_lv5" or goalId == "max_basic" then
 		return cannotAfford("basic_generator")
 	elseif goalId == "unlock_flare_reactor" then
-		return cannotAfford(if (input.Levels.ember_forge or 0) < 10 then "ember_forge" else "flare_reactor")
+		-- The goal's arrow is the locked generator; until its prerequisite
+		-- is levelled the action is somewhere else, so the coach points.
+		return (input.Levels.ember_forge or 0) < 10 or cannotAfford("flare_reactor")
 	elseif goalId == "unlock_ember_forge" then
-		return cannotAfford(if (input.Levels.basic_generator or 0) < 5 then "basic_generator" else "ember_forge")
-	elseif goalId == "gacha_pull" then
+		return (input.Levels.basic_generator or 0) < 5 or cannotAfford("ember_forge")
+	elseif goalId == "gacha_pull" or goalId == "display_item" or goalId == "fill_pedestals" then
+		-- The pull is the action (pedestals fill by themselves).
 		return input.Cash < input.PullCost
+	elseif goalId == "own_3_rares" or goalId == "own_2_epics" then
+		-- Fusing is the action; with no pair the coach says what to do
+		-- instead (pull the lower tier, or earn the cash for it).
+		return candidates.Fuse == nil
 	elseif goalId == "first_fusion" then
 		return candidates.Fuse == nil
 	elseif goalId == "upgrade_multiplier" or goalId == "multiplier_x1_5" or goalId == "multiplier_x2" then

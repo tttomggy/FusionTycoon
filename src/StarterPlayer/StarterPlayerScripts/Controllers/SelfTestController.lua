@@ -1362,6 +1362,18 @@ local function testCoachArrow(): { string }
 	check("the goal's own step keeps the arrow while the coach waits", { Current = 1, Target = 2, Step = goalStep, Coach = coach("Pull", "GachaStation", false) }, false, "FusionMachine", goal.Text)
 	check("no step and no coach: the goal's own target", { Current = 1, Target = 2 }, false, goal.Target, goal.Text)
 	check("no coach during the tutorial: the goal's step", { Current = 1, Target = 2, Step = goalStep }, true, "FusionMachine", goal.Text)
+	-- The screenshot case: cash 5630, pull 250, 2 of 4 pedestals full, no pair.
+	for _, candidate in GoalConfig.Goals do
+		if candidate.Id == "fill_pedestals" then
+			local target, text = marker.PlanGoalArrow(candidate, { Current = 2, Target = 4, Coach = coach("Pull", "GachaStation", false) }, false)
+			table.insert(
+				lines,
+				if target == "GachaStation" and text == candidate.Text
+					then "PASS goal arrow: fill_pedestals points at the Gacha Pad"
+					else ("FAIL goal arrow: fill_pedestals points at %s '%s' (wanted the Gacha Pad)"):format(tostring(target), text)
+			)
+		end
+	end
 	return lines
 end
 

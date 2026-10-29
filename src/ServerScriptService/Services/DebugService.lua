@@ -1932,6 +1932,24 @@ local function runGoalMigrationSelfTest(result: (boolean, string, string?) -> ()
 		ids[goal.Id] = true
 	end
 	result(unique, "goal list: every goal id is unique")
+
+	-- Every goal says WHERE the action is and WHICH loop step it is (a copy-pasted
+	-- "result" goal, like fill_pedestals pointing at a pedestal, fails here).
+	local steps: { [string]: boolean } = {}
+	for _, step in { "Pull", "Fuse", "Upgrade", "Steal" } do
+		steps[step] = true
+	end
+	local missing: { string } = {}
+	for _, goal in goals do
+		local looped = goal.Loop ~= nil and steps[goal.Loop] == true
+		local exempt = GoalConfig.NoLoop[goal.Id] == true
+		if goal.Target == "" or (exempt and goal.Loop ~= nil) or (not exempt and not looped) then
+			table.insert(missing, goal.Id)
+		end
+	end
+	result(#missing == 0, "goal list: every goal has a Target and a Loop (Pull / Fuse / Upgrade / Steal) unless it is in NoLoop", table.concat(missing, ", "))
+	local fillGoal = goals[GoalConfig.IndexOf("fill_pedestals") or 0]
+	result(fillGoal ~= nil and fillGoal.Loop == "Pull" and fillGoal.Target == "GachaStation", "goal list: fill_pedestals is Pull / GachaStation (pedestals fill by themselves)")
 	result(#goals - #GoalConfig.V1Ids == 6, "goal list: six goals were added to the frozen v1 list", ("%d goals, %d in v1"):format(#goals, #GoalConfig.V1Ids))
 
 	local sameGoal, ordered, bad = true, true, {}
@@ -2123,6 +2141,19 @@ local function runLoopCoachSelfTest(player: Player, result: (boolean, string, st
 	result(c6 ~= nil and c6.Takes, "loop coach: 'Fuse at your Fusion Machine' with nothing to fuse: the coach takes over")
 	local c7 = coachFor("first_fusion", nil, stub({ Counts = { Common = 2 } }))
 	result(c7 ~= nil and not c7.Takes and c7.Lit == "Fuse", "loop coach: ... with a pair, the goal keeps the line")
+	-- fill_pedestals: pedestals fill by themselves, the pull is the action.
+	local f1 = coachFor("fill_pedestals", nil, stub({ Cash = 5630, PullCost = 250 }))
+	result(f1 ~= nil and not f1.Takes and f1.Lit == "Pull" and f1.Step == "Pull" and f1.Target == "GachaStation", "loop coach: fill_pedestals with 5630 cash and a 250 pull, no pair: Pull is lit and the coach's arrow is the Gacha Pad")
+	local f2 = coachFor("fill_pedestals", nil, stub({ Cash = 100, PullCost = 250 }))
+	result(f2 ~= nil and f2.Takes, "loop coach: fill_pedestals with no cash for a pull: the coach takes over")
+	local f3 = coachFor("display_item", nil, stub({ Cash = 300 }))
+	result(f3 ~= nil and not f3.Takes and f3.Lit == "Pull", "loop coach: display_item with a pull affordable lights Pull")
+	local f4 = coachFor("own_3_rares", nil, stub({ Cash = 300 }))
+	result(f4 ~= nil and f4.Takes and f4.Step == "Pull", "loop coach: own_3_rares with nothing to fuse: the coach says Pull")
+	local f5 = coachFor("own_3_rares", nil, stub({ Cash = 5, Counts = { Common = 2 } }))
+	result(f5 ~= nil and not f5.Takes and f5.Lit == "Fuse", "loop coach: own_3_rares with a pair keeps the goal's arrow on the Fusion Machine")
+	local f6 = coachFor("unlock_flare_reactor", nil, stub({ Cash = 5000, Levels = { basic_generator = 9, ember_forge = 4 } }))
+	result(f6 ~= nil and f6.Takes, "loop coach: unlock_flare_reactor before Ember LV 10: the coach points, the Flare Reactor is locked")
 	local c8 = coachFor("claim_base", nil, stub({ Cash = 300 }))
 	result(c8 ~= nil and not c8.Takes and c8.Lit == c8.Step, "loop coach: a goal that is no loop step shows the coach's icon")
 

@@ -86,6 +86,18 @@ above (they fused past it), so they never block. Evaluators:
 `GoalService.EVALUATORS`; the coach's `LoopCoach.GoalBlocked` knows the new
 ids that need cash.
 
+**A goal names the ACTION, and its arrow leads there.** Text starts with a
+verb the player does; `Target` is where they do it and `Loop` (Pull / Fuse /
+Upgrade / Steal) lights that loop-strip step. Results that happen by
+themselves point at what causes them: `fill_pedestals` and `display_item`
+(pedestals fill by auto-display) are `GachaStation` / `Pull`. Only
+`GoalConfig.NoLoop` (claim_base, first_rebirth, first_shield) has no Loop;
+`/selftest` fails any other goal without a Target and a Loop. `GoalBlocked`
+hands the line and the arrow to the coach when the goal's action can't be
+done: no cash for a pull (`gacha_pull`, `display_item`, `fill_pedestals`),
+nothing to fuse (`own_3_rares`, `own_2_epics`), or the locked generator's
+prerequisite not levelled yet (`unlock_ember_forge`, `unlock_flare_reactor`).
+
 **Saved progress is an index.** `PlayerData.GoalVer` records the
 `GoalConfig.DataVersion` the `GoalIndex` was saved under (no `GoalVer` = 1,
 the 16-goal list frozen in `GoalConfig.V1Ids`). On load,
