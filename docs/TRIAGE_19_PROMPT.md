@@ -85,3 +85,32 @@ Do:
   hang helpers on an existing table.
 - Report per item: cause (found / not found), test bug or real bug, file.
   Say which parts you could not verify.
+
+## 4. NEW on the PC run: gacha card "a toast moved the card" (1920x1080 and 1366x768)
+
+Same code (`e2dedc1`) passed this check on the previous PC run, so it is
+timing / state, not the code:
+
+`a toast moved the card: top 198.0 quiet, 200.2 with an announcement; clamp
+#207: stackBottom 64.0 minTop 68.0 anchorY 524.2 drawnHeight 324.0 shift 0.00
+... top 200.2, stable bottom now 64.0`
+
+The clamp's shift is 0.00 in the toast sample (the card is unclamped, the stack
+bottom did not move: 64.0), so the clamp did not move the card. The 2.2 px is
+most likely the standing player's anchor (character / camera sway) drifting
+between the two samples. Check by reading `GachaBoardController` and the probe
+(`gachaDesktopStack`): is the card's top, when `shift == 0`, a pure function of
+the anchor? If so compare the clamp output (shift, or the top minus the
+anchor-derived part) between the two samples, not the raw top, or take both
+samples in the same frame. If instead the toast really moves an unclamped card,
+that is a real bug (the card jumps when an announcement shows): fix it. Keep
+the real guarantee: the card's top is >= stack bottom + 4 px with and without a
+toast.
+
+## 5. The flakiness itself
+
+The mission-box fails (3 on phone before, 3 on PC now) and the hand fail move
+between runs of identical code. After the cause is found for 1 and 2, add one
+line at the start of the client half's loop nudge / mission stages that prints
+the live state they depend on (tip showing, coach step, overlay open, forced
+layout, `UpgradeGuide` owned) so any later flake explains itself in the log.
