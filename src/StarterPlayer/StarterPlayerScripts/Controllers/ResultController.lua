@@ -1981,8 +1981,10 @@ end
 -- and the Gifts panel have closed (they close themselves for pull and item
 -- rewards), so the big card or the skipped line is never hidden under or
 -- beside them. Anything else runs at once.
-local REWARD_CARD_OVERLAYS = { "DailyReward", "Gifts" }
+local REWARD_CARD_OVERLAYS = { "DailyReward", "Gifts", "OrbRushResults" }
 local REWARD_REVEAL_WAIT_SECONDS = 4
+-- The ORB RUSH podium card is read first (the prize orb pops out after it closes).
+local RUSH_RESULTS_WAIT_SECONDS = 40
 local REWARD_REVEAL_SETTLE_SECONDS = 0.25
 
 local function afterRewardCards(payload: any, handler: (any) -> ())
@@ -2000,7 +2002,11 @@ local function afterRewardCards(payload: any, handler: (any) -> ())
 			end
 			return false
 		end
-		while cardOpen() and os.clock() - started < REWARD_REVEAL_WAIT_SECONDS do
+		while cardOpen() do
+			local limit = if UIKit.IsOverlayNamed("OrbRushResults") then RUSH_RESULTS_WAIT_SECONDS else REWARD_REVEAL_WAIT_SECONDS
+			if os.clock() - started >= limit then
+				break
+			end
 			task.wait(0.1)
 		end
 		-- Let the card's pop-out finish first.

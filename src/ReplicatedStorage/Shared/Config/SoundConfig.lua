@@ -70,6 +70,20 @@ SoundConfig.Slots = {
 	-- WorldLabelController every RivalConfig.InsaneHumSeconds while you are
 	-- near (positional; no looping sounds in this game).
 	InsaneHum = { Id = asset(16480577565), Volume = 0.3, PlaybackSpeed = 0.5, RollOffMaxDistance = 90 },
+	-- ORB RUSH (MinigameController). Ids reused from the slots above at other
+	-- speeds, judged by name, not ear: audition each with "/sound <slot>".
+	-- The call banner: the event stinger.
+	RushCall = { Id = asset(15675043410), Volume = 0.55 },
+	-- An orb taken: the coin blip, pitched up by the player's streak.
+	RushPop = { Id = asset(16480580213), Volume = 0.5 },
+	-- The 3-2-1 ticks: a bright click.
+	RushTick = { Id = asset(15675059323), Volume = 0.6, PlaybackSpeed = 1.2 },
+	-- GO!: the station purchase.
+	RushGo = { Id = asset(10066947742), Volume = 0.7, PlaybackSpeed = 1.15 },
+	-- The Golden Wave riser: the reveal riser, quick.
+	RushGolden = { Id = asset(16480577565), Volume = 0.55, PlaybackSpeed = 1.25 },
+	-- The final scores / podium: the big fusion reveal sting.
+	RushResults = { Id = asset(12222253), Volume = 0.55 },
 	-- Combat (CombatController). Ids picked from the Creator Store (Polish
 	-- 12; APM / ProSoundEffects / short public SFX), judged by name, not ear:
 	-- audition each in Studio with "/sound <slot>" and swap any that miss.

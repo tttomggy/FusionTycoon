@@ -36,6 +36,14 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # much the goal cash moves
                                                 # Rebirth 1 (target: the new
                                                 # goals add <= ~1 min)
+        python3 tools/econ_sim.py 20 4 --minigame [--mg-first=0.35]
+                                                # ORB RUSH (MinigameConfig): a
+                                                # greedy player joins EVERY
+                                                # round (one an 15 min), wins
+                                                # 1st 35% of them; Rebirth 1-3
+                                                # vs. the same seeds without
+                                                # (target: nothing moves more
+                                                # than 10% earlier)
         python3 tools/econ_sim.py 30 12 --rivals [--rival-success=0.5]
                                                 # rival-lab steals on (from
                                                 # minute 3, one lab per
@@ -195,6 +203,26 @@ RIVAL_TIERS = {  # RivalConfig.Tiers, hardest first
 }
 RIVAL_SUCCESS = 1.0  # chance an attempt on Medium / Hard / Insane is delivered (Easy: always)
 
+# ORB RUSH (MinigameConfig.lua), only with --minigame: a round every 15 minutes
+# (hh:07 ... the sim's player joins every one, from MG_START_SECONDS on). The
+# place is drawn from MG_PLACE_ODDS (1st = MG_FIRST_SHARE, set with
+# --mg-first=); 1st / 2nd / 3rd win one orb from MinigameConfig.Prizes, everyone
+# else MG_PARTICIPATION_SECONDS of their own passive income in cash. Mirrors
+# MinigameConfig.Prizes / ParticipationIncomeSeconds; PlacementPrizesPerHour (4)
+# never binds with a round every 15 minutes.
+MINIGAME = False
+MG_START_SECONDS = 600
+MG_ROUND_SECONDS = 900
+MG_FIRST_SHARE = 0.35
+MG_SECOND_SHARE = 0.25
+MG_THIRD_SHARE = 0.20  # the rest is "everyone else" (cash)
+MG_PARTICIPATION_SECONDS = 90
+MG_PRIZES = {
+    1: {"Epic": 60, "Legendary": 35, "Mythic": 4.5, "Secret": 0.5},
+    2: {"Rare": 50, "Epic": 45, "Legendary": 5},
+    3: {"Rare": 80, "Epic": 20},
+}
+
 # Onboarding goals (GoalConfig.lua), only with --goals=old|new. The goals are
 # paid in order, each in cash when its condition holds (GoalService). The
 # ids and rewards are read from GoalConfig.lua itself, so a reward change
@@ -317,6 +345,8 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     # Rival-lab steals: a separate RNG, so the base run's draws never move.
     rival_rng = random.Random(seed * 104729 + 5)
     next_steal = RIVAL_START_SECONDS
+    next_round = MG_START_SECONDS
+    mg_rng = random.Random(seed * 7919 + 11)  # its own RNG: the base run's draws never move
     rival_log = {}  # pool -> times (s) of delivered steals in the last hour
 
     shop = PAYERS[payer]
@@ -602,6 +632,23 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
                 milestones["rival_steals"] = milestones.get("rival_steals", 0) + 1
                 mark("first_rival_steal")
                 break
+        while MINIGAME and t >= next_round:
+            next_round += MG_ROUND_SECONDS
+            draw = mg_rng.random()
+            place = 1 if draw < MG_FIRST_SHARE else 2 if draw < MG_FIRST_SHARE + MG_SECOND_SHARE else 3 if draw < MG_FIRST_SHARE + MG_SECOND_SHARE + MG_THIRD_SHARE else 4
+            if place <= 3:
+                weights = MG_PRIZES[place]
+                roll = mg_rng.random() * sum(weights.values())
+                tier = "Common"
+                for tr, w in weights.items():
+                    tier = tr
+                    if roll < w:
+                        break
+                    roll -= w
+                add(tier, "None")
+                milestones["mg_orbs"] = milestones.get("mg_orbs", 0) + 1
+            else:
+                cash += MG_PARTICIPATION_SECONDS * cps(ev)
         income = cps(ev)
         cash += income * step
         earned += income * step
@@ -780,7 +827,13 @@ if __name__ == "__main__":
         QUESTS = True
     if "--rivals" in sys.argv:
         RIVALS = True
+    if "--minigame" in sys.argv:
+        MINIGAME = True
     for a in sys.argv:
+        if a.startswith("--mg-first="):
+            MG_FIRST_SHARE = float(a.split("=")[1])
+            MG_SECOND_SHARE = (1 - MG_FIRST_SHARE) * 0.45
+            MG_THIRD_SHARE = (1 - MG_FIRST_SHARE) * 0.35
         if a.startswith("--rival-success="):
             RIVAL_SUCCESS = float(a.split("=")[1])
     for a in sys.argv:
@@ -890,6 +943,22 @@ if __name__ == "__main__":
         print(f"  fastest decile Rebirth 1 with rivals: {fmt(lo1 if lo1 < 1e12 else None)} (target >= 0:35:00)")
         lo_half = sorted(r[0].get("rebirth1", 1e12) for r in half)[lo]
         print(f"  fastest decile Rebirth 1, 50% landing: {fmt(lo_half if lo_half < 1e12 else None)}")
+    if MINIGAME:
+        # The same seeds without ORB RUSH: how much a round every 15 minutes
+        # moves Rebirth 1-3 (target: nothing more than 10% earlier).
+        MINIGAME = False
+        base = [run(s, hours * 3600) for s in range(seeds)]
+        MINIGAME = True
+        print(f"ORB RUSH (every round joined, 1st {MG_FIRST_SHARE:.0%} / 2nd {MG_SECOND_SHARE:.0%} / 3rd {MG_THIRD_SHARE:.0%}, rest cash {MG_PARTICIPATION_SECONDS} s) vs. none (same seeds), median:")
+        for k in ["rebirth1", "rebirth2", "rebirth3"]:
+            a = sorted(r[0].get(k, 1e12) for r in base)[mid]
+            b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
+            if a < 1e12 and b < 1e12:
+                print(f"  {k:10s} none {fmt(a)}  orb rush {fmt(b)}  {(a - b) / a:+.1%} sooner")
+            else:
+                print(f"  {k:10s} none {fmt(a if a < 1e12 else None)}  orb rush {fmt(b if b < 1e12 else None)}")
+        lo1 = sorted(r[0].get("rebirth1", 1e12) for r in runs)[lo]
+        print(f"  fastest decile Rebirth 1 with ORB RUSH: {fmt(lo1 if lo1 < 1e12 else None)} (target >= 0:35:00)")
     if EVENTS:
         # The same seeds without events: how much the clock speeds Rebirth
         # 1-3 (target: at most 15% sooner).

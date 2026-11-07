@@ -1432,6 +1432,17 @@ local function testHudLeftColumn(): { string }
 				table.insert(lines, line)
 			end
 		end
+		-- ORB RUSH: the JOIN pill and the live top 3 sit in the column's free space.
+		local rushOk, rushResult = pcall(function(): { string }
+			return (require(script.Parent.MinigameController) :: any).SelfTestLines(if phone then "phone" else "desktop")
+		end)
+		if not rushOk then
+			table.insert(lines, "FAIL orb rush hud: " .. tostring(rushResult))
+		else
+			for _, line in rushResult :: { string } do
+				table.insert(lines, line)
+			end
+		end
 		-- The loop strip: five >= 44 px cells, the right chip lit, +62 px (desktop) / +40 px (phone) at most.
 		local stripOk, stripResult = pcall(hud.SelfTestLoopStrip, if phone then "phone" else "desktop")
 		if not stripOk then

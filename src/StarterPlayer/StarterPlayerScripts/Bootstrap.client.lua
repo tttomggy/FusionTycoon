@@ -76,6 +76,7 @@ local JumpPadController = safeRequire("JumpPadController", Controllers)
 local MusicController = safeRequire("MusicController", Controllers)
 local GachaBoardController = safeRequire("GachaBoardController", Controllers)
 local LoopCoachController = safeRequire("LoopCoachController", Controllers)
+local MinigameController = safeRequire("MinigameController", Controllers)
 local HudGate = safeRequire("HudGate", UI)
 local TopStack = safeRequire("TopStack", UI)
 local MissionBanner = safeRequire("MissionBanner", UI)
@@ -107,6 +108,7 @@ safeInit("MusicController", MusicController) -- the background playlist (Setting
 safeInit("JumpPadController", JumpPadController) -- the 2nd floor's jump pads launch your own character
 safeInit("GachaBoardController", GachaBoardController) -- the Gacha odds card above your pad (+ its E / R / ? buttons)
 safeInit("LoopCoachController", LoopCoachController) -- the loop-closing lines (new orb earns, more cash, free orb)
+safeInit("MinigameController", MinigameController) -- ORB RUSH: the JOIN pill, the round HUD, the results card
 safeInit("UpgradeGuide", UpgradeGuide) -- the coach's hand leads into the UPGRADES panel
 safeInit("MissionBanner", MissionBanner) -- the steal mission box in TopStack's Mission slot
 
