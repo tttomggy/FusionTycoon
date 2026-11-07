@@ -68,11 +68,13 @@ type PlayerDataServiceModule = typeof(require(script.Parent.PlayerDataService))
 type HeistServiceModule = typeof(require(script.Parent.HeistService))
 type TycoonServiceModule = typeof(require(script.Parent.TycoonService))
 type RivalServiceModule = typeof(require(script.Parent.RivalService))
+type MinigameServiceModule = typeof(require(script.Parent.MinigameService))
 
 local PlayerDataService: PlayerDataServiceModule
 local HeistService: HeistServiceModule
 local TycoonService: TycoonServiceModule
 local RivalService: RivalServiceModule
+local MinigameService: MinigameServiceModule
 
 local CombatService = {}
 CombatService.Name = "CombatService"
@@ -137,7 +139,9 @@ local function whyCantFight(player: Player): string?
 	if not PlayerDataService.IsDataLoaded(player) then
 		return "DataNotLoaded"
 	end
-	if PlayerDataService.GetRebirths(player) < CombatConfig.MinRebirths then
+	-- In an ORB RUSH round everyone in the arena can fight whatever their Rebirths
+	-- (the arena has no plots and no Protected labs); a weapon must still be owned.
+	if PlayerDataService.GetRebirths(player) < CombatConfig.MinRebirths and not MinigameService.IsPlaying(player) then
 		return "NeedsRebirth"
 	end
 	local humanoid = getHumanoid(player)
@@ -437,6 +441,10 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 	if not targetRoot then
 		return
 	end
+	-- ORB RUSH: a hit in the arena knocks 30% of the target's points out as orbs.
+	if MinigameService.IsPlaying(target) then
+		MinigameService.OnPlayerHit(attacker, target)
+	end
 	if attacker and isGuarding(target) then
 		AnalyticsKit.Custom(attacker, "GuardKnocked")
 	end
@@ -491,6 +499,22 @@ function CombatService.ApplyGuardHit(attacker: Player, rivalId: number, guardInd
 		Attacker = attacker.UserId,
 	})
 	AnalyticsKit.Custom(attacker, "RivalGuardHit", nil, weapon.Id)
+end
+
+-- A confirmed hit on ORB RUSH bot `botId`: the same scatter and immunity as a
+-- player (MinigameService), everyone sees the bonk / freeze FX.
+function CombatService.ApplyBotHit(attacker: Player, botId: number, weapon: CombatConfig.Weapon, from: Vector3)
+	local root = MinigameService.GetBotRoot(botId)
+	if not root or not MinigameService.OnBotHit(attacker, botId, from) then
+		return
+	end
+	RemoteEvents.HitFx:FireAllClients({
+		Weapon = weapon.Id,
+		Kind = if weapon.Kind == "Freeze" then "Freeze" else "Bonk",
+		From = from,
+		To = root.Position,
+		Attacker = attacker.UserId,
+	})
 end
 
 --[[ Tools ---------------------------------------------------------------------------- ]]
@@ -942,6 +966,20 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 		end
 	end
 
+	-- ORB RUSH bots in the box (within reach) are hit too.
+	local bots: { number } = {}
+	for _, part in parts do
+		local botId = MinigameService.BotOfPart(part)
+		local botRoot = if botId then MinigameService.GetBotRoot(botId) else nil
+		if botId and botRoot and not table.find(bots, botId) then
+			local distance = (botRoot.Position - root.Position).Magnitude
+			if distance <= maxReach then
+				table.insert(bots, botId)
+				table.insert(found, ("Bot %.1f studs"):format(distance))
+			end
+		end
+	end
+
 	local hits: { Player } = {}
 	local refusals: { string } = {}
 	for _, candidate in candidates do
@@ -964,8 +1002,11 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	for _ in guards do
 		table.insert(hitNames, "Lab Guard")
 	end
+	for _ in bots do
+		table.insert(hitNames, "Bot")
+	end
 	local verdict: string
-	if #hits > 0 or #guards > 0 then
+	if #hits > 0 or #guards > 0 or #bots > 0 then
 		verdict = "HIT " .. table.concat(hitNames, ", ")
 		if #refusals > 0 then
 			verdict ..= "; " .. table.concat(refusals, ", ")
@@ -981,6 +1022,9 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	end
 	for _, guard in guards do
 		CombatService.ApplyGuardHit(attacker, guard.RivalId, guard.Index, weapon, root.Position)
+	end
+	for _, botId in bots do
+		CombatService.ApplyBotHit(attacker, botId, weapon, root.Position)
 	end
 end
 
@@ -1045,6 +1089,10 @@ local function onRequestHit(attacker: Player, payload: unknown)
 		end
 		if guardRivalId and guardIndex then
 			CombatService.ApplyGuardHit(attacker, guardRivalId, guardIndex, weapon, origin)
+		end
+		local rayBotId = if hit and not target then MinigameService.BotOfPart(hit.Instance) else nil
+		if rayBotId then
+			CombatService.ApplyBotHit(attacker, rayBotId, weapon, origin)
 		end
 		if target and target ~= attacker then
 			local why = CombatService.WhyNotHittable(target)
@@ -1165,6 +1213,7 @@ function CombatService:Start()
 	HeistService = require(script.Parent.HeistService)
 	TycoonService = require(script.Parent.TycoonService)
 	RivalService = require(script.Parent.RivalService)
+	MinigameService = require(script.Parent.MinigameService)
 	PlayerDataService.OnSync(grantByRebirths)
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	for _, player in Players:GetPlayers() do

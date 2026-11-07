@@ -881,6 +881,9 @@ function HeistService.TryRivalSteal(thief: Player, rivalId: number, pedestalInde
 	if state.carries[thief.UserId] then
 		return false, "AlreadyCarrying"
 	end
+	if PlayerDataService.IsInMinigame(thief) then
+		return false, "InArena"
+	end
 	local rival = RivalService.GetRival(rivalId)
 	local pedestal = RivalService.GetPedestal(rivalId, pedestalIndex)
 	if not rival or not pedestal then
@@ -1001,6 +1004,11 @@ local function onRequestSteal(thief: Player, rawPayload: unknown)
 	-- shield after a loss and LossCap stop a lab being farmed).
 	if state.carries[thief.UserId] then
 		reject(thief, "AlreadyCarrying")
+		return
+	end
+	-- (No stealing from the ORB RUSH arena: the thief is not on a street.)
+	if PlayerDataService.IsInMinigame(thief) or PlayerDataService.IsInMinigame(victim) then
+		reject(thief, "InArena")
 		return
 	end
 	-- 3. Both at MinRebirths (or the victim /stealable in Studio).

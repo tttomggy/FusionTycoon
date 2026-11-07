@@ -82,8 +82,9 @@ local function onRequestRebirth(player: Player)
 	end
 	-- Not mid-heist on either side: the thief has their hands full, and a
 	-- victim can't reset while one of their items is out the door.
-	if PlayerDataService.IsCarrying(player) then
-		reject(player, "Carrying")
+	local busy = PlayerDataService.WhyBusy(player)
+	if busy then
+		reject(player, busy)
 		return
 	end
 	if PlayerDataService.HasCarriedItems(player) then

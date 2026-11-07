@@ -210,9 +210,11 @@ local function onRequestUpgrade(player: Player, rawGeneratorId: unknown)
 		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "DataNotLoaded", GeneratorId = generatorId })
 		return
 	end
-	-- Hands full: no upgrades while carrying a stolen item (HeistService).
-	if PlayerDataService.IsCarrying(player) then
-		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = "Carrying", GeneratorId = generatorId })
+	-- Hands full: no upgrades while carrying a stolen item (HeistService) or in
+	-- the ORB RUSH arena (MinigameService).
+	local busy = PlayerDataService.WhyBusy(player)
+	if busy then
+		RemoteEvents.UpgradeResult:FireClient(player, { Success = false, Reason = busy, GeneratorId = generatorId })
 		return
 	end
 
@@ -262,8 +264,9 @@ local function onRequestUpgradeMax(player: Player, rawRequest: unknown)
 		reject("DataNotLoaded")
 		return
 	end
-	if PlayerDataService.IsCarrying(player) then
-		reject("Carrying")
+	local busy = PlayerDataService.WhyBusy(player)
+	if busy then
+		reject(busy)
 		return
 	end
 
@@ -695,8 +698,9 @@ local function createGachaStation(plot: Model, origin: CFrame, owner: Player?)
 			end
 			return false, reason, cost
 		end
-		if PlayerDataService.IsCarrying(player) then
-			return refuse("Carrying", nil)
+		local busy = PlayerDataService.WhyBusy(player)
+		if busy then
+			return refuse(busy, nil)
 		end
 		-- The tutorial's free pulls: a guaranteed plain Common each, through
 		-- the free path (the pad price doesn't move).
@@ -873,8 +877,9 @@ local function createMultiplierStation(plot: Model, origin: CFrame, owner: Playe
 		if debounce or triggeringPlayer.UserId ~= player.UserId then
 			return
 		end
-		if PlayerDataService.IsCarrying(player) then
-			RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = false, Reason = "Carrying" })
+		local busy = PlayerDataService.WhyBusy(player)
+		if busy then
+			RemoteEvents.MultiplierUpgraded:FireClient(player, { Success = false, Reason = busy })
 			return
 		end
 		local level = PlayerDataService.GetCashMultiplierLevel(player)

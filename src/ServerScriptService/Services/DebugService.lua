@@ -28,6 +28,8 @@ local IndexConfig = require(ReplicatedStorage.Shared.Config.IndexConfig)
 local OfflineConfig = require(ReplicatedStorage.Shared.Config.OfflineConfig)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
+local MinigameConfig = require(ReplicatedStorage.Shared.Config.MinigameConfig)
+local ArenaLayout = require(ReplicatedStorage.Shared.Config.ArenaLayout)
 local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
@@ -72,6 +74,7 @@ type RewardServiceModule = typeof(require(script.Parent.RewardService))
 type FriendServiceModule = typeof(require(script.Parent.FriendService))
 type NotifyServiceModule = typeof(require(script.Parent.NotifyService))
 type RivalServiceModule = typeof(require(script.Parent.RivalService))
+type MinigameServiceModule = typeof(require(script.Parent.MinigameService))
 type GoalServiceModule = typeof(require(script.Parent.GoalService))
 
 type State = {
@@ -100,6 +103,7 @@ local RewardService: RewardServiceModule
 local FriendService: FriendServiceModule
 local NotifyService: NotifyServiceModule
 local RivalService: RivalServiceModule
+local MinigameService: MinigameServiceModule
 local GoalService: GoalServiceModule
 
 -- /stealable is a toggle; remembers each player's current setting.
@@ -218,6 +222,10 @@ local GIFTS_COMMAND = "/gifts"
 	change an item mid-fuzz).
 ]]
 local SELFTEST_COMMAND = "/selftest"
+-- "/orbrush now" queues you and starts a round at once (3 bots fill it);
+-- "/orbrush now 20" a 20-second round; "/orbrush call 30" opens a 30-second call;
+-- "/orbrush abort" ends everything and sends you home.
+local ORBRUSH_COMMAND = "/orbrush"
 local SELFTEST_REPORT_TIMEOUT = 90 -- the client's big stages (Fuzz, Done)
 local SELFTEST_PROBE_TIMEOUT = 10 -- one combat / gacha probe
 -- The effects tray probe: two layouts x (a 3 s tooltip wait + checks) + three window sizes.
@@ -3681,6 +3689,416 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 	RivalService.Step()
 end
 
+
+-- Any live rival lab with an orb on pedestal 1 (for the tests that need a carry).
+local function anyRivalLab(): any?
+	for _, view in RivalService.GetRivals() do
+		if RivalService.GetOrb(view.Id, 1) and view.Difficulty == "Easy" then
+			return view
+		end
+	end
+	return nil
+end
+
+-- ORB RUSH (MinigameService / MinigameConfig / ArenaLayout): the schedule, the
+-- prize rolls and awards, the bot win-rate model, the arena's geometry, then a
+-- real shortened round with the tester and three bots (queue -> teleport -> points
+-- -> results -> home), the anti-farm cap, an AFK round, and the carry that fails
+-- on entering the portal. Everything is put back after.
+local function lcg(seed: number): MinigameConfig.RngLike
+	local current = seed
+	local rng: any = {}
+	function rng.NextNumber(_self: any, a: number?, b: number?): number
+		current = (current * 1103515245 + 12345) % 2147483648
+		local unit = current / 2147483648
+		if a and b then
+			return a + unit * (b - a)
+		end
+		return unit
+	end
+	return rng :: MinigameConfig.RngLike
+end
+
+local function runMinigameSelfTest(player: Player, result: (boolean, string, string?) -> ())
+	local character = player.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	-- 1. The schedule: the four minutes, deterministic, never an event's start.
+	do
+		local bad: { string } = {}
+		local start = 1767225600 -- an hh:00 slot
+		local eventStarts: { [number]: boolean } = {}
+		for index = 0, 48 * 4 - 1 do
+			eventStarts[start + index * EventConfig.SlotSeconds] = true
+		end
+		local minutes: { [number]: boolean } = {}
+		for index = 0, 48 * 4 - 1 do
+			local slot = MinigameConfig.GetSlot(start + index * MinigameConfig.SlotSeconds)
+			local round = MinigameConfig.GetRoundForSlot(slot)
+			local again = MinigameConfig.GetRoundForSlot(slot)
+			if round.CallAt ~= again.CallAt or round.StartAt ~= again.StartAt then
+				table.insert(bad, "not deterministic")
+			end
+			minutes[math.floor(round.CallAt / 60) % 60] = true
+			if eventStarts[round.CallAt] or eventStarts[round.StartAt] or round.CallAt % EventConfig.SlotSeconds == 0 or round.StartAt % EventConfig.SlotSeconds == 0 then
+				table.insert(bad, ("round %d shares an event start"):format(slot))
+			end
+			-- A round in progress is reported until it ends, then the next one.
+			local during = MinigameConfig.GetCurrentOrNext(round.CallAt + 5)
+			local after = MinigameConfig.GetCurrentOrNext(round.StartAt + MinigameConfig.CountdownSeconds + MinigameConfig.RoundSeconds + 60)
+			if during.Slot ~= slot or after.Slot ~= slot + 1 then
+				table.insert(bad, ("current/next wrong at slot %d"):format(slot))
+			end
+		end
+		local want = { [7] = true, [22] = true, [37] = true, [52] = true }
+		for minute in minutes do
+			if not want[minute] then
+				table.insert(bad, "a round at minute " .. minute)
+			end
+		end
+		for minute in want do
+			if not minutes[minute] then
+				table.insert(bad, "no round at minute " .. minute)
+			end
+		end
+		result(#bad == 0, "orb rush: rounds call at hh:07 / :22 / :37 / :52, deterministic, never at an event's start minute over 48 h", table.concat(bad, "; "))
+	end
+
+	-- 2. Prize rolls: 10 000 per place match the weights within 1.5 points; nothing below the floor.
+	do
+		local bad: { string } = {}
+		local rng = lcg(31337)
+		for place = 1, 3 do
+			local counts: { [string]: number } = {}
+			local floorTier = MinigameConfig.PrizeFloor(place) :: string
+			local floorRank = table.find(MinigameConfig.TierOrder, floorTier) or 1
+			for _ = 1, 10000 do
+				local tier = MinigameConfig.PickPrizeTier(place, rng:NextNumber()) :: string
+				counts[tier] = (counts[tier] or 0) + 1
+				if (table.find(MinigameConfig.TierOrder, tier) or 0) < floorRank or (MinigameConfig.Prizes[place][tier] or 0) <= 0 then
+					table.insert(bad, ("place %d rolled %s"):format(place, tier))
+					break
+				end
+			end
+			for _, tier in MinigameConfig.TierOrder do
+				local got = (counts[tier] or 0) / 100
+				local want = MinigameConfig.PrizeShare(place, tier) * 100
+				if math.abs(got - want) > 1.5 then
+					table.insert(bad, ("place %d %s: %.2f%% vs %.2f%%"):format(place, tier, got, want))
+				end
+			end
+		end
+		result(MinigameConfig.PickPrizeTier(4, 0.5) == nil and #bad == 0, "orb rush: 10 000 prize rolls per place match the weights within 1.5 points, nothing below each place's floor, no prize for 4th", table.concat(bad, "; "))
+	end
+
+	-- 3. Awards: a bot winning pushes nobody up, AFK gets nothing, the 5th prize in an hour is cash.
+	do
+		local function entry(isBot: boolean, userId: number, points: number, left: boolean?): { IsBot: boolean, UserId: number, Points: number, Left: boolean }
+			return { IsBot = isBot, UserId = userId, Points = points, Left = left == true }
+		end
+		local rng = lcg(5)
+		local function roll(): number
+			return rng:NextNumber()
+		end
+		local awards = MinigameService.PlanAwards({ entry(true, 0, 90), entry(false, 11, 60), entry(true, 0, 50), entry(false, 12, 20), entry(false, 13, 4), entry(false, 14, 70, true) }, {}, roll)
+		local slide = awards[1].Kind == "None"
+			and awards[2].Kind == "Orb"
+			and awards[2].Place == 2
+			and awards[3].Kind == "None"
+			and awards[4].Kind == "Cash"
+			and awards[5].Kind == "None"
+			and awards[6].Kind == "None"
+		result(slide, "orb rush: a bot's 1st awards nothing and the best human gets the 2nd-place prize; 4th+ with 10+ points get cash; under 10 points and a leaver get nothing")
+		local counts: { [number]: number } = {}
+		local kinds: { string } = {}
+		for _ = 1, 5 do
+			local round = MinigameService.PlanAwards({ entry(false, 21, 80), entry(true, 0, 10), entry(true, 0, 5) }, counts, roll)
+			table.insert(kinds, round[1].Kind .. if round[1].Capped then "(capped)" else "")
+		end
+		result(table.concat(kinds, ",") == "Orb,Orb,Orb,Orb,Cash(capped)", "orb rush: placement prizes are capped at 4 an hour; the 5th round pays cash", table.concat(kinds, ","))
+		local split = MinigameConfig.SplitPoints(37)
+		local sum = 0
+		for _, id in split do
+			sum += MinigameConfig.GetOrbValue(id)
+		end
+		result(
+			sum == 37 and MinigameConfig.ScatterPoints(40) == 12 and MinigameConfig.ScatterPoints(0) == 0 and MinigameConfig.ScatterPoints(1) == 1,
+			"orb rush: a hit knocks out 30% of the points (at least 1) and the scatter orbs add up to exactly that",
+			("split sum %d, 40 -> %d"):format(sum, MinigameConfig.ScatterPoints(40))
+		)
+	end
+
+	-- 4. Bots can win: 100 simulated rounds of 4 bots vs an average player (walks 16 to the
+	-- nearest orb after 0.35 s): the player wins 30-50%.
+	do
+		local function winRate(rounds: number, seed: number): (number, number)
+			local rng = lcg(seed)
+			local wins = 0
+			for _ = 1, rounds do
+				local racers: { MinigameConfig.Racer } = { { Speed = 16, Reaction = 0.35, Greed = 0 } }
+				for _ = 1, 4 do
+					local skill = MinigameConfig.PickBotSkill(rng:NextNumber())
+					table.insert(racers, { Speed = skill.Speed, Reaction = skill.Reaction, Greed = skill.Greed })
+				end
+				local points = MinigameConfig.SimulateRound(rng, racers, ArenaLayout.PLAY_RADIUS)
+				local best = true
+				for index = 2, #points do
+					best = best and points[1] > points[index]
+				end
+				wins += if best then 1 else 0
+			end
+			return wins, rounds
+		end
+		local wins100 = winRate(100, 20240607)
+		local wins1000 = winRate(1000, 99)
+		result(
+			wins100 >= 30 and wins100 <= 50 and wins1000 >= 300 and wins1000 <= 500,
+			"orb rush: against 4 bots an average player wins 30-50% of rounds (100 and 1 000 simulated rounds)",
+			("%d of 100, %d of 1000"):format(wins100, wins1000)
+		)
+		-- Strong bots beat an average player about half the time (head to head).
+		local rng = lcg(5)
+		local strong = MinigameConfig.BotSkill[3]
+		local botWon = 0
+		for _ = 1, 600 do
+			local points = MinigameConfig.SimulateRound(rng, { { Speed = 16, Reaction = 0.35, Greed = 0 }, { Speed = strong.Speed, Reaction = strong.Reaction, Greed = strong.Greed } }, ArenaLayout.PLAY_RADIUS)
+			botWon += if points[2] > points[1] then 1 elseif points[2] == points[1] then 0.5 else 0
+		end
+		result(botWon >= 270 and botWon <= 390, "orb rush: a Strong bot beats an average player 45-65% of the time head to head", ("%.0f%%"):format(botWon / 6))
+	end
+
+	-- 5. The arena's geometry: assertions pass (at require), >= 500 studs from every plot slot,
+	-- a spawn for every seat, no lights in the arena, and the portal stands in the street.
+	do
+		local ok, err = pcall(require, ReplicatedStorage.Shared.Config.ArenaLayout)
+		local nearest = math.huge
+		for slot = 1, PlotLayout.MAX_PLOT_SLOTS do
+			nearest = math.min(nearest, (PlotLayout.GetSlotCFrame(slot).Position - ArenaLayout.CENTER).Magnitude)
+		end
+		local arena = MinigameService.GetArenaFolder()
+		local lights = 0
+		local spawns = 0
+		if arena then
+			for _, descendant in arena:GetDescendants() do
+				if descendant:IsA("Light") then
+					lights += 1
+				elseif descendant:IsA("SpawnLocation") then
+					spawns += 1
+				end
+			end
+		end
+		result(
+			ok and nearest >= ArenaLayout.MIN_PLOT_DISTANCE and ArenaLayout.SPAWN_COUNT >= MinigameConfig.MaxPlayers and arena ~= nil and lights == 0 and spawns == ArenaLayout.SPAWN_COUNT,
+			"orb rush: ArenaLayout's assertions pass, the arena is 500+ studs from every plot, has a spawn per seat and no lights",
+			("nearest %.0f studs, %d spawns, %d lights, %s"):format(nearest, spawns, lights, tostring(err))
+		)
+		local portalOk = pcall(require, ReplicatedStorage.Shared.Config.StreetLayout) and MinigameService.GetPortalTrigger() ~= nil
+		result(portalOk, "orb rush: StreetLayout's assertions (with the portal's footprint) pass and the portal is built")
+	end
+
+	if not character or not root or not root:IsA("BasePart") then
+		result(true, "orb rush: a live round (skipped: the tester has no character)")
+		return
+	end
+
+	-- 6. A live shortened round with the tester and three bots.
+	local home = root.CFrame
+	local rebirthsBefore = PlayerDataService.GetRebirths(player)
+	local savedSteals = HeistService.SelfTestGetRivalSteals(player)
+	local function waitUntil(condition: () -> boolean, timeout: number): boolean
+		local started = os.clock()
+		while not condition() and os.clock() - started < timeout do
+			task.wait(0.1)
+		end
+		return condition()
+	end
+	local function inventoryCount(): number
+		local inventory: { any } = PlayerDataService.GetInventory(player) or {}
+		return #inventory
+	end
+	local ok, err = pcall(function()
+		MinigameService.AbortRound()
+		MinigameService.SelfTestClearPrizes(player.UserId)
+		local timing = { Countdown = 1, Round = 5, Golden = 1, Hold = 0.2 }
+		local before = inventoryCount()
+		local started = MinigameService.DebugStartNow({ player }, timing)
+		result(started, "orb rush: a debug round starts")
+		local playing = waitUntil(function()
+			return MinigameService.GetPhase() == "Play"
+		end, 15)
+		local humans, bots = MinigameService.GetParticipantCount()
+		local inArena = PlayerDataService.IsInMinigame(player)
+		local current = player.Character
+		local currentRoot = current and current:FindFirstChild("HumanoidRootPart")
+		local farAway = currentRoot ~= nil and currentRoot:IsA("BasePart") and (currentRoot.Position - ArenaLayout.CENTER).Magnitude < ArenaLayout.FLOOR_RADIUS + 20
+		result(
+			playing and humans == 1 and bots == MinigameConfig.FillTo - 1 and inArena and farAway,
+			"orb rush: queued -> everyone is teleported to the arena, 1 human + 3 bots (bots fill up to 4), the tester is in the arena",
+			("playing %s, %d humans, %d bots, inArena %s, at arena %s"):format(tostring(playing), humans, bots, tostring(inArena), tostring(farAway))
+		)
+		-- Rules in the arena: no pulls / fusing / upgrades / steals; passive income pays.
+		local busy = PlayerDataService.WhyBusy(player)
+		local rivalView = anyRivalLab()
+		local stealRefused = true
+		if rivalView then
+			local grabbed, reason = HeistService.TryRivalSteal(player, rivalView.Id, 1)
+			stealRefused = not grabbed and (reason == "InArena")
+		end
+		result(busy == "InArena" and stealRefused, "orb rush: in the arena the hands are full (InArena): no pulls, fusing, upgrades, rebirth or stealing", tostring(busy))
+		-- Picking up: stand on an orb.
+		local folder = MinigameService.GetArenaFolder()
+		local orbs = folder and folder:FindFirstChild("Orbs")
+		local pointsBefore = MinigameService.GetPoints(player) or 0
+		local gotPoints = false
+		if orbs then
+			for _ = 1, 20 do
+				local orbPart = orbs:FindFirstChildWhichIsA("BasePart")
+				local live = player.Character
+				if orbPart and live then
+					live:PivotTo(CFrame.new(orbPart.Position + Vector3.new(0, 2, 0)))
+				end
+				task.wait(0.4)
+				if (MinigameService.GetPoints(player) or 0) > pointsBefore then
+					gotPoints = true
+					break
+				end
+			end
+		end
+		result(gotPoints, "orb rush: walking through an orb scores its value (server distance check)", ("points %s"):format(tostring(MinigameService.GetPoints(player))))
+		-- Falling off the arena: back on a spawn, points intact.
+		local pointsHeld = MinigameService.GetPoints(player) or 0
+		local fallen = player.Character
+		if fallen then
+			fallen:PivotTo(CFrame.new(ArenaLayout.CENTER + Vector3.new(0, -ArenaLayout.FALL_BELOW - 40, 0)))
+		end
+		local saved = waitUntil(function()
+			local after = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+			return after ~= nil and after:IsA("BasePart") and after.Position.Y > ArenaLayout.CENTER.Y - ArenaLayout.FALL_BELOW
+		end, 3)
+		result(saved and (MinigameService.GetPoints(player) or 0) >= pointsHeld, "orb rush: falling off the arena puts you back on a spawn with your points intact")
+		-- Make sure the tester places (a bot can't beat 300 points in five seconds).
+		MinigameService.SelfTestAddPoints(player, 300)
+		local finished = waitUntil(function()
+			return MinigameService.GetPhase() == "Idle"
+		end, 25)
+		task.wait(1.2)
+		local results = MinigameService.GetLastResults()
+		local podium = results and results.Podium
+		local awards = results and results.Awards
+		local firstIsTester = podium ~= nil and podium[1] ~= nil and podium[1].UserId == player.UserId and podium[1].Points >= 300
+		local award = awards and awards[1]
+		local backHome = PlayerDataService.IsInMinigame(player) == false
+		local afterRoot = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+		local awayFromArena = afterRoot ~= nil and afterRoot:IsA("BasePart") and (afterRoot.Position - ArenaLayout.CENTER).Magnitude > 300
+		result(
+			finished and firstIsTester and backHome and awayFromArena,
+			"orb rush: results -> the tester is 1st, out of the arena and back on their own plot",
+			("finished %s, first %s, home %s, away %s"):format(tostring(finished), tostring(firstIsTester), tostring(backHome), tostring(awayFromArena))
+		)
+		task.wait(0.8)
+		result(
+			award ~= nil and award.Kind == "Orb" and inventoryCount() == before + 1 and MinigameService.GetPrizeCount(player.UserId) == 1,
+			"orb rush: the 1st-place orb is in the inventory (one item) and counted for the hour",
+			("award %s, items %d -> %d"):format(award and award.Kind or "nil", before, inventoryCount())
+		)
+		character = player.Character
+		local resetRoot = character and character:FindFirstChild("HumanoidRootPart")
+		if resetRoot and resetRoot:IsA("BasePart") then
+			resetRoot.CFrame = home
+		end
+
+		-- The hourly cap on the 5th prize: four recorded, so this round pays cash.
+		MinigameService.SelfTestClearPrizes(player.UserId)
+		MinigameService.SelfTestRecordPrizes(player.UserId, MinigameConfig.PlacementPrizesPerHour)
+		local itemsBefore = inventoryCount()
+		MinigameService.DebugStartNow({ player }, timing)
+		waitUntil(function()
+			return MinigameService.GetPhase() == "Play"
+		end, 15)
+		MinigameService.SelfTestAddPoints(player, 300)
+		waitUntil(function()
+			return MinigameService.GetPhase() == "Idle"
+		end, 25)
+		task.wait(1)
+		local capped = MinigameService.GetLastResults()
+		local cappedAward = capped and capped.Awards and capped.Awards[1]
+		result(
+			cappedAward ~= nil and cappedAward.Kind == "Cash" and cappedAward.Capped == true and inventoryCount() == itemsBefore,
+			"orb rush: with 4 placement prizes already this hour, the next 1st place pays cash and no orb",
+			("award %s, items %d -> %d"):format(cappedAward and cappedAward.Kind or "nil", itemsBefore, inventoryCount())
+		)
+
+		-- An AFK round: no points, no prize, no cash.
+		MinigameService.SelfTestClearPrizes(player.UserId)
+		local afkItems = inventoryCount()
+		local cashBefore = PlayerDataService.GetCash(player)
+		MinigameService.DebugStartNow({ player }, { Countdown = 1, Round = 3, Golden = 1, Hold = 0.1 })
+		waitUntil(function()
+			return MinigameService.GetPhase() == "Idle"
+		end, 20)
+		task.wait(1)
+		local afk = MinigameService.GetLastResults()
+		local afkAward = afk and afk.Awards and afk.Awards[1]
+		local afkMine = nil
+		for place, entry in (afk and afk.Order) or {} do
+			if not entry.IsBot and entry.UserId == player.UserId then
+				afkMine = afk.Awards[place]
+			end
+		end
+		result(
+			afkMine ~= nil and (afkMine.Kind == "None" or (afkMine.Kind ~= "None" and (afk.Order[afkMine.Place] :: any).Points >= MinigameConfig.MinPointsToPlace)) and inventoryCount() == afkItems and PlayerDataService.GetCash(player) <= cashBefore + 1e9,
+			"orb rush: an AFK player with under 10 points gets no award",
+			("award %s, items %d -> %d"):format(afkMine and afkMine.Kind or (afkAward and afkAward.Kind) or "nil", afkItems, inventoryCount())
+		)
+		-- Reset and the carry that fails on entering the portal.
+		local rival = anyRivalLab()
+		if rival then
+			local ped = RivalService.GetPedestal(rival.Id, 1)
+			PlayerDataService.SetRebirths(player, 0)
+			HeistService.SelfTestClearRivalSteals(player)
+			if ped and RivalService.GetOrb(rival.Id, 1) then
+				local live = player.Character
+				if live then
+					live:PivotTo(ped.CFrame * CFrame.new(0, 3, 5))
+				end
+				task.wait(0.2)
+				local grabbed = HeistService.TryRivalSteal(player, rival.Id, 1)
+				MinigameService.DebugCall(10)
+				local called = waitUntil(function()
+					return MinigameService.GetPhase() == "Call"
+				end, 5)
+				local whyPill = MinigameService.WhyCantQueue(player)
+				MinigameService.SelfTestEnterPortal(player)
+				local queued = MinigameService.IsQueued(player)
+				result(
+					grabbed and called and whyPill == "Carrying" and not HeistService.IsCarrying(player) and queued,
+					"orb rush: queueing from the pill is refused while carrying; walking into the portal fails the carry and queues",
+					("grabbed %s, call %s, pill says %s, carrying %s, queued %s"):format(tostring(grabbed), tostring(called), tostring(whyPill), tostring(HeistService.IsCarrying(player)), tostring(queued))
+				)
+				MinigameService.AbortRound()
+				result(not MinigameService.IsQueued(player) and MinigameService.GetPhase() == "Idle", "orb rush: ending the call clears the queue")
+			else
+				result(true, "orb rush: carry fails on the portal (skipped: no rival orb)")
+			end
+		else
+			result(true, "orb rush: carry fails on the portal (skipped: no rival lab)")
+		end
+	end)
+	if not ok then
+		result(false, "orb rush (errored)", tostring(err))
+	end
+	MinigameService.AbortRound()
+	MinigameService.SelfTestClearPrizes(player.UserId)
+	HeistService.FailCarriesFor(player, "Failed")
+	HeistService.SelfTestSetRivalSteals(player, savedSteals)
+	PlayerDataService.SetRebirths(player, rebirthsBefore)
+	PlayerDataService.SyncTycoon(player)
+	local backCharacter = player.Character
+	local backRoot = backCharacter and backCharacter:FindFirstChild("HumanoidRootPart")
+	if backRoot and backRoot:IsA("BasePart") and (backRoot.Position - ArenaLayout.CENTER).Magnitude < 400 then
+		backCharacter:PivotTo(home)
+	end
+end
+
 local function runSelfTestBody(player: Player, result: (boolean, string, string?) -> (), only: string?)
 	print(("[SelfTest] running for %s"):format(player.Name))
 	if only == "combat" then
@@ -3690,6 +4108,10 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	elseif only == "rivals" then
 		print("[SelfTest] == 16. rival labs ==")
 		runRivalSelfTest(player, result)
+		return
+	elseif only == "orbrush" then
+		print("[SelfTest] == 17. ORB RUSH ==")
+		runMinigameSelfTest(player, result)
 		return
 	elseif only == "friends" then
 		print("[SelfTest] == 14. friend boost ==")
@@ -3972,6 +4394,9 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	runSection("16. rival labs", result, function()
 		runRivalSelfTest(player, result)
 	end)
+	runSection("17. ORB RUSH", result, function()
+		runMinigameSelfTest(player, result)
+	end)
 end
 
 local function runSelfTest(player: Player, only: string?)
@@ -4179,6 +4604,22 @@ local function onPlayerChatted(player: Player, message: string)
 		end
 		PlayerDataService.SyncTycoon(player)
 		print(("DebugService: %s's tutorial -> %s"):format(player.Name, argument))
+	elseif command == ORBRUSH_COMMAND then
+		local action, rawSeconds = argument:match("^(%S*)%s*(%S*)$")
+		local seconds = tonumber(rawSeconds)
+		if action == "now" or action == "" then
+			local timing = if seconds then { Round = math.clamp(seconds, 5, 300), Golden = math.min(MinigameConfig.GoldenWaveSeconds, math.clamp(seconds, 5, 300) / 3) } else nil
+			local started = MinigameService.DebugStartNow({ player }, timing)
+			print(("DebugService: /orbrush now: %s"):format(if started then "round starting" else "a round is already running (/orbrush abort)"))
+		elseif action == "call" then
+			local opened = MinigameService.DebugCall(seconds or 30)
+			print(("DebugService: /orbrush call: %s"):format(if opened then "call opens in a moment" else "not idle"))
+		elseif action == "abort" then
+			MinigameService.AbortRound()
+			print("DebugService: /orbrush abort: done")
+		else
+			warn("DebugService: /orbrush now [seconds] | call [seconds] | abort")
+		end
 	elseif command == STEALABLE_COMMAND then
 		local stealable = not stealableToggles[player.UserId]
 		stealableToggles[player.UserId] = stealable
@@ -4401,6 +4842,7 @@ function DebugService:Start()
 	FriendService = require(script.Parent.FriendService)
 	NotifyService = require(script.Parent.NotifyService)
 	RivalService = require(script.Parent.RivalService)
+	MinigameService = require(script.Parent.MinigameService)
 	GoalService = require(script.Parent.GoalService)
 
 	if DebugService.ShouldApplyStudioStart(RunService:IsStudio(), PlayerDataService.GetStoreKind()) then

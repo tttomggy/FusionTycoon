@@ -159,6 +159,25 @@ function StreetLayout.GetLeaderboardCFrame(spot: LeaderboardSpot): CFrame
 	return CFrame.lookAt(position, position + Vector3.new(-spot.SideX, 0, 0))
 end
 
+-- The ORB RUSH portal (MinigameService): a ring on the plain street at x = 0,
+-- between the plot columns' gates, clear of the belts, rails and gate ramps.
+-- Position is the centre of its floor ring (street top); Radius is the footprint.
+StreetLayout.RushPortal = {
+	Position = v3(0, StreetLayout.STREET_TOP_Y, 13.5),
+	Radius = 4.2, -- footprint (the ring, the posts); the trigger is a little wider
+	TriggerSize = v3(7, 6, 7),
+	PostHeight = 9,
+	PostSize = v3(1, 9, 1),
+	PostGap = 3.4, -- from the centre to each post
+	ArchHeight = 8.6, -- the top beam's centre above the street top
+	BeamSize = v3(8, 0.6, 1),
+	CounterStuds = v3(7, 1.8, 0), -- the "3 / 8" chip over the arch
+	CounterOffsetY = 11.8,
+	TitleStuds = v3(7, 1.8, 0),
+	TitleOffsetY = 14,
+	MaxDistance = 220,
+}
+
 function StreetLayout.GetBeltLength(): number
 	return StreetLayout.STREET_SIZE.X - StreetLayout.BELT_END_INSET
 end
@@ -227,6 +246,21 @@ do
 			and lbAbsZ + lb.Width / 2 < PlotLayout.GROUND_SIZE.Z / 2,
 		"StreetLayout: a leaderboard stands off the ground"
 	)
+	-- The ORB RUSH portal stands on plain street: clear of the rails and belts,
+	-- inside the kerb and off every plot gate's column (gate gap +- the ramp).
+	local portal = StreetLayout.RushPortal
+	local portalAbsZ = math.abs(portal.Position.Z)
+	assert(portalAbsZ - portal.Radius > railOuter, "StreetLayout: the ORB RUSH portal overlaps the rails")
+	assert(portalAbsZ + portal.Radius < halfStreet, "StreetLayout: the ORB RUSH portal is off the street")
+	assert(portal.TriggerSize.X / 2 <= portal.Radius + 1 and portal.TriggerSize.Z / 2 <= portal.Radius + 1, "StreetLayout: the ORB RUSH trigger is wider than its footprint")
+	for column = 0, PlotLayout.MAX_PLOT_SLOTS // 2 - 1 do
+		local gateX = (column - PlotLayout.SLOT_COLUMN_CENTER) * PlotLayout.SLOT_COLUMN_SPACING
+		assert(
+			math.abs(portal.Position.X - gateX) - portal.Radius > PlotLayout.GATE_RAMP_WIDTH / 2,
+			"StreetLayout: the ORB RUSH portal stands in a plot gate's column"
+		)
+	end
+	assert(portal.Position.X - portal.Radius > -StreetLayout.GetBeltLength() / 2 and portal.Position.X + portal.Radius < StreetLayout.GetBeltLength() / 2, "StreetLayout: the ORB RUSH portal is past the street's ends")
 	local taken: { [string]: boolean } = {}
 	for _, spot in lb.Spots do
 		local key = ("%d,%d"):format(spot.SideX, spot.SideZ)

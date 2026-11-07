@@ -49,6 +49,7 @@ AnalyticsKit.FunnelSteps = {
 	"FirstEvent",
 	"FirstRebirth",
 	"FirstSteal",
+	"FirstOrbRush", -- first ORB RUSH round played (MinigameService); APPENDED, so the live funnel's step numbers do not move
 }
 
 export type FunnelStore = {

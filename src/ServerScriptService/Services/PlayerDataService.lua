@@ -286,6 +286,8 @@ type State = {
 	-- each owner's displayed Uids being carried, and who is carrying.
 	carriedUids: { [number]: { [string]: boolean } },
 	carrying: { [number]: boolean },
+	-- userId -> in the ORB RUSH arena (SetInMinigame)
+	inMinigame: { [number]: boolean },
 	-- Called synchronously before a player's data is saved and released
 	-- (leaving, or the server closing). See OnRelease.
 	releaseHooks: { (Player) -> () },
@@ -466,6 +468,7 @@ local state: State = {
 	pendingOffline = {},
 	carriedUids = {},
 	carrying = {},
+	inMinigame = {},
 	releaseHooks = {},
 	syncHooks = {},
 	lastSyncRequest = {},
@@ -2233,6 +2236,36 @@ function PlayerDataService.IsCarrying(player: Player): boolean
 	return state.carrying[player.UserId] == true
 end
 
+-- ORB RUSH (MinigameService): true from the teleport into the arena until
+-- the player is back on their plot. No pulls, fusing, upgrades, Multiplier
+-- Pad, rebirth or stealing meanwhile (passive income keeps paying).
+function PlayerDataService.SetInMinigame(player: Player, inArena: boolean)
+	if inArena then
+		state.inMinigame[player.UserId] = true
+		player:SetAttribute("InOrbRush", true)
+	else
+		state.inMinigame[player.UserId] = nil
+		player:SetAttribute("InOrbRush", nil)
+	end
+end
+
+function PlayerDataService.IsInMinigame(player: Player): boolean
+	return state.inMinigame[player.UserId] == true
+end
+
+-- Why the player's hands are full (nil: free): "Carrying" a stolen orb, or
+-- "InArena" in ORB RUSH. The one check every pull / fuse / upgrade / rebirth
+-- / steal path asks.
+function PlayerDataService.WhyBusy(player: Player): string?
+	if state.carrying[player.UserId] == true then
+		return "Carrying"
+	end
+	if state.inMinigame[player.UserId] == true then
+		return "InArena"
+	end
+	return nil
+end
+
 -- Registers `callback(player)` to run synchronously before `player`'s data
 -- is saved and released: at the start of PlayerRemoving, and for every
 -- loaded player when the server closes. HeistService fails active carries
@@ -2412,6 +2445,7 @@ local function onPlayerRemoving(player: Player)
 	AnalyticsKit.Release(player)
 	state.carriedUids[userId] = nil
 	state.carrying[userId] = nil
+	state.inMinigame[userId] = nil
 	-- Left before collecting (or before the auto-claim): pay it, never lose it.
 	payPendingOffline(userId)
 	local profile = state.profiles[userId]

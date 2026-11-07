@@ -325,8 +325,9 @@ end
 -- both pass validation against the same items.
 local function onFusionRequest(player: Player, rawPayload: unknown)
 	-- Hands full: no fusing while carrying a stolen item (HeistService).
-	if PlayerDataService.IsDataLoaded(player) and PlayerDataService.IsCarrying(player) then
-		reject(player, "Carrying")
+	local busy = if PlayerDataService.IsDataLoaded(player) then PlayerDataService.WhyBusy(player) else nil
+	if busy then
+		reject(player, busy)
 		return
 	end
 	if typeof(rawPayload) ~= "table" or typeof((rawPayload :: any).Uids) ~= "table" then
@@ -492,9 +493,10 @@ local function runFuseAll(player: Player, auto: boolean)
 		end
 		return
 	end
-	if PlayerDataService.IsCarrying(player) then
+	local busy = PlayerDataService.WhyBusy(player)
+	if busy then
 		if not auto then
-			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = "Carrying" })
+			RemoteEvents.FuseAllResult:FireClient(player, { Count = 0, Reason = busy })
 		end
 		return
 	end
