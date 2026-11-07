@@ -17,6 +17,10 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   way to test the welcome-back card, since Studio profiles never save),
   `/shield <s>` (0 drops it),
   `/stealable` (toggles your lab stealable at Rebirth 0, for heist tests),
+  `/orbrush now [seconds]` (queue yourself and start an ORB RUSH round at once,
+  three bots fill it) / `/orbrush call [seconds]` (open a call window) /
+  `/orbrush abort` (end it, go home); `/selftest orbrush` runs the ORB RUSH
+  checks alone (`docs/systems/minigames.md`),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` (also
   clears the tutorial-flow tips `tipRival` / `tipUpgrade` / `tipMultiplier` /
   `tipIndex` / `tipEvent` / `tipRebirth` and the `RivalSteals` hourly counter,

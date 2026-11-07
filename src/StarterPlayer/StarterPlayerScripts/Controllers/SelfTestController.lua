@@ -150,6 +150,8 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		-- Never a real quest or power-up: junk ids / keys and types.
 		ClaimQuest = { {}, { "x" }, { { Id = 5 } }, { { Id = "nope" } }, { { Id = BIG_STRING } }, { { Id = { "chain" } } } },
 		UsePowerUp = { {}, { "x" }, { { Key = 5 } }, { { Key = "Nope" } }, { { Key = BIG_STRING } }, { { Key = { "CashBurst" } } } },
+		-- ORB RUSH's queue: never a valid Action (a real Join would walk the tester to the portal).
+		MinigameQueue = { {}, { "x" }, { 5 }, { { Action = 5 } }, { { Action = "Nope" } }, { { Action = BIG_STRING } }, { { Action = { "Join" } } }, { { Action = "Leave" } } },
 	}
 	for _, n in junkNumbers do
 		table.insert(cases.RequestSteal, { { OwnerUserId = n, PedestalIndex = n } })

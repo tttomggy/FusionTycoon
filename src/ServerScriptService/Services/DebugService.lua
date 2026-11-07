@@ -3918,7 +3918,7 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 	local ok, err = pcall(function()
 		MinigameService.AbortRound()
 		MinigameService.SelfTestClearPrizes(player.UserId)
-		local timing = { Countdown = 1, Round = 5, Golden = 1, Hold = 0.2 }
+		local timing = { Countdown = 1, Round = 10, Golden = 1, Hold = 0.2 }
 		local before = inventoryCount()
 		local started = MinigameService.DebugStartNow({ player }, timing)
 		result(started, "orb rush: a debug round starts")
@@ -4030,24 +4030,22 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		-- An AFK round: no points, no prize, no cash.
 		MinigameService.SelfTestClearPrizes(player.UserId)
 		local afkItems = inventoryCount()
-		local cashBefore = PlayerDataService.GetCash(player)
 		MinigameService.DebugStartNow({ player }, { Countdown = 1, Round = 3, Golden = 1, Hold = 0.1 })
 		waitUntil(function()
 			return MinigameService.GetPhase() == "Idle"
 		end, 20)
 		task.wait(1)
 		local afk = MinigameService.GetLastResults()
-		local afkAward = afk and afk.Awards and afk.Awards[1]
-		local afkMine = nil
+		local afkMine: any = nil
 		for place, entry in (afk and afk.Order) or {} do
 			if not entry.IsBot and entry.UserId == player.UserId then
 				afkMine = afk.Awards[place]
 			end
 		end
 		result(
-			afkMine ~= nil and (afkMine.Kind == "None" or (afkMine.Kind ~= "None" and (afk.Order[afkMine.Place] :: any).Points >= MinigameConfig.MinPointsToPlace)) and inventoryCount() == afkItems and PlayerDataService.GetCash(player) <= cashBefore + 1e9,
-			"orb rush: an AFK player with under 10 points gets no award",
-			("award %s, items %d -> %d"):format(afkMine and afkMine.Kind or (afkAward and afkAward.Kind) or "nil", afkItems, inventoryCount())
+			afkMine ~= nil and afkMine.Kind == "None" and inventoryCount() == afkItems,
+			"orb rush: an AFK player (under 10 points) gets no award: no orb, no cash",
+			("award %s, items %d -> %d"):format(afkMine and afkMine.Kind or "nil", afkItems, inventoryCount())
 		)
 		-- Reset and the carry that fails on entering the portal.
 		local rival = anyRivalLab()

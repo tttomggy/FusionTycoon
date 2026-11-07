@@ -2305,11 +2305,17 @@ publishing)**
 Play with 1 player (Studio Player1; restart Play after code changes: plots are
 built once). `/selftest rivals` first; then by hand:
 
-- [ ] Within ~5 s of joining, 3 labs near yours show a vermilion gate sign
-  `RIVAL LAB` / `steal me!` with a lab name pill ("DR. FIZZ'S LAB"), vermilion
-  wall strips, four orbs (only Common / Rare / Epic at Rebirth 0, now and then a
-  Golden) with name + `+$X/s` labels, no EMPTY `+` pill anywhere, and one blocky
-  vermilion guard walking between the pedestals. Each lab is a full-looking
+- [ ] Within ~5 s of joining, 4 labs near yours (one per difficulty) show a
+  gate sign with a lab name pill ("DR. FIZZ'S LAB"), a difficulty chip above the
+  board (`EASY` green, `MEDIUM` blue, `HARD` orange, `INSANE` red and slowly
+  pulsing), wall strips in the same colour, the tier odds line under the board
+  (`Common 65 · Rare 35%`), four orbs with name + `+$X/s` labels (Easy only
+  Common / Rare, Medium Rare / Epic, Hard Epic / Legendary, Insane Legendary with
+  now and then a Mythic), no EMPTY `+` pill anywhere, and the guards walking
+  between the pedestals: 1 / 1 / 2 / 3, bigger each tier (Medium 1.1, Hard 1.2
+  with a helmet, Insane 1.35 in black and red with a glowing visor). The Insane
+  sign reads `INSANE LAB` / `steal if you dare`, thin red Neon bands run along its
+  walls, and a low hum plays when you walk near it. Each lab is a full-looking
   lab: Fusion Machine, Gacha and Multiplier pads, the factory line with its
   cash balls running, the rebirth portal (no prices, no prompts; only the LOCK
   console is missing). The guard stands upright and wears its rival's name
@@ -2318,17 +2324,30 @@ built once). `/selftest rivals` first; then by hand:
   `back in 1:12` chip counting down; the orb returns with the chip gone. Chase
   a guard across the speed belts and knock it with a Bat: it never lies on its
   side (it stands up by itself within ~2 s if it ever does).
-- [ ] At Rebirth 0: walk to an orb, the prompt reads `Steal` with the orb name
-  and `+$X/s` (no "Unlocks at Rebirth 1" teaser), hold E 1.5 s: `YOU GRABBED
-  …! RUN HOME!`, the pedestal shows the red STOLEN! ring, the guard runs at you.
-  Run home (belts help): `HEIST COMPLETE!`, the orb is in ITEMS, the pedestal is
-  bare for 90 s and the orb comes back (a new roll).
+- [ ] At Rebirth 0: walk to an Easy orb, the prompt reads `Steal` with the orb
+  name and `+$X/s` (no "Unlocks at Rebirth 1" teaser), hold E 1.5 s: `YOU GRABBED
+  …! RUN HOME!`, a red `!` pops over the guard that starts chasing (only you see
+  it) with a low alarm, the pedestal shows the red STOLEN! ring. Run home (belts
+  help): `HEIST COMPLETE!`, the orb is in ITEMS, the pedestal is bare for 60 s
+  (Easy; Medium 90, Hard 150, Insane 300) and the orb comes back (a new roll).
+- [ ] At Rebirth 0 the Hard and Insane prompts read `Rebirth 2 to rob` /
+  `Rebirth 4 to rob`: a tap only toasts, nothing is grabbed, the guards still
+  patrol and you can walk in. `/rebirths 2` opens Hard, `/rebirths 4` Insane. Do
+  one steal from each difficulty at Rebirth 4 (Medium's guard at 13 beats a
+  12-speed carrier, so use a Bat or Freeze Ray friend, or Speed Boots: a rival
+  carry now runs at 12 x 1.5 = 18 with the boots on).
+- [ ] Insane, at most two guards chase and the third stands facing the gate; a
+  hit on one guard (Bat / Freeze Ray) drops only that guard for ~1.2 s and it
+  runs again when it is up; with a stun on both chasers plus Speed Boots you get
+  home, with no help you are caught.
 - [ ] Let the guard touch you (after the 2 s grace): "The lab guard got you!
   The orb went back", the orb is on its pedestal, nothing in ITEMS.
-- [ ] Past 12 delivered rival steals in an hour (`/selftest rivals` covers it,
-  or lower `StealsPerHour`): "The rivals are on alert. Try again in N min".
-- [ ] With a Rebirth 1+ friend and a Bat: hit the guard, it falls over for ~3 s
-  and stops chasing; you can't hit it while carrying.
+- [ ] Past 12 delivered Easy / Medium steals in an hour (`/selftest rivals`
+  covers it, or lower `RivalConfig.Tiers.Easy.StealsPerHour`) or 4 Hard / 2 Insane:
+  "The rivals are on alert. Try again in N min". The pools are separate.
+- [ ] With a Rebirth 1+ friend and a Bat: hit an Easy guard, it falls over for ~3
+  s (Hard 2, Insane 1.2) and, if you are still running, chases again when it is
+  up; you can't hit it while carrying.
 - [ ] Join a second player: the rival nearest to nobody can despawn only when
   every slot is full; both players always get a plot (12 slots).
 - [ ] Fuse your 2 orbs and leave the FUSION SUCCESS card open for ~10 s
@@ -2341,3 +2360,49 @@ built once). `/selftest rivals` first; then by hand:
   them: the PvP teaching (`stealHowTo`, HOW TO HEIST) is unchanged.
 - [ ] Analytics (Output): `funnel 7 FirstRivalSteal` once, then `custom
   RivalStealDelivered [Tier]` / `RivalStealTagged` / `RivalStealTimeout`.
+
+## 47. ORB RUSH (minigame)
+
+Play with 1 player (Studio Player1; restart Play after code changes). Run
+`/selftest orbrush` first (it runs a real 5-second round), then by hand. At
+1920×1080 and again with the Phone emulator (844×390).
+
+- [ ] `/orbrush call 30`: within a second TopStack says `ORB RUSH in 0:30 · win
+  an Epic+ orb!`, the street portal (middle of the street, +Z side, between the
+  plot gates) lights pink with `ORB RUSH · JOIN` and a `0 / 8` counter chip, and
+  an `ORB RUSH 0:29 / JOIN · 0 / 8` pill appears in the HUD's left column UNDER
+  the SHOP / QUESTS / LOCK rows (or beside their foot on a phone), overlapping
+  nothing, 44+ px tall, nothing in the top-left 170×60.
+- [ ] Tap the pill: you are walked to the portal, it reads `✓ QUEUED 1 / 8 ·
+  tap to leave`, the portal counter says `1 / 8`; tap again: you leave. Queue
+  again. While carrying a stolen orb the pill refuses ("Not while carrying a
+  stolen orb!"); running into the portal with the orb fails the carry and queues.
+- [ ] At 0:00 you are teleported to the floating arena (a neon-ringed disc, lab
+  debris and stars around it, a score tower in the middle) with 3 named `· BOT`
+  bots; a big `3 · 2 · 1 · GO!` shows with a tick per number and nobody moves
+  until GO. The pill is gone; TopStack shows `ORB RUSH 1:30 · You 0 · #1`; a live
+  top 3 sits where the pill was.
+- [ ] Orbs fall from the sky in waves (mostly white, some blue / purple / gold):
+  walking through one pops a sound that rises with a quick streak, a `+N` floater
+  in the orb's colour, the score and rank update; gold gives a tiny FOV punch.
+  The bots run for orbs. You cannot pull, fuse, upgrade, rebirth or steal in the
+  arena (the buttons toast / refuse); the cash still ticks.
+- [ ] Walk off the edge or jump at the wall: invisible walls hold; if you fall
+  you land on a spawn with your points. Reset your character: back on a spawn,
+  not on your plot.
+- [ ] With a weapon (`/weapons all`) hit a bot: ~30% of its points burst out as
+  orbs in an arc and it can't be hit again for 2 s; hit it again straight away:
+  nothing. The score tower and the list follow.
+- [ ] The last 15 s: a `GOLDEN WAVE!` line and riser, only gold orbs, twice as
+  often.
+- [ ] Results: everyone goes back to their own plot and a centred card shows the
+  podium (1st / 2nd / 3rd with avatars, bots with a gear face and a `BOT` chip),
+  confetti for 1st, `You placed 1st · 47 pts`, the prize line, `NEXT ORB RUSH at
+  :22` and a green CLOSE; no purchase prompt. After you close it the prize orb
+  pops out as the normal pull card (a 4th place with 10+ points gets cash; under
+  10 points nothing). At 1366×768 and 844×390 the card is centred in the band
+  between the top bar and the bottom row.
+- [ ] `/orbrush now 20`: a 20-second round starts at once. `/orbrush abort`
+  ends it and sends you home.
+- [ ] Output: `funnel 12 FirstOrbRush` once, then `custom OrbRushQueued`,
+  `OrbRushPlayed [n]`, `OrbRushPlace [place]`, `OrbRushPrize [Tier]`.

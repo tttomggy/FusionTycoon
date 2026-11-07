@@ -117,24 +117,64 @@ hook. Empty plot slots therefore hold **rival labs**: NPC-owned labs anyone
 can rob from the start. `RivalService` (server) + `RivalConfig` (every
 number); the steal itself is `HeistService`'s, same flow.
 
+Rival labs come in four **difficulties**. They replaced the old floor / role
+system (the least advanced player's best tier, PlusOne / Floor / Weighted
+pedestals, Rebirth bands): difficulty alone decides the orb tiers, so there is
+no second system.
+
+| | Easy | Medium | Hard | Insane |
+|---|---|---|---|---|
+| Orb tiers (weights) | Common 65, Rare 35 | Rare 60, Epic 40 | Epic 65, Legendary 35 | Legendary 85, Mythic 14.5, Secret 0.5 |
+| Guards | 1 | 1 | 2 | 3 |
+| Guard chase speed | 11 | 13 | 14 | 15 |
+| Leash (studs past the gate) | 40 | 60 | 90 | none |
+| Stun from a weapon hit | 3 s | 3 s | 2 s | 1.2 s |
+| Thief Rebirths to rob | 0 | 0 | 2 | 4 |
+| Delivered steals / rolling hour | shared 12 | shared 12 | 4 | 2 |
+| Respawn after a steal | 60 s | 90 s | 150 s | 300 s |
+| GoldenChance | 5% | 5% | 5% | 8% |
+
+All of it is `RivalConfig.Tiers` (`GetTier`, `IsTierAllowed`, `PickTier`,
+`ShareOf`, `FormatOdds`, `SignText`, `WhyCantRob`, `LockedText`); nothing else
+holds a number.
+
 - **The rule** (`HeistConfig`): `MinRebirthsVsPlayers = 1` (both thief and
-  victim, unchanged; `MinRebirths` is kept as an alias for the older
-  readers) and `MinRebirthsVsRivals = 0`. The one pure check is
-  `HeistService.WhyCantSteal(thiefRebirths, fromRival)`, used by both grab
-  paths and `/selftest`. New players are still never robbed by veterans
-  (their lab stays `Protected`).
-- **Labs.** Up to `MaxRivals = 3`, in the free slots nearest the real
-  players' labs (`RivalService.Step`, every `FillSeconds`). Built by
-  `TycoonService.BuildRivalPlot` = the player plot's code (`buildShell`,
-  walls, `PlotKit.BuildSignGate`, `createPedestals`, no claim button or spawn)
-  **plus the rest of a lab in decoration mode** (below): plot name
-  `PlotNaming.GetRivalPlotName` (`Rival_<id>`), attributes `Rival`,
-  `RivalId`, `RivalName`, `SlotIndex`, **no** `OwnerUserId` / `Claimed`, so
-  FactoryController and the shield code ignore it. Pedestals 1-4 only
-  (`RivalConfig.PedestalCount`), no `UnlockPrompt`; the `StealPrompt` carries
-  `RivalId` instead of `OwnerUserId`. The gate sign reads `RIVAL LAB` /
-  `steal me!` with the lab's name in the pill, in `World.AccentRival` /
-  `Gradients.Rival` (wall strips and the sign strip too).
+  victim, unchanged) and `MinRebirthsVsRivals = 0` (the floor). The one pure
+  check is `HeistService.WhyCantSteal(thiefRebirths, fromRival, difficulty?)`: a
+  rival lab needs `max(MinRebirthsVsRivals, tier.MinRebirths)`; used by both
+  grab paths, the loop coach and `/selftest`. New players are still never robbed
+  by veterans (their lab stays `Protected`).
+- **Labs.** `MaxRivals = 4`, **one lab per difficulty**, in the free slots
+  nearest the real players' labs (`RivalService.Step`, every `FillSeconds`;
+  spawn order Insane, Hard, Medium, Easy, so when slots are short the labs that
+  exist are the ones the despawn order keeps). Built by
+  `TycoonService.BuildRivalPlot(slot, id, name, difficulty)` = the player plot's
+  code (`buildShell`, walls, `PlotKit.BuildSignGate`, `createPedestals`, no claim
+  button or spawn) **plus the rest of a lab in decoration mode** (below): plot
+  name `PlotNaming.GetRivalPlotName` (`Rival_<id>`), attributes `Rival`,
+  `RivalId`, `RivalName`, `RivalDifficulty`, `SlotIndex`, **no** `OwnerUserId` /
+  `Claimed`, so FactoryController and the shield code ignore it. Pedestals 1-4
+  only (`RivalConfig.PedestalCount`), no `UnlockPrompt`; the `StealPrompt` carries
+  `RivalId`, `RivalDifficulty` and `RivalMinRebirths` instead of `OwnerUserId`.
+- **Reading the difficulty at a glance.** The gate sign (`PlotKit.
+  GetDifficultyStyle`, UITheme `World.Difficulty*` / `Gradients.Difficulty*`):
+  the pill holds the lab's name in the difficulty colour, a `DifficultyChip`
+  billboard over the board (`EASY` green, `MEDIUM` blue, `HARD` orange, `INSANE`
+  red; the Insane chip carries `Pulse = true` and WorldLabelController breathes
+  it, ±7% over 2.4 s), the wall and sign strips in the difficulty colour, and an
+  `OddsChip` under the board listing the tier odds in the Gacha board's format
+  (`Common 65 · Rare 35%`, `FusionConfig.FormatPercent`). Easy / Medium read
+  `RIVAL LAB` / `steal me!`, Hard `RIVAL LAB` / `Rebirth 2 to rob`, Insane
+  `INSANE LAB` / `steal if you dare`. **Insane extras:** thin red Neon trim
+  bands on the inner wall faces (`PlotKit.BuildInsaneTrim`, parts only, no
+  lights), and a low hum (`SoundConfig.InsaneHum`, played as a positional
+  one-shot every `InsaneHumSeconds` while you are within `InsaneHumStuds` of the
+  lab, by WorldLabelController; no looping sounds in this game).
+- **A locked lab is a teaser, not a wall.** Anyone can walk into a Hard or
+  Insane lab and see its guards. WorldLabelController gives a StealPrompt under
+  the lab's `RivalMinRebirths` the mode `Locked` (no hold; the action text reads
+  `Rebirth 4 to rob`, `RivalConfig.LockedText`) and the tap only toasts. The
+  server refuses a forged grab with `NeedsRebirth`.
 - **Decoration mode (a lab worth robbing).** The same builders a player's lab
   uses, with a `decorative` / nil-owner path that skips every prompt, remote,
   owner-only label and cash handler (no second copy of any geometry; PlotLayout
@@ -153,9 +193,9 @@ number); the steal itself is `HeistService`'s, same flow.
   portal, collector) plus the lights of its 4 pedestals, nothing more: TWO per
   filled pedestal (the `PedestalLight` and the orb's own), so
   `RivalConfig.MaxPedestalLights` = 2 x `PedestalCount` = 8, exactly what a fully
-  filled player lab adds. `/selftest` asserts that budget and that every rival
-  pedestal light obeys the caps (pedestal 0.8-1.6 / range 8-12, orb light 1, no
-  shadows).
+  filled player lab adds. `/selftest` asserts that budget for all four labs and
+  that every rival pedestal light obeys the caps (pedestal 0.8-1.6 / range 8-12,
+  orb light 1, no shadows).
 - **Stolen orb = empty cap + countdown.** A rival pedestal whose orb was
   delivered keeps the normal empty cap and carries the attribute `RespawnAt`
   (`RivalService` clock = unix seconds, set in `showPedestal`, cleared when the
@@ -166,38 +206,23 @@ number); the steal itself is `HeistService`'s, same flow.
 - **Slots are shared.** `TycoonService` owns `occupiedSlots`
   (`GetFreeSlots`, `ReserveSlot`, `ReleaseSlot`). A real player always gets a
   plot: `takeSlot` asks the registered reclaimer when none is free
-  (`RivalService.DespawnFarthest`), and the rival lab **farthest from every
-  player's lab** (slot centres; ties go to the newest) goes first. A carry
-  from a despawning lab fails cleanly first (`RivalService.OnDespawn` hook,
+  (`RivalService.DespawnFarthest`), and the **lowest difficulty** goes first
+  (Easy, then Medium, Hard, Insane last; with one lab per difficulty the
+  "farthest from every player's lab" rule only breaks a tie). A carry from a
+  despawning lab fails cleanly first (`RivalService.OnDespawn` hook,
   `HeistService.FailRivalCarries`: the orb is "back", outcome `Failed`).
-- **Orbs** are server objects, plain except one `GoldenChance` (5%) Golden,
-  **never** `BannedTiers` (Mythic, Secret; `RivalConfig` skips them in every
-  roll, and `TryRivalSteal` refuses one at grab time). They are worth the run
-  (a Rare owner used to carry home a Common that costs 100 cash to pull):
-  - **The floor** (`RivalService.GetFloor`) = the best tier owned by the
-    **least advanced real player in the server**, read from their inventories
-    (nobody in, or no orb: Common; a Mythic/Secret owner's floor is
-    Legendary). `SetFloorProvider` stubs it for `/selftest`.
-  - **Roles** (`RivalConfig.PlanRoles`, shuffled once per lab): one
-    **PlusOne** pedestal at floor + 1 (`PlusOneTierPedestals`; never above
-    Legendary), one **Floor** pedestal at the floor (`FloorTierPedestals`), the
-    rest **Weighted**: `TierWeights[band]` (band = the lowest Rebirth count,
-    clamped to `MaxBand`) with every tier BELOW the floor dropped
-    (`PickTierAtLeast`; stricter than "no Commons": an Epic owner is not shown
-    Rares; when the band lists nothing at or above the floor, the floor).
-    So a lab never shows four Commons to a Rare owner, and a brand-new player
-    (floor Common) sees Common / Rare / Epic with at least one Rare.
-  - A pedestal rolls its orb from its role and the floor of THAT moment: at
-    spawn, on a rotation, and when a stolen pedestal comes back.
-  - If the floor DROPS (a weaker player joins) the orbs rolled for a higher
-    floor are re-rolled at once (when the lab may rotate, below); when it
-    RISES the new floor waits for the next rotation.
+- **Orbs** are server objects, plain except one `GoldenChance` Golden.
+  `RivalService.RollOrb(difficulty)` picks the tier from the lab's weights
+  (`RivalConfig.PickTier`), then `RollOrbOfTier(tier, difficulty)`; only Insane
+  can roll Mythic / Secret. `TryRivalSteal` re-checks
+  `RivalConfig.IsTierAllowed(lab.Difficulty, orb.Tier)` at grab time. A pedestal
+  rolls at spawn, on a rotation and when a stolen pedestal comes back.
 - **Rotation.** Every `RotateSeconds` (150, +- `RotateJitterSeconds` 30) a lab
-  re-rolls its standing orbs by the rules above (`RivalService.Step`, every 3
-  s, on the injectable clock). The first rotations of the 1st / 2nd / 3rd lab
-  are at 0.5 / 0.75 / 1.0 x the interval, and `RivalConfig.SpaceRotation` keeps
-  any two labs `RotateMinGapSeconds` (10) apart. A lab waits for the next tick
-  (the time stays due) while its guard is chasing, any `StealPrompt` is held
+  re-rolls its standing orbs (`RivalService.Step`, every 3 s, on the injectable
+  clock). The first rotations of the 1st / 2nd / 3rd / 4th lab are at 0.5 / 0.75
+  / 1.0 / 1.25 x the interval, and `RivalConfig.SpaceRotation` keeps any two
+  labs `RotateMinGapSeconds` (10) apart. A lab waits for the next tick (the time
+  stays due) while any guard is chasing, any `StealPrompt` is held
   (`PromptButtonHoldBegan/Ended`), or a player stands within
   `RotateKeepOutStuds` (14) of a pedestal ("about to grab"); a pedestal being
   carried from is never touched, and one waiting to respawn rolls when it is
@@ -207,44 +232,63 @@ number); the steal itself is `HeistService`'s, same flow.
   attribute (RivalService clock = unix seconds) feeds the gate sign's
   `fresh orbs in 1:48` chip (`WorldLabelController`, `PlotLayout.Gate.
   RotateChipStuds`; `fresh orbs soon` once due and held back).
-- **Respawn and clock.** A stolen orb is back `RespawnSeconds` (90) after
+- **Respawn and clock.** A stolen orb is back `tier.RespawnSeconds` after
   **delivery** (a failed carry puts it back at once). The respawn clock, the
   rotation and the hourly limit read `RivalService.Now()` (unix seconds),
-  injectable (`SetClock`) for `/selftest`; the guard runs on `os.clock()`.
+  injectable (`SetClock`) for `/selftest`; the guards run on `os.clock()`.
 - **Stealing.** `RequestSteal { RivalId, PedestalIndex }` (client:
   `WorldLabelController.stealMode` gives a rival prompt `Steal` for everyone
-  while the pedestal is `Filled` and not `BeingStolen`). `HeistService.
-  TryRivalSteal` resolves the lab, pedestal, orb and distance itself and
-  rejects with the usual reasons plus `RivalGone` and `RivalAlert` (+
-  `Seconds`). A rival carry is a `Carry` with `RivalId` set, `VictimUserId`
-  0 and `ItemUid` `"rival:<id>:<index>"`: same hold, 45 s, WalkSpeed 12,
-  deliver = root inside your own walls. **The orb is created for the thief
-  on delivery** (`AddItem`, then sync + `SaveNow`); nothing belonged to a
-  saved player, so there is nothing to remove or duplicate, and every
-  other ending just hands the orb back. No victim shield, no loss cap, no
-  `TotalSteals` (the `first_steal` goal and its marker stay PvP), no
-  `HeistFeed`. The thief's `HeistEnded` carries `Rival = true`.
-- **Limit.** `StealsPerHour = 12` **delivered** rival steals per rolling
-  hour per player (`HeistService.GetRivalStealsLeft`); past it the grab is
-  refused with `RivalAlert` and the client toasts "The rivals are on alert.
-  Try again in N min". Counted at delivery, so being tagged costs nothing.
-  The times are **saved** (`PlayerData.RivalSteals`, unix seconds, newest
-  last, pruned to the hour on use, 64 kept): leaving and rejoining, or hopping
-  servers, does not reset it. Hence `RivalService.Now()` is the wall clock.
-- **The guard.** One blocky R15 NPC per lab (`HumanoidDescription` rig in
-  `World.AccentRival` / `CapsuleWhite` / `Structure`, server-owned, default
-  locomotion clips). Its name over the head is the **rival's** (`Dr. Fizz`,
-  `RivalConfig.GetShortName`) as a `BillboardKit.Chip` in `Gradients.Rival`
-  (`GuardName` on the Head, MaxDistance `GuardNameDistance` 60); the stock
-  overhead name is off. Patrols the stops in
-  `RivalConfig.PatrolPoints`. A grab (`RivalService.BeginCarry`) sends it
-  after the thief at `GuardSpeed` (13 vs the carrier's 12): PathfindingService
-  paths recomputed at most every `GuardPathSeconds` (0.5 s) in a task, so the
-  one guard loop (`GuardTickSeconds`, 0.1 s, all labs) never yields. Gives
-  up `GuardLeash` (60) studs past its gate and walks home.
-  **It stays on its feet:** `FallingDown`, `Ragdoll`, `Physics` and `Seated`
-  are disabled on its Humanoid, `BreakJointsOnDeath` / `RequiresNeck` off,
-  `HipHeight` taken from the rig's legs (root bottom to sole), every part
+  who meets the lab's Rebirths while the pedestal is `Filled` and not
+  `BeingStolen`, else `Locked`). `HeistService.TryRivalSteal` resolves the lab,
+  pedestal, orb and distance itself and rejects with the usual reasons plus
+  `RivalGone`, `RivalAlert` (+ `Seconds`) and `InArena` (ORB RUSH). A rival carry is a
+  `Carry` with `RivalId` set, `VictimUserId` 0 and `ItemUid`
+  `"rival:<id>:<index>"`: same hold, 45 s, WalkSpeed 12, deliver = root inside
+  your own walls. **Speed Boots count on a rival carry**: the carry loop holds
+  `CarryWalkSpeed x SpeedBoots.SpeedMultiplier` (12 -> 18) while the boots are
+  on and drops back to 12 when they end (QuestService only lifts a
+  normal-speed walker, so the boots never reached a carry before; PvP carries
+  are unchanged). **The orb is created for the thief on delivery** (`AddItem`,
+  then sync + `SaveNow`); nothing belonged to a saved player, so there is
+  nothing to remove or duplicate, and every other ending just hands the orb
+  back. No victim shield, no loss cap, no `TotalSteals` (the `first_steal` goal
+  and its marker stay PvP), no `HeistFeed`. The thief's `HeistEnded` carries
+  `Rival = true`.
+- **Limit.** Delivered rival steals per rolling hour per player, **per pool**
+  (`HeistService.GetRivalStealsLeft(player, difficulty)`): Easy + Medium share 12,
+  Hard has 4, Insane 2; past it the grab is refused with `RivalAlert` and the
+  client toasts "The rivals are on alert. Try again in N min". Counted at
+  delivery, so being tagged costs nothing. The times are **saved**
+  (`PlayerData.RivalSteals` = the shared pool, `PlayerData.RivalStealPools` =
+  Hard / Insane; unix seconds, newest last, pruned to the hour on use, 64 kept):
+  leaving and rejoining, or hopping servers, does not reset them. Hence
+  `RivalService.Now()` is the wall clock. The loop coach (`GoalService.
+  nearestRivalWithOrb`) only points a player at a lab they may rob and still
+  have steals for.
+- **The guards** (`Rival.Guards`, 1 / 1 / 2 / 3 by difficulty). Blocky R15 NPCs
+  (`HumanoidDescription` rigs, server-owned, default locomotion clips), named
+  after the **rival** (`Dr. Fizz`, `RivalConfig.GetShortName`) as a
+  `BillboardKit.Chip` in `Gradients.Rival` (`GuardName` on the Head, MaxDistance
+  `GuardNameDistance` 60, lifted with the guard's scale; the stock overhead
+  name is off). **Tougher by tier** (`Model:ScaleTo`, accessories and parts
+  only, no Highlight): Easy as before, Medium scale 1.1, Hard 1.2 with a helmet
+  (`GuardHelmet`), Insane 1.35 in `GuardDark` / `GuardRed` with a dark helmet and
+  a glowing Neon visor (`GuardVisor`). Guards spread over the patrol stops from
+  different start indices and over `GuardSpread` across x at home, so they never
+  stack. One loop (`GuardTickSeconds`, 0.1 s, every guard of every lab); path
+  requests are throttled per guard (`GuardPathSeconds`). A grab
+  (`RivalService.BeginCarry`) sends **at most `MaxChasers` (2) guards**, the
+  nearest free ones, after the thief at the difficulty's `GuardSpeed` (the
+  carrier walks at 12; PathfindingService paths recomputed at most every 0.5 s
+  in a task, so the loop never yields); any further guard **holds the gate**
+  (stands at `GuardHome` facing the gate until the carry ends). Each chaser that
+  starts running sends the carrier `RivalSpotted` (an alarm once per grab,
+  `SoundConfig.RivalAlarm`, and a red `!` chip over that guard for
+  `SpottedSeconds` 1.5; built on the carrier's client only). A chaser gives up
+  `tier.Leash` studs past its gate (Insane: never) and walks home. **It stays on
+  its feet:** `FallingDown`, `Ragdoll`, `Physics` and `Seated` are disabled on
+  its Humanoid, `BreakJointsOnDeath` / `RequiresNeck` off, `HipHeight` taken
+  from the rig's legs (root bottom to sole, after the scale), every part
   unanchored, network owner nil. The stun's `PlatformStand` ends in ONE place
   (`recoverGuard`: PlatformStand off, pivoted upright, `GettingUp`), reached
   from the tick once `StunUntil` has passed (a second hit only moves
@@ -252,68 +296,78 @@ number); the steal itself is `HeistService`'s, same flow.
   (`healGuard`, every tick while not stunned): a root more than
   `UprightLimitDegrees` (45) off vertical for > `GuardDownSeconds` (1) gets
   `ChangeState(GettingUp)`; still down a second later, the model is pivoted
-  upright where it lies. `RivalService.GetGuardUprightDegrees` /
-  `SelfTestLayDown` are the /selftest hooks. **The tag is
-  HeistService's**: after `TagGraceSeconds`, the guard's root within
-  `TagDistance` of the carrier ends the carry `Saved` (the thief's toast:
-  "The lab guard got you!"). Weapons work on it
-  (`CombatService.ApplyGuardHit`, melee box or ranged ray): it falls over for
-  `GuardStunSeconds`, can't tag while down and loses the chase, so a friend
-  can cover you (Rebirth 1+, like all weapons). It has no health.
+  upright where it lies. **The tag is HeistService's**: after
+  `TagGraceSeconds`, ANY guard's root (`RivalService.GetGuardRoots`, the ones
+  not stunned) within `TagDistance` of the carrier ends the carry `Saved` (the
+  thief's toast: "The lab guard got you!"). Weapons work on **one** guard
+  (`CombatService.ApplyGuardHit(attacker, rivalId, guardIndex, ...)`; guards carry
+  the attributes `RivalGuard` = rival id and `GuardIndex`, melee box or ranged
+  ray): it falls over for the difficulty's `StunSeconds`, can't tag while down,
+  and **goes back to the chase when it is up** if its carrier is still running
+  (`ResumeTarget`): a short Insane stun buys a few strides, not the orb, so the
+  stun column of the table means something. It has no health.
+- **The Insane check.** At 15 vs the carrier's 12 you only get home with help.
+  `RivalConfig.SimulateEscape` is the kinematic model (guards run straight at
+  `GuardSpeed`, stand still while stunned, give up at the leash, tag within
+  `TagDistance` after the grace) and `/selftest` runs it over every pair of slots
+  (pedestal to the thief's gate, +15% for bends): with the two chasers 6 studs
+  behind (worst case) or 10 / 14 behind, **no help is caught on every route** and
+  **a stun on both chasers at the end of the grace plus Speed Boots (18) gets home
+  on every route**. Same model, same gaps: stun only escapes 0 / 132 routes at
+  6 / 6 and 32 / 132 at 10 / 14; boots alone (18 > 15) escape 132 / 132. So
+  boots beat the chasers on their own in the model, and the gate-holder (it
+  only stands at `GuardHome`, 22 studs short of the gate, and the grace window
+  has ended by the time a runner is past it) is nearly decoration; if boots alone
+  should fail, raise Insane's `GuardSpeed` or move the holder to the gate mouth.
 - **Teaching.** `tipRival` (`tutorial.md`). The red hand markers on
-  grabbable pedestals work on rival pedestals too; `stealHowTo` and the
-  `first_steal` marker skip them.
+  grabbable pedestals work on rival pedestals too (a Locked prompt is not
+  grabbable, so no hand); `stealHowTo` and the `first_steal` marker skip them.
 - **Safety.** Rivals are not `Player`s: never in leaderboards, friend counts,
   the notification queue or analytics player counts, and they never take
   anything from anyone. No new lights or `Highlight`s (the standard
   `PedestalVisuals`); the owner-only EMPTY pill is disabled on a rival
   pedestal (it has no owner to hide it from). The remote fuzz sends junk
   `RivalId` payloads.
-- **Analytics.** Funnel `FirstRivalSteal` right after `FirstFuse` (the later
-  steps renumbered; pre-launch); custom `RivalStealDelivered` /
-  `RivalStealTagged` (guard tag or a weapon knock) / `RivalStealTimeout`
-  (field: tier), `RivalGuardHit` (weapon).
-- **Economy** (`tools/econ_sim.py 100 1.5 --rivals`, 12 steals an hour from
-  minute 3, 100 seeds; numbers in TycoonConfig's header). Old rule (one roll
-  from the band's weights): Rebirth 1 0:51:20 vs 0:50:03 with no rivals, i.e.
-  neutral. New rule (floor + 1, the floor, two weighted pedestals; the sim
-  grabs a random one of the four): **Rebirth 1 0:43:41** (12.7% sooner than
-  none), Rebirth 2 1:15:32 vs 1:27:56; fastest decile Rebirth 1 **0:35:25**
-  (target >= 0:35:00, so `StealsPerHour` stays 12; at 9 an hour it is 0:45:51
-  / 0:36:00). The sim charges no run time and always steals at the cap, so it
+- **Analytics.** Funnel `FirstRivalSteal` right after `FirstFuse`; custom
+  `RivalStealDelivered` / `RivalStealTagged` (guard tag or a weapon knock) /
+  `RivalStealTimeout` (field: tier), `RivalGuardHit` (weapon).
+- **Economy** (`tools/econ_sim.py 30 12 --rivals`, an attempt every 5 minutes
+  from minute 3 at the hardest lab the player's Rebirths allow whose hourly pool
+  has a steal left; `--rival-success=P` makes Medium / Hard / Insane steals land
+  with probability P). 30 seeds, 12 h: Rebirth 1 0:50:30 vs 0:49:48 with no
+  rivals (neutral), Rebirth 2 1:23:16 vs 1:30:28 (**8.0%** sooner), Rebirth 3
+  2:02:36 vs 2:10:41 (6.2%); fastest decile Rebirth 1 **0:40:17** (target >=
+  0:35:00). With only half of the Medium+ attempts landing: Rebirth 2 3.2%,
+  Rebirth 3 2.8% sooner. The sim charges no run time and a tag costs nothing, so it
   is an upper bound.
 - **`/selftest rivals`** (also section 16 of the full run): a solo server
-  fills its labs (ownerless, 4 steal pedestals, the RIVAL LAB sign, the Fusion
-  Machine / Gacha / Multiplier / factory line / portal models with the five
-  generators running and zero ProximityPrompts but the 4 steal prompts, no
-  Highlight, no live owner-only label, none on the stations, the gate sign
-  upright and square to its slot like a stand-in player's; only Common / Rare /
-  Epic at Rebirth 0); every guard within 20 deg of vertical after spawn, after a
-  6 s chase across the speed belts (thief on the far side of the street) and
-  after a stun plus a second hit (PlatformStand off), a guard laid on its side
-  standing up by itself within 5 s, the rig flags (no FallingDown / Ragdoll /
-  Physics / Seated, HipHeight, unanchored) and the name label; the light
-  budget; `RespawnAt` on a delivered pedestal and gone when the orb is back; a stand-in player joining
-  a full server displaces the farthest rival and gets its slot (stand-ins via
-  `TycoonService.SelfTestCreatePlot`); the Rebirth rule; a Rebirth 0 steal end
-  to end (grab, second grab refused, delivery creates the orb, the 90 s timer,
-  the respawn on an injected clock); the guard's tag returns the orb and
-  creates nothing (skipped if the guard rig did not build); a weapon stun;
-  `StealsPerHour` and the hour later; a despawn mid-carry with no error and
-  nothing created; **orb quality and rotation**: 10 000 labs per floor and
-  band (floor + 1 and the floor always present, nothing below the floor, no
-  Mythic / Secret, no four-Common lab for a Rare owner, a new player's lab has
-  a Rare and only Common / Rare / Epic), `RollOrb(tier)` is that tier with ~5%
-  Golden, `PickTier` / `PickTierAtLeast` skipping a listed banned tier; live
-  labs with the floor stubbed to Common / Rare / Epic after a rotation;
-  rotations spaced >= 5 s apart, the next one ~150 s out and `NextRotateAt`
-  advancing; a carried orb (guard chasing) and a player standing at a pedestal
-  hold the rotation, which goes through on the next tick; a risen floor waits,
-  a dropped one re-rolls at once. Run it in Studio: the steal parts need the
-  tester's character and a claimed lab.
-- **Not covered by code in this repo's checks**: the guard's pathing and
-  animation, the decorated labs' look and the client countdown chip were not
-  run in Studio when this was written (Rival labs 2 as well: the parser was
-  StyLua's, `luau-lsp` was not available) (`luau-lsp analyze` is clean and the pure rules were run in the
-  Luau CLI). Check `docs/UI_TEST.md`-style: walk to a rival lab at Rebirth 0,
-  hold E, run home, get tagged once, wait 90 s.
+  fills its labs (one per difficulty; ownerless, 4 steal pedestals, each lab's
+  sign text, difficulty chip, odds line and prompt attributes, the Insane trim
+  as thin Neon parts only on Insane, the Fusion Machine / Gacha / Multiplier /
+  factory line / portal models with the five generators running and zero
+  ProximityPrompts but the 4 steal prompts, no Highlight, no live owner-only
+  label, none on the stations, the gate sign upright and square to its slot
+  like a stand-in player's); every guard (1 / 1 / 2 / 3) within 20 deg of
+  vertical after spawn, after a 6 s chase across the speed belts and after a
+  stun plus a second hit, a guard laid on its side standing up by itself within
+  5 s, the rig flags, the name label, the tier's scale / helmet / visor, no two
+  guards stacked; displacement (stand-in players fill the server, then each
+  further player takes the labs in the order Easy, Medium, Hard, Insane, and the
+  slot); the Rebirth rules per difficulty and live (`TryRivalSteal` at Rebirth 0
+  and 4 on all four labs); a Rebirth 0 steal end to end (grab, second grab
+  refused, delivery creates the orb, the Easy respawn on an injected clock); the
+  guard's tag returns the orb and creates nothing; a weapon stun on one guard;
+  the hourly pools (Easy + Medium shared, Hard 4, Insane 2, each pool dry leaves
+  the others open, `RivalAlert`); a despawn mid-carry; **orb rolls**: 5 000
+  `RollOrb` per difficulty stay in the lab's tier set with weights within 3 points,
+  Mythic / Secret only on Insane, Golden at the difficulty's chance; rotation
+  spacing, the carried-orb and standing-player holds; on a grab at most 2 guards
+  chase and the rest hold; Speed Boots on a carry (18, back to 12); the Insane
+  escape model; the light budget of all four labs. Run it in Studio: the steal
+  parts need the tester's character and a claimed lab.
+- **Not covered by code in this repo's checks**: the guards' pathing and
+  animation, the helmet / visor / scale look, the decorated labs' look, the
+  difficulty chip and its pulse, the odds line and the hum were not run in
+  Studio when this was written (`luau-lsp analyze` is clean and the pure rules
+  were run in the Luau CLI). Check `docs/UI_TEST.md` section 46: walk to each lab
+  at Rebirth 0, hold E on Easy, run home, get tagged once, wait for the respawn.

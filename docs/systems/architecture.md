@@ -19,6 +19,7 @@ calls left in `Services/`.
 | `GoalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService`, `TutorialService`, `HeistService`, `RivalService` (all Start; the coach reads the tutorial flag, the rival steal allowance and the rival labs' orbs) | `--!strict` |
 | `TycoonService` | `:Init()` `:Start()` | `PlayerDataService` (module scope, leaf), `FusionMachineService`, `WorldService` (Start); `RivalService` registers a slot reclaimer with it (`SetSlotReclaimer`), never required | `--!nonstrict` ⚠ |
 | `RivalService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` (`HeistService` requires it and registers `OnDespawn`; no cycle) | `--!strict` |
+| `MinigameService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService`, `HeistService` (`CombatService` and `DebugService` require it in Start; it never requires them) | `--!strict` |
 | `FusionMachineService` | `:Init()` | — | `--!nonstrict` ⚠ |
 | `WorldService` | `:Init()` | — | `--!strict` |
 | `RebirthService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
@@ -30,7 +31,7 @@ calls left in `Services/`.
 | `RewardService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
 | `LeaderboardService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `TutorialService` | `:Init()` `:Start()` | `PlayerDataService`, `TycoonService` | `--!strict` |
-| `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService`, `RivalService` | `--!strict` |
+| `CombatService` | `:Init()` `:Start()` | `PlayerDataService`, `HeistService`, `TycoonService`, `RivalService`, `MinigameService` | `--!strict` |
 | `QuestService` | `:Init()` `:Start()` | `PlayerDataService`, `CombatService` | `--!strict` |
 | `FriendService` | `:Init()` `:Start()` | `PlayerDataService` | `--!strict` |
 | `NotifyService` | `:Init()` `:Start()` | `PlayerDataService` (AdminService calls `QueueAdminAbuse`) | `--!strict` |
@@ -105,4 +106,11 @@ only),
 `HeistStarted` / `HeistEnded` (S→thief and victim; a rejected grab is
 `HeistEnded { Outcome = "Rejected", Reason, Seconds? }`; a rival steal's
 carry sends only the thief `Rival = true`, `OtherUserId = 0` and the lab's
-name as `OtherName`), `HeistFeed` (S→all, Legendary+, never for rival labs).
+name as `OtherName`), `HeistFeed` (S→all, Legendary+, never for rival labs),
+`RivalSpotted` (S→the carrier only `{ RivalId, GuardIndex, Head, Alarm,
+Seconds }`: a rival guard started chasing; the client plays the alarm and
+builds the red `!` over that guard),
+`MinigameQueue` (C→S `{ Action = "Join" | "Leave" }`, rate limited) and
+`MinigameState` (S→C, ORB RUSH: `Kind` = `Start` / `Scores` / `Pickup` /
+`Golden` / `Message` / `Queued` / `Results`; the live kinds only go to the
+players in the round; `docs/systems/minigames.md`).

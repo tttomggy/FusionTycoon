@@ -21,7 +21,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `LogOnboardingFunnelStepEvent` once per player ever (`PlayerData.Funnel`,
   via `SetFunnelStore` from PlayerDataService): Join, ClaimLab,
   FirstUpgrade, FirstPull, FirstDisplay, FirstFuse, FirstRivalSteal,
-  FirstMultiplier, FirstEvent, FirstRebirth, FirstSteal (FirstRivalSteal went
+  FirstMultiplier, FirstEvent, FirstRebirth, FirstSteal, FirstOrbRush
+  (ORB RUSH; APPENDED at the end so the live funnel's indices do not move)
+  (FirstRivalSteal went
   in after FirstFuse with the rival labs, so every later step moved up one;
   fine pre-launch, and `PlayerData.Funnel` is keyed by name). `Source` / `Sink` →
   `LogEconomyEvent` ("Cash"): passive income summed per minute
@@ -33,7 +35,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   `NotifyOptInAnalytics`, whitelisted, rate-limited), Purchase (key), DailyClaimed (day), GiftClaimed (index),
   StealStarted / StealDelivered / StealSaved, RivalStealDelivered /
   RivalStealTagged (the guard's touch or a weapon hit) / RivalStealTimeout
-  (field: the orb's tier), RivalGuardHit (weapon), QuestClaimed (id),
+  (field: the orb's tier), RivalGuardHit (weapon), OrbRushQueued /
+  OrbRushPlayed (value = humans in the round) / OrbRushPlace (value = place) /
+  OrbRushPrize (field = tier), QuestClaimed (id),
   PowerUpUsed (key). Never call AnalyticsService
   directly.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are

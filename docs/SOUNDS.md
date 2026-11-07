@@ -12,7 +12,9 @@ needs to change.
   experience. They were **picked by Claude** from the store's names and
   lengths, without listening: flag any that sound wrong in a playtest. No
   slot reuses another's sound (the old `electronicpingshort` placeholder is
-  gone).
+  gone) **except** the rival-lab and ORB RUSH slots at the bottom of the table,
+  which reuse an existing id at another PlaybackSpeed because no new id could be
+  looked up; audition them with `/sound <slot>` and swap any that miss.
 - **An empty Id is silent** and raises no error.
 - **A bad Id warns once** at startup (`SoundKit: <slot> failed to load
   <id>`, from `SoundKit.Preload` in `Bootstrap.client.lua`), then that slot
@@ -28,7 +30,7 @@ needs to change.
 - Per-slot extras in SoundConfig: `SpeedJitter` (random PlaybackSpeed per
   play) and `RollOffMaxDistance` (positional plays).
 - **There is no looping ambient sound.** The Mythic/Secret pedestal bell
-  loop was removed.
+  loop was removed (the Insane lab's `InsaneHum` is a repeated one-shot, not a loop).
 
 | Slot | Asset id | Creator Store name | Volume | Plays when / where | Notes |
 |---|---|---|---|---|---|
@@ -53,6 +55,14 @@ needs to change.
 | `Swing` | 9120972321 | ProSoundEffects "Wood Whoosh Quick Swing" | 0.5 | A melee swing starts, at the swinger (yours the moment you click, others from `HitFx` Swing) | positional, RollOffMaxDistance 90, PlaybackSpeed 0.95–1.1; `/sound Swing` |
 | `Shoot` | 96445944074750 | "eblaster_blast_fire_01" | 0.45 | A gun fires, at the shooter (Freeze Ray plays it at 0.8 speed) | positional, RollOffMaxDistance 120; `/sound Shoot` |
 | `Equip` | 9117509491 | ProSoundEffects "Plastic Flashlight pick up" | 0.4 | A weapon comes up in someone's hand, at them | positional, RollOffMaxDistance 60; `/sound Equip` |
+| `RivalAlarm` | 16480579431 | Roblox_Pinball_8Bit_Blip_05 at 0.7x | 0.55 | A rival guard starts chasing you, once per grab (HeistController, RivalSpotted) | REUSES `Alarm`'s id at another speed; not auditioned |
+| `InsaneHum` | 16480577565 | Roblox_Pinball_8Bit_Riser_04 at 0.5x | 0.3 | Near an Insane rival lab, a positional one-shot every 3.5 s (WorldLabelController, `PlayAt`) | REUSES `EventReveal`'s id at 0.5x; RollOffMaxDistance 90; not a loop; not auditioned |
+| `RushCall` | 15675043410 | Roblox_UI_Tonal_Stinger | 0.55 | The ORB RUSH call announces (MinigameController) | REUSES `EventStart`'s id; not auditioned |
+| `RushPop` | 16480580213 | Roblox_Pinball_8Bit_Blip_01 | 0.5 | You take an orb; PlaybackSpeed 1 + 0.07 per pickup in a 1 s streak (cap +0.56) | REUSES `CoinPickup`'s id; not auditioned |
+| `RushTick` | 15675059323 | Roblox_UI_Bright_Click at 1.2x | 0.6 | The 3 · 2 · 1 countdown | REUSES `Toast`'s id; not auditioned |
+| `RushGo` | 10066947742 | RBLX UI Purchase at 1.15x | 0.7 | GO! | REUSES `Station`'s id; not auditioned |
+| `RushGolden` | 16480577565 | Roblox_Pinball_8Bit_Riser_04 at 1.25x | 0.55 | The GOLDEN WAVE starts | REUSES `EventReveal`'s id; not auditioned |
+| `RushResults` | 12222253 | victory.wav | 0.55 | The ORB RUSH results card opens | REUSES `RevealMajor`'s id; not auditioned |
 
 > **For Harris (Polish 12):** every combat slot now has an id (APM /
 > ProSoundEffects / short public SFX, picked by name, not by ear). Audition

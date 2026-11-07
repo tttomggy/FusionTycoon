@@ -184,6 +184,10 @@ local function whyCantSwing(attacker: Player, weapon: CombatConfig.Weapon): stri
 	if PlayerDataService.IsCarrying(attacker) then
 		return "Carrying"
 	end
+	-- ORB RUSH: nobody swings during the 3-2-1 (nobody moves until GO).
+	if MinigameService.IsPlaying(attacker) and not MinigameService.IsRoundLive() then
+		return "Countdown"
+	end
 	if untilActive(attacker, "RagdollUntil") then
 		return "Ragdolled"
 	end

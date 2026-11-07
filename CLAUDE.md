@@ -87,7 +87,8 @@ Portal, back-right corner) → hunt Secrets, mutations and the Index.
 | Monetization (shop, deals, offers, receipts) | `docs/systems/monetization.md` | MonetizationService, ShopConfig, ShopController |
 | Daily rewards & playtime gifts | `docs/systems/rewards.md` | RewardService, DailyConfig, GiftConfig |
 | Leaderboards, analytics, Admin Abuse | `docs/systems/leaderboards-analytics-admin.md` | LeaderboardService, AnalyticsKit, AdminService |
-| Heist, LOCK, shields, rival (NPC) labs | `docs/systems/heist.md` | HeistService, HeistConfig, HeistController, RivalService, RivalConfig |
+| Heist, LOCK, shields, rival (NPC) labs (four difficulties) | `docs/systems/heist.md` | HeistService, HeistConfig, HeistController, RivalService, RivalConfig |
+| ORB RUSH minigame (arena, bots, prizes, street portal) | `docs/systems/minigames.md` | MinigameService, MinigameConfig, ArenaLayout, MinigameController |
 | File tree | `docs/systems/file-layout.md` | |
 | Service table, remote list | `docs/systems/architecture.md` | |
 

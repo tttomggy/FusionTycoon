@@ -295,12 +295,17 @@ local function publish()
 	Workspace:SetAttribute("OrbRushMax", MinigameConfig.MaxPlayers)
 end
 
+-- What the portal last showed, so a scheduler tick that changes nothing sets nothing
+-- (SetChipGradient rebuilds its gradient each call).
+local portalShown = { On = false, Text = "", Count = -1, Built = false }
+
 local function updatePortal()
 	local on = state.phase == "Call"
 	local counter, title, face = state.portalCounter, state.portalTitle, state.portalFace
-	if counter then
+	if counter and (portalShown.Count ~= #state.queue or portalShown.On ~= on) then
 		counter.Gui.Enabled = on
 		counter.Label.Text = ("%d / %d"):format(#state.queue, MinigameConfig.MaxPlayers)
+		portalShown.Count = #state.queue
 	end
 	if title then
 		local nextAt = Workspace:GetAttribute("OrbRushNextAt")
@@ -308,11 +313,15 @@ local function updatePortal()
 		if title.Label.Text ~= text then
 			title.Label.Text = text
 		end
-		BillboardKit.SetChipGradient(title, if on then UITheme.Gradients.OrbRush else UITheme.Gradients.Disabled)
+		if portalShown.On ~= on or not portalShown.Built then
+			BillboardKit.SetChipGradient(title, if on then UITheme.Gradients.OrbRush else UITheme.Gradients.Disabled)
+		end
 	end
-	if face then
+	if face and (portalShown.On ~= on or not portalShown.Built) then
 		BillboardKit.SetPadFace(face, if on then World.RushPortal else World.Unclaimed, "RUSH", true)
 	end
+	portalShown.On = on
+	portalShown.Built = true
 end
 
 local function setPhase(phase: Phase)
@@ -451,7 +460,12 @@ local function buildArena()
 		PartKit.MakeDecorative(band)
 	end
 	for _, diameter in ArenaLayout.RING_DIAMETERS do
-		BillboardKit.BuildPadFace(folder, CFrame.new(center), diameter, World.ArenaRim, nil)
+		local ring = BillboardKit.BuildPadFace(folder, CFrame.new(center), diameter, World.ArenaRim, nil)
+		-- The pad face brings a PointLight; the arena has no lights (the glow is the SurfaceGui's).
+		local light = ring:FindFirstChild("FaceLight")
+		if light then
+			light:Destroy()
+		end
 	end
 
 	-- Invisible walls round the rim.
@@ -587,7 +601,9 @@ local function buildPortal()
 		Parent = folder,
 	})
 	PartKit.MakeDecorative(strip)
-	state.portalFace = BillboardKit.BuildPadFace(folder, base, portal.Radius * 2, World.Unclaimed, "RUSH")
+	local face = BillboardKit.BuildPadFace(folder, base, portal.Radius * 2, World.Unclaimed, "RUSH")
+	BillboardKit.SetPadFace(face, World.Unclaimed, "RUSH", true) -- no street light: the ring's glow is enough
+	state.portalFace = face
 
 	local anchor = PartKit.Part({
 		Name = "LabelAnchor",
@@ -1233,7 +1249,8 @@ local function armDeathReload(player: Player)
 		task.defer(function()
 			local p = participantFor(player)
 			if p and not p.Left and (state.phase == "Play" or state.phase == "Countdown") and player.Parent == Players then
-				(player :: any):LoadCharacterAsync()
+				local reloadable = player :: any
+				reloadable:LoadCharacterAsync()
 			end
 		end)
 	end)

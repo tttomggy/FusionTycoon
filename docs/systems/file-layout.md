@@ -16,8 +16,11 @@ src/ReplicatedStorage/Shared/
                  MusicConfig — the background playlist and its fades, AdminConfig —
                  admins and the Admin Abuse panel,
                  HeistConfig — stealing and the lab shield,
-                 RivalConfig — rival (NPC) labs: count, orb tiers (floor +
-                 roles + band weights), rotation, respawn, guard, StealsPerHour,
+                 RivalConfig — rival (NPC) labs: the four difficulties' table
+                 (orb weights, guards, speed, leash, stun, Rebirth gate, hourly
+                 pool, respawn), rotation, guard constants, the escape model,
+                 MinigameConfig — ORB RUSH: schedule, orbs, prizes, bots, the
+                 headless round model; ArenaLayout — the ORB RUSH arena,
                  GoalConfig — the ordered onboarding goals,
                  SettingsConfig — the player's reveal-card rules,
                  ShopConfig — every pass / product and shop number,
@@ -69,6 +72,8 @@ src/ServerScriptService/
                            CombatService weapons, hits and ragdoll;
                            RivalService the rival (NPC) labs in empty slots,
                            their orbs and guards (the steal is HeistService's);
+                           MinigameService ORB RUSH: the arena, the street
+                           portal, the queue, rounds, bots, prizes;
                            RewardService the daily reward and playtime
                            gifts; LeaderboardService the street boards;
                            FriendService the friend boost's friend count;
