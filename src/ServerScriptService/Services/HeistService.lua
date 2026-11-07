@@ -1085,8 +1085,8 @@ local function stepCarries()
 				-- ANY guard's touch sends the orb back.
 				local tagged = false
 				if graceOver then
-					for _, guardRoot in RivalService.GetGuardRoots(carry.RivalId) do
-						if (guardRoot.Position - rivalThiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
+					for _, zone in RivalService.GetGuardTagZones(carry.RivalId) do
+						if (zone.Root.Position - rivalThiefRoot.Position).Magnitude <= zone.Radius then
 							tagged = true
 							break
 						end

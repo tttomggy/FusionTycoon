@@ -2336,10 +2336,12 @@ built once). `/selftest rivals` first; then by hand:
   one steal from each difficulty at Rebirth 4 (Medium's guard at 13 beats a
   12-speed carrier, so use a Bat or Freeze Ray friend, or Speed Boots: a rival
   carry now runs at 12 x 1.5 = 18 with the boots on).
-- [ ] Insane, at most two guards chase and the third stands facing the gate; a
-  hit on one guard (Bat / Freeze Ray) drops only that guard for ~1.2 s and it
-  runs again when it is up; with a stun on both chasers plus Speed Boots you get
-  home, with no help you are caught.
+- [ ] Insane, two guards chase and the third (the gate-holder) stands IN the
+  gate the whole time (even before you grab). A hit on one guard (Bat / Freeze
+  Ray) drops only that guard for ~1.2 s and it runs again when it is up. With no
+  help, with Boots alone, or with a stun on the chasers alone you are caught at
+  the gate; a friend stunning the holder as you arrive plus Speed Boots gets you
+  home.
 - [ ] Let the guard touch you (after the 2 s grace): "The lab guard got you!
   The orb went back", the orb is on its pedestal, nothing in ITEMS.
 - [ ] Past 12 delivered Easy / Medium steals in an hour (`/selftest rivals`

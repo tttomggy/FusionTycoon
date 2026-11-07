@@ -242,12 +242,6 @@ function RivalConfig.SignText(difficulty: string): (string, string)
 	return "RIVAL LAB", "steal me!"
 end
 
--- A difficulty with its lab's guards' chase plan: how many chase, how many hold.
-function RivalConfig.SplitGuards(guardCount: number): (number, number)
-	local chasers = math.min(guardCount, RivalConfig.MaxChasers)
-	return chasers, guardCount - chasers
-end
-
 -- Rotation
 RivalConfig.RotateSeconds = 150
 RivalConfig.RotateJitterSeconds = 30 -- +- on every interval
@@ -272,7 +266,15 @@ RivalConfig.PatrolPoints = {
 	Vector3.new(14, 0, 5),
 	Vector3.new(0, 0, 5),
 } :: { Vector3 }
-RivalConfig.GuardHome = Vector3.new(0, 0, 10) -- plot-local; where the first guard spawns / returns and where a gate-holder stands facing the gate
+RivalConfig.GuardHome = Vector3.new(0, 0, 10) -- plot-local; where the first guard spawns / returns
+-- The gate-holder (every guard past MaxChasers: Insane's third) stands IN the
+-- gate all the time, facing the street, on the exit path just inside the wall
+-- (the gate gap is x -7..+7 at z 31..32), and tags inside HolderTagRadius
+-- instead of HeistConfig.TagDistance: 8 studs from (0, 29) reaches both gap
+-- corners (7.6 studs), so there is no way out past it that is not in its reach.
+RivalConfig.GateHoldPoint = Vector3.new(0, 0, 29)
+RivalConfig.HolderTagRadius = 8
+RivalConfig.HolderRouteBack = 3 -- the holder stands this far short of the gate along the exit route (gate z 32 - 29)
 RivalConfig.GuardSpread = 4 -- guards beyond the first start this many studs apart across x, so they never stack
 -- Staying upright: the self-heal stands a guard up when its root's up-vector
 -- is more than UprightLimitDegrees off vertical for GuardDownSeconds without
@@ -306,14 +308,23 @@ export type EscapeInput = {
 	StunAt: number?, -- seconds into the carry both chasers are hit by a weapon (nil: never)
 	ReactionSeconds: number?, -- before a guard's first path is computed (default 0.3)
 	GateAt: number?, -- where the lab's gate is along the route (default 34: pedestal row to gate); a chaser quits Leash studs past it
+	HolderStunAt: number?, -- seconds into the carry a weapon hits the gate-holder (nil: never); only for a difficulty that has one
 }
+
+-- Whether a lab of `difficulty` has a gate-holder (more guards than MaxChasers).
+function RivalConfig.HasHolder(difficulty: string): boolean
+	return RivalConfig.GetTier(difficulty).Guards > RivalConfig.MaxChasers
+end
 
 -- A kinematic model of a carry on a straight route against a lab's chasers
 -- (the gate-holder only stands, so it is left out): the carrier runs at
 -- CarrierSpeed; each chaser runs at the difficulty's GuardSpeed once its path
 -- is in, stands still while stunned (StunSeconds) and then runs again, gives up
 -- once it is Leash studs past the lab's gate; any chaser within TagDistance
--- after TagGraceSeconds tags. Returns (escaped,
+-- after TagGraceSeconds tags. A difficulty with a gate-holder (Insane) also has
+-- it standing HolderRouteBack short of the gate, tagging within HolderTagRadius
+-- of its spot (after the grace) unless a weapon hit it (HolderStunAt) and it is
+-- still down. Returns (escaped,
 -- seconds). Idealised: real guards path around things, so this is the best a
 -- guard does, and the numbers are what /selftest holds.
 function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
@@ -326,7 +337,12 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 		table.insert(chasers, { Pos = -gap, StunnedUntil = -1 })
 	end
 	local stunned = false
-	local quitAt = (input.GateAt or 34) + tier.Leash
+	local gateAt = input.GateAt or 34
+	local holderAt = gateAt - RivalConfig.HolderRouteBack
+	local holderStunnedUntil = -1
+	local holderStunApplied = false
+	local hasHolder = RivalConfig.HasHolder(input.Difficulty)
+	local quitAt = gateAt + tier.Leash
 	local t = 0
 	while t < HeistConfig.CarrySeconds do
 		if carrier >= input.Distance then
@@ -339,7 +355,21 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 				chaser.StunnedUntil = t + tier.StunSeconds
 			end
 		end
+		local holderStunAt = input.HolderStunAt
+		if holderStunAt and not holderStunApplied and t >= holderStunAt then
+			holderStunApplied = true
+			holderStunnedUntil = t + tier.StunSeconds
+		end
 		carrier += input.CarrierSpeed * step
+		-- The gate-holder stands in the gate and tags anyone inside its radius.
+		if
+			hasHolder
+			and t >= HeistConfig.TagGraceSeconds
+			and t >= holderStunnedUntil
+			and math.abs(carrier - holderAt) <= RivalConfig.HolderTagRadius
+		then
+			return false, t
+		end
 		for _, chaser in chasers do
 			if t >= reaction and t >= chaser.StunnedUntil and chaser.Pos < quitAt then
 				chaser.Pos = math.min(chaser.Pos + tier.GuardSpeed * step, carrier)

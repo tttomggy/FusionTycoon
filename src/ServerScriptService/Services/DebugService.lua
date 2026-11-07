@@ -3553,14 +3553,16 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			table.concat(poolBad, "; ")
 		)
 
-		-- 9c. Guards on a grab: the nearest two chase, the rest hold the gate, and
-		-- when the carry ends nobody is left chasing or holding.
+		-- 9c. Guards on a grab: the nearest two chase, the gate-holder (Insane's third)
+		-- stands in the gate at its post the whole time, and when the carry ends nobody
+		-- is left chasing.
 		local chaseBad: { string } = {}
 		for _, difficulty in RivalConfig.Difficulties do
 			local lab, labIndex = firstOrb(difficulty)
 			if lab and labIndex then
 				local guardCount = RivalService.GetGuardCount(lab.Id)
 				if guardCount > 0 then
+					local wantHolders = if RivalConfig.HasHolder(difficulty) then guardCount - RivalConfig.MaxChasers else 0
 					RivalService.BeginCarry(lab.Id, labIndex, player)
 					local chasers, holders = 0, 0
 					for guardIndex = 1, guardCount do
@@ -3568,21 +3570,37 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 						chasers += if mode == "Chase" then 1 else 0
 						holders += if mode == "Hold" then 1 else 0
 					end
-					local wantChasers = math.min(guardCount, RivalConfig.MaxChasers)
-					if chasers ~= wantChasers or holders ~= guardCount - wantChasers or RivalService.GetChaserCount(lab.Id) > RivalConfig.MaxChasers then
+					local wantChasers = guardCount - wantHolders
+					if chasers ~= math.min(wantChasers, RivalConfig.MaxChasers) or holders ~= wantHolders or RivalService.GetChaserCount(lab.Id) > RivalConfig.MaxChasers then
 						table.insert(chaseBad, ("%s: %d chasing / %d holding of %d"):format(difficulty, chasers, holders, guardCount))
 					end
 					RivalService.EndCarry(lab.Id, labIndex, false)
 					for guardIndex = 1, guardCount do
-						local mode = RivalService.GetGuardMode(lab.Id, guardIndex)
-						if mode == "Chase" or mode == "Hold" then
-							table.insert(chaseBad, ("%s guard %d still %s after the carry"):format(difficulty, guardIndex, tostring(mode)))
+						if RivalService.GetGuardMode(lab.Id, guardIndex) == "Chase" then
+							table.insert(chaseBad, ("%s guard %d still chasing after the carry"):format(difficulty, guardIndex))
+						end
+					end
+					-- The holder stands in the gate (flat, within a few studs of its post) and tags in the wide radius.
+					if wantHolders > 0 then
+						local post = lab.Origin:PointToWorldSpace(RivalConfig.GateHoldPoint)
+						local zones = RivalService.GetGuardTagZones(lab.Id)
+						local atPost = false
+						local wideZone = false
+						for _, zone in zones do
+							if zone.Radius == RivalConfig.HolderTagRadius then
+								wideZone = true
+								local offset = zone.Root.Position - post
+								atPost = atPost or Vector3.new(offset.X, 0, offset.Z).Magnitude <= 4
+							end
+						end
+						if not (wideZone and atPost) then
+							table.insert(chaseBad, difficulty .. ": the gate-holder is not at its post in the gate with the wide tag radius")
 						end
 					end
 				end
 			end
 		end
-		result(#chaseBad == 0, "rivals: on a grab at most 2 guards chase (the third holds the gate) and all stand down when the carry ends", table.concat(chaseBad, "; "))
+		result(#chaseBad == 0, "rivals: on a grab at most 2 guards chase, Insane's third stands in the gate (post + wide tag radius) throughout, and nobody keeps chasing after the carry", table.concat(chaseBad, "; "))
 
 		-- 9d. Speed Boots count on a rival carry: 12 x 1.5 while on, back to 12 when off.
 		local bootsLab, bootsIndex = firstOrb("Easy")
@@ -3610,12 +3628,15 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		freeLabs()
 
 		-- 9e. The Insane escape check. A kinematic model of the carry (RivalConfig.
-		-- SimulateEscape: guards run straight at GuardSpeed, stun for StunSeconds,
-		-- tag within TagDistance after the grace) over EVERY pair of slots (the lab's
-		-- pedestal to the thief's gate), with the two chasers starting 6 studs behind
-		-- (the worst case) and 10 / 14 behind: (a) with no help the thief is caught
-		-- on every route; (b) with both chasers stunned at the end of the grace and
-		-- the Speed Boots (x1.5) the thief gets home on every route.
+		-- SimulateEscape: chasers run straight at GuardSpeed, stand still while
+		-- stunned, tag within TagDistance after the grace; the gate-holder stands in the
+		-- gate and tags inside HolderTagRadius unless it is stunned) over EVERY pair of
+		-- slots (the lab's pedestal to the thief's gate), with the chasers 6 / 6 studs
+		-- behind (the worst case) and 10 / 14 behind:
+		--   no help -> caught on every route
+		--   Boots alone (x1.5) -> caught (by the holder)
+		--   a stun on the HOLDER as the carrier arrives + Boots -> home on every route
+		--   a stun on the chasers alone -> caught (by the holder)
 		local routes: { number } = {}
 		for from = 1, PlotLayout.MAX_PLOT_SLOTS do
 			for to = 1, PlotLayout.MAX_PLOT_SLOTS do
@@ -3627,10 +3648,18 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 		local boostSpeed = HeistConfig.CarryWalkSpeed * (QuestConfig.PowerUps.SpeedBoots.SpeedMultiplier or 1)
-		local function escapes(speed: number, stunAt: number?, gaps: { number }): number
+		local zoneEntry = (34 - RivalConfig.HolderRouteBack) - RivalConfig.HolderTagRadius -- along the route, where the holder's reach starts
+		local function escapes(speed: number, chaserStunAt: number?, holderStunAt: number?, gaps: { number }): number
 			local count = 0
 			for _, distance in routes do
-				local escaped = RivalConfig.SimulateEscape({ Difficulty = "Insane", Distance = distance, CarrierSpeed = speed, Gaps = gaps, StunAt = stunAt })
+				local escaped = RivalConfig.SimulateEscape({
+					Difficulty = "Insane",
+					Distance = distance,
+					CarrierSpeed = speed,
+					Gaps = gaps,
+					StunAt = chaserStunAt,
+					HolderStunAt = holderStunAt,
+				})
 				count += if escaped then 1 else 0
 			end
 			return count
@@ -3638,19 +3667,25 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		local escapeBad: { string } = {}
 		local escapeNotes: { string } = {}
 		for _, gaps in { { 6, 6 }, { 10, 14 } } do
-			local none = escapes(HeistConfig.CarryWalkSpeed, nil, gaps)
-			local stunOnly = escapes(HeistConfig.CarryWalkSpeed, HeistConfig.TagGraceSeconds, gaps)
-			local bootsOnly = escapes(boostSpeed, nil, gaps)
-			local both = escapes(boostSpeed, HeistConfig.TagGraceSeconds, gaps)
+			local none = escapes(HeistConfig.CarryWalkSpeed, nil, nil, gaps)
+			local bootsAlone = escapes(boostSpeed, nil, nil, gaps)
+			local holderAndBoots = escapes(boostSpeed, nil, (zoneEntry - 2) / boostSpeed, gaps)
+			local chasersAlone = escapes(HeistConfig.CarryWalkSpeed, HeistConfig.TagGraceSeconds, nil, gaps)
 			if none ~= 0 then
 				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with no help"):format(gaps[1], gaps[2], none, #routes))
 			end
-			if both ~= #routes then
-				table.insert(escapeBad, ("gaps %d/%d: only %d of %d routes escape with stun + boots"):format(gaps[1], gaps[2], both, #routes))
+			if bootsAlone ~= 0 then
+				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with Boots alone"):format(gaps[1], gaps[2], bootsAlone, #routes))
 			end
-			table.insert(escapeNotes, ("gaps %d/%d of %d routes: none %d, stun only %d, boots only %d, stun + boots %d"):format(gaps[1], gaps[2], #routes, none, stunOnly, bootsOnly, both))
+			if holderAndBoots ~= #routes then
+				table.insert(escapeBad, ("gaps %d/%d: only %d of %d routes escape with a stun on the holder + Boots"):format(gaps[1], gaps[2], holderAndBoots, #routes))
+			end
+			if chasersAlone ~= 0 then
+				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with a stun on the chasers alone"):format(gaps[1], gaps[2], chasersAlone, #routes))
+			end
+			table.insert(escapeNotes, ("gaps %d/%d of %d routes: none %d, Boots alone %d, holder stun + Boots %d, chasers stun alone %d"):format(gaps[1], gaps[2], #routes, none, bootsAlone, holderAndBoots, chasersAlone))
 		end
-		result(#escapeBad == 0, "rivals: Insane escape model: caught with no help on every route, home with a stun on the chasers plus Speed Boots", table.concat(escapeBad, "; ") .. " | " .. table.concat(escapeNotes, " | "))
+		result(#escapeBad == 0, "rivals: Insane escape model: caught with no help, with Boots alone and with a stun on the chasers alone; home with a stun on the gate-holder plus Boots, on every route", table.concat(escapeBad, "; ") .. " | " .. table.concat(escapeNotes, " | "))
 
 		-- 9f. Every rival lab's lights stay within a claimed player lab's budget.
 		local ownPlot = TycoonService.GetPlotForPlayer(player)

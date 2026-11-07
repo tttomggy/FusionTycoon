@@ -213,7 +213,7 @@ Supporting detail:
 
 ### Type checker
 
-`luau-lsp analyze` has 2 known pre-existing errors in `Shared/VFX/SparkleEmitter.lua` (lines 17, 35). Leave them alone unless asked; a clean run means no errors in the files you touched. Details: `docs/systems/architecture.md`.
+`luau-lsp analyze` has 2 known pre-existing errors in `Shared/VFX/SparkleEmitter.lua` (lines 17, 35). Leave them alone unless asked; a clean run means no errors in the files you touched. **With luau-lsp 1.70.1 and the current `globalTypes.d.luau` (aftman pins 1.69.0) the baseline is 6 distinct errors**, not 2: the two SparkleEmitter ones plus `BillboardKit.lua:135` (`DistanceLowerLimit` is missing from that globalTypes), `NotifyService.lua:699` (`pcall` returns 1 value) and `TopStack.lua:232` (x2, `Expected this to be`). The raw count of reported lines is higher (93-96) because every module that requires an erroring one reports it again, so **diff the distinct set** (strip the line numbers, `sort -u`) against a run at the base commit instead of counting. Details: `docs/systems/architecture.md`.
 
 ### Remotes
 

@@ -50,7 +50,7 @@
 	    guards chase the carrier at the difficulty's GuardSpeed along
 	    PathfindingService paths (recomputed at most every GuardPathSeconds),
 	    giving up at the difficulty's Leash past the gate (Insane: never); a
-	    third guard holds the gate (GuardHome, facing it). Each chaser that
+	    third guard is the gate-holder: it stands IN the gate (RivalConfig.GateHoldPoint) and tags in HolderTagRadius. Each chaser that
 	    starts running tells the carrier (RivalSpotted: alarm + a red "!").
 	    HeistService owns the tag: ANY guard within HeistConfig.TagDistance of
 	    the carrier sends the orb back.
@@ -77,6 +77,7 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local FusionConfig = require(ReplicatedStorage.Shared.Config.FusionConfig)
+local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
@@ -110,7 +111,7 @@ type PedestalState = {
 }
 
 -- Patrol: walking the stops. Chase: after a carrier. Home: walking back to its
--- own spot. Hold: standing at the gate spot facing the gate while a carrier runs.
+-- own spot. Hold: the gate-holder at its post in the gate (always).
 type GuardMode = "Patrol" | "Chase" | "Home" | "Hold"
 
 type Guard = {
@@ -127,7 +128,8 @@ type Guard = {
 	GetUpAt: number?, -- os.clock() of the GettingUp attempt; still down a second later = pivot it
 	PatrolIndex: number,
 	PauseUntil: number,
-	HomeLocal: Vector3, -- plot-local: where it spawns, returns and (as the gate-holder) stands
+	Holder: boolean, -- the gate-holder (a guard past MaxChasers): stands IN the gate at RivalConfig.GateHoldPoint, never chases
+	HomeLocal: Vector3, -- plot-local: where it spawns and returns (the holder: its post in the gate)
 	Faced: boolean, -- Hold: already turned to the gate
 	Waypoints: { PathWaypoint },
 	WaypointIndex: number,
@@ -600,7 +602,8 @@ local function buildGuard(rival: Rival, index: number)
 	end
 	rig:SetAttribute("RivalGuard", rival.Id)
 	rig:SetAttribute("GuardIndex", index)
-	local homeLocal = guardHomeLocal(index, tier.Guards)
+	local holder = RivalConfig.HasHolder(rival.Difficulty) and index > RivalConfig.MaxChasers
+	local homeLocal = if holder then RivalConfig.GateHoldPoint else guardHomeLocal(index, math.min(tier.Guards, RivalConfig.MaxChasers))
 	local home = rival.Origin:PointToWorldSpace(homeLocal + Vector3.new(0, 3 * tier.GuardScale, 0))
 	rig:PivotTo(CFrame.new(home) * rival.Origin.Rotation)
 	rig.Parent = rival.Plot
@@ -613,7 +616,7 @@ local function buildGuard(rival: Rival, index: number)
 		Model = rig,
 		Root = root,
 		Humanoid = humanoid,
-		Mode = "Patrol",
+		Mode = if holder then "Hold" else "Patrol",
 		Target = nil,
 		ResumeTarget = nil,
 		StunUntil = 0,
@@ -623,6 +626,7 @@ local function buildGuard(rival: Rival, index: number)
 		-- Spread over the stops so the guards never stack.
 		PatrolIndex = ((index - 1) * math.max(1, points // tier.Guards)) % points + 1,
 		PauseUntil = 0,
+		Holder = holder,
 		HomeLocal = homeLocal,
 		Faced = false,
 		Waypoints = {},
@@ -832,6 +836,28 @@ local function guardStep(rival: Rival, guard: Guard)
 	local humanoid = guard.Humanoid
 	local position = guard.Root.Position
 
+	if guard.Holder then
+		-- The gate-holder: runs to its post in the gate (at the chase speed when it
+		-- was knocked off it), stands facing the street. It never chases.
+		local spot = rival.Origin:PointToWorldSpace(guard.HomeLocal)
+		if flatDistance(position, spot) > RivalConfig.GuardWaypointReach + 1 then
+			humanoid.WalkSpeed = tier.GuardSpeed
+			if t - guard.LastPathAt >= RivalConfig.GuardPathSeconds * 4 then
+				requestPath(guard, spot)
+			end
+			followPath(guard, spot)
+			setMoving(guard, true)
+			guard.Faced = false
+		else
+			setMoving(guard, false)
+			if not guard.Faced then
+				guard.Faced = true
+				faceDirection(guard, gateDirection(rival))
+			end
+		end
+		return
+	end
+
 	if guard.Mode == "Chase" then
 		local target = guard.Target
 		local targetRoot = if target and target.Parent then getRoot(target) else nil
@@ -852,24 +878,6 @@ local function guardStep(rival: Rival, guard: Guard)
 	end
 
 	humanoid.WalkSpeed = RivalConfig.GuardPatrolSpeed
-	if guard.Mode == "Hold" then
-		-- The gate-holder: at its spot, facing the gate, until the carry is over.
-		local spot = rival.Origin:PointToWorldSpace(guard.HomeLocal)
-		if flatDistance(position, spot) > RivalConfig.GuardWaypointReach + 1 then
-			if t - guard.LastPathAt >= RivalConfig.GuardPathSeconds * 4 then
-				requestPath(guard, spot)
-			end
-			followPath(guard, spot)
-			setMoving(guard, true)
-		else
-			setMoving(guard, false)
-			if not guard.Faced then
-				guard.Faced = true
-				faceDirection(guard, gateDirection(rival))
-			end
-		end
-		return
-	end
 	if guard.Mode == "Home" then
 		local home = rival.Origin:PointToWorldSpace(guard.HomeLocal)
 		if flatDistance(position, home) <= RivalConfig.GuardWaypointReach + 1 then
@@ -1011,6 +1019,9 @@ function RivalService.BeginCarry(rivalId: number, index: number, thief: Player):
 	local free: { Guard } = {}
 	local busy: { Guard } = {}
 	for _, guard in rival.Guards do
+		if guard.Holder then
+			continue -- the gate-holder stays in the gate
+		end
 		local target = guard.Target
 		local running = guard.Mode == "Chase" and target ~= nil and carriers[target] == true and target ~= thief
 		table.insert(if running then busy else free, guard)
@@ -1023,18 +1034,11 @@ function RivalService.BeginCarry(rivalId: number, index: number, thief: Player):
 	if #free == 0 and busy[1] then
 		table.insert(free, table.remove(busy, 1) :: Guard) -- every guard is busy: the nearest switches
 	end
-	local chasers, holders = RivalConfig.SplitGuards(#rival.Guards)
 	local chasing = 0
 	for _, guard in free do
-		if chasing < math.min(chasers, RivalConfig.MaxChasers) then
+		if chasing < RivalConfig.MaxChasers then
 			chasing += 1
 			startChase(rival, guard, thief)
-		elseif holders > 0 and guard.Mode ~= "Hold" then
-			guard.Mode = "Hold"
-			guard.Target = nil
-			guard.Faced = false
-			guard.Waypoints = {}
-			guard.LastPathAt = -math.huge
 		end
 	end
 	return ped.Orb
@@ -1062,7 +1066,7 @@ function RivalService.EndCarry(rivalId: number, index: number, delivered: boolea
 	for _, guard in rival.Guards do
 		local target = guard.Target
 		local runningHere = guard.Mode == "Chase" and target ~= nil and carriers[target] == true
-		if (guard.Mode == "Chase" and not runningHere) or (guard.Mode == "Hold" and next(carriers) == nil) then
+		if guard.Mode == "Chase" and not runningHere then
 			guard.Mode = "Home"
 			guard.Target = nil
 			guard.Waypoints = {}
@@ -1087,6 +1091,23 @@ function RivalService.GetGuardRoots(rivalId: number): { BasePart }
 		end
 	end
 	return roots
+end
+
+-- The tag zones of the lab's guards that can tag right now: the root and how far
+-- from it a touch counts (HeistConfig.TagDistance; the gate-holder's is the
+-- wider RivalConfig.HolderTagRadius, enough to cover the whole gate opening).
+function RivalService.GetGuardTagZones(rivalId: number): { { Root: BasePart, Radius: number } }
+	local zones: { { Root: BasePart, Radius: number } } = {}
+	local rival = state.rivals[rivalId]
+	if rival then
+		local t = os.clock()
+		for _, guard in rival.Guards do
+			if guard.Root.Parent ~= nil and t >= guard.StunUntil then
+				table.insert(zones, { Root = guard.Root, Radius = if guard.Holder then RivalConfig.HolderTagRadius else HeistConfig.TagDistance })
+			end
+		end
+	end
+	return zones
 end
 
 local function getGuard(rivalId: number, index: number?): Guard?

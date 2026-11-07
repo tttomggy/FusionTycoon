@@ -73,6 +73,18 @@ deleted in the world redesign.)
   `options = options or {}` idiom does not narrow the optional parameter for
   the checker; the fix is a narrowed local (`local style = options or {}`).
 
+**Baseline with luau-lsp 1.70.1 + the current `globalTypes.d.luau`** (aftman
+pins 1.69.0; run on the world-redesign tree before ORB RUSH and again after, the
+same set both times): 6 distinct errors, 93 reported lines (96 after the new
+modules, which only add requirers of the same errors): the two SparkleEmitter
+ones above, `BillboardKit.lua:135` (`Key 'DistanceLowerLimit' not found in external
+type 'BillboardGui'`: the downloaded globalTypes predates that property),
+`NotifyService.lua:699` (`Function only returns 1 value, but 2 are required
+here`: `local ok, err = pcall(fn)` where `fn` has no return) and
+`TopStack.lua:232` twice (`Expected this to be ...`). To check a change: run
+the analyzer at the base commit and after it, reduce each output to its
+distinct `file: message` lines (drop the `(line,col)`), and diff the two sets.
+
 Note these are reported whenever you analyze any module that transitively
 requires it (most of `Services/`), so a "clean" run means *no errors owned by
 the file under test* — check the path on each reported line.

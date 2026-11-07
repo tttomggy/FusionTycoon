@@ -280,8 +280,7 @@ holds a number.
   (`RivalService.BeginCarry`) sends **at most `MaxChasers` (2) guards**, the
   nearest free ones, after the thief at the difficulty's `GuardSpeed` (the
   carrier walks at 12; PathfindingService paths recomputed at most every 0.5 s
-  in a task, so the loop never yields); any further guard **holds the gate**
-  (stands at `GuardHome` facing the gate until the carry ends). Each chaser that
+  in a task, so the loop never yields); any further guard is the **gate-holder** (see below). Each chaser that
   starts running sends the carrier `RivalSpotted` (an alarm once per grab,
   `SoundConfig.RivalAlarm`, and a red `!` chip over that guard for
   `SpottedSeconds` 1.5; built on the carrier's client only). A chaser gives up
@@ -306,19 +305,27 @@ holds a number.
   and **goes back to the chase when it is up** if its carrier is still running
   (`ResumeTarget`): a short Insane stun buys a few strides, not the orb, so the
   stun column of the table means something. It has no health.
+- **The gate-holder** (Insane's third guard; `RivalConfig.HasHolder`, `Guard.Holder`).
+  It never chases: it stands IN the gate at `RivalConfig.GateHoldPoint` (plot-local
+  (0, 0, 29), just inside the wall on the exit path, facing the street) all the
+  time, runs back at the chase speed if knocked off it, and tags inside
+  `RivalConfig.HolderTagRadius` (8 studs; the opening's corners are 7.6 away, so no
+  way out passes it out of reach) instead of `TagDistance`
+  (`RivalService.GetGuardTagZones`, read by `HeistService`'s carry loop). The
+  usual grace applies, a weapon stuns it for `StunSeconds` like any guard.
 - **The Insane check.** At 15 vs the carrier's 12 you only get home with help.
-  `RivalConfig.SimulateEscape` is the kinematic model (guards run straight at
+  `RivalConfig.SimulateEscape` is the kinematic model (chasers run straight at
   `GuardSpeed`, stand still while stunned, give up at the leash, tag within
-  `TagDistance` after the grace) and `/selftest` runs it over every pair of slots
-  (pedestal to the thief's gate, +15% for bends): with the two chasers 6 studs
-  behind (worst case) or 10 / 14 behind, **no help is caught on every route** and
-  **a stun on both chasers at the end of the grace plus Speed Boots (18) gets home
-  on every route**. Same model, same gaps: stun only escapes 0 / 132 routes at
-  6 / 6 and 32 / 132 at 10 / 14; boots alone (18 > 15) escape 132 / 132. So
-  boots beat the chasers on their own in the model, and the gate-holder (it
-  only stands at `GuardHome`, 22 studs short of the gate, and the grace window
-  has ended by the time a runner is past it) is nearly decoration; if boots alone
-  should fail, raise Insane's `GuardSpeed` or move the holder to the gate mouth.
+  `TagDistance` after the grace; the holder tags inside its radius unless it is
+  stunned) and `/selftest` runs it over every pair of slots (132 routes: pedestal
+  to the thief's gate, +15% for bends), with the chasers 6 / 6 studs behind (worst
+  case) and 10 / 14 behind. Counts of routes that get home (both gap sets are the
+  same): no help **0**, Boots alone (18) **0** (caught by the holder), a stun on
+  the chasers alone **0** (the holder), a stun on the chasers + Boots **0**, a
+  stun on the holder alone (12) **0**, a stun on the holder as the carrier arrives
+  **+ Boots 132**. A holder stun at 12 is not enough: crossing its 16-stud reach
+  takes 1.33 s at 12 against a 1.2 s stun, 0.9 s at 18. The margins are about
+  0.2 s, so the real thing needs a friend to land the hit as you arrive.
 - **Teaching.** `tipRival` (`tutorial.md`). The red hand markers on
   grabbable pedestals work on rival pedestals too (a Locked prompt is not
   grabbable, so no hand); `stealHowTo` and the `first_steal` marker skip them.
