@@ -1,8 +1,8 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Controllers = script.Parent.Controllers
-local UI = script.Parent.UI
+local Controllers = script.Parent:WaitForChild("Controllers")
+local UI = script.Parent:WaitForChild("UI")
 
 -- One controller failing to load or Init must never leave the player with no
 -- HUD: every require and every Init runs behind xpcall, warns with the
