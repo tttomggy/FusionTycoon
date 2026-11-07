@@ -181,8 +181,14 @@ local function whyCantSwing(attacker: Player, weapon: CombatConfig.Weapon): stri
 	if not tool or not tool:IsA("Tool") then
 		return "NotEquipped"
 	end
+	-- Hands full while carrying a stolen orb: no swings. The exception is a RIVAL
+	-- carry, where a ranged weapon (Laser Gun, Freeze Ray) may still be fired, so a
+	-- lone thief can stun the gate-holder from range; melee and the peel stay blocked.
 	if PlayerDataService.IsCarrying(attacker) then
-		return "Carrying"
+		local rangedRivalCarry = HeistService.IsRivalCarry(attacker) and (weapon.Kind == "Ranged" or weapon.Kind == "Freeze")
+		if not rangedRivalCarry then
+			return "Carrying"
+		end
 	end
 	-- ORB RUSH: nobody swings during the 3-2-1 (nobody moves until GO).
 	if MinigameService.IsPlaying(attacker) and not MinigameService.IsRoundLive() then

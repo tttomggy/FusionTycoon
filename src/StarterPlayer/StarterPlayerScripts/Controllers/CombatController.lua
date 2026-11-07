@@ -143,6 +143,16 @@ local function isCarrying(): boolean
 	return localPlayer:GetAttribute("HeistTier") ~= nil
 end
 
+-- Hands full for THIS weapon: a carry blocks everything except a ranged weapon
+-- (Laser Gun, Freeze Ray) while the orb is a rival lab's (HeistVictimUserId 0).
+local function handsFullFor(weapon: CombatConfig.Weapon): boolean
+	if not isCarrying() then
+		return false
+	end
+	local rivalCarry = localPlayer:GetAttribute("HeistVictimUserId") == 0
+	return not (rivalCarry and (weapon.Kind == "Ranged" or weapon.Kind == "Freeze"))
+end
+
 local function untilActive(player: Player, attribute: string): boolean
 	local value = player:GetAttribute(attribute)
 	return typeof(value) == "number" and value > serverNow()
@@ -178,7 +188,7 @@ local function toggleEquip(weapon: CombatConfig.Weapon)
 		ToastController.Show(if weapon.UnlockRebirth then ("Unlocks at Rebirth %d"):format(weapon.UnlockRebirth) else "Earned from a quest", "Neutral")
 		return
 	end
-	if isCarrying() then
+	if handsFullFor(weapon) then
 		ToastController.Show("Hands full: run it home!", "Neutral")
 		return
 	end
@@ -461,7 +471,7 @@ local function refreshBar()
 			slot.Stroke.Color = if equipped then World.WeaponLime else Colors.Ink
 			slot.Stroke.Thickness = if equipped then 3 else 2
 		end
-		setSlotDim(slot, if not slot.Owned then LOCKED_DIM elseif carrying then CARRYING_DIM else 0)
+		setSlotDim(slot, if not slot.Owned then LOCKED_DIM elseif carrying and handsFullFor(weapon) then CARRYING_DIM else 0)
 	end
 end
 
@@ -557,7 +567,7 @@ local function use(weapon: CombatConfig.Weapon): (boolean, string?)
 		end
 		return false, "NeedsRebirth"
 	end
-	if isCarrying() then
+	if handsFullFor(weapon) then
 		ToastController.Show("Hands full: run it home!", "Neutral")
 		return false, "Carrying"
 	end

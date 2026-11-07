@@ -26,7 +26,7 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   immune (a shimmer). **Server authority:** `RequestHit { Weapon, Origin?,
   Direction? }` (C→S; a melee swing sends only the weapon) is re-checked:
   owned AND equipped, the server cooldown (`TakeCooldown`), both sides'
-  eligibility (`WhyNotHittable`), the attacker not carrying / ragdolled,
+  eligibility (`WhyNotHittable`), the attacker not carrying (except a RANGED weapon, Laser Gun / Freeze Ray, during a RIVAL-lab carry: `HeistService.IsRivalCarry`; see heist.md) / ragdolled,
   melee by the server's hitbox (see "Server hitbox" below), ranged by a
   server raycast; `RemoteGuard` numbers and rate limit. The server owns Player
   attributes `RagdollUntil` / `ImmuneUntil` / `FrozenUntil` /
@@ -237,7 +237,7 @@ never sold, server authority are unchanged.
   cooldown = a radial clock-wipe (two clipped halves with a hard-edged
   rotating UIGradient) + seconds; not earned = dim model + 🔒 and "R2" /
   "R3" / "Quest" (all five slots show from Rebirth 1, quest ones locked);
-  carrying = the whole bar dims. Centred 12 px above the bottom buttons; off
+  carrying = the whole bar dims (a rival carry leaves the ranged weapons lit). Centred 12 px above the bottom buttons; off
   at Rebirth 0 **and while the tutorial runs** (so it can never sit over the
   tutorial's action button). The unlock card shows the big turning model
   (`TutorialConfig.Card.Weapon`).

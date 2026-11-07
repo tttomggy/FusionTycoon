@@ -274,6 +274,7 @@ RivalConfig.GuardHome = Vector3.new(0, 0, 10) -- plot-local; where the first gua
 -- corners (7.6 studs), so there is no way out past it that is not in its reach.
 RivalConfig.GateHoldPoint = Vector3.new(0, 0, 29)
 RivalConfig.HolderTagRadius = 8
+RivalConfig.HolderStunSeconds = 3 -- a weapon hit on the gate-holder (the chasers keep tier.StunSeconds, 1.2 on Insane): long enough for one skilled player with Boots to freeze it from range and slip past
 RivalConfig.HolderRouteBack = 3 -- the holder stands this far short of the gate along the exit route (gate z 32 - 29)
 RivalConfig.GuardSpread = 4 -- guards beyond the first start this many studs apart across x, so they never stack
 -- Staying upright: the self-heal stands a guard up when its root's up-vector
@@ -358,7 +359,7 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 		local holderStunAt = input.HolderStunAt
 		if holderStunAt and not holderStunApplied and t >= holderStunAt then
 			holderStunApplied = true
-			holderStunnedUntil = t + tier.StunSeconds
+			holderStunnedUntil = t + RivalConfig.HolderStunSeconds
 		end
 		carrier += input.CarrierSpeed * step
 		-- The gate-holder stands in the gate and tags anyone inside its radius.

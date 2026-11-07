@@ -312,20 +312,30 @@ holds a number.
   `RivalConfig.HolderTagRadius` (8 studs; the opening's corners are 7.6 away, so no
   way out passes it out of reach) instead of `TagDistance`
   (`RivalService.GetGuardTagZones`, read by `HeistService`'s carry loop). The
-  usual grace applies, a weapon stuns it for `StunSeconds` like any guard.
+  usual grace applies. A weapon stuns it for `RivalConfig.HolderStunSeconds` (3 s;
+  the chasers keep the tier's `StunSeconds`, Insane 1.2).
+- **Weapons while carrying a rival orb.** A carry used to block every weapon
+  (`CombatService.whyCantSwing` -> `Carrying`; `CombatController` mirrored it).
+  During a **rival** carry (`HeistService.IsRivalCarry`; client: the player
+  attribute `HeistVictimUserId` is 0) a **ranged** weapon (Laser Gun, Freeze Ray:
+  `Kind` `Ranged` / `Freeze`) can be equipped and fired; melee, the peel and every
+  weapon during a player-vs-player carry stay blocked. That is how one player
+  stuns the gate-holder from range.
 - **The Insane check.** At 15 vs the carrier's 12 you only get home with help.
   `RivalConfig.SimulateEscape` is the kinematic model (chasers run straight at
   `GuardSpeed`, stand still while stunned, give up at the leash, tag within
-  `TagDistance` after the grace; the holder tags inside its radius unless it is
-  stunned) and `/selftest` runs it over every pair of slots (132 routes: pedestal
-  to the thief's gate, +15% for bends), with the chasers 6 / 6 studs behind (worst
-  case) and 10 / 14 behind. Counts of routes that get home (both gap sets are the
-  same): no help **0**, Boots alone (18) **0** (caught by the holder), a stun on
-  the chasers alone **0** (the holder), a stun on the chasers + Boots **0**, a
-  stun on the holder alone (12) **0**, a stun on the holder as the carrier arrives
-  **+ Boots 132**. A holder stun at 12 is not enough: crossing its 16-stud reach
-  takes 1.33 s at 12 against a 1.2 s stun, 0.9 s at 18. The margins are about
-  0.2 s, so the real thing needs a friend to land the hit as you arrive.
+  `TagDistance` after the grace; the holder tags inside its radius unless it was
+  hit within `HolderStunSeconds`) and `/selftest` runs it over every pair of slots
+  (132 routes: pedestal to the thief's gate, +15% for bends), with the chasers
+  6 / 6 studs behind (worst case) and 10 / 14 behind. Routes that get home (the
+  same for both gap sets): no help **0**, Boots alone (18) **0** (the holder),
+  a ranged stun on the holder alone, no Boots **0** (the chasers catch you), a
+  stun on the chasers alone **0** (the holder), a ranged stun on the holder
+  **+ Boots 132**. The shot's timing window: fired from 15 / 20 / 25 / 30 studs
+  from the holder, the stun outlasts your crossing of its reach by **1.72 / 1.44
+  / 1.17 / 0.89 s**, so a skilled solo player has about 15-27 studs (roughly a
+  second of running) to land the shot, and `/selftest` holds the 15-stud shot
+  to at least 1 s of margin.
 - **Teaching.** `tipRival` (`tutorial.md`). The red hand markers on
   grabbable pedestals work on rival pedestals too (a Locked prompt is not
   grabbable, so no hand); `stealHowTo` and the `first_steal` marker skip them.

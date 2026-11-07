@@ -3630,13 +3630,15 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		-- 9e. The Insane escape check. A kinematic model of the carry (RivalConfig.
 		-- SimulateEscape: chasers run straight at GuardSpeed, stand still while
 		-- stunned, tag within TagDistance after the grace; the gate-holder stands in the
-		-- gate and tags inside HolderTagRadius unless it is stunned) over EVERY pair of
-		-- slots (the lab's pedestal to the thief's gate), with the chasers 6 / 6 studs
-		-- behind (the worst case) and 10 / 14 behind:
+		-- gate and tags inside HolderTagRadius unless a weapon hit it within the last
+		-- HolderStunSeconds) over EVERY pair of slots (the lab's pedestal to the thief's
+		-- gate), with the chasers 6 / 6 studs behind (the worst case) and 10 / 14 behind:
 		--   no help -> caught on every route
 		--   Boots alone (x1.5) -> caught (by the holder)
-		--   a stun on the HOLDER as the carrier arrives + Boots -> home on every route
-		--   a stun on the chasers alone -> caught (by the holder)
+		--   a ranged stun on the HOLDER alone (no Boots) -> caught (by the chasers)
+		--   a ranged stun on the chasers alone -> caught (by the holder)
+		--   a ranged stun on the holder from 15 studs away + Boots -> home on every
+		--   route, with at least a second to spare
 		local routes: { number } = {}
 		for from = 1, PlotLayout.MAX_PLOT_SLOTS do
 			for to = 1, PlotLayout.MAX_PLOT_SLOTS do
@@ -3648,7 +3650,9 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 		local boostSpeed = HeistConfig.CarryWalkSpeed * (QuestConfig.PowerUps.SpeedBoots.SpeedMultiplier or 1)
-		local zoneEntry = (34 - RivalConfig.HolderRouteBack) - RivalConfig.HolderTagRadius -- along the route, where the holder's reach starts
+		local holderAt = 34 - RivalConfig.HolderRouteBack -- along the exit route
+		local holderExit = holderAt + RivalConfig.HolderTagRadius
+		local SHOT_DISTANCE = 15 -- studs from the holder when the ranged shot is fired
 		local function escapes(speed: number, chaserStunAt: number?, holderStunAt: number?, gaps: { number }): number
 			local count = 0
 			for _, distance in routes do
@@ -3666,26 +3670,39 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		end
 		local escapeBad: { string } = {}
 		local escapeNotes: { string } = {}
+		local shotBoots = (holderAt - SHOT_DISTANCE) / boostSpeed
+		local shotWalk = (holderAt - SHOT_DISTANCE) / HeistConfig.CarryWalkSpeed
+		-- Seconds the stun outlasts the carrier's crossing of the holder's reach.
+		local margin = shotBoots + RivalConfig.HolderStunSeconds - holderExit / boostSpeed
+		if margin < 1 then
+			table.insert(escapeBad, ("the holder stun leaves only %.2f s to spare"):format(margin))
+		end
 		for _, gaps in { { 6, 6 }, { 10, 14 } } do
 			local none = escapes(HeistConfig.CarryWalkSpeed, nil, nil, gaps)
 			local bootsAlone = escapes(boostSpeed, nil, nil, gaps)
-			local holderAndBoots = escapes(boostSpeed, nil, (zoneEntry - 2) / boostSpeed, gaps)
+			local holderAlone = escapes(HeistConfig.CarryWalkSpeed, nil, shotWalk, gaps)
 			local chasersAlone = escapes(HeistConfig.CarryWalkSpeed, HeistConfig.TagGraceSeconds, nil, gaps)
+			local holderAndBoots = escapes(boostSpeed, nil, shotBoots, gaps)
+			local label = ("%d/%d"):format(gaps[1], gaps[2])
 			if none ~= 0 then
-				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with no help"):format(gaps[1], gaps[2], none, #routes))
+				table.insert(escapeBad, ("gaps %s: %d of %d routes escape with no help"):format(label, none, #routes))
 			end
 			if bootsAlone ~= 0 then
-				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with Boots alone"):format(gaps[1], gaps[2], bootsAlone, #routes))
+				table.insert(escapeBad, ("gaps %s: %d of %d routes escape with Boots alone"):format(label, bootsAlone, #routes))
 			end
-			if holderAndBoots ~= #routes then
-				table.insert(escapeBad, ("gaps %d/%d: only %d of %d routes escape with a stun on the holder + Boots"):format(gaps[1], gaps[2], holderAndBoots, #routes))
+			if holderAlone ~= 0 then
+				table.insert(escapeBad, ("gaps %s: %d of %d routes escape with a holder stun alone"):format(label, holderAlone, #routes))
 			end
 			if chasersAlone ~= 0 then
-				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with a stun on the chasers alone"):format(gaps[1], gaps[2], chasersAlone, #routes))
+				table.insert(escapeBad, ("gaps %s: %d of %d routes escape with a stun on the chasers alone"):format(label, chasersAlone, #routes))
 			end
-			table.insert(escapeNotes, ("gaps %d/%d of %d routes: none %d, Boots alone %d, holder stun + Boots %d, chasers stun alone %d"):format(gaps[1], gaps[2], #routes, none, bootsAlone, holderAndBoots, chasersAlone))
+			if holderAndBoots ~= #routes then
+				table.insert(escapeBad, ("gaps %s: only %d of %d routes escape with a ranged holder stun + Boots"):format(label, holderAndBoots, #routes))
+			end
+			table.insert(escapeNotes, ("gaps %s of %d routes: none %d, Boots alone %d, holder stun alone %d, chasers stun alone %d, holder stun from %d studs + Boots %d"):format(label, #routes, none, bootsAlone, holderAlone, chasersAlone, SHOT_DISTANCE, holderAndBoots))
 		end
-		result(#escapeBad == 0, "rivals: Insane escape model: caught with no help, with Boots alone and with a stun on the chasers alone; home with a stun on the gate-holder plus Boots, on every route", table.concat(escapeBad, "; ") .. " | " .. table.concat(escapeNotes, " | "))
+		table.insert(escapeNotes, ("margin %.2f s"):format(margin))
+		result(#escapeBad == 0, "rivals: Insane escape model: caught with no help, Boots alone, a holder stun alone or a chasers stun alone; home with a ranged holder stun from 15 studs + Boots on every route, 1 s+ to spare", table.concat(escapeBad, "; ") .. " | " .. table.concat(escapeNotes, " | "))
 
 		-- 9f. Every rival lab's lights stay within a claimed player lab's budget.
 		local ownPlot = TycoonService.GetPlotForPlayer(player)

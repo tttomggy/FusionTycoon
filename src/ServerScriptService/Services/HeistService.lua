@@ -690,6 +690,13 @@ function HeistService.IsCarrying(player: Player): boolean
 	return state.carries[player.UserId] ~= nil
 end
 
+-- Whether `player`'s carry is an orb from a RIVAL lab (not a stolen player item):
+-- CombatService lets a rival carrier fire a ranged weapon.
+function HeistService.IsRivalCarry(player: Player): boolean
+	local carry = state.carries[player.UserId]
+	return carry ~= nil and carry.RivalId ~= nil
+end
+
 --[[ Grab ------------------------------------------------------------------ ]]
 
 local function reject(thief: Player, reason: string, extra: { [string]: any }?)

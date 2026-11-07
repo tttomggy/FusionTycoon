@@ -1197,7 +1197,7 @@ function RivalService.StunGuard(rivalId: number, index: number, from: Vector3): 
 	if not rival or not guard or guard.Root.Parent == nil then
 		return false
 	end
-	guard.StunUntil = os.clock() + RivalConfig.GetTier(rival.Difficulty).StunSeconds
+	guard.StunUntil = os.clock() + (if guard.Holder then RivalConfig.HolderStunSeconds else RivalConfig.GetTier(rival.Difficulty).StunSeconds)
 	guard.Stunned = true
 	guard.Humanoid.PlatformStand = true
 	local away = guard.Root.Position - from
