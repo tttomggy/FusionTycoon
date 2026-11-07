@@ -63,6 +63,13 @@ SoundConfig.Slots = {
 	Toast = { Id = asset(15675059323), Volume = 0.35 },
 	-- RBLX UI Purchase (SFX): a station purchase (Multiplier Pad, gacha).
 	Station = { Id = asset(10066947742), Volume = 0.5 },
+	-- A rival guard spots the carrier: the same blip as Alarm, one low, slow
+	-- ping (judged by name; audition with "/sound RivalAlarm").
+	RivalAlarm = { Id = asset(16480579431), Volume = 0.55, PlaybackSpeed = 0.7 },
+	-- The Insane lab's low hum: the Event riser at half speed, repeated by
+	-- WorldLabelController every RivalConfig.InsaneHumSeconds while you are
+	-- near (positional; no looping sounds in this game).
+	InsaneHum = { Id = asset(16480577565), Volume = 0.3, PlaybackSpeed = 0.5, RollOffMaxDistance = 90 },
 	-- Combat (CombatController). Ids picked from the Creator Store (Polish
 	-- 12; APM / ProSoundEffects / short public SFX), judged by name, not ear:
 	-- audition each in Studio with "/sound <slot>" and swap any that miss.

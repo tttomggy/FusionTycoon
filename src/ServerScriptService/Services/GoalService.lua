@@ -252,12 +252,20 @@ end
 
 -- The name of the rival lab nearest the player that holds an orb to grab
 -- (the arrow's NearestRivalPedestal picks the same lab), or nil.
-local function nearestRivalWithOrb(player: Player): string?
+local function nearestRivalWithOrb(player: Player): (string?, number)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local best: string? = nil
+	local bestLeft = 0
 	local bestDistance = math.huge
+	local rebirths = PlayerDataService.GetRebirths(player)
 	for _, rival in RivalService.GetRivals() do
+		-- Only a lab this player may rob (its difficulty's Rebirth gate) and still
+		-- has hourly steals for: the coach never sends a Rebirth 0 player to an Insane lab.
+		local left = HeistService.GetRivalStealsLeft(player, rival.Difficulty)
+		if HeistService.WhyCantSteal(rebirths, true, rival.Difficulty) ~= nil or left <= 0 then
+			continue
+		end
 		local hasOrb = false
 		for index = 1, RivalConfig.PedestalCount do
 			if RivalService.GetOrb(rival.Id, index) then
@@ -268,11 +276,11 @@ local function nearestRivalWithOrb(player: Player): string?
 		if hasOrb then
 			local distance = if root and root:IsA("BasePart") then (rival.Origin.Position - root.Position).Magnitude else 0
 			if distance < bestDistance then
-				best, bestDistance = rival.Name, distance
+				best, bestDistance, bestLeft = rival.Name, distance, left
 			end
 		end
 	end
-	return best
+	return best, bestLeft
 end
 
 -- The player's own state as the coach's input (nil until their data loads).
@@ -282,7 +290,7 @@ local function liveCoachInput(player: Player): LoopCoach.Input?
 		return nil
 	end
 	local cash = PlayerDataService.GetCash(player)
-	local stealsLeft = HeistService.GetRivalStealsLeft(player)
+	local rivalName, stealsLeft = nearestRivalWithOrb(player)
 	return {
 		Counts = countOrbs(player, nil),
 		Rebirths = inputs.Rebirths,
@@ -291,7 +299,7 @@ local function liveCoachInput(player: Player): LoopCoach.Input?
 		PullCost = pullCostFor(player),
 		Income = TycoonConfig.GetPassiveCashPerSecond(inputs),
 		Upgrade = LoopCoach.PickUpgrade(inputs, cash),
-		Rival = nearestRivalWithOrb(player),
+		Rival = rivalName,
 		StealsLeft = stealsLeft,
 		Levels = inputs.GeneratorLevels,
 		MultiplierLevel = inputs.CashMultiplierLevel,

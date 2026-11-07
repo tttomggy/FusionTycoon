@@ -30,6 +30,7 @@ local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
 local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local StreetLayout = require(ReplicatedStorage.Shared.Config.StreetLayout)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local PlotKit = require(ReplicatedStorage.Shared.Modules.PlotKit)
 local FactoryKit = require(ReplicatedStorage.Shared.Modules.FactoryKit)
 local GeneratorKit = require(ReplicatedStorage.Shared.Modules.GeneratorKit)
 local PortalKit = require(ReplicatedStorage.Shared.Modules.PortalKit)
@@ -2036,7 +2037,7 @@ local function runLoopCoachSelfTest(player: Player, result: (boolean, string, st
 			Income = 10,
 			Upgrade = nil,
 			Rival = nil,
-			StealsLeft = RivalConfig.StealsPerHour,
+			StealsLeft = RivalConfig.GetTier("Easy").StealsPerHour,
 			Levels = { basic_generator = 1 },
 			MultiplierLevel = 0,
 		}
@@ -2603,10 +2604,13 @@ local function runFriendBoostSelfTest(player: Player, result: (boolean, string, 
 end
 
 
--- Rival labs (RivalService + HeistService's rival path): the fill, a real
--- player's slot, the Rebirth rule, a steal end to end (grab, deliver, the
--- guard's tag, the 90 s respawn on an injected clock), the hourly limit, the
--- orb rolls and a lab despawning mid-carry. Everything is put back after.
+-- Rival labs (RivalService + HeistService's rival path): one lab per
+-- difficulty, a real player's slot (and the despawn order), each difficulty's
+-- Rebirth gate, a steal end to end (grab, deliver, the guard's tag, the
+-- respawn on an injected clock), the per-difficulty hourly pools, the orb
+-- rolls per difficulty, the guards (1 / 1 / 2 / 3, upright, at most 2 chasing),
+-- the Insane escape model and a lab despawning mid-carry. Everything is put
+-- back after.
 local function runRivalSelfTest(player: Player, result: (boolean, string, string?) -> ())
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -2647,15 +2651,27 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		character:PivotTo(pedestal.CFrame * CFrame.new(0, 3, 5))
 		task.wait(0.1)
 	end
-	local function anyOrb(): (any?, number?)
+	-- A lab with an orb on a pedestal: of `difficulty`, else any (Easy is what a
+	-- Rebirth 0 tester may rob).
+	local function anyOrb(difficulty: string?): (any?, number?)
 		for _, view in RivalService.GetRivals() do
-			for index = 1, RivalConfig.PedestalCount do
-				if RivalService.GetOrb(view.Id, index) then
-					return view, index
+			if difficulty == nil or view.Difficulty == difficulty then
+				for index = 1, RivalConfig.PedestalCount do
+					if RivalService.GetOrb(view.Id, index) then
+						return view, index
+					end
 				end
 			end
 		end
 		return nil, nil
+	end
+	local function labOf(difficulty: string): any?
+		for _, view in RivalService.GetRivals() do
+			if view.Difficulty == difficulty then
+				return view
+			end
+		end
+		return nil
 	end
 	local limit = RivalConfig.GuardUprightSelfTestDegrees
 	-- Every built guard's root is within `limit` degrees of vertical. Returns
@@ -2664,18 +2680,20 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		local measured = 0
 		local bad: { string } = {}
 		for _, view in RivalService.GetRivals() do
-			local angle = RivalService.GetGuardUprightDegrees(view.Id)
-			if angle then
-				measured += 1
-				if angle > limit then
-					table.insert(bad, ("%s %.0f deg"):format(view.Name, angle))
+			for guardIndex = 1, RivalService.GetGuardCount(view.Id) do
+				local angle = RivalService.GetGuardUprightDegrees(view.Id, guardIndex)
+				if angle then
+					measured += 1
+					if angle > limit then
+						table.insert(bad, ("%s #%d %.0f deg"):format(view.Name, guardIndex, angle))
+					end
 				end
 			end
 		end
 		return #bad == 0, measured, table.concat(bad, ", ")
 	end
-	local function guardHumanoid(rivalId: number): Humanoid?
-		local model = RivalService.GetGuardModel(rivalId)
+	local function guardHumanoid(rivalId: number, guardIndex: number?): Humanoid?
+		local model = RivalService.GetGuardModel(rivalId, guardIndex)
 		return if model then model:FindFirstChildOfClass("Humanoid") else nil
 	end
 	-- The gate sign's board relative to its slot (the same for every lab).
@@ -2714,6 +2732,16 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			("rivals: the server fills %d rival lab(s) in free slots"):format(RivalConfig.MaxRivals),
 			("%d labs, %d slots free"):format(#rivals, freeNow)
 		)
+		-- One lab per difficulty (as many difficulties as there are labs).
+		local seenDifficulty: { [string]: number } = {}
+		for _, view in rivals do
+			seenDifficulty[view.Difficulty] = (seenDifficulty[view.Difficulty] or 0) + 1
+		end
+		local distinctOk = true
+		for _, count in seenDifficulty do
+			distinctOk = distinctOk and count == 1
+		end
+		result(distinctOk and #rivals >= 1, "rivals: one lab per difficulty", ("%d labs"):format(#rivals))
 		local shapeBad: { string } = {}
 		for _, view in rivals do
 			local plot = view.Plot
@@ -2801,49 +2829,82 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 					break
 				end
 			end
-			if title ~= "RIVAL LAB" then
-				table.insert(shapeBad, view.Name .. " sign reads " .. tostring(title))
+			local wantTitle, wantDetail = RivalConfig.SignText(view.Difficulty)
+			local detailText: string? = nil
+			for _, descendant in plot:GetDescendants() do
+				if descendant:IsA("TextLabel") and descendant.Name == "Detail" and descendant:FindFirstAncestor("SignGate") then
+					detailText = descendant.Text
+					break
+				end
+			end
+			if title ~= wantTitle or detailText ~= wantDetail then
+				table.insert(shapeBad, ("%s sign reads %s / %s"):format(view.Name, tostring(title), tostring(detailText)))
+			end
+			-- The difficulty chip (EASY / MEDIUM / HARD / INSANE; the Insane one pulses),
+			-- the odds line in the Gacha board's format, the Insane trim (Neon parts, no
+			-- lights) only on Insane, and the steal prompts' gate attributes.
+			local board = plot:FindFirstChild("SignGate") and plot.SignGate:FindFirstChild("SignBoard")
+			local chipLabel = board and board:FindFirstChild("DifficultyChip") and board.DifficultyChip:FindFirstChild("Text", true)
+			local oddsLabel = board and board:FindFirstChild("OddsChip") and board.OddsChip:FindFirstChild("Text", true)
+			if not (chipLabel and chipLabel:IsA("TextLabel")) or chipLabel.Text ~= RivalConfig.GetTier(view.Difficulty).Label then
+				table.insert(shapeBad, view.Name .. " difficulty chip")
+			end
+			if not (oddsLabel and oddsLabel:IsA("TextLabel")) or oddsLabel.Text ~= RivalConfig.FormatOdds(view.Difficulty) then
+				table.insert(shapeBad, view.Name .. " odds line")
+			end
+			local pulses = board and board:FindFirstChild("DifficultyChip") and board.DifficultyChip:GetAttribute("Pulse") == true
+			if pulses ~= (view.Difficulty == "Insane") then
+				table.insert(shapeBad, view.Name .. " chip pulse")
+			end
+			local trim = plot:FindFirstChild(PlotKit.INSANE_TRIM_NAME)
+			if (trim ~= nil) ~= (view.Difficulty == "Insane") then
+				table.insert(shapeBad, view.Name .. " Insane trim presence")
+			elseif trim then
+				for _, part in trim:GetDescendants() do
+					if part:IsA("Light") or (part:IsA("BasePart") and (part.Material ~= Enum.Material.Neon or part.Size.Y > 0.5)) then
+						table.insert(shapeBad, view.Name .. " Insane trim is not thin Neon parts")
+						break
+					end
+				end
+			end
+			local stealOne = plot:FindFirstChild("Pedestals") and plot.Pedestals:FindFirstChild("Pedestal1") and plot.Pedestals.Pedestal1:FindFirstChild("StealPrompt")
+			if
+				not stealOne
+				or stealOne:GetAttribute("RivalDifficulty") ~= view.Difficulty
+				or stealOne:GetAttribute("RivalMinRebirths") ~= RivalConfig.GetTier(view.Difficulty).MinRebirths
+			then
+				table.insert(shapeBad, view.Name .. " steal prompt difficulty attributes")
 			end
 		end
-		result(#shapeBad == 0, "rivals: each lab is ownerless, with 4 filled steal pedestals, a RIVAL LAB sign, the Fusion Machine, Gacha, Multiplier, factory line and portal as pictures, and zero prompts but the 4 steal prompts", table.concat(shapeBad, "; "))
-		-- A new player (floor stubbed to Common, the tester at home) sees only
-		-- Common / Rare / Epic after a rotation, and a Rare in every lab.
+		result(#shapeBad == 0, "rivals: each lab is ownerless, with 4 filled steal pedestals, its difficulty's sign / chip / odds line, the Fusion Machine, Gacha, Multiplier, factory line and portal as pictures, and zero prompts but the 4 steal prompts", table.concat(shapeBad, "; "))
+		-- After a rotation every orb in each lab is one that lab's difficulty may roll.
 		local tiersBad: { string } = {}
 		character:PivotTo(home)
 		task.wait(0.2)
-		RivalService.SetFloorProvider(function()
-			return "Common"
-		end)
 		for _, view in rivals do
 			RivalService.SelfTestMakeRotationDue(view.Id)
 		end
 		fakeNow += 1
 		RivalService.Step()
 		for _, view in rivals do
-			local hasRare = false
 			for index = 1, RivalConfig.PedestalCount do
 				local orb = RivalService.GetOrb(view.Id, index)
-				if not orb or orb.Tier == "Legendary" or orb.Tier == "Mythic" or orb.Tier == "Secret" then
+				if not orb or not RivalConfig.IsTierAllowed(view.Difficulty, orb.Tier) then
 					table.insert(tiersBad, ("%s/%d %s"):format(view.Name, index, if orb then orb.Tier else "empty"))
 				end
-				hasRare = hasRare or (orb ~= nil and orb.Tier == "Rare")
-			end
-			if not hasRare then
-				table.insert(tiersBad, view.Name .. " has no Rare")
 			end
 		end
-		RivalService.SetFloorProvider(nil)
-		result(#tiersBad == 0, "rivals: with the lowest player at Common (Rebirth 0) every orb is a Common, Rare or Epic and every lab has a Rare", table.concat(tiersBad, "; "))
+		result(#tiersBad == 0, "rivals: after a rotation every standing orb is a tier its lab's difficulty may show", table.concat(tiersBad, "; "))
 
 		-- Guards (group 2 / 3): built async, so give the rigs a moment.
 		waitUntil(function()
 			for _, view in RivalService.GetRivals() do
-				if RivalService.GetGuardModel(view.Id) == nil then
+				if RivalService.GetGuardCount(view.Id) < RivalConfig.GetTier(view.Difficulty).Guards then
 					return false
 				end
 			end
 			return true
-		end, 10)
+		end, 20)
 		local upright, measured, uprightDetail = guardsUpright()
 		if measured == 0 then
 			result(true, "rivals: guards stand upright after spawn (skipped: no guard rig built)")
@@ -2851,42 +2912,76 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			result(upright, "rivals: every guard's root is within 20 deg of vertical after spawn", uprightDetail)
 			local rigBad: { string } = {}
 			for _, view in rivals do
-				local humanoid = guardHumanoid(view.Id)
-				local model = RivalService.GetGuardModel(view.Id)
-				local guardRoot = model and model:FindFirstChild("HumanoidRootPart")
-				if humanoid and model and guardRoot and guardRoot:IsA("BasePart") then
-					for _, humanoidState in { Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Physics, Enum.HumanoidStateType.Seated } do
-						if humanoid:GetStateEnabled(humanoidState) then
-							table.insert(rigBad, ("%s can enter %s"):format(view.Name, humanoidState.Name))
+				local tier = RivalConfig.GetTier(view.Difficulty)
+				local count = RivalService.GetGuardCount(view.Id)
+				if count ~= tier.Guards then
+					table.insert(rigBad, ("%s has %d guards, wants %d"):format(view.Name, count, tier.Guards))
+				end
+				for guardIndex = 1, count do
+					local humanoid = guardHumanoid(view.Id, guardIndex)
+					local model = RivalService.GetGuardModel(view.Id, guardIndex)
+					local guardRoot = model and model:FindFirstChild("HumanoidRootPart")
+					if humanoid and model and guardRoot and guardRoot:IsA("BasePart") then
+						local label = ("%s #%d"):format(view.Name, guardIndex)
+						for _, humanoidState in { Enum.HumanoidStateType.FallingDown, Enum.HumanoidStateType.Ragdoll, Enum.HumanoidStateType.Physics, Enum.HumanoidStateType.Seated } do
+							if humanoid:GetStateEnabled(humanoidState) then
+								table.insert(rigBad, ("%s can enter %s"):format(label, humanoidState.Name))
+							end
+						end
+						if humanoid.BreakJointsOnDeath or humanoid.RequiresNeck or guardRoot.Anchored or humanoid.HipHeight <= 0 or humanoid.PlatformStand then
+							table.insert(rigBad, ("%s: BreakJointsOnDeath %s, RequiresNeck %s, Anchored %s, HipHeight %.2f, PlatformStand %s"):format(
+								label,
+								tostring(humanoid.BreakJointsOnDeath),
+								tostring(humanoid.RequiresNeck),
+								tostring(guardRoot.Anchored),
+								humanoid.HipHeight,
+								tostring(humanoid.PlatformStand)
+							))
+						end
+						-- The name over its head: the rival's, in a world label (60 studs).
+						local head = model:FindFirstChild("Head")
+						local nameGui = head and head:FindFirstChild("GuardName")
+						local nameText = nameGui and nameGui:FindFirstChild("Text", true)
+						if
+							not (nameGui and nameGui:IsA("BillboardGui") and nameText and nameText:IsA("TextLabel"))
+							or nameText.Text ~= RivalConfig.GetShortName(view.Name)
+							or nameGui.MaxDistance ~= RivalConfig.GuardNameDistance
+							or nameGui.AlwaysOnTop
+							or nameGui.LightInfluence ~= 0
+							or humanoid.DisplayDistanceType ~= Enum.HumanoidDisplayDistanceType.None
+						then
+							table.insert(rigBad, label .. " name label is not the rival's name / 60 studs / world-label rules")
+						end
+						-- Tougher by tier: scale 1 / 1.1 / 1.2 / 1.35, a helmet from Hard, a
+						-- Neon visor (a part, no Highlight) on Insane.
+						if math.abs(model:GetScale() - tier.GuardScale) > 0.01 then
+							table.insert(rigBad, ("%s scale %.2f, wants %.2f"):format(label, model:GetScale(), tier.GuardScale))
+						end
+						local wantHelmet = tier.Look == "Helmet" or tier.Look == "Elite"
+						local helmet = model:FindFirstChild("GuardHelmet")
+						local visor = model:FindFirstChild("GuardVisor")
+						local visorPart = visor and visor:FindFirstChild("Handle")
+						if (helmet ~= nil) ~= wantHelmet or (visor ~= nil) ~= (tier.Look == "Elite") then
+							table.insert(rigBad, label .. " helmet / visor does not match its look")
+						elseif visorPart and visorPart:IsA("BasePart") and visorPart.Material ~= Enum.Material.Neon then
+							table.insert(rigBad, label .. " visor is not Neon")
+						end
+						if model:FindFirstChildWhichIsA("Highlight", true) then
+							table.insert(rigBad, label .. " has a Highlight")
 						end
 					end
-					if humanoid.BreakJointsOnDeath or humanoid.RequiresNeck or guardRoot.Anchored or humanoid.HipHeight <= 0 or humanoid.PlatformStand then
-						table.insert(rigBad, ("%s: BreakJointsOnDeath %s, RequiresNeck %s, Anchored %s, HipHeight %.2f, PlatformStand %s"):format(
-							view.Name,
-							tostring(humanoid.BreakJointsOnDeath),
-							tostring(humanoid.RequiresNeck),
-							tostring(guardRoot.Anchored),
-							humanoid.HipHeight,
-							tostring(humanoid.PlatformStand)
-						))
-					end
-					-- The name over its head: the rival's, in a world label (60 studs).
-					local head = model:FindFirstChild("Head")
-					local nameGui = head and head:FindFirstChild("GuardName")
-					local nameText = nameGui and nameGui:FindFirstChild("Text", true)
-					if
-						not (nameGui and nameGui:IsA("BillboardGui") and nameText and nameText:IsA("TextLabel"))
-						or nameText.Text ~= RivalConfig.GetShortName(view.Name)
-						or nameGui.MaxDistance ~= RivalConfig.GuardNameDistance
-						or nameGui.AlwaysOnTop
-						or nameGui.LightInfluence ~= 0
-						or humanoid.DisplayDistanceType ~= Enum.HumanoidDisplayDistanceType.None
-					then
-						table.insert(rigBad, view.Name .. " name label is not the rival's name / 60 studs / world-label rules")
+				end
+				-- Guards spread over the lab: no two stand within 2 studs of each other.
+				local roots: { BasePart } = RivalService.GetGuardRoots(view.Id)
+				for first = 1, #roots do
+					for second = first + 1, #roots do
+						if (roots[first].Position - roots[second].Position).Magnitude < 2 then
+							table.insert(rigBad, view.Name .. " guards stack")
+						end
 					end
 				end
 			end
-			result(#rigBad == 0, "rivals: guards can't fall over or ragdoll, hip height from the rig, named after their rival", table.concat(rigBad, "; "))
+			result(#rigBad == 0, "rivals: every guard (1 / 1 / 2 / 3 by difficulty) can't fall over or ragdoll, has a hip height from the rig, its rival's name, the size / helmet / visor of its tier and stands apart from the others", table.concat(rigBad, "; "))
 			-- Self-heal: a guard laid on its side stands itself up (1 s tilted,
 			-- GettingUp, 1 s more, then the pivot).
 			local first = rivals[1]
@@ -2910,46 +3005,6 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				made += 1
 			end
 		end
-		local rivalsFull = RivalService.GetRivals()
-		local fullOk = #TycoonService.GetFreeSlots() == 0 and #rivalsFull >= 1
-		if fullOk then
-			local anchors: { Vector3 } = {}
-			for _, slot in TycoonService.GetPlayerSlots() do
-				table.insert(anchors, PlotLayout.GetSlotCFrame(slot).Position)
-			end
-			local expected: any = nil
-			local expectedDistance = -math.huge
-			for _, view in rivalsFull do
-				local nearest = math.huge
-				for _, anchor in anchors do
-					nearest = math.min(nearest, (view.Origin.Position - anchor).Magnitude)
-				end
-				if nearest > expectedDistance or (nearest == expectedDistance and expected ~= nil and view.Id > expected.Id) then
-					expected, expectedDistance = view, nearest
-				end
-			end
-			local extra: any = { UserId = -9099, Name = "RivalTestX", DisplayName = "RivalTestX" }
-			local plot = TycoonService.SelfTestCreatePlot(extra)
-			table.insert(standIns, extra)
-			result(
-				plot ~= nil
-					and RivalService.GetRival(expected.Id) == nil
-					and #RivalService.GetRivals() == #rivalsFull - 1
-					and plot:GetAttribute("SlotIndex") == expected.SlotIndex
-					and expected.Plot.Parent == nil,
-				"rivals: a player joining a full server displaces the farthest rival and gets its slot",
-				("expected %s (slot %d) to go; plot %s, slot %s, %d -> %d labs"):format(
-					expected.Name,
-					expected.SlotIndex,
-					tostring(plot ~= nil),
-					tostring(plot and plot:GetAttribute("SlotIndex")),
-					#rivalsFull,
-					#RivalService.GetRivals()
-				)
-			)
-		else
-			result(true, "rivals: displacement (skipped: the server could not be filled)", ("%d free, %d rivals, %d stand-ins"):format(#TycoonService.GetFreeSlots(), #rivalsFull, made))
-		end
 		-- The gate sign stands like a player's: same CFrame relative to its slot.
 		local standPlot = if standIns[1] then TycoonService.GetPlotForPlayer(standIns[1]) else nil
 		local standSlot = if standPlot then standPlot:GetAttribute("SlotIndex") else nil
@@ -2966,6 +3021,52 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		else
 			result(true, "rivals: sign orientation vs a player plot (skipped: no stand-in plot was built)")
 		end
+		local rivalsFull = RivalService.GetRivals()
+		local fullOk = #TycoonService.GetFreeSlots() == 0 and #rivalsFull >= 1
+		if fullOk then
+			-- Each further player takes a slot from the LOWEST difficulty left (Easy,
+			-- Medium, Hard, Insane last); the lab of equal difficulty farthest from every
+			-- player's lab breaks a tie (one lab per difficulty, so none is needed).
+			local wantOrder: { string } = {}
+			for _, difficulty in RivalConfig.Difficulties do
+				if labOf(difficulty) then
+					table.insert(wantOrder, difficulty)
+				end
+			end
+			local gotOrder: { string } = {}
+			local firstPlotOk = true
+			for extraIndex = 1, #wantOrder do
+				local before = RivalService.GetRivals()
+				local extra: any = { UserId = -9099 + extraIndex, Name = "RivalTestX" .. extraIndex, DisplayName = "RivalTestX" .. extraIndex }
+				local plot = TycoonService.SelfTestCreatePlot(extra)
+				table.insert(standIns, extra)
+				local after = RivalService.GetRivals()
+				local goneView: any = nil
+				for _, was in before do
+					local still = false
+					for _, now in after do
+						still = still or now.Id == was.Id
+					end
+					if not still then
+						goneView = was
+					end
+				end
+				if goneView then
+					table.insert(gotOrder, goneView.Difficulty)
+					firstPlotOk = firstPlotOk and plot ~= nil and plot:GetAttribute("SlotIndex") == goneView.SlotIndex and goneView.Plot.Parent == nil
+				else
+					table.insert(gotOrder, "none")
+					firstPlotOk = false
+				end
+			end
+			result(
+				firstPlotOk and table.concat(gotOrder, ",") == table.concat(wantOrder, ","),
+				"rivals: players joining a full server displace the labs Easy first, then Medium, Hard, Insane last, and each gets the slot",
+				("went %s, wanted %s"):format(table.concat(gotOrder, ","), table.concat(wantOrder, ","))
+			)
+		else
+			result(true, "rivals: displacement (skipped: the server could not be filled)", ("%d free, %d rivals, %d stand-ins"):format(#TycoonService.GetFreeSlots(), #rivalsFull, made))
+		end
 		for _, stand in standIns do
 			TycoonService.SelfTestRemovePlot(stand)
 		end
@@ -2976,12 +3077,17 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		-- 3. The Rebirth rule: Rebirth 0 may rob a rival, not a player.
 		local isProtected = HeistService.IsProtected(player)
 		result(
-			HeistService.WhyCantSteal(0, true) == nil
+			HeistService.WhyCantSteal(0, true, "Easy") == nil
+				and HeistService.WhyCantSteal(0, true, "Medium") == nil
+				and HeistService.WhyCantSteal(1, true, "Hard") == "NeedsRebirth"
+				and HeistService.WhyCantSteal(2, true, "Hard") == nil
+				and HeistService.WhyCantSteal(3, true, "Insane") == "NeedsRebirth"
+				and HeistService.WhyCantSteal(4, true, "Insane") == nil
 				and HeistService.WhyCantSteal(0, false) == "NeedsRebirth"
 				and HeistService.WhyCantSteal(1, false) == nil
 				and HeistConfig.MinRebirthsVsRivals == 0
 				and HeistConfig.MinRebirthsVsPlayers == 1,
-			"rivals: Rebirth 0 may steal from a rival, not from a player; Rebirth 1 may from both"
+			"rivals: Easy / Medium open at Rebirth 0, Hard needs Rebirth 2, Insane Rebirth 4; a player's lab still needs Rebirth 1"
 		)
 		PlayerDataService.SetRebirths(player, 1)
 		local protectedAtOne = HeistService.IsProtected(player)
@@ -2995,7 +3101,7 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 		else
 			releaseClaim = release
 			local plot = TycoonService.GetPlotForPlayer(player)
-			local view, index = anyOrb()
+			local view, index = anyOrb("Easy")
 			local pedestal = view and RivalService.GetPedestal(view.Id, index :: number)
 			if not plot or not view or not pedestal or not index then
 				result(false, "rivals: a rival with an orb and the tester's lab", "none")
@@ -3064,8 +3170,8 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				)
 				local respawnAt = RivalService.GetRespawnAt(view.Id, index)
 				result(
-					RivalService.GetOrb(view.Id, index) == nil and respawnAt ~= nil and math.abs((respawnAt :: number) - (fakeNow + RivalConfig.RespawnSeconds)) < 0.001,
-					"rivals: a delivered orb leaves its pedestal with a 90 s respawn timer"
+					RivalService.GetOrb(view.Id, index) == nil and respawnAt ~= nil and math.abs((respawnAt :: number) - (fakeNow + RivalConfig.GetTier(view.Difficulty).RespawnSeconds)) < 0.001,
+					"rivals: a delivered orb leaves its pedestal with its difficulty's respawn timer (Easy 60 s)"
 				)
 				result(
 					pedestal:GetAttribute("RespawnAt") == respawnAt and pedestal:GetAttribute("Filled") == false and pedestal:FindFirstChild("PedestalVisualElements") == nil,
@@ -3073,7 +3179,7 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 					("RespawnAt %s, Filled %s"):format(tostring(pedestal:GetAttribute("RespawnAt")), tostring(pedestal:GetAttribute("Filled")))
 				)
 				-- The respawn, on the injected clock.
-				fakeNow += RivalConfig.RespawnSeconds - 0.5
+				fakeNow += RivalConfig.GetTier(view.Difficulty).RespawnSeconds - 0.5
 				RivalService.Step()
 				local early = RivalService.GetOrb(view.Id, index) == nil
 				fakeNow += 1
@@ -3081,7 +3187,7 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				local back = RivalService.GetOrb(view.Id, index)
 				result(
 					early and back ~= nil and pedestal:GetAttribute("Filled") == true and pedestal:GetAttribute("RespawnAt") == nil,
-					"rivals: the orb is back after 90 s (injected clock), not before, and the countdown goes"
+					"rivals: the orb is back after its respawn time (injected clock), not before, and the countdown goes"
 				)
 				if added[1] then
 					PlayerDataService.RemoveItemsByUid(player, { added[1].Uid })
@@ -3122,7 +3228,9 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 						local worst = 0
 						local chaseUntil = os.clock() + 6
 						while os.clock() < chaseUntil do
-							worst = math.max(worst, RivalService.GetGuardUprightDegrees(view.Id) or 0)
+							for guardIndex = 1, RivalService.GetGuardCount(view.Id) do
+								worst = math.max(worst, RivalService.GetGuardUprightDegrees(view.Id, guardIndex) or 0)
+							end
 							task.wait(0.2)
 						end
 						HeistService.FailCarriesFor(player, "Failed")
@@ -3136,11 +3244,14 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				-- A hit stuns the guard: no tag while it is down; a second hit mid-stun
 				-- is one stun; afterwards PlatformStand is off and it stands upright.
 				if guardRoot and guardRoot:IsA("BasePart") then
-					RivalService.StunGuard(view.Id, guardRoot.Position + Vector3.new(0, 0, 3))
-					result(RivalService.IsGuardStunned(view.Id) and RivalService.GetGuardRoot(view.Id) == nil, "rivals: a weapon hit stuns the guard (it can't tag while down)")
+					RivalService.StunGuard(view.Id, 1, guardRoot.Position + Vector3.new(0, 0, 3))
+					result(
+						RivalService.IsGuardStunned(view.Id, 1) and #RivalService.GetGuardRoots(view.Id) == RivalService.GetGuardCount(view.Id) - 1,
+						"rivals: a weapon hit stuns that guard (it can't tag while down) and only that one"
+					)
 					task.wait(0.5)
-					RivalService.StunGuard(view.Id, guardRoot.Position + Vector3.new(0, 0, -3))
-					task.wait(RivalConfig.GuardStunSeconds + 0.6)
+					RivalService.StunGuard(view.Id, 1, guardRoot.Position + Vector3.new(0, 0, -3))
+					task.wait(RivalConfig.GetTier(view.Difficulty).StunSeconds + 0.6)
 					local humanoid = guardHumanoid(view.Id)
 					local afterStun = RivalService.GetGuardUprightDegrees(view.Id) or 0
 					result(
@@ -3152,25 +3263,26 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 
 				-- 5. StealsPerHour.
 				HeistService.SelfTestClearRivalSteals(player)
-				HeistService.SelfTestRecordRivalSteals(player, RivalConfig.StealsPerHour - 1)
-				local leftAt11 = HeistService.GetRivalStealsLeft(player)
-				HeistService.SelfTestRecordRivalSteals(player, 1)
-				local leftAt12, wait = HeistService.GetRivalStealsLeft(player)
+				local sharedPerHour = RivalConfig.GetTier("Easy").StealsPerHour
+				HeistService.SelfTestRecordRivalSteals(player, sharedPerHour - 1, "Easy")
+				local leftAt11 = HeistService.GetRivalStealsLeft(player, "Easy")
+				HeistService.SelfTestRecordRivalSteals(player, 1, "Easy")
+				local leftAt12, wait = HeistService.GetRivalStealsLeft(player, "Easy")
 				putNextTo(pedestal)
 				local blocked, blockedReason, blockedSeconds = HeistService.TryRivalSteal(player, view.Id, index)
 				result(
 					leftAt11 == 1 and leftAt12 == 0 and not blocked and blockedReason == "RivalAlert" and (blockedSeconds or 0) >= 1 and wait == blockedSeconds,
-					("rivals: past %d steals an hour the grab is refused with RivalAlert and the minutes left"):format(RivalConfig.StealsPerHour),
+					("rivals: past %d steals an hour the grab is refused with RivalAlert and the minutes left"):format(sharedPerHour),
 					("left %d/%d, %s, %ss"):format(leftAt11, leftAt12, tostring(blockedReason), tostring(blockedSeconds))
 				)
 				fakeNow += RivalConfig.StealWindowSeconds + 1
 				RivalService.Step()
-				local viewNow, indexNow = anyOrb()
+				local viewNow, indexNow = anyOrb("Easy")
 				local pedestalNow = viewNow and RivalService.GetPedestal(viewNow.Id, indexNow :: number)
 				if viewNow and indexNow and pedestalNow then
 					putNextTo(pedestalNow)
 					local freed = HeistService.TryRivalSteal(player, viewNow.Id, indexNow)
-					result(freed and HeistService.GetRivalStealsLeft(player) == RivalConfig.StealsPerHour, "rivals: an hour later the limit is open again")
+					result(freed and HeistService.GetRivalStealsLeft(player, "Easy") == sharedPerHour, "rivals: an hour later the limit is open again")
 
 					-- 6. A lab that despawns mid-carry fails cleanly.
 					local carriedBefore = inventoryCount()
@@ -3195,90 +3307,63 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 		end
 
-		-- 7. Orb rolls and tiers (pure): per floor over 10 000 labs, never a
-		-- Mythic / Secret, one pedestal at floor + 1 and one at the floor,
-		-- nothing below the floor; a new player's lab has a Rare and shows
-		-- only Common / Rare / Epic; a Rare owner never sees four Commons.
-		local offered = RivalConfig.OfferedTiers()
-		local pureBad: { string } = {}
-		local pureRng = Random.new(20)
-		local function pureRoll(): number
-			return pureRng:NextNumber()
-		end
-		for _, floorName in { "Common", "Rare", "Epic", "Legendary", "Mythic", "Secret" } do
-			local floor = RivalConfig.ClampFloor(floorName)
-			local plusOne = RivalConfig.PlusOneTier(floor)
-			local floorRank = RivalConfig.OfferedRank(floor)
-			for band = 0, RivalConfig.MaxBand do
-				for _ = 1, 2500 do
-					local tiers = RivalConfig.PlanTiers(floor, band, pureRoll)
-					local hasFloor, hasPlus, allCommon = false, false, true
-					for _, tier in tiers do
-						if RivalConfig.BannedTiers[tier] or RivalConfig.OfferedRank(tier) < floorRank then
-							table.insert(pureBad, ("floor %s band %d rolled %s"):format(floor, band, tier))
-						end
-						hasFloor = hasFloor or tier == floor
-						hasPlus = hasPlus or tier == plusOne
-						allCommon = allCommon and tier == "Common"
-					end
-					if #tiers ~= RivalConfig.PedestalCount or not hasFloor or not hasPlus or (floor ~= "Common" and allCommon) then
-						table.insert(pureBad, ("floor %s band %d: %s"):format(floor, band, table.concat(tiers, ",")))
-					end
-					if floor == "Common" and band == 0 then
-						local hasRare = false
-						for _, tier in tiers do
-							hasRare = hasRare or tier == "Rare"
-							if tier ~= "Common" and tier ~= "Rare" and tier ~= "Epic" then
-								table.insert(pureBad, "a new player's lab showed " .. tier)
-							end
-						end
-						if not hasRare then
-							table.insert(pureBad, "a new player's lab had no Rare: " .. table.concat(tiers, ","))
-						end
-					end
-					if #pureBad > 6 then
-						break
-					end
-				end
-			end
-		end
-		result(#pureBad == 0, "rivals: 10 000 labs per floor and band: floor + 1 and the floor always present, nothing below the floor, no Mythic / Secret, no four-Common lab for a Rare owner, a new player's lab has a Rare and only Common / Rare / Epic", table.concat(pureBad, "; "))
-		result(RivalConfig.PlusOneTier("Legendary") == "Legendary" and RivalConfig.ClampFloor("Mythic") == offered[#offered], "rivals: floor + 1 is capped at Legendary and a Mythic owner's floor is Legendary")
-
-		local goldenBad: { string } = {}
-		for _, tier in offered do
+		-- 7. Orb rolls per difficulty (pure but for the RNG): 5 000 rolls each
+		-- through RivalService.RollOrb, nothing outside the lab's tier set, Mythic
+		-- and Secret only from Insane, the weights and the Golden chance in range.
+		local rollBad: { string } = {}
+		RivalService.SetRandom(Random.new(20))
+		local rollsPer = 5000
+		for _, difficulty in RivalConfig.Difficulties do
+			local tier = RivalConfig.GetTier(difficulty)
+			local counts: { [string]: number } = {}
 			local golden = 0
-			for _ = 1, 10000 do
-				local orb = RivalService.RollOrb(tier)
-				if orb.Tier ~= tier or ItemConfig.GetItemById(orb.ItemId) == nil then
-					table.insert(goldenBad, ("%s rolled %s"):format(tier, orb.Tier))
+			for _ = 1, rollsPer do
+				local orb = RivalService.RollOrb(difficulty)
+				counts[orb.Tier] = (counts[orb.Tier] or 0) + 1
+				if not RivalConfig.IsTierAllowed(difficulty, orb.Tier) or ItemConfig.GetItemById(orb.ItemId) == nil then
+					table.insert(rollBad, ("%s rolled %s"):format(difficulty, orb.Tier))
 					break
 				end
 				if orb.Mutation == "Golden" then
 					golden += 1
 				elseif orb.Mutation ~= nil then
-					table.insert(goldenBad, ("%s rolled mutation %s"):format(tier, tostring(orb.Mutation)))
+					table.insert(rollBad, ("%s rolled mutation %s"):format(difficulty, tostring(orb.Mutation)))
 					break
 				end
 			end
-			if golden < 350 or golden > 650 then
-				table.insert(goldenBad, ("%s: %d Golden in 10000 (want ~500)"):format(tier, golden))
+			if difficulty ~= "Insane" and ((counts.Mythic or 0) > 0 or (counts.Secret or 0) > 0) then
+				table.insert(rollBad, difficulty .. " rolled a Mythic / Secret")
+			end
+			for tierName in tier.Weights do
+				local want = RivalConfig.ShareOf(difficulty, tierName)
+				local got = (counts[tierName] or 0) / rollsPer
+				if math.abs(got - want) > 0.03 then
+					table.insert(rollBad, ("%s %s: %.1f%% rolled, %.1f%% wanted"):format(difficulty, tierName, got * 100, want * 100))
+				end
+			end
+			local wantGolden = tier.GoldenChance * rollsPer
+			if math.abs(golden - wantGolden) > 5 * math.sqrt(wantGolden) then
+				table.insert(rollBad, ("%s: %d Golden in %d (want ~%d)"):format(difficulty, golden, rollsPer, wantGolden))
 			end
 		end
-		result(#goldenBad == 0, "rivals: RollOrb(tier) is that tier, plain or ~5% Golden", table.concat(goldenBad, "; "))
-		local weights = RivalConfig.TierWeights[0]
-		local savedMythic = weights.Mythic
-		weights.Mythic = 1000
-		local leaked = false
-		for step = 0, 999 do
-			if RivalConfig.BannedTiers[RivalConfig.PickTier(0, step / 1000)] or RivalConfig.BannedTiers[RivalConfig.PickTierAtLeast(0, "Common", step / 1000)] then
-				leaked = true
+		RivalService.SetRandom(nil)
+		result(#rollBad == 0, "rivals: 5 000 RollOrb rolls per difficulty stay inside the difficulty's tiers (weights within 3 points), Mythic / Secret only on Insane, plain or the difficulty's Golden chance", table.concat(rollBad, "; "))
+		local gateTiers = RivalConfig.IsTierAllowed("Hard", "Mythic") == false
+			and RivalConfig.IsTierAllowed("Medium", "Secret") == false
+			and RivalConfig.IsTierAllowed("Insane", "Mythic")
+			and RivalConfig.IsTierAllowed("Insane", "Secret")
+			and not RivalConfig.IsTierAllowed("Easy", "Epic")
+		local pickLeak = false
+		for _, difficulty in RivalConfig.Difficulties do
+			for step = 0, 999 do
+				if not RivalConfig.IsTierAllowed(difficulty, RivalConfig.PickTier(difficulty, step / 1000)) then
+					pickLeak = true
+				end
 			end
 		end
-		weights.Mythic = savedMythic
-		result(not leaked, "rivals: PickTier / PickTierAtLeast skip a banned tier even if a band lists it")
+		result(gateTiers and not pickLeak, "rivals: IsTierAllowed matches the tables (HeistService re-checks it at grab time) and PickTier never leaves a lab's set")
 
-		-- 8. The live labs: floor stubs, rotation, spacing, the countdown.
+		-- 8. The live labs: rotation, spacing, the countdown.
 		character:PivotTo(home)
 		task.wait(0.2)
 		RivalService.Step()
@@ -3308,30 +3393,8 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 			end
 			return list
 		end
-		local liveBad: { string } = {}
-		for _, floorName in { "Common", "Rare", "Epic" } do
-			RivalService.SetFloorProvider(function()
-				return floorName
-			end)
-			rotateAll()
-			for _, view in RivalService.GetRivals() do
-				local tiers = standingTiers(view.Id)
-				local hasFloor, hasPlus, below = false, false, false
-				for _, tier in tiers do
-					hasFloor = hasFloor or tier == floorName
-					hasPlus = hasPlus or tier == RivalConfig.PlusOneTier(floorName)
-					below = below or RivalConfig.OfferedRank(tier) < RivalConfig.OfferedRank(floorName) or RivalConfig.BannedTiers[tier] == true
-				end
-				if #tiers == RivalConfig.PedestalCount and (not hasFloor or not hasPlus or below) then
-					table.insert(liveBad, ("%s floor %s: %s"):format(view.Name, floorName, table.concat(tiers, ",")))
-				end
-			end
-		end
-		result(#liveBad == 0 and #labs >= 1, "rivals: after a rotation each live lab has the floor and floor + 1 and nothing below (floor Common / Rare / Epic stubbed)", table.concat(liveBad, "; "))
-
-		-- Staggered: three labs' next rotations are >= 5 s apart (the config
+		-- Staggered: the labs' next rotations are >= 5 s apart (the config
 		-- asks 10); the attribute the sign counts down to is the lab's.
-		RivalService.SetFloorProvider(nil)
 		local nextTimes: { number } = {}
 		local attributeOk = true
 		for _, view in RivalService.GetRivals() do
@@ -3396,33 +3459,203 @@ local function runRivalSelfTest(player: Player, result: (boolean, string, string
 				result(heldBack and RivalService.GetOrb(first.Id, 1) ~= standing, "rivals: a player standing at a pedestal holds the rotation; it goes through once they leave")
 			end
 
-			-- A floor that drops re-rolls the higher orbs at once; a floor that rises waits.
-			freeLabs()
-			RivalService.SetFloorProvider(function()
-				return "Epic"
-			end)
-			rotateAll()
-			local epicOrb = RivalService.GetOrb(first.Id, 1)
-			RivalService.SetFloorProvider(function()
-				return "Legendary"
-			end)
-			fakeNow += 1
-			RivalService.Step()
-			local risen = RivalService.GetOrb(first.Id, 1) == epicOrb
-			RivalService.SetFloorProvider(function()
-				return "Common"
-			end)
-			fakeNow += 1
-			RivalService.Step()
-			local droppedTiers = standingTiers(first.Id)
-			local lowOnes = 0
-			for _, tier in droppedTiers do
-				if tier == "Common" or tier == "Rare" then
-					lowOnes += 1
+		end
+
+		-- 9. The difficulty rules, live. Back to a plain state first.
+		character:PivotTo(home)
+		task.wait(0.2)
+		freeLabs()
+		RivalService.Step()
+		local function firstOrb(difficulty: string): (any?, number?)
+			return anyOrb(difficulty)
+		end
+
+		-- 9a. Each lab's Rebirth gate on a real grab: Rebirth 0 is refused on Hard and
+		-- Insane (NeedsRebirth) and allowed on Easy / Medium; Rebirth 4 can rob all four.
+		local gateBad: { string } = {}
+		local gatesRun = 0
+		for _, difficulty in RivalConfig.Difficulties do
+			local lab, labIndex = firstOrb(difficulty)
+			local labPedestal = lab and RivalService.GetPedestal(lab.Id, labIndex :: number)
+			if lab and labIndex and labPedestal then
+				for _, rebirths in { 0, 4 } do
+					PlayerDataService.SetRebirths(player, rebirths)
+					HeistService.SelfTestClearRivalSteals(player)
+					putNextTo(labPedestal)
+					local grabbed, reason = HeistService.TryRivalSteal(player, lab.Id, labIndex)
+					local wantGrab = rebirths >= RivalConfig.GetTier(difficulty).MinRebirths
+					gatesRun += 1
+					if grabbed ~= wantGrab or (not grabbed and reason ~= "NeedsRebirth") then
+						table.insert(gateBad, ("%s at Rebirth %d: grabbed %s (%s)"):format(difficulty, rebirths, tostring(grabbed), tostring(reason)))
+					end
+					if grabbed then
+						HeistService.FailCarriesFor(player, "Failed")
+						task.wait(0.1)
+					end
 				end
 			end
-			result(risen and lowOnes >= 1, "rivals: a risen floor waits for the next rotation; a dropped one re-rolls the higher orbs now", ("risen kept %s, after the drop %s"):format(tostring(risen), table.concat(droppedTiers, ",")))
-			RivalService.SetFloorProvider(nil)
+		end
+		PlayerDataService.SetRebirths(player, 0)
+		freeLabs()
+		result(#gateBad == 0 and gatesRun >= 2, "rivals: Rebirth 0 can rob Easy / Medium and is refused on Hard / Insane with NeedsRebirth; Rebirth 4 can rob all four", table.concat(gateBad, "; "))
+
+		-- 9b. The hourly pools: Easy + Medium share 12, Hard has 4, Insane 2; one pool
+		-- running dry leaves the others alone, and the grab is refused with RivalAlert.
+		local poolBad: { string } = {}
+		PlayerDataService.SetRebirths(player, 4)
+		for _, difficulty in RivalConfig.Difficulties do
+			local tier = RivalConfig.GetTier(difficulty)
+			HeistService.SelfTestClearRivalSteals(player)
+			HeistService.SelfTestRecordRivalSteals(player, tier.StealsPerHour - 1, difficulty)
+			local leftBefore = HeistService.GetRivalStealsLeft(player, difficulty)
+			HeistService.SelfTestRecordRivalSteals(player, 1, difficulty)
+			local leftAfter = HeistService.GetRivalStealsLeft(player, difficulty)
+			if leftBefore ~= 1 or leftAfter ~= 0 then
+				table.insert(poolBad, ("%s: left %d then %d"):format(difficulty, leftBefore, leftAfter))
+			end
+			for _, other in RivalConfig.Difficulties do
+				if other ~= difficulty then
+					local sharesPool = RivalConfig.GetTier(other).Pool == tier.Pool
+					local otherLeft = HeistService.GetRivalStealsLeft(player, other)
+					local wantLeft = if sharesPool then 0 else RivalConfig.GetTier(other).StealsPerHour
+					if otherLeft ~= wantLeft then
+						table.insert(poolBad, ("%s dry: %s has %d left, wanted %d"):format(difficulty, other, otherLeft, wantLeft))
+					end
+				end
+			end
+			local lab, labIndex = firstOrb(difficulty)
+			local labPedestal = lab and RivalService.GetPedestal(lab.Id, labIndex :: number)
+			if lab and labIndex and labPedestal then
+				putNextTo(labPedestal)
+				local grabbed, reason = HeistService.TryRivalSteal(player, lab.Id, labIndex)
+				if grabbed or reason ~= "RivalAlert" then
+					table.insert(poolBad, ("%s: a dry pool still allowed a grab (%s)"):format(difficulty, tostring(reason)))
+				end
+				if grabbed then
+					HeistService.FailCarriesFor(player, "Failed")
+				end
+			end
+		end
+		HeistService.SelfTestClearRivalSteals(player)
+		PlayerDataService.SetRebirths(player, 0)
+		freeLabs()
+		result(
+			#poolBad == 0 and RivalConfig.GetTier("Easy").Pool == RivalConfig.GetTier("Medium").Pool and RivalConfig.GetTier("Hard").Pool ~= RivalConfig.GetTier("Insane").Pool,
+			"rivals: hourly limits hold per pool (Easy + Medium shared 12, Hard 4, Insane 2) and a dry pool leaves the others open",
+			table.concat(poolBad, "; ")
+		)
+
+		-- 9c. Guards on a grab: the nearest two chase, the rest hold the gate, and
+		-- when the carry ends nobody is left chasing or holding.
+		local chaseBad: { string } = {}
+		for _, difficulty in RivalConfig.Difficulties do
+			local lab, labIndex = firstOrb(difficulty)
+			if lab and labIndex then
+				local guardCount = RivalService.GetGuardCount(lab.Id)
+				if guardCount > 0 then
+					RivalService.BeginCarry(lab.Id, labIndex, player)
+					local chasers, holders = 0, 0
+					for guardIndex = 1, guardCount do
+						local mode = RivalService.GetGuardMode(lab.Id, guardIndex)
+						chasers += if mode == "Chase" then 1 else 0
+						holders += if mode == "Hold" then 1 else 0
+					end
+					local wantChasers = math.min(guardCount, RivalConfig.MaxChasers)
+					if chasers ~= wantChasers or holders ~= guardCount - wantChasers or RivalService.GetChaserCount(lab.Id) > RivalConfig.MaxChasers then
+						table.insert(chaseBad, ("%s: %d chasing / %d holding of %d"):format(difficulty, chasers, holders, guardCount))
+					end
+					RivalService.EndCarry(lab.Id, labIndex, false)
+					for guardIndex = 1, guardCount do
+						local mode = RivalService.GetGuardMode(lab.Id, guardIndex)
+						if mode == "Chase" or mode == "Hold" then
+							table.insert(chaseBad, ("%s guard %d still %s after the carry"):format(difficulty, guardIndex, tostring(mode)))
+						end
+					end
+				end
+			end
+		end
+		result(#chaseBad == 0, "rivals: on a grab at most 2 guards chase (the third holds the gate) and all stand down when the carry ends", table.concat(chaseBad, "; "))
+
+		-- 9d. Speed Boots count on a rival carry: 12 x 1.5 while on, back to 12 when off.
+		local bootsLab, bootsIndex = firstOrb("Easy")
+		local bootsPedestal = bootsLab and RivalService.GetPedestal(bootsLab.Id, bootsIndex :: number)
+		local bootsHumanoid = character:FindFirstChildOfClass("Humanoid")
+		if bootsLab and bootsIndex and bootsPedestal and bootsHumanoid then
+			local bootsBefore = player:GetAttribute("SpeedBootsUntil")
+			HeistService.SelfTestClearRivalSteals(player)
+			putNextTo(bootsPedestal)
+			player:SetAttribute("SpeedBootsUntil", Workspace:GetServerTimeNow() + 60)
+			if HeistService.TryRivalSteal(player, bootsLab.Id, bootsIndex) then
+				local boosted = bootsHumanoid.WalkSpeed
+				player:SetAttribute("SpeedBootsUntil", nil)
+				task.wait(0.4)
+				local plain = bootsHumanoid.WalkSpeed
+				HeistService.FailCarriesFor(player, "Failed")
+				local want = HeistConfig.CarryWalkSpeed * (QuestConfig.PowerUps.SpeedBoots.SpeedMultiplier or 1)
+				result(boosted == want and plain == HeistConfig.CarryWalkSpeed, "rivals: Speed Boots lift a rival carry to 12 x 1.5 and drop it back when they run out", ("boosted %s, after %s"):format(tostring(boosted), tostring(plain)))
+			else
+				result(true, "rivals: Speed Boots on a carry (skipped: the grab was refused)")
+			end
+			player:SetAttribute("SpeedBootsUntil", bootsBefore)
+			character:PivotTo(home)
+		end
+		freeLabs()
+
+		-- 9e. The Insane escape check. A kinematic model of the carry (RivalConfig.
+		-- SimulateEscape: guards run straight at GuardSpeed, stun for StunSeconds,
+		-- tag within TagDistance after the grace) over EVERY pair of slots (the lab's
+		-- pedestal to the thief's gate), with the two chasers starting 6 studs behind
+		-- (the worst case) and 10 / 14 behind: (a) with no help the thief is caught
+		-- on every route; (b) with both chasers stunned at the end of the grace and
+		-- the Speed Boots (x1.5) the thief gets home on every route.
+		local routes: { number } = {}
+		for from = 1, PlotLayout.MAX_PLOT_SLOTS do
+			for to = 1, PlotLayout.MAX_PLOT_SLOTS do
+				if from ~= to then
+					local pedestalAt = PlotLayout.GetSlotCFrame(from):PointToWorldSpace(Vector3.new(6, 0, -2))
+					local gateAt = PlotLayout.GetSlotCFrame(to):PointToWorldSpace(Vector3.new(0, 0, PlotLayout.PLOT_HALF - 2))
+					table.insert(routes, (pedestalAt - gateAt).Magnitude * 1.15) -- a little for bends
+				end
+			end
+		end
+		local boostSpeed = HeistConfig.CarryWalkSpeed * (QuestConfig.PowerUps.SpeedBoots.SpeedMultiplier or 1)
+		local function escapes(speed: number, stunAt: number?, gaps: { number }): number
+			local count = 0
+			for _, distance in routes do
+				local escaped = RivalConfig.SimulateEscape({ Difficulty = "Insane", Distance = distance, CarrierSpeed = speed, Gaps = gaps, StunAt = stunAt })
+				count += if escaped then 1 else 0
+			end
+			return count
+		end
+		local escapeBad: { string } = {}
+		local escapeNotes: { string } = {}
+		for _, gaps in { { 6, 6 }, { 10, 14 } } do
+			local none = escapes(HeistConfig.CarryWalkSpeed, nil, gaps)
+			local stunOnly = escapes(HeistConfig.CarryWalkSpeed, HeistConfig.TagGraceSeconds, gaps)
+			local bootsOnly = escapes(boostSpeed, nil, gaps)
+			local both = escapes(boostSpeed, HeistConfig.TagGraceSeconds, gaps)
+			if none ~= 0 then
+				table.insert(escapeBad, ("gaps %d/%d: %d of %d routes escape with no help"):format(gaps[1], gaps[2], none, #routes))
+			end
+			if both ~= #routes then
+				table.insert(escapeBad, ("gaps %d/%d: only %d of %d routes escape with stun + boots"):format(gaps[1], gaps[2], both, #routes))
+			end
+			table.insert(escapeNotes, ("gaps %d/%d of %d routes: none %d, stun only %d, boots only %d, stun + boots %d"):format(gaps[1], gaps[2], #routes, none, stunOnly, bootsOnly, both))
+		end
+		result(#escapeBad == 0, "rivals: Insane escape model: caught with no help on every route, home with a stun on the chasers plus Speed Boots", table.concat(escapeBad, "; ") .. " | " .. table.concat(escapeNotes, " | "))
+
+		-- 9f. Every rival lab's lights stay within a claimed player lab's budget.
+		local ownPlot = TycoonService.GetPlotForPlayer(player)
+		if ownPlot then
+			local lightBad: { string } = {}
+			local playerFloorLights = countLights(ownPlot, false)
+			for _, view in RivalService.GetRivals() do
+				local floorLights, pedestalLights = countLights(view.Plot, false), countLights(view.Plot, true)
+				if floorLights > playerFloorLights or pedestalLights > RivalConfig.MaxPedestalLights then
+					table.insert(lightBad, ("%s %s: floor %d (max %d), pedestal %d (max %d)"):format(view.Name, view.Difficulty, floorLights, playerFloorLights, pedestalLights, RivalConfig.MaxPedestalLights))
+				end
+			end
+			result(#lightBad == 0, "rivals: all four labs stay inside the light budget (the Insane trim is Neon parts, not lights)", table.concat(lightBad, "; "))
 		end
 	end)
 	if not ok then

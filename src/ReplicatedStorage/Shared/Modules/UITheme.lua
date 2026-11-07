@@ -92,6 +92,24 @@ UITheme.World = {
 	AccentRebirth = hex("#FF8A3D"), -- Rebirth Portal ring, edge strips, light
 	AccentPink = hex("#FF5CC8"), -- the Neon Pink Lab (LabStyle): wall + sign strips, cash balls
 	AccentRival = hex("#FF5A36"), -- rival labs (RivalService): wall + sign strips, the guard's tint
+	-- Rival lab difficulty (RivalConfig.Tiers): the gate sign's chip, wall strips, the guard "!" cue
+	DifficultyEasy = hex("#3BEB7E"),
+	DifficultyMedium = hex("#4FB3FF"),
+	DifficultyHard = hex("#FF8A3D"),
+	DifficultyInsane = hex("#FF2E4D"), -- also the Insane lab's thin Neon trim bands and the guards' visor
+	GuardDark = hex("#1A1630"), -- the Insane guard's black
+	GuardRed = hex("#C4162F"), -- the Insane guard's red
+	GuardHelmet = hex("#5B5F7A"), -- the Hard guard's helmet
+	-- ORB RUSH (MinigameService / MinigameController): the arena and the cosmetic orb tiers
+	ArenaDisc = hex("#1C1838"), -- the floating arena's disc
+	ArenaRim = hex("#8B5CFF"), -- its rim bands
+	ArenaDebris = hex("#2D2856"), -- floating lab debris round it
+	ArenaTower = hex("#221E42"), -- the score tower
+	OrbWhite = hex("#F4F1FF"), -- worth 1
+	OrbBlue = hex("#4FB3FF"), -- worth 2
+	OrbPurple = hex("#A47BFF"), -- worth 3
+	OrbGold = hex("#FFBE28"), -- worth 5 (and the Golden Wave)
+	RushPortal = hex("#FF5CC8"), -- the ORB RUSH street portal
 	-- Combat (CombatService tools, CombatController FX)
 	WeaponWood = hex("#C98A4B"), -- the Bat
 	WeaponWoodDark = hex("#9E6A36"), -- the Bat's dents
@@ -126,6 +144,11 @@ UITheme.Gradients = {
 	Heist = { Top = hex("#FF5470"), Bottom = hex("#6E0F24") }, -- victim banner, heist cards (Danger -> deep red)
 	Shield = { Top = hex("#FF8AE6"), Bottom = hex("#E02FBE") }, -- LOCK (ready): the console pill
 	Rival = { Top = hex("#FF8A5C"), Bottom = hex("#D12E1B") }, -- the rival labs' gate sign (World.AccentRival)
+	DifficultyEasy = { Top = hex("#3BEB7E"), Bottom = hex("#1FB458") }, -- the rival gate sign's difficulty chip
+	DifficultyMedium = { Top = hex("#4FB3FF"), Bottom = hex("#2378E0") },
+	DifficultyHard = { Top = hex("#FFB066"), Bottom = hex("#F06A1F") },
+	DifficultyInsane = { Top = hex("#FF5470"), Bottom = hex("#B0102A") },
+	OrbRush = { Top = hex("#FF8AD8"), Bottom = hex("#6A3FE0") }, -- the ORB RUSH pill, banner and results card header
 	Disabled = { Top = hex("#3A3560"), Bottom = hex("#3A3560") }, -- locked/maxed/unaffordable
 	ShopFeatured = { Top = hex("#FFB347"), Bottom = hex("#E0306E") }, -- the shop's featured banner (warm)
 	Pink = { Top = hex("#FF8AD8"), Bottom = hex("#E02F9E") }, -- the HUD GIFTS button, the shop's Deal

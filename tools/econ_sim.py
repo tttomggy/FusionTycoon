@@ -36,11 +36,12 @@ Usage:  python3 tools/econ_sim.py               # 20 seeds, 10 h horizon
                                                 # much the goal cash moves
                                                 # Rebirth 1 (target: the new
                                                 # goals add <= ~1 min)
-        python3 tools/econ_sim.py 30 12 --rivals [--rival-rule=band] [--steals=9]
+        python3 tools/econ_sim.py 30 12 --rivals [--rival-success=0.5]
                                                 # rival-lab steals on (from
-                                                # minute 3, RivalConfig's
-                                                # StealsPerHour), then Rebirth
-                                                # 1-3 vs. the same seeds
+                                                # minute 3, one lab per
+                                                # difficulty, RivalConfig.Tiers'
+                                                # gates and hourly pools), then
+                                                # Rebirth 1-3 vs. the same seeds
                                                 # without (target: Rebirth 1
                                                 # sooner, still >= 35 min)
 """
@@ -173,37 +174,26 @@ AWAY_SECONDS = 8 * 3600
 # event from Random.new(slotStart); the sim draws the same distribution
 # from its own seeded RNG per slot.
 EVENTS = False
-# Rival labs (RivalConfig.lua / HeistConfig.MinRebirthsVsRivals = 0): from
-# minute 3 ANY player can steal an orb from an NPC lab, at most StealsPerHour
-# delivered per rolling hour. The sim's player steals at that cap, every
-# 3600 / 12 s (an upper bound: nobody delivers 12 an hour, and the run home
-# costs real play time the sim does not charge). The tier comes from the
-# band = the player's own rebirths (a solo player is the server's lowest),
-# capped at MaxBand; plain, one GOLDEN_CHANCE Golden; never Mythic / Secret.
-#
-# RIVAL_RULE "floor" (RivalConfig, the current one): a lab has FOUR orbs, one
-# at floor + 1 (never above Legendary), one at the floor (the best tier the
-# player owns, as the sim's player is the server's least advanced) and two from
-# the band's weights with every tier below the floor dropped; the sim's player
-# grabs a random one of the four (the old rule's single roll is one random
-# pedestal too, so the two are comparable). "band": the old rule (one roll from
-# the band's weights).
+# Rival labs (RivalConfig.lua, one per difficulty): from minute 3 a player can
+# steal an orb from an NPC lab. Each difficulty has its own tier weights,
+# Rebirth gate (the thief's), hourly pool of DELIVERED steals (Easy and Medium
+# share one) and Golden chance (RivalConfig.Tiers). The sim's player is greedy:
+# every RIVAL_ATTEMPT_SECONDS it robs the HARDEST lab its Rebirths allow whose
+# pool has a steal left (an upper bound: the run home costs real play time the
+# sim does not charge, and --rival-success=P makes Medium / Hard / Insane
+# steals only land with probability P, a tag costing nothing but the attempt).
+# The orb is one roll from the lab's weights (a random pedestal of the four).
 RIVALS = False
-RIVAL_RULE = "floor"
-RIVAL_OFFERED = ["Common", "Rare", "Epic", "Legendary"]
-RIVAL_PLUS_ONE = 1
-RIVAL_FLOOR_PEDESTALS = 1
-RIVAL_PEDESTALS = 4
 RIVAL_START_SECONDS = 180
-RIVAL_STEALS_PER_HOUR = 12
-RIVAL_GOLDEN_CHANCE = 0.05
-RIVAL_MAX_BAND = 3
-RIVAL_TIER_WEIGHTS = {
-    0: {"Common": 60, "Rare": 30, "Epic": 10},
-    1: {"Common": 40, "Rare": 38, "Epic": 18, "Legendary": 4},
-    2: {"Common": 25, "Rare": 35, "Epic": 28, "Legendary": 12},
-    3: {"Common": 15, "Rare": 30, "Epic": 35, "Legendary": 20},
+RIVAL_ATTEMPT_SECONDS = 300
+RIVAL_WINDOW_SECONDS = 3600
+RIVAL_TIERS = {  # RivalConfig.Tiers, hardest first
+    "Insane": {"weights": {"Legendary": 85, "Mythic": 14.5, "Secret": 0.5}, "min_rebirths": 4, "pool": "Insane", "per_hour": 2, "golden": 0.08},
+    "Hard": {"weights": {"Epic": 65, "Legendary": 35}, "min_rebirths": 2, "pool": "Hard", "per_hour": 4, "golden": 0.05},
+    "Medium": {"weights": {"Rare": 60, "Epic": 40}, "min_rebirths": 0, "pool": "Shared", "per_hour": 12, "golden": 0.05},
+    "Easy": {"weights": {"Common": 65, "Rare": 35}, "min_rebirths": 0, "pool": "Shared", "per_hour": 12, "golden": 0.05},
 }
+RIVAL_SUCCESS = 1.0  # chance an attempt on Medium / Hard / Insane is delivered (Easy: always)
 
 # Onboarding goals (GoalConfig.lua), only with --goals=old|new. The goals are
 # paid in order, each in cash when its condition holds (GoalService). The
@@ -327,6 +317,7 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
     # Rival-lab steals: a separate RNG, so the base run's draws never move.
     rival_rng = random.Random(seed * 104729 + 5)
     next_steal = RIVAL_START_SECONDS
+    rival_log = {}  # pool -> times (s) of delivered steals in the last hour
 
     shop = PAYERS[payer]
     base_pedestals = shop["pedestals"]
@@ -586,40 +577,31 @@ def run(seed, horizon=10 * 3600, sessions=0, offline=True, payer="free"):
             mark(f"goal_{goal_list[goal_at][0]}")
             goal_at += 1
         while RIVALS and t >= next_steal:
-            # One delivered rival steal: the orb from the band's weights.
-            weights = RIVAL_TIER_WEIGHTS[min(rebirths, RIVAL_MAX_BAND)]
-            if RIVAL_RULE == "floor":
-                owned_best = max((TIERS.index(tr) for (tr, mu), n in inv.items() if n > 0), default=0)
-                floor = min(owned_best, len(RIVAL_OFFERED) - 1)
-                lab = [RIVAL_OFFERED[min(floor + 1, len(RIVAL_OFFERED) - 1)]] * RIVAL_PLUS_ONE
-                lab += [RIVAL_OFFERED[floor]] * RIVAL_FLOOR_PEDESTALS
-                kept = {tr: w for tr, w in weights.items() if TIERS.index(tr) >= floor}
-                while len(lab) < RIVAL_PEDESTALS:
-                    if not kept:
-                        lab.append(RIVAL_OFFERED[floor])
-                        continue
-                    r = rival_rng.random() * sum(kept.values())
-                    pick = RIVAL_OFFERED[floor]
-                    for tr, w in kept.items():
-                        pick = tr
-                        if r < w:
-                            break
-                        r -= w
-                    lab.append(pick)
-                tier = lab[rival_rng.randrange(RIVAL_PEDESTALS)]
-            else:
-                roll = rival_rng.random() * sum(weights.values())
+            next_steal += RIVAL_ATTEMPT_SECONDS
+            for name, lab in RIVAL_TIERS.items():
+                if rebirths < lab["min_rebirths"]:
+                    continue
+                log = rival_log.setdefault(lab["pool"], [])
+                while log and log[0] <= t - RIVAL_WINDOW_SECONDS:
+                    log.pop(0)
+                if len(log) >= lab["per_hour"]:
+                    continue
+                # The hardest open lab: one attempt per round.
+                if name != "Easy" and rival_rng.random() >= RIVAL_SUCCESS:
+                    break
+                roll = rival_rng.random() * sum(lab["weights"].values())
                 tier = "Common"
-                for tr, w in weights.items():
+                for tr, w in lab["weights"].items():
                     tier = tr
                     if roll < w:
                         break
                     roll -= w
-            golden = rival_rng.random() < RIVAL_GOLDEN_CHANCE
-            add(tier, "Golden" if golden else "None")
-            milestones["rival_steals"] = milestones.get("rival_steals", 0) + 1
-            mark("first_rival_steal")
-            next_steal += 3600 / RIVAL_STEALS_PER_HOUR
+                golden = rival_rng.random() < lab["golden"]
+                add(tier, "Golden" if golden else "None")
+                log.append(t)
+                milestones["rival_steals"] = milestones.get("rival_steals", 0) + 1
+                mark("first_rival_steal")
+                break
         income = cps(ev)
         cash += income * step
         earned += income * step
@@ -799,10 +781,8 @@ if __name__ == "__main__":
     if "--rivals" in sys.argv:
         RIVALS = True
     for a in sys.argv:
-        if a.startswith("--rival-rule="):
-            RIVAL_RULE = a.split("=")[1]
-        if a.startswith("--steals="):
-            RIVAL_STEALS_PER_HOUR = int(a.split("=")[1])
+        if a.startswith("--rival-success="):
+            RIVAL_SUCCESS = float(a.split("=")[1])
     for a in sys.argv:
         if a.startswith("--goals="):
             GOALS = a.split("=")[1]
@@ -886,29 +866,30 @@ if __name__ == "__main__":
             vals = sorted(r[0].get(f"goal_{gid}", 1e12) for r in runs)
             print(f"  goal_{gid:22s} median {fmt(vals[mid] if vals[mid] < 1e12 else None)}")
     if RIVALS:
-        # The same seeds without rival steals, and with the other rule: how
-        # much the NPC labs move Rebirth 1-3 (target: Rebirth 1 sooner, but
-        # the fastest decile not under 35 min).
+        # The same seeds without rival steals: how much the NPC labs move
+        # Rebirth 1-3 (target: Rebirth 1 sooner, but the fastest decile not
+        # under 35 min). Also with only half of the Medium / Hard / Insane
+        # attempts landing (a tag costs the attempt).
         RIVALS = False
         base = [run(s, hours * 3600) for s in range(seeds)]
         RIVALS = True
-        saved_rule = RIVAL_RULE
-        RIVAL_RULE = "band" if saved_rule == "floor" else "floor"
-        other = [run(s, hours * 3600) for s in range(seeds)]
-        RIVAL_RULE = saved_rule
-        print(f"rival steals ({RIVAL_STEALS_PER_HOUR}/h from minute {RIVAL_START_SECONDS // 60}, rule '{saved_rule}') vs. none and vs. rule '{'band' if saved_rule == 'floor' else 'floor'}' (same seeds), median:")
+        saved_success = RIVAL_SUCCESS
+        RIVAL_SUCCESS = 0.5
+        half = [run(s, hours * 3600) for s in range(seeds)]
+        RIVAL_SUCCESS = saved_success
+        print(f"rival steals (one lab per difficulty, an attempt every {RIVAL_ATTEMPT_SECONDS // 60} min from minute {RIVAL_START_SECONDS // 60}, Medium+ landing {saved_success:.0%}) vs. none and vs. 50% landing (same seeds), median:")
         for k in ["rebirth1", "rebirth2", "rebirth3"]:
             a = sorted(r[0].get(k, 1e12) for r in base)[mid]
             b = sorted(r[0].get(k, 1e12) for r in runs)[mid]
-            c = sorted(r[0].get(k, 1e12) for r in other)[mid]
+            c = sorted(r[0].get(k, 1e12) for r in half)[mid]
             if a < 1e12 and b < 1e12 and c < 1e12:
-                print(f"  {k:10s} none {fmt(a)}  {saved_rule} {fmt(b)}  {(a - b) / a:+.1%} sooner  other rule {fmt(c)}")
+                print(f"  {k:10s} none {fmt(a)}  rivals {fmt(b)}  {(a - b) / a:+.1%} sooner  50% landing {fmt(c)}  {(a - c) / a:+.1%} sooner")
             else:
-                print(f"  {k:10s} none {fmt(a if a < 1e12 else None)}  {saved_rule} {fmt(b if b < 1e12 else None)}")
+                print(f"  {k:10s} none {fmt(a if a < 1e12 else None)}  rivals {fmt(b if b < 1e12 else None)}")
         lo1 = sorted(r[0].get("rebirth1", 1e12) for r in runs)[lo]
         print(f"  fastest decile Rebirth 1 with rivals: {fmt(lo1 if lo1 < 1e12 else None)} (target >= 0:35:00)")
-        lo_other = sorted(r[0].get("rebirth1", 1e12) for r in other)[lo]
-        print(f"  fastest decile Rebirth 1, other rule: {fmt(lo_other if lo_other < 1e12 else None)}")
+        lo_half = sorted(r[0].get("rebirth1", 1e12) for r in half)[lo]
+        print(f"  fastest decile Rebirth 1, 50% landing: {fmt(lo_half if lo_half < 1e12 else None)}")
     if EVENTS:
         # The same seeds without events: how much the clock speeds Rebirth
         # 1-3 (target: at most 15% sooner).

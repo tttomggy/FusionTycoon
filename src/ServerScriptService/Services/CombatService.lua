@@ -40,9 +40,10 @@
 	    home, the owner sees SAVED). Analytics: Hit (weapon), ThiefKnocked,
 	    GuardKnocked.
 	  * A rival lab's guard (RivalService) is hit like a player by any
-	    weapon that finds it (melee box, ranged ray): it falls over for
-	    RivalConfig.GuardStunSeconds, can't tag and loses the chase, so a
-	    friend can cover a thief. Analytics: RivalGuardHit (weapon).
+	    weapon that finds it (melee box, ranged ray): ONE guard falls over
+	    for its difficulty's StunSeconds (RivalConfig.Tiers) and can't tag,
+	    then goes back to the chase, so a friend can cover a thief.
+	    Analytics: RivalGuardHit (weapon).
 	  * HitFx { Weapon, Kind, From, To, Attacker?, Target? } to everyone: the
 	    bonk / beam / freeze / slip effects, a Swing for every accepted melee
 	    swing (a miss too, so others see it), a Throw when a peel lands
@@ -469,15 +470,17 @@ function CombatService.ApplyHit(attacker: Player?, target: Player, weapon: Comba
 	end
 end
 
--- A confirmed hit on rival `rivalId`'s guard: it falls over (RivalService),
--- everyone sees the bonk / freeze FX. Nothing else: it has no health.
-function CombatService.ApplyGuardHit(attacker: Player, rivalId: number, weapon: CombatConfig.Weapon, from: Vector3)
-	local model = RivalService.GetGuardModel(rivalId)
+-- A confirmed hit on ONE guard (`guardIndex`) of rival `rivalId`: it falls over
+-- for its difficulty's StunSeconds (RivalService), everyone sees the bonk /
+-- freeze FX. Nothing else: it has no health, and the lab's other guards are
+-- untouched.
+function CombatService.ApplyGuardHit(attacker: Player, rivalId: number, guardIndex: number, weapon: CombatConfig.Weapon, from: Vector3)
+	local model = RivalService.GetGuardModel(rivalId, guardIndex)
 	local root = model and model:FindFirstChild("HumanoidRootPart")
-	if not root or not root:IsA("BasePart") or RivalService.IsGuardStunned(rivalId) then
+	if not root or not root:IsA("BasePart") or RivalService.IsGuardStunned(rivalId, guardIndex) then
 		return
 	end
-	if not RivalService.StunGuard(rivalId, from) then
+	if not RivalService.StunGuard(rivalId, guardIndex, from) then
 		return
 	end
 	RemoteEvents.HitFx:FireAllClients({
@@ -923,15 +926,17 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 		table.insert(found, ("%s %.1f studs"):format(candidate.Name, seen[candidate] :: number))
 	end
 	-- Rival labs' guards in the box (within reach) are hit too.
-	local guards: { number } = {}
+	local guards: { { RivalId: number, Index: number } } = {}
+	local seenGuards: { [Model]: boolean } = {}
 	for _, part in parts do
-		local rivalId = RivalService.GuardOfPart(part)
-		local guardModel = if rivalId then RivalService.GetGuardModel(rivalId) else nil
+		local rivalId, guardIndex = RivalService.GuardOfPart(part)
+		local guardModel = if rivalId then RivalService.GetGuardModel(rivalId, guardIndex) else nil
 		local guardRoot = guardModel and guardModel:FindFirstChild("HumanoidRootPart")
-		if rivalId and guardRoot and guardRoot:IsA("BasePart") and not table.find(guards, rivalId) then
+		if rivalId and guardIndex and guardModel and guardRoot and guardRoot:IsA("BasePart") and not seenGuards[guardModel] then
 			local distance = (guardRoot.Position - root.Position).Magnitude
 			if distance <= maxReach then
-				table.insert(guards, rivalId)
+				seenGuards[guardModel] = true
+				table.insert(guards, { RivalId = rivalId, Index = guardIndex })
 				table.insert(found, ("Lab Guard %.1f studs"):format(distance))
 			end
 		end
@@ -974,8 +979,8 @@ local function resolveMelee(attacker: Player, weapon: CombatConfig.Weapon, reque
 	for _, target in hits do
 		CombatService.ApplyHit(attacker, target, weapon, root.Position)
 	end
-	for _, rivalId in guards do
-		CombatService.ApplyGuardHit(attacker, rivalId, weapon, root.Position)
+	for _, guard in guards do
+		CombatService.ApplyGuardHit(attacker, guard.RivalId, guard.Index, weapon, root.Position)
 	end
 end
 
@@ -1034,9 +1039,12 @@ local function onRequestHit(attacker: Player, payload: unknown)
 		local endPoint = if hit then hit.Position else origin + direction.Unit * weapon.Range
 		local character = hit and hit.Instance:FindFirstAncestorWhichIsA("Model")
 		local target = character and Players:GetPlayerFromCharacter(character)
-		local guardRivalId = if hit and not target then RivalService.GuardOfPart(hit.Instance) else nil
-		if guardRivalId then
-			CombatService.ApplyGuardHit(attacker, guardRivalId, weapon, origin)
+		local guardRivalId, guardIndex = nil, nil
+		if hit and not target then
+			guardRivalId, guardIndex = RivalService.GuardOfPart(hit.Instance)
+		end
+		if guardRivalId and guardIndex then
+			CombatService.ApplyGuardHit(attacker, guardRivalId, guardIndex, weapon, origin)
 		end
 		if target and target ~= attacker then
 			local why = CombatService.WhyNotHittable(target)

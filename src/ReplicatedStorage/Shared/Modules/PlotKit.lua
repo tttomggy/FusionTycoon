@@ -244,6 +244,58 @@ function PlotKit.SetWallStripsClaimed(plot: Instance, claimed: boolean, accent: 
 	end
 end
 
+-- The accent colour and gradient of a rival lab's difficulty (the wall strips,
+-- the sign strip and pill, the gate chip). UITheme tokens only.
+function PlotKit.GetDifficultyStyle(difficulty: string): (Color3, UITheme.GradientPair)
+	if difficulty == "Insane" then
+		return World.DifficultyInsane, UITheme.Gradients.DifficultyInsane
+	elseif difficulty == "Hard" then
+		return World.DifficultyHard, UITheme.Gradients.DifficultyHard
+	elseif difficulty == "Medium" then
+		return World.DifficultyMedium, UITheme.Gradients.DifficultyMedium
+	end
+	return World.DifficultyEasy, UITheme.Gradients.DifficultyEasy
+end
+
+PlotKit.INSANE_TRIM_NAME = "InsaneTrim"
+
+-- The Insane lab's thin red Neon bands: one along the inner face of each wall
+-- segment, halfway up. Thin bands only (a flat Neon face blooms unevenly), no
+-- lights. Returns the folder.
+function PlotKit.BuildInsaneTrim(origin: CFrame, parent: Instance): Folder
+	local folder = Instance.new("Folder")
+	folder.Name = PlotKit.INSANE_TRIM_NAME
+	local half = PlotLayout.PLOT_HALF
+	local thickness = PlotLayout.WALL_THICKNESS
+	local inner = half - thickness
+	local band = 0.14
+	local depth = 0.12
+	local height = PlotLayout.WALL_HEIGHT / 2
+	local gate = PlotLayout.GATE_HALF_WIDTH
+	local frontSegment = inner - gate
+	local bands = {
+		{ Center = Vector3.new(0, 0, -(inner - depth / 2)), Size = Vector3.new(inner * 2, band, depth) },
+		{ Center = Vector3.new(-(inner - depth / 2), 0, 0), Size = Vector3.new(depth, band, inner * 2) },
+		{ Center = Vector3.new(inner - depth / 2, 0, 0), Size = Vector3.new(depth, band, inner * 2) },
+		{ Center = Vector3.new(-(gate + frontSegment / 2), 0, inner - depth / 2), Size = Vector3.new(frontSegment, band, depth) },
+		{ Center = Vector3.new(gate + frontSegment / 2, 0, inner - depth / 2), Size = Vector3.new(frontSegment, band, depth) },
+	}
+	for _, entry in bands do
+		local part = PartKit.Part({
+			Name = "TrimBand",
+			Size = entry.Size,
+			CFrame = PartKit.At(origin, entry.Center, height),
+			Color = World.DifficultyInsane,
+			Material = Enum.Material.Neon,
+			CanCollide = false,
+			Parent = folder,
+		})
+		PartKit.MakeDecorative(part)
+	end
+	folder.Parent = parent
+	return folder
+end
+
 -- A wedge from street level up to the floor, outside the gate gap. A
 -- WedgePart is tallest at its local +Z face, so it's turned to put that
 -- face against the floor edge.

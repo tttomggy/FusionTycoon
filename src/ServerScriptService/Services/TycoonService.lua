@@ -919,7 +919,7 @@ end
 -- The folder is built complete and parented LAST, so it replicates to the
 -- client in one piece (parenting it first let it arrive before its children,
 -- and the client wired only the pedestals it could see at that moment).
-local function createPedestals(plot: Model, origin: CFrame, player: Player?, rivalId: number?)
+local function createPedestals(plot: Model, origin: CFrame, player: Player?, rivalId: number?, difficulty: string?)
 	local folder = Instance.new("Folder")
 	folder.Name = "Pedestals"
 
@@ -980,6 +980,10 @@ local function createPedestals(plot: Model, origin: CFrame, player: Player?, riv
 		if rivalId then
 			-- A rival lab has no owner: the client sends this id instead.
 			steal:SetAttribute("RivalId", rivalId)
+			-- The lab's difficulty and the Rebirths it needs: the client shows the
+			-- locked "Rebirth 4 to rob" prompt from these (the server re-checks).
+			steal:SetAttribute("RivalDifficulty", difficulty or "Easy")
+			steal:SetAttribute("RivalMinRebirths", RivalConfig.GetTier(difficulty or "Easy").MinRebirths)
 		elseif player then
 			steal:SetAttribute("OwnerUserId", player.UserId)
 		end
@@ -1752,7 +1756,7 @@ end
 -- RivalConfig.PedestalCount) plus the Fusion Machine, Gacha / Multiplier
 -- pads, factory line and portal as pictures (decoration mode: no prompts,
 -- labels or handlers), no owner. Returns nil when the template is missing.
-function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: string): Model?
+function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: string, difficulty: string): Model?
 	local template = ReplicatedStorage:FindFirstChild("TycoonTemplate")
 	if not template or not template:IsA("Model") then
 		warn("TycoonService: ReplicatedStorage.TycoonTemplate (a Model) not found; no rival lab " .. name)
@@ -1764,6 +1768,7 @@ function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: 
 	plot:SetAttribute("Rival", true)
 	plot:SetAttribute("RivalId", rivalId)
 	plot:SetAttribute("RivalName", name)
+	plot:SetAttribute("RivalDifficulty", difficulty)
 	plot:SetAttribute("SlotIndex", slotIndex)
 	stripTemplateLeftovers(plot)
 	validatePlotClone(plot, name)
@@ -1774,17 +1779,49 @@ function TycoonService.BuildRivalPlot(slotIndex: number, rivalId: number, name: 
 	end
 
 	buildShell(plot, origin, nil)
-	PlotKit.SetWallStripsClaimed(plot, true, World.AccentRival)
+	local accent, accentGradient = PlotKit.GetDifficultyStyle(difficulty)
+	PlotKit.SetWallStripsClaimed(plot, true, accent)
 	local sign = PlotKit.BuildSignGate(origin, plot)
-	sign.Set("RIVAL LAB", "steal me!")
+	local title, detail = RivalConfig.SignText(difficulty)
+	sign.Set(title, detail)
 	sign.SetGradient(UITheme.Gradients.Rival)
 	sign.SetPill(name:upper())
-	sign.SetPillColor(World.AccentRival)
-	local strip = plot:FindFirstChild("SignGate") and plot.SignGate:FindFirstChild("SignStrip")
+	sign.SetPillColor(accent)
+	local gate = plot:FindFirstChild("SignGate")
+	local strip = gate and gate:FindFirstChild("SignStrip")
 	if strip and strip:IsA("BasePart") then
-		strip.Color = World.AccentRival
+		strip.Color = accent
 	end
-	createPedestals(plot, origin, nil, rivalId)
+	-- The difficulty chip above the board (the Insane one pulses, client-side),
+	-- and the tier odds line under it, in the Gacha board's format.
+	local board = gate and gate:FindFirstChild("SignBoard")
+	if board and board:IsA("BasePart") then
+		local g = PlotLayout.Gate
+		local chip = BillboardKit.Chip(board, {
+			Name = "DifficultyChip",
+			Text = RivalConfig.GetTier(difficulty).Label,
+			Gradient = accentGradient,
+			Studs = Vector2.new(g.DifficultyChipStuds.X, g.DifficultyChipStuds.Y),
+			StudsOffset = Vector3.new(0, g.BoardSize.Y / 2 + g.DifficultyChipStuds.Y / 2 + 0.4, 0),
+			MaxDistance = 160,
+		})
+		chip.Gui:SetAttribute("Pulse", difficulty == "Insane")
+		BillboardKit.Chip(board, {
+			Name = "OddsChip",
+			Text = RivalConfig.FormatOdds(difficulty),
+			Studs = Vector2.new(g.OddsChipStuds.X, g.OddsChipStuds.Y),
+			StudsOffset = Vector3.new(
+				0,
+				-(g.BoardSize.Y / 2 + g.StripSize.Y + g.RotateChipStuds.Y + 0.6 + g.OddsChipStuds.Y / 2),
+				0
+			),
+			MaxDistance = 110,
+		})
+	end
+	if difficulty == "Insane" then
+		PlotKit.BuildInsaneTrim(origin, plot)
+	end
+	createPedestals(plot, origin, nil, rivalId, difficulty)
 	-- The rest of a lab, as pictures (decoration mode: models and visuals, no
 	-- prompts, remotes, owner-only labels or cash).
 	FusionMachineService.Build(origin, PlotLayout.FUSION_MACHINE, plot, true)

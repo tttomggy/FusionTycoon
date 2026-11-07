@@ -173,6 +173,10 @@ export type PlayerData = {
 	-- steals, newest last: RivalConfig.StealsPerHour counts the last hour of
 	-- it. Saved, so leaving and rejoining (or another server) can't reset it.
 	RivalSteals: { number },
+	-- The same for the Hard and Insane rival labs, which have their own hourly
+	-- pools (RivalConfig.Tiers[...].Pool): { Hard = {unix s...}, Insane = {...} }.
+	-- "Shared" (Easy + Medium) is RivalSteals above.
+	RivalStealPools: { [string]: { number } },
 	-- Save format version (DATA_VERSION); migrations key off it.
 	Version: number,
 }
@@ -316,7 +320,24 @@ local STUDIO_STORE_NAME = "FT_StudioTest_1"
 local STUDIO_SAVES_ATTRIBUTE = "FT_StudioSaves"
 local PROFILE_KEY_PREFIX = "Player_"
 local DATA_VERSION = 1
-local RIVAL_STEALS_KEPT = 64 -- saved rival-steal times (RivalConfig.StealsPerHour is far below this)
+local RIVAL_STEALS_KEPT = 64 -- saved rival-steal times (RivalConfig.Tiers[...].StealsPerHour is far below this)
+
+-- A saved list of rival-steal times: finite, positive, oldest first, at most RIVAL_STEALS_KEPT.
+local function sanitizeStealTimes(raw: unknown): { number }
+	local out: { number } = {}
+	if typeof(raw) == "table" then
+		for _, at in raw :: { unknown } do
+			if typeof(at) == "number" and at == at and at > 0 and at < math.huge then
+				table.insert(out, at)
+			end
+		end
+		table.sort(out)
+		while #out > RIVAL_STEALS_KEPT do
+			table.remove(out, 1)
+		end
+	end
+	return out
+end
 local AUTOSAVE_INTERVAL_SECONDS = 120 -- ProfileStore's AUTO_SAVE_PERIOD
 -- A load that can't get the profile (DataStore down, or the lock never
 -- frees) gives up after this long and kicks; nothing is overwritten.
@@ -430,6 +451,7 @@ local DEFAULT_DATA: PlayerData = {
 	FreePulls = 0,
 	Funnel = {},
 	RivalSteals = {},
+	RivalStealPools = { Hard = {}, Insane = {} },
 	Version = DATA_VERSION,
 }
 
@@ -725,16 +747,12 @@ local function reconcile(raw: any): PlayerData
 		data.BestIncome = raw.BestIncome
 	end
 	-- Rival steal times: finite, positive, at most RIVAL_STEALS_KEPT, oldest first.
-	data.RivalSteals = {}
-	if typeof(raw.RivalSteals) == "table" then
-		for _, at in raw.RivalSteals do
-			if typeof(at) == "number" and at == at and at > 0 and at < math.huge then
-				table.insert(data.RivalSteals, at)
-			end
-		end
-		table.sort(data.RivalSteals)
-		while #data.RivalSteals > RIVAL_STEALS_KEPT do
-			table.remove(data.RivalSteals, 1)
+	data.RivalSteals = sanitizeStealTimes(raw.RivalSteals)
+	data.RivalStealPools = { Hard = {}, Insane = {} }
+	if typeof(raw.RivalStealPools) == "table" then
+		local pools = raw.RivalStealPools :: { [string]: unknown }
+		for pool in data.RivalStealPools do
+			data.RivalStealPools[pool] = sanitizeStealTimes(pools[pool])
 		end
 	end
 	-- An old save's Gifts table is ignored: the playtime gifts restart every visit.
@@ -947,6 +965,7 @@ function PlayerDataService.SelfTestFingerprintFields(player: Player): { [string]
 		Armed = data.Armed,
 		Quests = data.Quests,
 		RivalSteals = data.RivalSteals,
+		RivalStealPools = data.RivalStealPools,
 	}
 	local out: { [string]: string } = {}
 	for name, value in fields do
@@ -1579,6 +1598,9 @@ function PlayerDataService.ResetTutorialFlowTips(player: Player, ids: { string }
 		data.Tips[id] = nil
 	end
 	table.clear(data.RivalSteals)
+	for _, log in data.RivalStealPools do
+		table.clear(log)
+	end
 end
 
 -- The player's saved rival-steal times (unix seconds, oldest first). The REAL
@@ -1587,6 +1609,24 @@ end
 function PlayerDataService.GetRivalSteals(player: Player): { number }
 	local data = state.sessionCache[player.UserId]
 	return if data then data.RivalSteals else {}
+end
+
+-- The saved delivered-steal times of one hourly pool ("Shared" = RivalSteals,
+-- "Hard" / "Insane" = RivalStealPools). The REAL table, like GetRivalSteals.
+function PlayerDataService.GetRivalStealLog(player: Player, pool: string): { number }
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return {}
+	end
+	if pool == "Shared" then
+		return data.RivalSteals
+	end
+	local log = data.RivalStealPools[pool]
+	if not log then
+		log = {}
+		data.RivalStealPools[pool] = log
+	end
+	return log
 end
 
 -- A heist delivered (HeistService).

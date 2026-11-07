@@ -44,6 +44,8 @@ local Workspace = game:GetService("Workspace")
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local HeistConfig = require(ReplicatedStorage.Shared.Config.HeistConfig)
+local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
+local SoundKit = require(ReplicatedStorage.Shared.Modules.SoundKit)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 
@@ -171,7 +173,9 @@ export type StealMode = "Hidden" | "Locked" | "Shielded" | "Guarded" | "Steal"
 
 local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewerCarrying: boolean): StealMode
 	if typeof(prompt:GetAttribute("RivalId")) == "number" then
-		-- A rival lab: no owner, no shield, no Rebirth gate for the thief.
+		-- A rival lab: no owner, no shield; the lab's own Rebirth gate (its
+		-- difficulty: Easy / Medium 0, Hard 2, Insane 4). A locked lab is a
+		-- teaser, not a wall: anyone may walk in; the prompt just says what it takes.
 		local rivalPedestal = prompt.Parent
 		if
 			viewerCarrying
@@ -181,7 +185,11 @@ local function stealMode(prompt: ProximityPrompt, viewerRebirths: number, viewer
 		then
 			return "Hidden"
 		end
-		return if viewerRebirths < HeistConfig.MinRebirthsVsRivals then "Locked" else "Steal"
+		local needed = prompt:GetAttribute("RivalMinRebirths")
+		if typeof(needed) ~= "number" then
+			needed = HeistConfig.MinRebirthsVsRivals
+		end
+		return if viewerRebirths < needed then "Locked" else "Steal"
 	end
 	local owner = prompt:GetAttribute("OwnerUserId")
 	if owner == localUserId or viewerCarrying then
@@ -212,7 +220,11 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 	-- The item and its $/s (server's StealLabel), except on the teaser.
 	local pedestal = prompt.Parent
 	local label = pedestal and pedestal:GetAttribute("StealLabel")
-	local objectText = if mode == "Locked" then "Unlocks at Rebirth 1" elseif typeof(label) == "string" then label else ""
+	local rivalLab = typeof(prompt:GetAttribute("RivalId")) == "number"
+	local objectText = if mode == "Locked" and not rivalLab
+		then "Unlocks at Rebirth 1"
+		elseif typeof(label) == "string" then label
+		else ""
 	if prompt.ObjectText ~= objectText then
 		prompt.ObjectText = objectText
 	end
@@ -231,7 +243,9 @@ local function applyStealMode(prompt: ProximityPrompt, mode: StealMode)
 	prompt:SetAttribute("Mode", mode)
 	prompt.Enabled = mode ~= "Hidden"
 	if mode == "Locked" then
-		prompt.ActionText = "🔒 Steal"
+		-- A rival lab reads "Rebirth 4 to rob"; a player lab "🔒 Steal".
+		local difficulty = prompt:GetAttribute("RivalDifficulty")
+		prompt.ActionText = if rivalLab and typeof(difficulty) == "string" then RivalConfig.LockedText(difficulty) else "🔒 Steal"
 		prompt.HoldDuration = 0
 	elseif mode == "Guarded" then
 		prompt.ActionText = "Owner is guarding"
@@ -359,6 +373,52 @@ local function updateRotateChips()
 	end
 end
 
+--[[ Insane labs: the pulsing chip and the low hum ------------------------------------ ]]
+
+local PULSE_PERIOD = 2.4 -- seconds for one slow breath of the INSANE chip
+local PULSE_AMOUNT = 0.07
+local pulseBase: { [BillboardGui]: UDim2 } = {}
+local nextHumAt = 0
+
+-- The INSANE chip breathes (its Gui carries Pulse = true); and while you are
+-- within InsaneHumStuds of an Insane lab its low hum plays every
+-- InsaneHumSeconds, positional, so it fades with distance. One-shots, no loops.
+local function updateInsaneLabs()
+	local plots = Workspace:FindFirstChild(PlotNaming.PlotsFolderName)
+	if not plots then
+		return
+	end
+	local now = os.clock()
+	local character = localPlayer.Character
+	local root = character and character:FindFirstChild("HumanoidRootPart")
+	local factor = 1 + PULSE_AMOUNT * math.sin(now * 2 * math.pi / PULSE_PERIOD)
+	local hum = now >= nextHumAt
+	for _, plot in plots:GetChildren() do
+		if plot:GetAttribute("RivalDifficulty") ~= "Insane" then
+			continue
+		end
+		local gate = plot:FindFirstChild("SignGate")
+		local board = gate and gate:FindFirstChild("SignBoard")
+		local chip = board and board:FindFirstChild("DifficultyChip")
+		if chip and chip:IsA("BillboardGui") and chip:GetAttribute("Pulse") == true then
+			local base = pulseBase[chip]
+			if not base then
+				base = chip.Size
+				pulseBase[chip] = base
+			end
+			chip.Size = UDim2.fromScale(base.X.Scale * factor, base.Y.Scale * factor)
+		end
+		local slot = plot:GetAttribute("SlotIndex")
+		if hum and root and root:IsA("BasePart") and typeof(slot) == "number" then
+			local center = PlotLayout.GetSlotCFrame(slot).Position
+			if (root.Position - center).Magnitude <= RivalConfig.InsaneHumStuds then
+				SoundKit.PlayAt("InsaneHum", center)
+				nextHumAt = now + RivalConfig.InsaneHumSeconds
+			end
+		end
+	end
+end
+
 local function trackStealPrompt(prompt: ProximityPrompt)
 	if stealPrompts[prompt] ~= nil then
 		return
@@ -408,6 +468,7 @@ function WorldLabelController.Init()
 	end
 	plots.DescendantAdded:Connect(consider)
 	RunService.Heartbeat:Connect(updateProximity)
+	RunService.Heartbeat:Connect(updateInsaneLabs)
 	RunService.Heartbeat:Connect(function(dt: number)
 		stealCheckAccumulator += dt
 		if stealCheckAccumulator >= STEAL_CHECK_SECONDS then

@@ -531,6 +531,8 @@ PlotLayout.Gate = {
 	BorderSize = v3(20.6, 5.1, 0.6),
 	StripSize = v3(20, 0.3, 0.9),
 	RotateChipStuds = v3(9, 1.4, 0), -- a rival lab's "fresh orbs in 1:48" chip under the board
+	DifficultyChipStuds = v3(6, 1.5, 0), -- a rival lab's EASY / MEDIUM / HARD / INSANE chip above the board
+	OddsChipStuds = v3(18, 1.3, 0), -- ... and its tier odds line under the "fresh orbs" chip
 	SurfacePixelsPerStud = 40,
 }
 

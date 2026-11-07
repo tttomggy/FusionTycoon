@@ -51,18 +51,22 @@
 
 	Rival labs (RivalService): the same grab / carry / deliver flow against an
 	NPC lab. RequestSteal { RivalId, PedestalIndex } instead of { OwnerUserId,
-	PedestalIndex }. Any player may steal from one (HeistConfig.
-	MinRebirthsVsRivals = 0; player-vs-player keeps MinRebirthsVsPlayers), no
-	shield, no loss cap, no owner to guard. A rival carry is a Carry with
-	RivalId set and VictimUserId 0: the orb is created for the thief on
-	delivery (no victim save to touch, so there is nothing to duplicate or
-	lose), the guard's touch (RivalService.GetGuardRoot within TagDistance)
-	is the tag, and every other ending hands the orb back to the pedestal.
-	Limits: RivalConfig.StealsPerHour delivered steals per player in any
-	rolling hour (reason RivalAlert + seconds), counted in the player's SAVED
-	PlayerData.RivalSteals (unix seconds), so leaving and rejoining or hopping
-	servers does not reset it; and never a banned tier. A
-	lab that despawns mid-carry fails its carries first (FailRivalCarries).
+	PedestalIndex }. Each lab has a DIFFICULTY (RivalConfig.Tiers): the thief
+	needs its MinRebirths (WhyCantSteal; 0 Easy / Medium, 2 Hard, 4 Insane;
+	player-vs-player keeps MinRebirthsVsPlayers), no shield, no loss cap, no
+	owner to guard. A rival carry is a Carry with RivalId set and VictimUserId 0:
+	the orb is created for the thief on delivery (no victim save to touch, so
+	there is nothing to duplicate or lose), ANY of the lab's guards touching the
+	carrier (RivalService.GetGuardRoots within TagDistance) is the tag, and every
+	other ending hands the orb back to the pedestal. Speed Boots count on a rival
+	carry (CarryWalkSpeed x the boots multiplier while they are on).
+	Limits: the difficulty's StealsPerHour delivered steals per player in any
+	rolling hour, one pool for Easy + Medium and one each for Hard and Insane
+	(reason RivalAlert + seconds), counted in the player's SAVED
+	PlayerData.RivalSteals / RivalStealPools (unix seconds), so leaving and
+	rejoining or hopping servers does not reset it; and never a tier the lab
+	may not hand out (RivalConfig.IsTierAllowed). A
+lab that despawns mid-carry fails its carries first (FailRivalCarries).
 
 	Follows ServiceTemplate:
 	  :Init()   own state, RequestSteal, the LOCK prompt and
@@ -82,6 +86,7 @@ local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local MutationConfig = require(ReplicatedStorage.Shared.Config.MutationConfig)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local QuestConfig = require(ReplicatedStorage.Shared.Config.QuestConfig)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local LockKit = require(ReplicatedStorage.Shared.Modules.LockKit)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -108,7 +113,7 @@ type ItemInfo = {
 }
 
 -- The orb a rival carry will create for the thief on delivery.
-type RivalOrb = { ItemId: string, Tier: string, Mutation: string? }
+type RivalOrb = { ItemId: string, Tier: string, Mutation: string?, Difficulty: string }
 
 type Carry = {
 	ThiefUserId: number,
@@ -318,11 +323,15 @@ function HeistService.IsShielded(player: Player): boolean
 end
 
 -- The Rebirth rule for a grab: a thief at `thiefRebirths` may steal from a
--- RIVAL lab at HeistConfig.MinRebirthsVsRivals (0: anyone) and from a REAL
--- player at MinRebirthsVsPlayers (1; the victim needs it too: IsProtected).
--- nil = allowed. Both grab paths ask this; /selftest does too.
-function HeistService.WhyCantSteal(thiefRebirths: number, fromRival: boolean): string?
-	local needed = if fromRival then HeistConfig.MinRebirthsVsRivals else HeistConfig.MinRebirthsVsPlayers
+-- RIVAL lab of `difficulty` at that difficulty's MinRebirths (RivalConfig.Tiers:
+-- 0 Easy / Medium, 2 Hard, 4 Insane; never below HeistConfig.MinRebirthsVsRivals)
+-- and from a REAL player at MinRebirthsVsPlayers (1; the victim needs it too:
+-- IsProtected). nil = allowed. Both grab paths ask this; /selftest does too.
+function HeistService.WhyCantSteal(thiefRebirths: number, fromRival: boolean, difficulty: string?): string?
+	local needed = HeistConfig.MinRebirthsVsPlayers
+	if fromRival then
+		needed = math.max(HeistConfig.MinRebirthsVsRivals, RivalConfig.GetTier(difficulty or "Easy").MinRebirths)
+	end
 	return if thiefRebirths < needed then "NeedsRebirth" else nil
 end
 
@@ -410,10 +419,11 @@ end
 
 --[[ Rival carries --------------------------------------------------------------- ]]
 
--- The player's saved delivered-steal times (PlayerData.RivalSteals, unix
--- seconds), pruned to the last StealWindowSeconds in place.
-local function prunedRivalSteals(player: Player): { number }
-	local log = PlayerDataService.GetRivalSteals(player)
+-- The player's saved delivered-steal times of one hourly pool (PlayerData.
+-- RivalSteals = "Shared", Easy + Medium; RivalStealPools = "Hard" / "Insane";
+-- unix seconds), pruned to the last StealWindowSeconds in place.
+local function prunedRivalSteals(player: Player, pool: string): { number }
+	local log = PlayerDataService.GetRivalStealLog(player, pool)
 	local cutoff = RivalService.Now() - RivalConfig.StealWindowSeconds
 	for index = #log, 1, -1 do
 		if log[index] <= cutoff then
@@ -423,39 +433,50 @@ local function prunedRivalSteals(player: Player): { number }
 	return log
 end
 
--- Delivered rival steals left this rolling hour, and the seconds until the
--- next one frees up when none are left (0 otherwise).
-function HeistService.GetRivalStealsLeft(player: Player): (number, number)
-	local log = prunedRivalSteals(player)
-	if #log < RivalConfig.StealsPerHour then
-		return RivalConfig.StealsPerHour - #log, 0
+-- Delivered rival steals left this rolling hour in `difficulty`'s pool, and
+-- the seconds until the next one frees up when none are left (0 otherwise).
+function HeistService.GetRivalStealsLeft(player: Player, difficulty: string?): (number, number)
+	local tier = RivalConfig.GetTier(difficulty or "Easy")
+	local log = prunedRivalSteals(player, tier.Pool)
+	if #log < tier.StealsPerHour then
+		return tier.StealsPerHour - #log, 0
 	end
 	local oldest = log[1]
 	return 0, math.max(1, math.ceil(oldest + RivalConfig.StealWindowSeconds - RivalService.Now()))
 end
 
--- /selftest: pretend `player` already delivered `count` rival steals now.
-function HeistService.SelfTestRecordRivalSteals(player: Player, count: number)
-	local log = prunedRivalSteals(player)
+-- /selftest: pretend `player` already delivered `count` rival steals now (in
+-- `difficulty`'s pool; Easy when omitted).
+function HeistService.SelfTestRecordRivalSteals(player: Player, count: number, difficulty: string?)
+	local log = prunedRivalSteals(player, RivalConfig.GetTier(difficulty or "Easy").Pool)
 	for _ = 1, count do
 		table.insert(log, RivalService.Now())
 	end
 end
 
 function HeistService.SelfTestClearRivalSteals(player: Player)
-	table.clear(PlayerDataService.GetRivalSteals(player))
+	for _, pool in RivalConfig.Pools do
+		table.clear(PlayerDataService.GetRivalStealLog(player, pool))
+	end
 end
 
--- /selftest: a copy of the saved times, and putting a copy back.
-function HeistService.SelfTestGetRivalSteals(player: Player): { number }
-	return table.clone(PlayerDataService.GetRivalSteals(player))
+-- /selftest: a copy of the saved times (every pool), and putting a copy back.
+function HeistService.SelfTestGetRivalSteals(player: Player): { [string]: { number } }
+	local copy: { [string]: { number } } = {}
+	for _, pool in RivalConfig.Pools do
+		copy[pool] = table.clone(PlayerDataService.GetRivalStealLog(player, pool))
+	end
+	return copy
 end
 
-function HeistService.SelfTestSetRivalSteals(player: Player, times: { number })
-	local log = PlayerDataService.GetRivalSteals(player)
-	table.clear(log)
-	for _, at in times do
-		table.insert(log, at)
+function HeistService.SelfTestSetRivalSteals(player: Player, saved: { [string]: { number } })
+	for _, pool in RivalConfig.Pools do
+		local log = PlayerDataService.GetRivalStealLog(player, pool)
+		table.clear(log)
+		local times: { number } = saved[pool] or {}
+		for _, at in times do
+			table.insert(log, at)
+		end
 	end
 end
 
@@ -473,7 +494,7 @@ local function finishRivalCarry(thief: Player?, carry: Carry, outcome: Outcome):
 			and PlayerDataService.IsProfileActive(thief :: Player)
 		if ok and thief then
 			PlayerDataService.AddItem(thief, orb.ItemId, orb.Tier, orb.Mutation, nil)
-			table.insert(prunedRivalSteals(thief), RivalService.Now())
+			table.insert(prunedRivalSteals(thief, RivalConfig.GetTier(orb.Difficulty).Pool), RivalService.Now())
 			RivalService.EndCarry(rivalId, carry.PedestalIndex, true)
 			syncBoth(thief, nil, true)
 			PlayerDataService.SaveNow(thief)
@@ -772,6 +793,18 @@ startCarry = function(
 	end
 end
 
+-- A rival carry's walk speed: CarryWalkSpeed, times the Speed Boots multiplier
+-- while the boots are on (QuestService only lifts a normal-speed walker, so the
+-- 12 of a carry never got the boots; a rival carry does now, which is what lets
+-- a thief outrun an Insane guard at 15). Player-vs-player carries are unchanged.
+local function rivalCarrySpeed(thief: Player): number
+	local bootsUntil = thief:GetAttribute("SpeedBootsUntil")
+	if typeof(bootsUntil) == "number" and bootsUntil > serverNow() then
+		return HeistConfig.CarryWalkSpeed * (QuestConfig.PowerUps.SpeedBoots.SpeedMultiplier or 1)
+	end
+	return HeistConfig.CarryWalkSpeed
+end
+
 -- Records a rival carry and tells the thief (TryRivalSteal, after every
 -- check). The lab is told (the pedestal shows it gone, the guard gives
 -- chase); nothing is saved or changed until delivery.
@@ -795,7 +828,7 @@ local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: nu
 		ThiefUserId = thief.UserId,
 		VictimUserId = 0,
 		RivalId = rivalId,
-		RivalOrb = { ItemId = orb.ItemId, Tier = orb.Tier, Mutation = orb.Mutation },
+		RivalOrb = { ItemId = orb.ItemId, Tier = orb.Tier, Mutation = orb.Mutation, Difficulty = rival.Difficulty },
 		PedestalIndex = pedestalIndex,
 		ItemUid = key,
 		StartedAt = os.clock(),
@@ -811,7 +844,7 @@ local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: nu
 	carry.DiedConnection = humanoid.Died:Connect(function()
 		endCarry(thief.UserId, "Died")
 	end)
-	humanoid.WalkSpeed = HeistConfig.CarryWalkSpeed
+	humanoid.WalkSpeed = rivalCarrySpeed(thief)
 
 	thief:SetAttribute("HeistTier", info.Tier)
 	thief:SetAttribute("HeistMutation", info.Mutation)
@@ -848,24 +881,27 @@ function HeistService.TryRivalSteal(thief: Player, rivalId: number, pedestalInde
 	if state.carries[thief.UserId] then
 		return false, "AlreadyCarrying"
 	end
-	local gate = HeistService.WhyCantSteal(PlayerDataService.GetRebirths(thief), true)
-	if gate then
-		return false, gate
-	end
 	local rival = RivalService.GetRival(rivalId)
 	local pedestal = RivalService.GetPedestal(rivalId, pedestalIndex)
 	if not rival or not pedestal then
 		return false, "RivalGone"
 	end
+	-- The lab's own gate (Hard Rebirth 2, Insane Rebirth 4): anyone may walk in and
+	-- look; only the grab is refused.
+	local gate = HeistService.WhyCantSteal(PlayerDataService.GetRebirths(thief), true, rival.Difficulty)
+	if gate then
+		return false, gate
+	end
 	if RivalService.IsCarried(rivalId, pedestalIndex) or state.carriedItems[("rival:%d:%d"):format(rivalId, pedestalIndex)] then
 		return false, "AlreadyStolen"
 	end
 	local orb = RivalService.GetOrb(rivalId, pedestalIndex)
-	-- Never a banned tier, whatever the lab holds.
-	if not orb or RivalConfig.BannedTiers[orb.Tier] then
+	-- Never a tier THIS lab may not hand out (only Insane rolls Mythic / Secret),
+	-- whatever the lab holds.
+	if not orb or not RivalConfig.IsTierAllowed(rival.Difficulty, orb.Tier) then
 		return false, "Empty"
 	end
-	local left, wait = HeistService.GetRivalStealsLeft(thief)
+	local left, wait = HeistService.GetRivalStealsLeft(thief, rival.Difficulty)
 	if left <= 0 then
 		return false, "RivalAlert", wait
 	end
@@ -1038,10 +1074,25 @@ local function stepCarries()
 			local rivalThiefRoot = getRoot(thief)
 			if rivalThiefRoot then
 				local graceOver = os.clock() - carry.StartedAt >= HeistConfig.TagGraceSeconds
-				local guardRoot = RivalService.GetGuardRoot(carry.RivalId)
-				if graceOver and guardRoot and (guardRoot.Position - rivalThiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
+				-- ANY guard's touch sends the orb back.
+				local tagged = false
+				if graceOver then
+					for _, guardRoot in RivalService.GetGuardRoots(carry.RivalId) do
+						if (guardRoot.Position - rivalThiefRoot.Position).Magnitude <= HeistConfig.TagDistance then
+							tagged = true
+							break
+						end
+					end
+				end
+				if tagged then
 					endCarry(thiefUserId, "Saved")
 					continue
+				end
+				-- The boots count for the whole carry, and only while they are on.
+				local carryHumanoid = getHumanoid(thief)
+				local wanted = rivalCarrySpeed(thief)
+				if carryHumanoid and carryHumanoid.WalkSpeed ~= wanted and carryHumanoid.Health > 0 then
+					carryHumanoid.WalkSpeed = wanted
 				end
 				local _, thiefOrigin = getClaimedPlot(thief)
 				if thiefOrigin and isInsidePlot(thiefOrigin, rivalThiefRoot.Position) then

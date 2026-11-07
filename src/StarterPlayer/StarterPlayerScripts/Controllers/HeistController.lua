@@ -128,6 +128,7 @@ local REJECT_MESSAGES: { [string]: string } = {
 	LabCapped = "This lab has been robbed enough for now",
 	AlreadyStolen = "Someone's already carrying that",
 	RivalGone = "That rival lab just packed up",
+	NeedsRebirth = "You need more Rebirths to rob that lab",
 	Empty = "Nothing to steal there",
 	TooFar = "Get closer",
 	NoCharacter = "Can't steal right now",
@@ -642,6 +643,36 @@ local function playAlarm()
 	end)
 end
 
+-- A rival guard started chasing you: the alarm once per grab and a red "!" over
+-- that guard for RivalConfig.SpottedSeconds. Built here, on this client, so only
+-- the carrier sees it.
+local function onRivalSpotted(payload: any)
+	if typeof(payload) ~= "table" then
+		return
+	end
+	local head = payload.Head
+	if payload.Alarm == true then
+		SoundKit.Play("RivalAlarm")
+	end
+	if typeof(head) ~= "Instance" or not head:IsA("BasePart") or head:FindFirstChild("SpottedChip") then
+		return
+	end
+	local model = head.Parent
+	local scale = if model and model:IsA("Model") then model:GetScale() else 1
+	local seconds = if typeof(payload.Seconds) == "number" then payload.Seconds else 1.5
+	local chip = BillboardKit.Chip(head, {
+		Name = "SpottedChip",
+		Text = "!",
+		Gradient = UITheme.Gradients.Red,
+		Studs = Vector2.new(1.7, 1.7),
+		StudsOffset = Vector3.new(0, 4 * scale, 0),
+		MaxDistance = 200,
+	})
+	task.delay(seconds, function()
+		chip.Gui:Destroy()
+	end)
+end
+
 --[[ Remote handlers --------------------------------------------------------------- ]]
 
 local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Player)
@@ -665,7 +696,13 @@ local function onPromptTriggered(prompt: ProximityPrompt, triggeringPlayer: Play
 		ToastController.Show(REJECT_MESSAGES.Guarded, "Neutral")
 		return
 	elseif mode == "Locked" then
-		ToastController.Show(("Stealing unlocks at Rebirth %d"):format(HeistConfig.MinRebirthsVsPlayers), "Neutral")
+		-- A rival lab names its own Rebirth ("Rebirth 4 to rob"); a player lab is Rebirth 1.
+		local needed = prompt:GetAttribute("RivalMinRebirths")
+		if typeof(rivalId) == "number" and typeof(needed) == "number" then
+			ToastController.Show(("Rebirth %d to rob this lab"):format(needed), "Neutral")
+		else
+			ToastController.Show(("Stealing unlocks at Rebirth %d"):format(HeistConfig.MinRebirthsVsPlayers), "Neutral")
+		end
 		return
 	end
 	if typeof(rivalId) == "number" then
@@ -1288,6 +1325,7 @@ function HeistController.Init()
 	ProximityPromptService.PromptTriggered:Connect(onPromptTriggered)
 	RemoteEvents.HeistStarted.OnClientEvent:Connect(onHeistStarted)
 	RemoteEvents.HeistEnded.OnClientEvent:Connect(onHeistEnded)
+	RemoteEvents.RivalSpotted.OnClientEvent:Connect(onRivalSpotted)
 	-- Pulls, upgrades and the Multiplier Pad all refuse a carrying thief
 	-- with Reason "Carrying"; one toast for all of them.
 	for _, remote in {

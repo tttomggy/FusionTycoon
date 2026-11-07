@@ -8,49 +8,56 @@
 	deliver flow).
 
 	Labs
-	  * Up to RivalConfig.MaxRivals, in the free slots nearest to the real
-	    players' labs. Built by TycoonService.BuildRivalPlot (the player plot
-	    code: shell, walls, sign gate, pedestals, plus the Fusion Machine,
-	    stations, factory line and portal as decoration-mode pictures: no
-	    prompts, no labels, no owner). Slots are TycoonService's table: a real
-	    player is never refused a plot because of a rival. With no slot free
-	    TycoonService calls DespawnFarthest (registered in :Start), and the
-	    lab farthest from every player's lab goes first; a carry from it
-	    fails cleanly (HeistService.FailRivalCarries) before the plot goes.
-	  * Orbs are server objects (every client sees the same ones): plain,
-	    one RivalConfig.GoldenChance Golden. Each pedestal has a ROLE
-	    (RivalConfig.PlanRoles: one PlusOne, one Floor, the rest Weighted) and
-	    its tier comes from the FLOOR = the best tier owned by the least
-	    advanced real player in the server (RivalService.GetFloor, from their
-	    inventories; SetFloorProvider for /selftest): floor + 1 (never past
-	    Legendary), the floor, or a band-weighted tier at or above the floor.
-	    Never a banned tier, never four Commons for someone who owns Rares. If
-	    the floor DROPS (a weaker player joins) the orbs rolled for a higher
-	    one are re-rolled at once; a rise waits for the next rotation.
+	  * RivalConfig.MaxRivals (4), ONE per difficulty (Easy, Medium, Hard,
+	    Insane), in the free slots nearest to the real players' labs. Built by
+	    TycoonService.BuildRivalPlot (the player plot code: shell, walls, sign
+	    gate, pedestals, plus the Fusion Machine, stations, factory line and
+	    portal as decoration-mode pictures: no prompts, no labels, no owner).
+	    Slots are TycoonService's table: a real player is never refused a plot
+	    because of a rival. With no slot free TycoonService calls
+	    DespawnFarthest (registered in :Start) and the LOWEST difficulty goes
+	    first (Easy, Medium, Hard, Insane last; the lab farthest from every
+	    player's lab breaks a tie); a carry from it fails cleanly
+	    (HeistService.FailRivalCarries) before the plot goes. When slots are
+	    short the labs that spawn are the ones that would despawn last.
+	  * The DIFFICULTY (RivalConfig.Tiers) decides the lab: the orb tiers and
+	    weights (only Insane rolls Mythic / Secret), the guards, the Rebirths a
+	    thief needs, the hourly pool, the respawn and the Golden chance.
+	  * Orbs are server objects (every client sees the same ones): plain, one
+	    Golden at the difficulty's GoldenChance. A pedestal rolls its tier from
+	    the lab's weights (RivalConfig.PickTier) at spawn, on a rotation and
+	    when a stolen pedestal comes back.
 	  * Rotation: every RivalConfig.RotateSeconds (+- jitter, labs spaced at
 	    least RotateMinGapSeconds apart) a lab re-rolls its orbs: a flash on the
 	    old orb, a shell closing on the new one. Never a pedestal that is being
-	    carried from; the whole lab waits for the next tick while its guard
+	    carried from; the whole lab waits for the next tick while a guard
 	    chases, a StealPrompt is held, or a player is within
 	    RotateKeepOutStuds of a pedestal. A pedestal waiting to respawn rolls
 	    its new orb when it comes back. The plot's NextRotateAt attribute
 	    (RivalService clock = unix seconds) feeds the gate sign's "fresh orbs in
 	    1:48" (WorldLabelController).
-	  * A stolen orb comes back after RivalConfig.RespawnSeconds (the
+	  * A stolen orb comes back after the difficulty's RespawnSeconds (the
 	    respawn clock is injectable: SetClock, /selftest).
 
-	Guard
-	  * One blocky R15 NPC per lab (HumanoidDescription rig), server-side, named
-	    after its rival. It stays upright (no FallingDown / Ragdoll / Physics /
-	    Seated, a self-heal for a root tilted past 45 deg). It patrols the
-	    lab; HeistService calls BeginCarry on a grab and it
-	    chases the carrier at RivalConfig.GuardSpeed along PathfindingService
-	    paths (recomputed at most every GuardPathSeconds), gives up GuardLeash
-	    studs past its gate and walks home. HeistService owns the tag: the
-	    guard within HeistConfig.TagDistance of the carrier sends the orb back.
-	  * Weapons work on it like on a player (CombatService -> StunGuard): it
-	    falls over for GuardStunSeconds, can't tag, and loses the chase.
-	  * ONE guard loop per server.
+	Guards (Rival.Guards, 1 / 1 / 2 / 3 by difficulty)
+	  * Blocky R15 NPCs (HumanoidDescription rigs), server-side, named after
+	    their rival, bigger and tougher-looking by difficulty (scale 1 / 1.1 /
+	    1.2 + helmet / 1.35 black and red with a glowing visor). Each stays
+	    upright (no FallingDown / Ragdoll / Physics / Seated, a self-heal for a
+	    root tilted past 45 deg) and runs the same patrol / chase / home code,
+	    spread over the patrol stops so they never stack. HeistService calls
+	    BeginCarry on a grab: the (up to RivalConfig.MaxChasers = 2) nearest
+	    guards chase the carrier at the difficulty's GuardSpeed along
+	    PathfindingService paths (recomputed at most every GuardPathSeconds),
+	    giving up at the difficulty's Leash past the gate (Insane: never); a
+	    third guard holds the gate (GuardHome, facing it). Each chaser that
+	    starts running tells the carrier (RivalSpotted: alarm + a red "!").
+	    HeistService owns the tag: ANY guard within HeistConfig.TagDistance of
+	    the carrier sends the orb back.
+	  * Weapons work on ONE guard (CombatService -> StunGuard): it falls over for
+	    the difficulty's StunSeconds, can't tag, and goes back to the chase when
+	    it is up if the carrier is still running.
+	  * ONE guard loop per server (every guard of every lab).
 
 	Rivals never steal, never appear in leaderboards, friend counts, the
 	notification queue or analytics player counts (they are not Players).
@@ -76,6 +83,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local TycoonConfig = require(ReplicatedStorage.Shared.Config.TycoonConfig)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
+local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local PedestalVisuals = require(ReplicatedStorage.Shared.Modules.PedestalVisuals)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
@@ -96,30 +104,36 @@ export type Orb = {
 type PedestalState = {
 	Orb: Orb?,
 	Carried: boolean,
+	Thief: Player?, -- who carries it
 	RespawnAt: number?, -- RivalService clock time a stolen orb is back
-	Role: string, -- "PlusOne" | "Floor" | "Weighted" (RivalConfig.PlanRoles)
-	RolledRank: number, -- RivalConfig.OfferedRank of the floor the orb was rolled for
 	Holders: { [Player]: boolean }, -- players holding this pedestal's StealPrompt
 }
 
-type GuardMode = "Patrol" | "Chase" | "Home"
+-- Patrol: walking the stops. Chase: after a carrier. Home: walking back to its
+-- own spot. Hold: standing at the gate spot facing the gate while a carrier runs.
+type GuardMode = "Patrol" | "Chase" | "Home" | "Hold"
 
 type Guard = {
+	Index: number, -- 1..Rival.Guards (the "GuardIndex" attribute)
 	Model: Model,
 	Root: BasePart,
 	Humanoid: Humanoid,
 	Mode: GuardMode,
 	Target: Player?,
+	ResumeTarget: Player?, -- the carrier a stunned chaser goes back after once it is up
 	StunUntil: number,
 	Stunned: boolean,
 	TiltedSince: number?, -- os.clock() the root's up-vector went past the limit (not stunned)
 	GetUpAt: number?, -- os.clock() of the GettingUp attempt; still down a second later = pivot it
 	PatrolIndex: number,
 	PauseUntil: number,
+	HomeLocal: Vector3, -- plot-local: where it spawns, returns and (as the gate-holder) stands
+	Faced: boolean, -- Hold: already turned to the gate
 	Waypoints: { PathWaypoint },
 	WaypointIndex: number,
 	PathPending: boolean,
 	LastPathAt: number,
+	SpottedAt: number, -- os.clock() of the last "!" cue sent for this guard
 	WalkTrack: AnimationTrack?,
 	IdleTrack: AnimationTrack?,
 }
@@ -127,11 +141,12 @@ type Guard = {
 type Rival = {
 	Id: number,
 	Name: string,
+	Difficulty: string, -- RivalConfig.Difficulties
 	SlotIndex: number,
 	Plot: Model,
 	Origin: CFrame,
 	Pedestals: { [number]: PedestalState },
-	Guard: Guard?,
+	Guards: { Guard },
 	NextRotateAt: number, -- RivalService clock time of the next orb rotation
 }
 
@@ -139,6 +154,7 @@ type Rival = {
 export type RivalView = {
 	Id: number,
 	Name: string,
+	Difficulty: string,
 	SlotIndex: number,
 	Plot: Model,
 	Origin: CFrame,
@@ -155,7 +171,7 @@ type State = {
 	connections: { RBXScriptConnection },
 	-- Called with a rival's id just before it goes (HeistService fails its carries).
 	despawnHooks: { (number) -> () },
-	floorProvider: (() -> string)?, -- /selftest: the floor tier instead of the players' inventories
+	lastAlarmAt: { [number]: number }, -- carrier UserId -> os.clock() of the last alarm (one per grab)
 }
 
 --[[ Private state -------------------------------------------------------- ]]
@@ -176,7 +192,7 @@ local state: State = {
 	guardAccumulator = 0,
 	connections = {},
 	despawnHooks = {},
-	floorProvider = nil,
+	lastAlarmAt = {},
 }
 
 -- Resolved in :Start(), never at module scope.
@@ -236,6 +252,7 @@ local function view(rival: Rival): RivalView
 	return {
 		Id = rival.Id,
 		Name = rival.Name,
+		Difficulty = rival.Difficulty,
 		SlotIndex = rival.SlotIndex,
 		Plot = rival.Plot,
 		Origin = rival.Origin,
@@ -244,59 +261,15 @@ end
 
 --[[ Orbs ----------------------------------------------------------------------- ]]
 
--- The lowest Rebirth count among the real players (0 with nobody in).
-function RivalService.GetLowestRebirths(): number
-	local lowest: number? = nil
-	for _, player in Players:GetPlayers() do
-		if PlayerDataService.IsDataLoaded(player) then
-			local rebirths = PlayerDataService.GetRebirths(player)
-			lowest = if lowest == nil then rebirths else math.min(lowest, rebirths)
-		end
-	end
-	return lowest or 0
-end
-
--- The floor: the best tier owned by the LEAST advanced real player (a player
--- with no orb counts as Common; nobody in is Common). Never a banned tier.
-function RivalService.GetFloor(): string
-	local provider = state.floorProvider
-	if provider then
-		return RivalConfig.ClampFloor(provider())
-	end
-	local lowest: number? = nil
-	for _, player in Players:GetPlayers() do
-		if PlayerDataService.IsDataLoaded(player) then
-			local best = 1
-			local inventory: { any } = PlayerDataService.GetInventory(player) or {}
-			for _, item in inventory do
-				best = math.max(best, ItemConfig.Tiers[item.Tier] or 1)
-			end
-			lowest = if lowest == nil then best else math.min(lowest, best)
-		end
-	end
-	local tier: string? = nil
-	for _, name in RivalConfig.TierOrder do
-		if ItemConfig.Tiers[name] == lowest then
-			tier = name
-		end
-	end
-	return RivalConfig.ClampFloor(tier)
-end
-
--- /selftest: stub the floor (a tier name; nil goes back to the inventories).
-function RivalService.SetFloorProvider(provider: (() -> string)?)
-	state.floorProvider = provider
-end
-
 local function roll(): number
 	return state.rng:NextNumber()
 end
 
--- One rival orb of `tier`: plain, one GoldenChance Golden. Pure but for the
--- RNG (injectable: SetRandom).
-function RivalService.RollOrb(tier: string): Orb
+-- One rival orb of `tier`: plain, one Golden at `difficulty`'s GoldenChance.
+-- Pure but for the RNG (injectable: SetRandom).
+function RivalService.RollOrbOfTier(tier: string, difficulty: string): Orb
 	local def = ItemConfig.PickRandomOfTier(tier, state.rng) or ItemConfig.Items[1]
-	local mutation: string? = if roll() < RivalConfig.GoldenChance then "Golden" else nil
+	local mutation: string? = if roll() < RivalConfig.GetTier(difficulty).GoldenChance then "Golden" else nil
 	return {
 		ItemId = def.Id,
 		Tier = def.Tier,
@@ -304,6 +277,12 @@ function RivalService.RollOrb(tier: string): Orb
 		Name = MutationConfig.GetDisplayName(def.Name, mutation, nil),
 		Rate = TycoonConfig.GetItemCashPerSecond(def.Tier, MutationConfig.List(mutation, nil)),
 	}
+end
+
+-- One rival orb for a lab of `difficulty`: its tier from the difficulty's
+-- weights (never a tier the lab may not hand out), then RollOrbOfTier.
+function RivalService.RollOrb(difficulty: string): Orb
+	return RivalService.RollOrbOfTier(RivalConfig.PickTier(difficulty, roll()), difficulty)
 end
 
 -- Draws the pedestal for what the state says: the orb, the stolen ghost
@@ -398,8 +377,8 @@ local function tierColor(tier: string): Color3
 	return FusionConfig.TierAccentColors[tier] or UITheme.Colors.Text
 end
 
--- Rolls the pedestal's orb from its role and the current floor. `cue`: the
--- swap flash (a rotation), not for a first fill or a respawn.
+-- Rolls the pedestal's orb from the lab's difficulty. `cue`: the swap flash (a
+-- rotation), not for a first fill or a respawn.
 local function fillPedestal(rival: Rival, index: number, cue: boolean?)
 	local ped = rival.Pedestals[index]
 	if not ped then
@@ -408,11 +387,8 @@ local function fillPedestal(rival: Rival, index: number, cue: boolean?)
 	local pedestal = getPedestal(rival, index)
 	local oldOrb = ped.Orb
 	local oldCenter = if cue and pedestal and oldOrb then orbCenter(pedestal) else nil
-	local floor = RivalService.GetFloor()
-	local tier = RivalConfig.TierForRole(ped.Role, floor, RivalConfig.GetBand(RivalService.GetLowestRebirths()), roll)
-	local newOrb = RivalService.RollOrb(tier)
+	local newOrb = RivalService.RollOrb(rival.Difficulty)
 	ped.Orb = newOrb
-	ped.RolledRank = RivalConfig.OfferedRank(floor)
 	ped.Carried = false
 	ped.RespawnAt = nil
 	if oldCenter and oldOrb then
@@ -429,7 +405,17 @@ end
 
 --[[ Guard ------------------------------------------------------------------------ ]]
 
-local function guardColors(): { [string]: Color3 }
+-- The guard's body colours by look: Easy / Medium / Hard keep the lab's own
+-- (orange arms and torso, white head, dark legs); the Elite look is black and red.
+local function guardColors(look: string): { [string]: Color3 }
+	if look == "Elite" then
+		return {
+			Head = World.GuardDark,
+			Torso = World.GuardDark,
+			Arms = World.GuardRed,
+			Legs = World.GuardDark,
+		}
+	end
 	return {
 		Head = World.CapsuleWhite,
 		Torso = World.AccentRival,
@@ -438,8 +424,8 @@ local function guardColors(): { [string]: Color3 }
 	}
 end
 
-local function describeGuard(): HumanoidDescription
-	local colors = guardColors()
+local function describeGuard(look: string): HumanoidDescription
+	local colors = guardColors(look)
 	local description = Instance.new("HumanoidDescription")
 	description.HeadColor = colors.Head
 	description.TorsoColor = colors.Torso
@@ -448,6 +434,44 @@ local function describeGuard(): HumanoidDescription
 	description.LeftLegColor = colors.Legs
 	description.RightLegColor = colors.Legs
 	return description
+end
+
+-- A rig accessory: one SmoothPlastic / Neon part welded to the head's
+-- `attachment`. `handleOffset` is where the part's own attachment sits in its
+-- local space (the part's centre lands at the head attachment minus this).
+-- Massless and non-colliding: it must not change how the guard walks.
+local function makeAccessory(name: string, attachment: string, size: Vector3, shape: Enum.PartType, color: Color3, material: Enum.Material, handleOffset: Vector3): Accessory
+	local accessory = Instance.new("Accessory")
+	accessory.Name = name
+	local handle = Instance.new("Part")
+	handle.Name = "Handle"
+	handle.Size = size
+	handle.Shape = shape
+	handle.Color = color
+	handle.Material = material
+	handle.Massless = true
+	handle.CanCollide = false
+	handle.CanQuery = false
+	handle.CanTouch = false
+	handle.CastShadow = false
+	local hold = Instance.new("Attachment")
+	hold.Name = attachment
+	hold.Position = handleOffset
+	hold.Parent = handle
+	handle.Parent = accessory
+	return accessory
+end
+
+-- Hard: a helmet cap. Elite: a dark helmet and a glowing Neon visor (a part,
+-- not a Highlight). Easy / Medium wear nothing extra.
+local function addGuardAccessories(humanoid: Humanoid, look: string)
+	if look == "Helmet" or look == "Elite" then
+		local color = if look == "Elite" then World.GuardDark else World.GuardHelmet
+		humanoid:AddAccessory(makeAccessory("GuardHelmet", "HatAttachment", Vector3.new(1.5, 1.5, 1.5), Enum.PartType.Ball, color, Enum.Material.SmoothPlastic, Vector3.new(0, -0.35, 0)))
+	end
+	if look == "Elite" then
+		humanoid:AddAccessory(makeAccessory("GuardVisor", "FaceFrontAttachment", Vector3.new(1.3, 0.28, 0.12), Enum.PartType.Block, World.DifficultyInsane, Enum.Material.Neon, Vector3.new(0, -0.1, 0.06)))
+	end
 end
 
 local function loadTrack(humanoid: Humanoid, id: string, looped: boolean): AnimationTrack?
@@ -503,7 +527,7 @@ end
 
 -- The guard's name over its head, in the rival accent ("Dr. Fizz"), instead of
 -- the stock overhead name. A world label: not on top, no light influence, a MaxDistance.
-local function buildGuardName(rig: Model, humanoid: Humanoid, labName: string)
+local function buildGuardName(rig: Model, humanoid: Humanoid, labName: string, scale: number)
 	local shortName = RivalConfig.GetShortName(labName)
 	humanoid.DisplayName = shortName
 	humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
@@ -517,16 +541,25 @@ local function buildGuardName(rig: Model, humanoid: Humanoid, labName: string)
 		Text = shortName,
 		Gradient = UITheme.Gradients.Rival,
 		Studs = GUARD_NAME_STUDS,
-		StudsOffset = GUARD_NAME_OFFSET,
+		StudsOffset = GUARD_NAME_OFFSET * scale, -- clears a bigger guard's head
 		MaxDistance = RivalConfig.GuardNameDistance,
 	})
 end
 
--- Builds the rival's guard (yields: the rig comes from a HumanoidDescription),
--- unless the lab went in the meantime. A failed rig leaves the lab guardless.
-local function buildGuard(rival: Rival)
+-- Where guard `index` of `count` stands when idle: the lab's GuardHome, the
+-- rest spread across x so they never stack (the gate-holder is the last one).
+local function guardHomeLocal(index: number, count: number): Vector3
+	local spread = (index - (count + 1) / 2) * RivalConfig.GuardSpread
+	return RivalConfig.GuardHome + Vector3.new(spread, 0, 0)
+end
+
+-- Builds guard `index` of the rival's guards (yields: the rig comes from a
+-- HumanoidDescription), unless the lab went in the meantime. A failed rig
+-- leaves the lab one guard short.
+local function buildGuard(rival: Rival, index: number)
+	local tier = RivalConfig.GetTier(rival.Difficulty)
 	local ok, rig = pcall(function()
-		return Players:CreateHumanoidModelFromDescription(describeGuard(), Enum.HumanoidRigType.R15)
+		return Players:CreateHumanoidModelFromDescription(describeGuard(tier.Look), Enum.HumanoidRigType.R15)
 	end)
 	if not ok or not rig then
 		warn(("RivalService: no guard rig for %s (%s)"):format(rival.Name, tostring(rig)))
@@ -543,7 +576,11 @@ local function buildGuard(rival: Rival)
 		rig:Destroy()
 		return
 	end
-	buildGuardName(rig, humanoid, rival.Name)
+	addGuardAccessories(humanoid, tier.Look)
+	if tier.GuardScale ~= 1 then
+		rig:ScaleTo(tier.GuardScale) -- bigger by difficulty; the Avatar Settings scale limits do not apply to a Model:ScaleTo
+	end
+	buildGuardName(rig, humanoid, rival.Name, tier.GuardScale)
 	humanoid.WalkSpeed = RivalConfig.GuardPatrolSpeed
 	humanoid.BreakJointsOnDeath = false
 	humanoid.RequiresNeck = false
@@ -562,35 +599,55 @@ local function buildGuard(rival: Rival)
 		end
 	end
 	rig:SetAttribute("RivalGuard", rival.Id)
-	local home = rival.Origin:PointToWorldSpace(RivalConfig.GuardHome + Vector3.new(0, 3, 0))
+	rig:SetAttribute("GuardIndex", index)
+	local homeLocal = guardHomeLocal(index, tier.Guards)
+	local home = rival.Origin:PointToWorldSpace(homeLocal + Vector3.new(0, 3 * tier.GuardScale, 0))
 	rig:PivotTo(CFrame.new(home) * rival.Origin.Rotation)
 	rig.Parent = rival.Plot
 	pcall(function()
 		root:SetNetworkOwner(nil) -- the server drives it; no player's client can
 	end)
+	local points = #RivalConfig.PatrolPoints
 	local guard: Guard = {
+		Index = index,
 		Model = rig,
 		Root = root,
 		Humanoid = humanoid,
 		Mode = "Patrol",
 		Target = nil,
+		ResumeTarget = nil,
 		StunUntil = 0,
 		Stunned = false,
 		TiltedSince = nil,
 		GetUpAt = nil,
-		PatrolIndex = 1,
+		-- Spread over the stops so the guards never stack.
+		PatrolIndex = ((index - 1) * math.max(1, points // tier.Guards)) % points + 1,
 		PauseUntil = 0,
+		HomeLocal = homeLocal,
+		Faced = false,
 		Waypoints = {},
 		WaypointIndex = 1,
 		PathPending = false,
 		LastPathAt = -math.huge,
+		SpottedAt = -math.huge,
 		WalkTrack = loadTrack(humanoid, WALK_ANIMATION, true),
 		IdleTrack = loadTrack(humanoid, IDLE_ANIMATION, true),
 	}
 	if guard.IdleTrack then
 		guard.IdleTrack:Play()
 	end
-	rival.Guard = guard
+	table.insert(rival.Guards, guard)
+end
+
+-- All of a lab's guards, one after the other (each rig yields).
+local function buildGuards(rival: Rival)
+	local count = RivalConfig.GetTier(rival.Difficulty).Guards
+	for index = 1, count do
+		if state.rivals[rival.Id] ~= rival or rival.Plot.Parent == nil then
+			return
+		end
+		buildGuard(rival, index)
+	end
 end
 
 local function setMoving(guard: Guard, moving: boolean)
@@ -698,11 +755,65 @@ local function healGuard(guard: Guard, t: number, facing: Vector3)
 	end
 end
 
-local function guardStep(rival: Rival)
-	local guard = rival.Guard
-	if not guard or guard.Root.Parent == nil then
+-- The players carrying an orb out of this lab right now.
+local function carriersOf(rival: Rival): { [Player]: boolean }
+	local set: { [Player]: boolean } = {}
+	for _, ped in rival.Pedestals do
+		if ped.Carried and ped.Thief then
+			set[ped.Thief] = true
+		end
+	end
+	return set
+end
+
+-- Turns the guard to look along `direction` (flat) where it stands.
+local function faceDirection(guard: Guard, direction: Vector3)
+	local look = Vector3.new(direction.X, 0, direction.Z)
+	if look.Magnitude < 0.01 then
 		return
 	end
+	local position = guard.Root.Position
+	guard.Model:PivotTo(CFrame.lookAt(position, position + look))
+end
+
+-- The lab's gate direction (+Z in plot space), flat, in the world.
+local function gateDirection(rival: Rival): Vector3
+	return rival.Origin:VectorToWorldSpace(Vector3.new(0, 0, 1))
+end
+
+-- A guard starts running after `target`: the carrier is told (the alarm once
+-- per grab, a red "!" over THIS guard for the carrier only: the cue is the
+-- client's, so nobody else sees it).
+local function startChase(rival: Rival, guard: Guard, target: Player)
+	guard.Mode = "Chase"
+	guard.Target = target
+	guard.ResumeTarget = nil
+	guard.Faced = false
+	guard.Waypoints = {}
+	guard.LastPathAt = -math.huge
+	local t = os.clock()
+	local firstAlarm = t - (state.lastAlarmAt[target.UserId] or -math.huge) > 1
+	if firstAlarm then
+		state.lastAlarmAt[target.UserId] = t
+	end
+	guard.SpottedAt = t
+	local head = guard.Model:FindFirstChild("Head")
+	if head and target.Parent then
+		RemoteEvents.RivalSpotted:FireClient(target, {
+			RivalId = rival.Id,
+			GuardIndex = guard.Index,
+			Head = head,
+			Alarm = firstAlarm,
+			Seconds = RivalConfig.SpottedSeconds,
+		})
+	end
+end
+
+local function guardStep(rival: Rival, guard: Guard)
+	if guard.Root.Parent == nil then
+		return
+	end
+	local tier = RivalConfig.GetTier(rival.Difficulty)
 	local t = os.clock() -- the guard runs on the real clock (SetClock is for orbs and limits)
 	if t < guard.StunUntil then
 		setMoving(guard, false)
@@ -710,6 +821,12 @@ local function guardStep(rival: Rival)
 	end
 	if guard.Stunned then
 		recoverGuard(guard)
+		-- Up again: back on the carrier it was chasing, if that thief is still running.
+		local resume = guard.ResumeTarget
+		guard.ResumeTarget = nil
+		if resume and resume.Parent and carriersOf(rival)[resume] then
+			startChase(rival, guard, resume)
+		end
 	end
 	healGuard(guard, t, rival.Origin.LookVector)
 	local humanoid = guard.Humanoid
@@ -718,13 +835,13 @@ local function guardStep(rival: Rival)
 	if guard.Mode == "Chase" then
 		local target = guard.Target
 		local targetRoot = if target and target.Parent then getRoot(target) else nil
-		if not targetRoot or flatDistance(position, gateWorld(rival)) > RivalConfig.GuardLeash then
+		if not targetRoot or flatDistance(position, gateWorld(rival)) > tier.Leash then
 			-- Gone, or too far from home: give up and walk back.
 			guard.Mode = "Home"
 			guard.Target = nil
 			guard.Waypoints = {}
 		else
-			humanoid.WalkSpeed = RivalConfig.GuardSpeed
+			humanoid.WalkSpeed = tier.GuardSpeed
 			if t - guard.LastPathAt >= RivalConfig.GuardPathSeconds then
 				requestPath(guard, targetRoot.Position)
 			end
@@ -735,8 +852,26 @@ local function guardStep(rival: Rival)
 	end
 
 	humanoid.WalkSpeed = RivalConfig.GuardPatrolSpeed
+	if guard.Mode == "Hold" then
+		-- The gate-holder: at its spot, facing the gate, until the carry is over.
+		local spot = rival.Origin:PointToWorldSpace(guard.HomeLocal)
+		if flatDistance(position, spot) > RivalConfig.GuardWaypointReach + 1 then
+			if t - guard.LastPathAt >= RivalConfig.GuardPathSeconds * 4 then
+				requestPath(guard, spot)
+			end
+			followPath(guard, spot)
+			setMoving(guard, true)
+		else
+			setMoving(guard, false)
+			if not guard.Faced then
+				guard.Faced = true
+				faceDirection(guard, gateDirection(rival))
+			end
+		end
+		return
+	end
 	if guard.Mode == "Home" then
-		local home = rival.Origin:PointToWorldSpace(RivalConfig.GuardHome)
+		local home = rival.Origin:PointToWorldSpace(guard.HomeLocal)
 		if flatDistance(position, home) <= RivalConfig.GuardWaypointReach + 1 then
 			guard.Mode = "Patrol"
 			guard.PauseUntil = t + RivalConfig.GuardPatrolPauseSeconds
@@ -856,7 +991,10 @@ function RivalService.SetRandom(rng: Random?)
 	state.rng = rng or Random.new()
 end
 
--- A thief grabbed the orb: the pedestal shows it gone, the guard gives chase.
+-- A thief grabbed the orb: the pedestal shows it gone and the guards react:
+-- the nearest (up to RivalConfig.MaxChasers) free guards chase the thief, the
+-- others hold the gate. A guard already chasing someone else stays on them,
+-- unless every guard is busy: then the nearest one switches to the new thief.
 -- Returns the orb, or nil if there is nothing to grab.
 function RivalService.BeginCarry(rivalId: number, index: number, thief: Player): Orb?
 	local rival = state.rivals[rivalId]
@@ -865,20 +1003,46 @@ function RivalService.BeginCarry(rivalId: number, index: number, thief: Player):
 		return nil
 	end
 	ped.Carried = true
+	ped.Thief = thief
 	showPedestal(rival, index)
-	local guard = rival.Guard
-	if guard then
-		guard.Mode = "Chase"
-		guard.Target = thief
-		guard.Waypoints = {}
-		guard.LastPathAt = -math.huge
+	local thiefRoot = getRoot(thief)
+	local thiefPosition = if thiefRoot then thiefRoot.Position else rival.Origin.Position
+	local carriers = carriersOf(rival)
+	local free: { Guard } = {}
+	local busy: { Guard } = {}
+	for _, guard in rival.Guards do
+		local target = guard.Target
+		local running = guard.Mode == "Chase" and target ~= nil and carriers[target] == true and target ~= thief
+		table.insert(if running then busy else free, guard)
+	end
+	local function byDistance(a: Guard, b: Guard): boolean
+		return (a.Root.Position - thiefPosition).Magnitude < (b.Root.Position - thiefPosition).Magnitude
+	end
+	table.sort(free, byDistance)
+	table.sort(busy, byDistance)
+	if #free == 0 and busy[1] then
+		table.insert(free, table.remove(busy, 1) :: Guard) -- every guard is busy: the nearest switches
+	end
+	local chasers, holders = RivalConfig.SplitGuards(#rival.Guards)
+	local chasing = 0
+	for _, guard in free do
+		if chasing < math.min(chasers, RivalConfig.MaxChasers) then
+			chasing += 1
+			startChase(rival, guard, thief)
+		elseif holders > 0 and guard.Mode ~= "Hold" then
+			guard.Mode = "Hold"
+			guard.Target = nil
+			guard.Faced = false
+			guard.Waypoints = {}
+			guard.LastPathAt = -math.huge
+		end
 	end
 	return ped.Orb
 end
 
--- The carry ended. Delivered: the orb is gone and comes back after
--- RespawnSeconds; anything else: it is back on the pedestal now. Safe for a
--- lab that has gone.
+-- The carry ended. Delivered: the orb is gone and comes back after the
+-- difficulty's RespawnSeconds; anything else: it is back on the pedestal now.
+-- Safe for a lab that has gone.
 function RivalService.EndCarry(rivalId: number, index: number, delivered: boolean)
 	local rival = state.rivals[rivalId]
 	local ped = rival and rival.Pedestals[index]
@@ -886,69 +1050,100 @@ function RivalService.EndCarry(rivalId: number, index: number, delivered: boolea
 		return
 	end
 	ped.Carried = false
+	ped.Thief = nil
 	if delivered then
 		ped.Orb = nil
-		ped.RespawnAt = now() + RivalConfig.RespawnSeconds
+		ped.RespawnAt = now() + RivalConfig.GetTier(rival.Difficulty).RespawnSeconds
 	end
 	showPedestal(rival, index)
-	-- The chase is over once nobody carries from this lab.
-	local carried = false
-	for _, other in rival.Pedestals do
-		carried = carried or other.Carried
-	end
-	local guard = rival.Guard
-	if guard and not carried and guard.Mode == "Chase" then
-		guard.Mode = "Home"
-		guard.Target = nil
-		guard.Waypoints = {}
+	-- The chase is over for every guard whose carrier is done; the holders
+	-- stand down once nobody carries from this lab.
+	local carriers = carriersOf(rival)
+	for _, guard in rival.Guards do
+		local target = guard.Target
+		local runningHere = guard.Mode == "Chase" and target ~= nil and carriers[target] == true
+		if (guard.Mode == "Chase" and not runningHere) or (guard.Mode == "Hold" and next(carriers) == nil) then
+			guard.Mode = "Home"
+			guard.Target = nil
+			guard.Waypoints = {}
+		end
+		local resume = guard.ResumeTarget
+		if resume and not carriers[resume] then
+			guard.ResumeTarget = nil
+		end
 	end
 end
 
--- The guard's root while it can tag (alive, on its feet), else nil.
-function RivalService.GetGuardRoot(rivalId: number): BasePart?
+-- The roots of the lab's guards that can tag right now (alive, on their feet).
+function RivalService.GetGuardRoots(rivalId: number): { BasePart }
+	local roots: { BasePart } = {}
 	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
-	if not guard or guard.Root.Parent == nil or os.clock() < guard.StunUntil then
-		return nil
+	if rival then
+		local t = os.clock()
+		for _, guard in rival.Guards do
+			if guard.Root.Parent ~= nil and t >= guard.StunUntil then
+				table.insert(roots, guard.Root)
+			end
+		end
 	end
-	return guard.Root
+	return roots
 end
 
--- The guard's root even while it is down (/selftest moves it).
-function RivalService.GetGuardModel(rivalId: number): Model?
+local function getGuard(rivalId: number, index: number?): Guard?
 	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
+	return if rival then rival.Guards[index or 1] else nil
+end
+
+-- How many guards the lab has built so far (RivalConfig.Tiers[...].Guards once all are in).
+function RivalService.GetGuardCount(rivalId: number): number
+	local rival = state.rivals[rivalId]
+	return if rival then #rival.Guards else 0
+end
+
+-- A guard's model even while it is down (/selftest moves it). Index 1 by default.
+function RivalService.GetGuardModel(rivalId: number, index: number?): Model?
+	local guard = getGuard(rivalId, index)
 	return if guard then guard.Model else nil
 end
 
-function RivalService.IsGuardStunned(rivalId: number): boolean
-	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
+function RivalService.IsGuardStunned(rivalId: number, index: number?): boolean
+	local guard = getGuard(rivalId, index)
 	return guard ~= nil and os.clock() < guard.StunUntil
 end
 
-function RivalService.GetGuardMode(rivalId: number): string?
-	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
+function RivalService.GetGuardMode(rivalId: number, index: number?): string?
+	local guard = getGuard(rivalId, index)
 	return if guard then guard.Mode else nil
 end
 
--- Degrees the guard's root is off vertical (0 = standing), nil with no guard
--- (/selftest holds it to RivalConfig.GuardUprightSelfTestDegrees).
-function RivalService.GetGuardUprightDegrees(rivalId: number): number?
+-- How many of the lab's guards are chasing (never above RivalConfig.MaxChasers
+-- per carrier: /selftest).
+function RivalService.GetChaserCount(rivalId: number): number
 	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
+	local count = 0
+	local guards: { Guard } = if rival then rival.Guards else {}
+	for _, guard in guards do
+		if guard.Mode == "Chase" then
+			count += 1
+		end
+	end
+	return count
+end
+
+-- Degrees a guard's root is off vertical (0 = standing), nil with no guard
+-- (/selftest holds it to RivalConfig.GuardUprightSelfTestDegrees).
+function RivalService.GetGuardUprightDegrees(rivalId: number, index: number?): number?
+	local guard = getGuard(rivalId, index)
 	if not guard or guard.Root.Parent == nil then
 		return nil
 	end
 	return uprightAngle(guard.Root)
 end
 
--- /selftest: lays the guard on its side where it stands, as a bad fall would
+-- /selftest: lays a guard on its side where it stands, as a bad fall would
 -- (the self-heal must stand it up again by itself).
-function RivalService.SelfTestLayDown(rivalId: number): boolean
-	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
+function RivalService.SelfTestLayDown(rivalId: number, index: number?): boolean
+	local guard = getGuard(rivalId, index)
 	if not guard or guard.Root.Parent == nil then
 		return false
 	end
@@ -956,28 +1151,32 @@ function RivalService.SelfTestLayDown(rivalId: number): boolean
 	return true
 end
 
--- The rival id whose guard model `part` belongs to (CombatService), or nil.
-function RivalService.GuardOfPart(part: Instance): number?
+-- The rival id and guard index whose guard model `part` belongs to
+-- (CombatService), or nil.
+function RivalService.GuardOfPart(part: Instance): (number?, number?)
 	local current: Instance? = part
 	while current and current ~= Workspace do
 		local id = current:GetAttribute("RivalGuard")
 		if typeof(id) == "number" then
-			return id
+			local index = current:GetAttribute("GuardIndex")
+			return id, if typeof(index) == "number" then index else 1
 		end
 		current = current.Parent
 	end
-	return nil
+	return nil, nil
 end
 
--- A weapon hit the guard (CombatService): it falls over for GuardStunSeconds,
--- can't tag and loses the chase. `from` is where the blow came from.
-function RivalService.StunGuard(rivalId: number, from: Vector3): boolean
+-- A weapon hit ONE guard (CombatService): it falls over for the difficulty's
+-- StunSeconds and can't tag. A chaser remembers its carrier and goes back to the
+-- chase once it is up (a short Insane stun buys a few strides, not the orb).
+-- `from` is where the blow came from.
+function RivalService.StunGuard(rivalId: number, index: number, from: Vector3): boolean
 	local rival = state.rivals[rivalId]
-	local guard = rival and rival.Guard
-	if not guard or guard.Root.Parent == nil then
+	local guard = rival and rival.Guards[index]
+	if not rival or not guard or guard.Root.Parent == nil then
 		return false
 	end
-	guard.StunUntil = os.clock() + RivalConfig.GuardStunSeconds
+	guard.StunUntil = os.clock() + RivalConfig.GetTier(rival.Difficulty).StunSeconds
 	guard.Stunned = true
 	guard.Humanoid.PlatformStand = true
 	local away = guard.Root.Position - from
@@ -985,7 +1184,7 @@ function RivalService.StunGuard(rivalId: number, from: Vector3): boolean
 	local direction = if flat.Magnitude > 0.01 then flat.Unit else Vector3.new(0, 0, 1)
 	guard.Root.AssemblyLinearVelocity = direction * GUARD_KNOCKBACK + Vector3.new(0, GUARD_KICK, 0)
 	if guard.Mode == "Chase" then
-		-- It lost the chase; the carry goes on and the guard walks home when up.
+		guard.ResumeTarget = guard.Target
 		guard.Mode = "Home"
 		guard.Target = nil
 		guard.Waypoints = {}
@@ -1056,9 +1255,10 @@ end
 -- again): the guard isn't chasing, nobody holds a StealPrompt, and no player
 -- stands at a pedestal (about to grab).
 local function canRotate(rival: Rival): boolean
-	local guard = rival.Guard
-	if guard and guard.Mode == "Chase" then
-		return false
+	for _, guard in rival.Guards do
+		if guard.Mode == "Chase" then
+			return false
+		end
 	end
 	for index, ped in rival.Pedestals do
 		if next(ped.Holders) ~= nil then
@@ -1088,7 +1288,25 @@ local function rotateLab(rival: Rival)
 	scheduleRotation(rival, now() + RivalConfig.RotateDelay(roll()))
 end
 
-local function spawnRival(): Rival?
+-- The difficulties that have no lab yet, in SPAWN order: the one that would
+-- despawn last first (Insane, Hard, Medium, Easy), so when slots are short the
+-- labs that exist are the ones the despawn order keeps.
+local function missingDifficulties(): { string }
+	local have: { [string]: boolean } = {}
+	for _, rival in state.rivals do
+		have[rival.Difficulty] = true
+	end
+	local missing: { string } = {}
+	for index = #RivalConfig.Difficulties, 1, -1 do
+		local difficulty = RivalConfig.Difficulties[index]
+		if not have[difficulty] then
+			table.insert(missing, difficulty)
+		end
+	end
+	return missing
+end
+
+local function spawnRival(difficulty: string): Rival?
 	local slot = pickSlot()
 	if not slot or not TycoonService.ReserveSlot(slot) then
 		return nil
@@ -1097,7 +1315,7 @@ local function spawnRival(): Rival?
 	state.nextId += 1
 	state.nameSerial += 1
 	local name = RivalConfig.GetName(state.nameSerial)
-	local plot = TycoonService.BuildRivalPlot(slot, id, name)
+	local plot = TycoonService.BuildRivalPlot(slot, id, name, difficulty)
 	if not plot then
 		TycoonService.ReleaseSlot(slot)
 		return nil
@@ -1105,11 +1323,12 @@ local function spawnRival(): Rival?
 	local rival: Rival = {
 		Id = id,
 		Name = name,
+		Difficulty = difficulty,
 		SlotIndex = slot,
 		Plot = plot,
 		Origin = PlotLayout.GetSlotCFrame(slot),
 		Pedestals = {},
-		Guard = nil,
+		Guards = {},
 		NextRotateAt = 0,
 	}
 	local labsBefore = 0
@@ -1117,17 +1336,16 @@ local function spawnRival(): Rival?
 		labsBefore += 1
 	end
 	state.rivals[id] = rival
-	local roles = RivalConfig.PlanRoles(roll)
 	for index = 1, RivalConfig.PedestalCount do
-		rival.Pedestals[index] = { Orb = nil, Carried = false, RespawnAt = nil, Role = roles[index], RolledRank = 1, Holders = {} }
+		rival.Pedestals[index] = { Orb = nil, Carried = false, Thief = nil, RespawnAt = nil, Holders = {} }
 		fillPedestal(rival, index)
 		trackHolders(rival, index)
 	end
-	-- The first rotation of the 1st / 2nd / 3rd lab is spread over the interval.
+	-- The first rotation of the 1st / 2nd / ... lab is spread over the interval.
 	local fractions = RivalConfig.RotateFirstFractions
 	local fraction = fractions[math.min(labsBefore + 1, #fractions)]
 	scheduleRotation(rival, now() + RivalConfig.RotateSeconds * fraction)
-	task.spawn(buildGuard, rival)
+	task.spawn(buildGuards, rival)
 	return rival
 end
 
@@ -1155,9 +1373,9 @@ function RivalService.Despawn(rivalId: number): boolean
 		end
 	end
 	state.rivals[rivalId] = nil
-	local guard = rival.Guard
-	rival.Guard = nil
-	if guard then
+	local guards = rival.Guards
+	rival.Guards = {}
+	for _, guard in guards do
 		if guard.Stunned then
 			recoverGuard(guard) -- the stun ends on this path too
 		end
@@ -1168,8 +1386,10 @@ function RivalService.Despawn(rivalId: number): boolean
 	return true
 end
 
--- The rival lab farthest from every player's lab (their slot centres; the
--- origin with nobody in). Ties go to the newest.
+-- The lab to give up first: the LOWEST difficulty (Easy, Medium, Hard, Insane
+-- last), and among labs of equal difficulty the one farthest from every
+-- player's lab (their slot centres; the origin with nobody in); ties go to the
+-- newest.
 local function farthestRival(): Rival?
 	local anchors: { Vector3 } = {}
 	for _, slot in TycoonService.GetPlayerSlots() do
@@ -1179,21 +1399,25 @@ local function farthestRival(): Rival?
 		table.insert(anchors, Vector3.zero)
 	end
 	local best: Rival? = nil
+	local bestRank = math.huge
 	local bestDistance = -math.huge
 	for _, rival in state.rivals do
+		local rank = RivalConfig.GetTier(rival.Difficulty).Rank
 		local nearest = math.huge
 		for _, anchor in anchors do
 			nearest = math.min(nearest, (rival.Origin.Position - anchor).Magnitude)
 		end
-		if nearest > bestDistance or (nearest == bestDistance and best ~= nil and rival.Id > best.Id) then
-			best, bestDistance = rival, nearest
+		local better = rank < bestRank
+			or (rank == bestRank and (nearest > bestDistance or (nearest == bestDistance and best ~= nil and rival.Id > best.Id)))
+		if better then
+			best, bestRank, bestDistance = rival, rank, nearest
 		end
 	end
 	return best
 end
 
--- A real player needs a slot and none is free: the farthest rival goes
--- (TycoonService's reclaimer). False if there is no rival to give up.
+-- A real player needs a slot and none is free: the lowest-difficulty rival
+-- goes (TycoonService's reclaimer). False if there is no rival to give up.
 function RivalService.DespawnFarthest(): boolean
 	local rival = farthestRival()
 	if not rival then
@@ -1204,44 +1428,28 @@ end
 
 --[[ Housekeeping --------------------------------------------------------------------- ]]
 
--- One pass: refill the labs, bring back stolen orbs whose time is up,
--- re-roll the orbs of a lab whose rotation is due (and the ones rolled for a
--- higher floor than the server's lowest now), all only while canRotate.
--- Called every FillSeconds; /selftest calls it with its own clock.
+-- One pass: refill the labs (one per difficulty), bring back stolen orbs whose
+-- time is up, re-roll the orbs of a lab whose rotation is due, all only while
+-- canRotate. Called every FillSeconds; /selftest calls it with its own clock.
 function RivalService.Step()
-	while true do
+	for _, difficulty in missingDifficulties() do
 		local count = 0
 		for _ in state.rivals do
 			count += 1
 		end
-		if count >= RivalConfig.MaxRivals or not spawnRival() then
+		if count >= RivalConfig.MaxRivals or not spawnRival(difficulty) then
 			break
 		end
 	end
 	local t = now()
-	local floorRank = RivalConfig.OfferedRank(RivalService.GetFloor())
 	for _, rival in state.rivals do
 		for index, ped in rival.Pedestals do
 			if ped.Orb == nil and not ped.Carried and ped.RespawnAt ~= nil and t >= ped.RespawnAt then
 				fillPedestal(rival, index)
 			end
 		end
-		local lowered = false
-		for _, ped in rival.Pedestals do
-			lowered = lowered or (ped.Orb ~= nil and not ped.Carried and ped.RolledRank > floorRank)
-		end
-		if (t >= rival.NextRotateAt or lowered) and canRotate(rival) then
-			if t >= rival.NextRotateAt then
-				rotateLab(rival)
-			else
-				-- A weaker player joined: only the orbs rolled for a higher
-				-- floor are re-rolled; the schedule is unchanged.
-				for index, ped in rival.Pedestals do
-					if ped.Orb ~= nil and not ped.Carried and ped.RolledRank > floorRank then
-						fillPedestal(rival, index, true)
-					end
-				end
-			end
+		if t >= rival.NextRotateAt and canRotate(rival) then
+			rotateLab(rival)
 		end
 	end
 end
@@ -1284,12 +1492,14 @@ function RivalService:Start()
 			end
 			state.guardAccumulator = 0
 			for _, rival in state.rivals do
-				local ok, err = pcall(function(): string?
-					guardStep(rival)
-					return nil
-				end)
-				if not ok then
-					warn("RivalService: guard step failed - " .. tostring(err))
+				for _, guard in rival.Guards do
+					local ok, err = pcall(function(): string?
+						guardStep(rival, guard)
+						return nil
+					end)
+					if not ok then
+						warn("RivalService: guard step failed - " .. tostring(err))
+					end
 				end
 			end
 		end)
