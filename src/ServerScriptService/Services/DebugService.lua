@@ -3967,12 +3967,27 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		local inventory: { any } = PlayerDataService.GetInventory(player) or {}
 		return #inventory
 	end
+	-- A forced round that really starts: nothing else (a stray call, a round left
+	-- over) may be running, and the previous results are dropped so a round that
+	-- did not start can never be judged on stale awards.
+	local function startForcedRound(timing: { Countdown: number?, Round: number?, Golden: number?, Hold: number? }): boolean
+		MinigameService.AbortRound()
+		local started = MinigameService.DebugStartNow({ player }, timing)
+		if not started then
+			waitUntil(function()
+				return MinigameService.GetPhase() == "Idle"
+			end, 5)
+			MinigameService.AbortRound()
+			started = MinigameService.DebugStartNow({ player }, timing)
+		end
+		return started
+	end
 	local ok, err = pcall(function()
 		MinigameService.AbortRound()
 		MinigameService.SelfTestClearPrizes(player.UserId)
 		local timing = { Countdown = 1, Round = 10, Golden = 1, Hold = 0.2 }
 		local before = inventoryCount()
-		local started = MinigameService.DebugStartNow({ player }, timing)
+		local started = startForcedRound(timing)
 		result(started, "orb rush: a debug round starts")
 		local playing = waitUntil(function()
 			return MinigameService.GetPhase() == "Play"
@@ -4062,7 +4077,7 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		MinigameService.SelfTestClearPrizes(player.UserId)
 		MinigameService.SelfTestRecordPrizes(player.UserId, MinigameConfig.PlacementPrizesPerHour)
 		local itemsBefore = inventoryCount()
-		MinigameService.DebugStartNow({ player }, timing)
+		local cappedStarted = startForcedRound(timing)
 		waitUntil(function()
 			return MinigameService.GetPhase() == "Play"
 		end, 15)
@@ -4074,7 +4089,7 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		local capped = MinigameService.GetLastResults()
 		local cappedAward = capped and capped.Awards and capped.Awards[1]
 		result(
-			cappedAward ~= nil and cappedAward.Kind == "Cash" and cappedAward.Capped == true and inventoryCount() == itemsBefore,
+			cappedStarted and cappedAward ~= nil and cappedAward.Kind == "Cash" and cappedAward.Capped == true and inventoryCount() == itemsBefore,
 			"orb rush: with 4 placement prizes already this hour, the next 1st place pays cash and no orb",
 			("award %s, items %d -> %d"):format(cappedAward and cappedAward.Kind or "nil", itemsBefore, inventoryCount())
 		)
@@ -4082,7 +4097,7 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		-- An AFK round: no points, no prize, no cash.
 		MinigameService.SelfTestClearPrizes(player.UserId)
 		local afkItems = inventoryCount()
-		MinigameService.DebugStartNow({ player }, { Countdown = 1, Round = 3, Golden = 1, Hold = 0.1 })
+		local afkStarted = startForcedRound({ Countdown = 1, Round = 3, Golden = 1, Hold = 0.1 })
 		waitUntil(function()
 			return MinigameService.GetPhase() == "Idle"
 		end, 20)
@@ -4095,7 +4110,7 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 			end
 		end
 		result(
-			afkMine ~= nil and afkMine.Kind == "None" and inventoryCount() == afkItems,
+			afkStarted and afkMine ~= nil and afkMine.Kind == "None" and inventoryCount() == afkItems,
 			"orb rush: an AFK player (under 10 points) gets no award: no orb, no cash",
 			("award %s, items %d -> %d"):format(afkMine and afkMine.Kind or "nil", afkItems, inventoryCount())
 		)
@@ -4469,7 +4484,11 @@ local function runSelfTest(player: Player, only: string?)
 	-- The report queue lives for the WHOLE run (every probe's report needs it)
 	-- and is cleared on every way out.
 	selfTestReports[player.UserId] = {}
+	-- ORB RUSH's real schedule (hh:07 / :22 / :37 / :52) must not open a call or
+	-- leave a results overlay up while the run is measuring the screen.
+	MinigameService.SetSelfTest(true)
 	local ok, err = pcall(runSelfTestBody, player, result, only)
+	MinigameService.SetSelfTest(false)
 	TycoonService.SelfTestFreezeIncome(player, false)
 	if not ok then
 		result(false, "self-test aborted", tostring(err))

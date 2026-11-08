@@ -122,6 +122,7 @@ type State = {
 	timing: Timing,
 	clock: () -> number, -- unix seconds
 	forcedCallUntil: number?, -- a debug call window (unix)
+	selfTest: boolean, -- /selftest is running: the real schedule opens no call
 	roundToken: number,
 	goAt: number, -- os.clock() the round starts (after the countdown)
 	endsAt: number, -- os.clock() the round ends
@@ -175,6 +176,7 @@ local state: State = {
 	timing = defaultTiming(),
 	clock = unixNow,
 	forcedCallUntil = nil,
+	selfTest = false,
 	roundToken = 0,
 	goAt = 0,
 	endsAt = 0,
@@ -1690,7 +1692,11 @@ local function schedulerStep()
 			return
 		end
 		local round = MinigameConfig.GetRoundForSlot(MinigameConfig.GetSlot(unix))
-		if unix >= round.CallAt and unix < round.StartAt and state.lastCallSlot ~= round.Slot then
+		if state.selfTest then
+			-- /selftest runs its own forced rounds; a scheduled call must not open.
+			publish()
+			updatePortal()
+		elseif unix >= round.CallAt and unix < round.StartAt and state.lastCallSlot ~= round.Slot then
 			beginCall(round, round.StartAt)
 		else
 			publish()
@@ -1698,7 +1704,10 @@ local function schedulerStep()
 		end
 	elseif state.phase == "Call" then
 		local round = state.round
-		if round and unix >= round.StartAt then
+		if round and state.selfTest and round.Slot >= 0 then
+			-- A scheduled call that was already open when /selftest began.
+			MinigameService.AbortRound()
+		elseif round and unix >= round.StartAt then
 			state.roundToken += 1
 			local token = state.roundToken
 			setPhase("Countdown")
@@ -1745,6 +1754,16 @@ function MinigameService.AbortRound()
 end
 
 --[[ Studio + /selftest ------------------------------------------------------------------------------ ]]
+
+-- /selftest on / off (DebugService.runSelfTest, cleared even on error): while on,
+-- the scheduler opens no call window, and a round or call already running is
+-- aborted now. Forced rounds (DebugStartNow / DebugCall) still work.
+function MinigameService.SetSelfTest(on: boolean)
+	state.selfTest = on
+	if on and state.phase ~= "Idle" then
+		MinigameService.AbortRound()
+	end
+end
 
 function MinigameService.GetPhase(): Phase
 	return state.phase

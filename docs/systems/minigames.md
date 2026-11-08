@@ -138,7 +138,13 @@ All colours are `UITheme.World` tokens (`Arena*`, `Orb*`, `RushPortal`).
   column rect** (`HudController.GetObstacleRectsFor`), else beside its foot, else
   above the bottom row: the first spot inside the screen that overlaps no HUD
   rect and not the Roblox top-left buttons (re-placed every 0.5 s and on
-  `UIKit.LayoutChanged`). `/selftest` ("orb rush hud") checks it at both layouts.
+  `UIKit.LayoutChanged`). The HUD rects carry the top-bar inset (screen space) while
+  this gui's positions sit below it, so `hudRects` subtracts the inset first; the list
+  is placed with the pill's rect in the set. `/selftest` ("orb rush hud") checks it at both layouts.
+- **/selftest flag:** `DebugService.runSelfTest` calls `MinigameService.SetSelfTest(true)`
+  (cleared after the run, even on error): the scheduler opens no call, and a call or
+  round already running is aborted. Forced rounds still work; section 17 starts them
+  through `startForcedRound` (abort, start, retry once) and fails the check if no round started.
 - TopStack's mission slot carries `ORB RUSH 1:12 · You 34 · #2` (key `OrbRush`;
   `GOLDEN WAVE ...` in the last 15 s).
 - Pickups: a pop (`RushPop`) pitched up 7% per pickup in a 1 s streak, a `+5`

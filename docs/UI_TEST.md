@@ -2368,6 +2368,8 @@ built once). `/selftest rivals` first; then by hand:
 
 ## 47. ORB RUSH (minigame)
 
+(`/selftest` stops the real ORB RUSH schedule for its whole run; the JOIN pill and top 3 are placed in the HUD's inset-corrected rects.)
+
 Play with 1 player (Studio Player1; restart Play after code changes). Run
 `/selftest orbrush` first (it runs a real 5-second round), then by hand. At
 1920×1080 and again with the Phone emulator (844×390).

@@ -681,6 +681,9 @@ local function testHover(label: string): { string }
 		task.wait(wait)
 	end
 	local eventObjects = workspace:FindFirstChild("EventObjects")
+	-- The ORB RUSH arena is deliberately outside every plot: its debris still gets
+	-- the rest-pose check, only the "inside a plot slot" one is skipped.
+	local arena = workspace:FindFirstChild("OrbRushArena")
 	local bad: { string } = {}
 	local checked = 0
 	for _, target in CollectionService:GetTagged(PartKit.HOVER_TAG) do
@@ -690,7 +693,8 @@ local function testHover(label: string): { string }
 			local position = pose.Position
 			local base = target:GetAttribute(PartKit.HOVER_BASE_ATTRIBUTE)
 			local bob = (target:GetAttribute("BobStuds") :: number?) or 0
-			local onStreet = eventObjects ~= nil and target:IsDescendantOf(eventObjects)
+			local onStreet = (eventObjects ~= nil and target:IsDescendantOf(eventObjects))
+				or (arena ~= nil and target:IsDescendantOf(arena))
 			if typeof(base) ~= "CFrame" then
 				table.insert(bad, target:GetFullName() .. " has no HoverBase")
 			elseif (position - base.Position).Magnitude > math.abs(bob) + 1 then

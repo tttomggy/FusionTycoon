@@ -944,6 +944,15 @@ function PlayerDataService.SelfTestFingerprintFields(player: Player): { [string]
 	if not data then
 		return {}
 	end
+	-- Tips: the client's tutorial tip service marks real TipConfig ids by itself
+	-- (tipRival fired mid-fuzz). Those are the game, not a junk remote, so only
+	-- ids that are NOT valid TipConfig ids count here (MarkTipSeen refuses those).
+	local oddTips: { [string]: boolean } = {}
+	for id, seen in data.Tips do
+		if not TipConfig.IsValid(id) then
+			oddTips[id] = seen
+		end
+	end
 	local fields: { [string]: any } = {
 		Inventory = data.Inventory,
 		PedestalDisplays = pedestalDisplaysToDisk(data.PedestalDisplays),
@@ -954,7 +963,7 @@ function PlayerDataService.SelfTestFingerprintFields(player: Player): { [string]
 		SecretPity = data.SecretPity,
 		FreePulls = data.FreePulls,
 		Settings = data.Settings,
-		Tips = data.Tips,
+		Tips = oddTips,
 		Daily = data.Daily,
 		GiftsClaimed = giftState(player).Claimed,
 		SafeFusionTokens = data.SafeFusionTokens,

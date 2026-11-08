@@ -25,6 +25,7 @@
 	    place, the prize (the orb itself pops out through the normal pull card, a
 	    cash line otherwise), "NEXT ORB RUSH at :22" and CLOSE. No purchase prompt.
 ]]
+local GuiService = game:GetService("GuiService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -131,7 +132,17 @@ local function hudRects(): { [string]: ScreenRect }
 	local ok, rects = pcall(function(): { [string]: ScreenRect }
 		return HudController.GetObstacleRectsFor(UIKit.GetLogicalViewport())
 	end)
-	return if ok then rects else {}
+	if not ok then
+		return {}
+	end
+	-- The HUD's rects have the top-bar inset added back (screen space); this gui's
+	-- Position / AbsolutePosition sit below it. Put both in the same space.
+	local inset = Vector2.new(0, GuiService:GetGuiInset().Y / UIKit.EffectiveScale(screenGui))
+	local shifted: { [string]: ScreenRect } = {}
+	for name, rect in rects do
+		shifted[name] = { Position = rect.Position - inset, Size = rect.Size }
+	end
+	return shifted
 end
 
 -- Where an element of `size` goes: under the left column, else beside its foot,
@@ -193,6 +204,10 @@ local function placeColumn()
 		pillHolder.Position = UDim2.fromOffset(position.X, position.Y)
 	end
 	if listShown then
+		if pillShown then
+			-- The list goes where the pill is not.
+			rects.OrbRushPill = { Position = Vector2.new(pillHolder.Position.X.Offset, pillHolder.Position.Y.Offset), Size = pillSize() }
+		end
 		local position = chooseSpot(LIST_SIZE, rects)
 		listHolder.Position = UDim2.fromOffset(position.X, position.Y)
 	end
