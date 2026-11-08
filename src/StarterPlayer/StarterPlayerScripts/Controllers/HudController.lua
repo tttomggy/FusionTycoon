@@ -61,6 +61,8 @@ local HowToHeistPanel = require(script.Parent.Parent.UI.HowToHeistPanel)
 local ItemPickerUI = require(script.Parent.Parent.UI.ItemPickerUI)
 
 local HudController = {}
+local columnChanged = Instance.new("BindableEvent")
+HudController.ColumnChanged = columnChanged.Event
 
 local Colors = UITheme.Colors
 local Fonts = UITheme.Fonts
@@ -2054,6 +2056,7 @@ end
 -- a pill came or went); no button rebuild.
 local function placeColumn()
 	placeColumnFor(layoutIsPhone)
+	columnChanged:Fire()
 end
 
 function applyLayout(isPhone: boolean)
@@ -2072,6 +2075,7 @@ function applyLayout(isPhone: boolean)
 	shopRow.Visible = not isPhone and gateOpen
 	questRow.Visible = not isPhone and gateOpen
 	placeColumnFor(isPhone)
+	columnChanged:Fire()
 	GoalTracker.ApplySizing(isPhone)
 	buildButtons(isPhone)
 	refreshRebirthButton()
@@ -2275,6 +2279,15 @@ local function isShown(gui: GuiObject): boolean
 	return current == screenGui and screenGui.Enabled
 end
 
+-- A piece of another ScreenGui that belongs to the left-column stack. Its rect
+-- is reported by GetObstacleRects; the owner places it under the column
+-- (MinigameController) and re-places when ColumnChanged fires.
+HudController.ColumnItems = {} :: { [string]: GuiObject }
+function HudController.SetColumnItem(name: string, gui: GuiObject?)
+	HudController.ColumnItems[name] = gui
+	columnChanged:Fire()
+end
+
 function HudController.GetObstacleRects(): { [string]: ScreenRect }
 	local inset = GuiService:GetGuiInset().Y
 	local parts: { [string]: GuiObject } = {
@@ -2289,7 +2302,15 @@ function HudController.GetObstacleRects(): { [string]: ScreenRect }
 		PhoneStatus = phoneStatus,
 		BottomRow = buttonRow,
 	}
+	-- Other guis' pieces that live in the left column (ORB RUSH's pill / list):
+	-- registered through SetColumnItem, an obstacle like every element above.
 	local rects: { [string]: ScreenRect } = {}
+	for name, gui in HudController.ColumnItems do
+		local host = gui:FindFirstAncestorWhichIsA("ScreenGui")
+		if gui.Visible and host and host.Enabled and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
+			rects[name] = { Position = gui.AbsolutePosition + Vector2.new(0, inset), Size = gui.AbsoluteSize }
+		end
+	end
 	for name, gui in parts do
 		if isShown(gui) and gui.AbsoluteSize.X > 0 and gui.AbsoluteSize.Y > 0 then
 			if gui == buttonRow then

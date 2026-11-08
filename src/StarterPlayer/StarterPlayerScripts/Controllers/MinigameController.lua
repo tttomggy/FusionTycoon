@@ -135,14 +135,18 @@ local function hudRects(): { [string]: ScreenRect }
 	if not ok then
 		return {}
 	end
-	-- The HUD's rects have the top-bar inset added back (screen space); this gui's
-	-- Position / AbsolutePosition sit below it. Put both in the same space.
-	local inset = Vector2.new(0, GuiService:GetGuiInset().Y / UIKit.EffectiveScale(screenGui))
-	local shifted: { [string]: ScreenRect } = {}
+	-- The HUD's rects are in the Position space of the HUD gui (top-bar inset
+	-- added back); this gui is an IgnoreGuiInset Screen too, so its Position
+	-- offsets are in that same space. No shift here (the old shift put the pill
+	-- one inset too high). The pill and list are the HUD's own column items:
+	-- they never count as obstacles for their own placement.
+	local others: { [string]: ScreenRect } = {}
 	for name, rect in rects do
-		shifted[name] = { Position = rect.Position - inset, Size = rect.Size }
+		if name ~= "OrbRushPill" and name ~= "OrbRushList" then
+			others[name] = rect
+		end
 	end
-	return shifted
+	return others
 end
 
 -- Where an element of `size` goes: under the left column, else beside its foot,
@@ -168,6 +172,8 @@ local function chooseSpot(size: Vector2, rects: { [string]: ScreenRect }): (Vect
 		Vector2.new(columnLeft, columnBottom + COLUMN_GAP),
 		Vector2.new(columnRight + COLUMN_GAP, math.max(columnBottom - size.Y, UIKit.GetCardTop())),
 		Vector2.new(columnLeft, bottomRowTop - size.Y - COLUMN_GAP),
+		-- Phone, no room in the column: the right edge, just under the top bar.
+		Vector2.new(view.X - size.X - 12, UIKit.GetCardTop() + 8),
 	}
 	local robloxButtons: ScreenRect = { Position = Vector2.zero, Size = Vector2.new(170, 60) }
 	for _, candidate in candidates do
@@ -1010,9 +1016,10 @@ function MinigameController.SelfTestLines(scaleName: string): { string }
 	local view = UIKit.GetLogicalViewport()
 	local scale = UIKit.EffectiveScale(screenGui)
 	local failures: { string } = {}
+	local inset = Vector2.new(0, GuiService:GetGuiInset().Y)
 	local holders: { [string]: Frame } = { OrbRushPill = pillHolder, OrbRushList = listHolder }
 	for name, holder in holders do
-		local rect: ScreenRect = { Position = holder.AbsolutePosition / scale, Size = holder.AbsoluteSize / scale }
+		local rect: ScreenRect = { Position = (holder.AbsolutePosition + inset) / scale, Size = holder.AbsoluteSize / scale }
 		for other, hud in rects do
 			if overlaps(rect, hud) then
 				table.insert(failures, ("%s overlaps HUD %s"):format(name, other))
@@ -1024,6 +1031,14 @@ function MinigameController.SelfTestLines(scaleName: string): { string }
 		if overlaps(rect, { Position = Vector2.zero, Size = Vector2.new(170, 60) }) then
 			table.insert(failures, name .. " covers the Roblox top-left buttons")
 		end
+	end
+	local pillFrame: Frame = holders.OrbRushPill
+	local listFrame: Frame = holders.OrbRushList
+	if overlaps(
+		{ Position = (pillFrame.AbsolutePosition + inset) / scale, Size = pillFrame.AbsoluteSize / scale },
+		{ Position = (listFrame.AbsolutePosition + inset) / scale, Size = listFrame.AbsoluteSize / scale }
+	) then
+		table.insert(failures, "OrbRushPill overlaps OrbRushList")
 	end
 	local tapHeight = pillHolder.AbsoluteSize.Y
 	if tapHeight < 44 then
@@ -1047,6 +1062,15 @@ function MinigameController.Init()
 	screenGui = UIKit.Screen("OrbRush", DISPLAY_ORDER)
 	buildPill()
 	buildList()
+	-- Part of the HUD's left-column stack: its rects are obstacles like every
+	-- other element's, and the HUD re-places them whenever the column moves.
+	HudController.SetColumnItem("OrbRushPill", pillHolder)
+	HudController.SetColumnItem("OrbRushList", listHolder)
+	HudController.ColumnChanged:Connect(function()
+		if pillHolder.Visible or listHolder.Visible then
+			task.defer(placeColumn)
+		end
+	end)
 	buildCountdown()
 	buildMission()
 	buildResults()

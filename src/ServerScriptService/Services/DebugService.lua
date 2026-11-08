@@ -3885,7 +3885,10 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		local function winRate(rounds: number, seed: number): (number, number)
 			local rng = lcg(seed)
 			local wins = 0
-			for _ = 1, rounds do
+			for round = 1, rounds do
+				if round % 10 == 0 then
+					task.wait() -- a simulated round is heavy: never hold the thread for seconds
+				end
 				local racers: { MinigameConfig.Racer } = { { Speed = 16, Reaction = 0.35, Greed = 0 } }
 				for _ = 1, 4 do
 					local skill = MinigameConfig.PickBotSkill(rng:NextNumber())
@@ -3911,7 +3914,10 @@ local function runMinigameSelfTest(player: Player, result: (boolean, string, str
 		local rng = lcg(5)
 		local strong = MinigameConfig.BotSkill[3]
 		local botWon = 0
-		for _ = 1, 600 do
+		for round = 1, 600 do
+			if round % 10 == 0 then
+				task.wait()
+			end
 			local points = MinigameConfig.SimulateRound(rng, { { Speed = 16, Reaction = 0.35, Greed = 0 }, { Speed = strong.Speed, Reaction = strong.Reaction, Greed = strong.Greed } }, ArenaLayout.PLAY_RADIUS)
 			botWon += if points[2] > points[1] then 1 elseif points[2] == points[1] then 0.5 else 0
 		end

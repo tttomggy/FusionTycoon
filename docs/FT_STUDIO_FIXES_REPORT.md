@@ -19,3 +19,18 @@ HUD rects before / after at 1920x1080, 1366x768, 844x390, 896x414: the HUD itsel
 
 ## Could not verify without Studio
 The four-viewport HUD overlap numbers, the hover/fuzz/section-17 results, and that a results overlay already open on the client before /selftest starts closes (the abort sends no Results message).
+
+# Round 2
+
+Not verified in Studio (none available). Checked: `compile_check.py` (155 files, 0 errors), `theme_token_check.py` clean, `luau-lsp analyze` distinct set identical to the base commit (run without a sourcemap: rojo 7.4.4 here cannot read `ExplosionEffect.rbxm`), no new lines starting with `(`.
+
+## A. /selftest crashed in section 17 ("Script timeout: exhausted allowed execution time")
+Cause: not the forced round. After the 1 000-round PASS the next check ran 600 more `MinigameConfig.SimulateRound` calls (Strong bot head to head) in a single resume; a simulated round is heavy (the orb list is never pruned), so ~1 700 rounds back to back without a yield blew the script's time budget, blamed on the `pcall(runSelfTestBody)` frame. `startForcedRound`, `waitUntil`, `AbortRound`, `SetSelfTest`, `clearOrbs` and the `DebugStartNow` false path all yield (`task.wait`) or have no loops and are bounded (`waitUntil` has a timeout).
+Fix: `winRate` and the Strong-bot loop `task.wait()` every 10 simulated rounds. Nothing else changed in the forced rounds; their two `award nil` checks were already guarded by `startForcedRound`.
+
+## B. ORB RUSH pill still overlapped the HUD
+Cause: round 1 got the coordinate space wrong. The HUD rects (`Abs + inset`) are in the same space as an IgnoreGuiInset gui's `Position` offsets, so the original placement was right and my inset subtraction put the pill one inset (~58 px) too high, onto LockRow (desktop) and PhoneStatus / PhoneGrid / DealBadge (phone). The self-test measured `AbsolutePosition` against the shifted rects, so it agreed with the wrong placement only partly.
+Fix: no shift in `hudRects`; the self-test measures `(AbsolutePosition + inset) / scale`. The pill and list are now HUD left-column items: `HudController.SetColumnItem` registers them, `GetObstacleRects` reports their rects (so tips, effects tray, etc. avoid them), and `HudController.ColumnChanged` (after every column re-place / layout change) makes MinigameController re-place them below the lowest column rect. New fallback when the column has no room (phone 844x390 / 896x414): the right edge just under the top bar (>= 44 px tall tap target). The self-test also checks pill vs list.
+
+## Could not verify without Studio
+The live overlap numbers at 1920x1080, 1366x768, 844x390 and 896x414, whether the phone really falls back to the right edge, that the right edge is clear of the boost pills (it is only checked against registered HUD rects), and that section 17 now finishes with its `done` summary.

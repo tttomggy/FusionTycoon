@@ -137,10 +137,15 @@ All colours are `UITheme.World` tokens (`Arena*`, `Orb*`, `RushPortal`).
   a small `UIKit.Panel`. Both go in the HUD's left column, **below the lowest
   column rect** (`HudController.GetObstacleRectsFor`), else beside its foot, else
   above the bottom row: the first spot inside the screen that overlaps no HUD
-  rect and not the Roblox top-left buttons (re-placed every 0.5 s and on
-  `UIKit.LayoutChanged`). The HUD rects carry the top-bar inset (screen space) while
-  this gui's positions sit below it, so `hudRects` subtracts the inset first; the list
-  is placed with the pill's rect in the set. `/selftest` ("orb rush hud") checks it at both layouts.
+  rect and not the Roblox top-left buttons, else (phone, no room) the right edge just
+  under the top bar. The HUD rects and this IgnoreGuiInset gui's `Position` offsets share
+  ONE space (inset added back, `Abs + inset`), so no shift is applied (round 1's inset
+  subtraction was the bug); `/selftest` measures `(AbsolutePosition + inset) / scale`.
+  The pill and list are **HUD column items**: `HudController.SetColumnItem` registers
+  them, `GetObstacleRects` reports their rects like every element, and
+  `HudController.ColumnChanged` (fired after every column re-place) makes
+  MinigameController re-place them; the list is placed with the pill's rect in the set.
+  `/selftest` ("orb rush hud") checks pill vs HUD, list vs HUD and pill vs list.
 - **/selftest flag:** `DebugService.runSelfTest` calls `MinigameService.SetSelfTest(true)`
   (cleared after the run, even on error): the scheduler opens no call, and a call or
   round already running is aborted. Forced rounds still work; section 17 starts them
