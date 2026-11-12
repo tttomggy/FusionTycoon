@@ -162,6 +162,98 @@ function RivalConfig.GetTier(difficulty: string): DifficultyDef
 	return RivalConfig.Tiers[difficulty] or RivalConfig.Tiers.Easy
 end
 
+--[[ A save's first rival steal (retention fix) --------------------------------------
+	Live data (Nov 3-10): FirstRivalSteal was the biggest early funnel drop (30% of
+	the players who fused never delivered a rival steal). Three causes, three rules:
+	  * the Easy lab spawned in the FARTHEST of the four free slots (spawn order
+	    Insane first, each lab taking the nearest free slot), so tipRival's
+	    "nearest lab with an orb" sent a Rebirth 0 player to Medium, whose guard
+	    (13) outruns a carrier (12): SlotPickIndex now leaves the nearest slots to
+	    the lower difficulties, and a joining player takes the free slot nearest
+	    the Easy lab's gate (TycoonService's slot anchor);
+	  * until the first delivery the arrow, the mission box and the coach point at
+	    the LOWEST difficulty lab with an orb (BetterTargetLab), not the nearest;
+	  * a guard standing between the pedestal and the gate caught a new player 2 s
+	    into the carry (TagGraceSeconds), even on Easy. On a save's first rival steal
+	    (no FirstRivalSteal funnel mark yet) no guard tags for FirstSteal.
+	    TagGraceSeconds and the chasers run at most FirstSteal.MaxGuardSpeed, below
+	    the carrier: past the grace they are behind and slower, or past their leash.
+	Later steals, the hourly pools, the orbs and the economy are unchanged.
+	/selftest "retention" proves it on SimulateEscape over every pair of slots. ]]
+RivalConfig.FirstSteal = {
+	TagGraceSeconds = 10, -- no guard tag this long (12 studs/s x 10 = 120 studs: past Easy's and Medium's leash)
+	MaxGuardSpeed = HeistConfig.CarryWalkSpeed - 1, -- 11: a chaser never outruns a first-time carrier
+}
+
+-- The seconds after a grab in which no guard can tag (HeistService's carry loop).
+function RivalConfig.TagGraceFor(firstSteal: boolean?): number
+	return if firstSteal then RivalConfig.FirstSteal.TagGraceSeconds else HeistConfig.TagGraceSeconds
+end
+
+-- A chasing guard's speed against this carrier (RivalService.guardStep).
+function RivalConfig.ChaseSpeedFor(difficulty: string, firstSteal: boolean?): number
+	local speed = RivalConfig.GetTier(difficulty).GuardSpeed
+	return if firstSteal then math.min(speed, RivalConfig.FirstSteal.MaxGuardSpeed) else speed
+end
+
+-- The fail reason a first rival steal logs (FirstRivalStealFailed's field) for a
+-- carry outcome: a guard's touch ("Saved") is "Tagged"; the rest keep their name.
+function RivalConfig.FirstStealFailReason(outcome: string): string
+	return if outcome == "Saved" then "Tagged" else outcome
+end
+
+-- Which lab the steal arrow should prefer: true if lab A (difficulty rank, distance)
+-- beats lab B. Before the first delivery the lowest difficulty wins (the Easy lab),
+-- then the nearest; after it, simply the nearest (the old rule).
+function RivalConfig.BetterTargetLab(firstSteal: boolean, rankA: number, distanceA: number, rankB: number, distanceB: number): boolean
+	if firstSteal and rankA ~= rankB then
+		return rankA < rankB
+	end
+	return distanceA < distanceB
+end
+
+-- Where in the nearest-first list of free slots a spawning lab goes. `missing` is
+-- the spawn list still to place, this lab included (Insane, Hard, Medium, Easy:
+-- highest first). The lower difficulties still to come keep the nearer slots, so
+-- with enough slots the Easy lab ends up nearest the players and Insane farthest.
+-- Clamped to the free slots there are (index 1 = nearest).
+function RivalConfig.SlotPickIndex(difficulty: string, missing: { string }, freeCount: number): number
+	local rank = RivalConfig.GetTier(difficulty).Rank
+	local lower = 0
+	for _, other in missing do
+		if RivalConfig.GetTier(other).Rank < rank then
+			lower += 1
+		end
+	end
+	return math.clamp(lower + 1, 1, math.max(1, freeCount))
+end
+
+-- `free` sorted nearest-first by the distance from each slot's gate (`gateOf`) to
+-- the nearest anchor; ties keep the lower slot index. No anchors: unchanged order.
+function RivalConfig.SortSlotsByDistance(free: { number }, anchors: { Vector3 }, gateOf: (number) -> Vector3): { number }
+	local sorted = table.clone(free)
+	if #anchors == 0 then
+		table.sort(sorted)
+		return sorted
+	end
+	local distance: { [number]: number } = {}
+	for _, slot in sorted do
+		local nearest = math.huge
+		local gate = gateOf(slot)
+		for _, anchor in anchors do
+			nearest = math.min(nearest, (gate - anchor).Magnitude)
+		end
+		distance[slot] = nearest
+	end
+	table.sort(sorted, function(a: number, b: number): boolean
+		if distance[a] ~= distance[b] then
+			return distance[a] < distance[b]
+		end
+		return a < b
+	end)
+	return sorted
+end
+
 -- Whether a lab of `difficulty` may show / hand out an orb of `tier` (its
 -- weight is above 0). HeistService re-checks this at grab time.
 function RivalConfig.IsTierAllowed(difficulty: string, tier: string): boolean
@@ -305,11 +397,12 @@ export type EscapeInput = {
 	Difficulty: string,
 	Distance: number, -- the route the carrier runs to their own plot, studs
 	CarrierSpeed: number, -- 12 carrying; x1.5 with Speed Boots
-	Gaps: { number }, -- each CHASER's distance behind the carrier when the grab lands
+	Gaps: { number }, -- each CHASER's distance behind the carrier when the grab lands (negative: ahead of it, between the pedestal and the gate)
 	StunAt: number?, -- seconds into the carry both chasers are hit by a weapon (nil: never)
 	ReactionSeconds: number?, -- before a guard's first path is computed (default 0.3)
 	GateAt: number?, -- where the lab's gate is along the route (default 34: pedestal row to gate); a chaser quits Leash studs past it
 	HolderStunAt: number?, -- seconds into the carry a weapon hits the gate-holder (nil: never); only for a difficulty that has one
+	FirstSteal: boolean?, -- a save's first rival steal: TagGraceFor / ChaseSpeedFor (RivalConfig.FirstSteal)
 }
 
 -- Whether a lab of `difficulty` has a gate-holder (more guards than MaxChasers).
@@ -344,6 +437,8 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 	local holderStunApplied = false
 	local hasHolder = RivalConfig.HasHolder(input.Difficulty)
 	local quitAt = gateAt + tier.Leash
+	local grace = RivalConfig.TagGraceFor(input.FirstSteal)
+	local guardSpeed = RivalConfig.ChaseSpeedFor(input.Difficulty, input.FirstSteal)
 	local t = 0
 	while t < HeistConfig.CarrySeconds do
 		if carrier >= input.Distance then
@@ -365,7 +460,7 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 		-- The gate-holder stands in the gate and tags anyone inside its radius.
 		if
 			hasHolder
-			and t >= HeistConfig.TagGraceSeconds
+			and t >= grace
 			and t >= holderStunnedUntil
 			and math.abs(carrier - holderAt) <= RivalConfig.HolderTagRadius
 		then
@@ -373,9 +468,9 @@ function RivalConfig.SimulateEscape(input: EscapeInput): (boolean, number)
 		end
 		for _, chaser in chasers do
 			if t >= reaction and t >= chaser.StunnedUntil and chaser.Pos < quitAt then
-				chaser.Pos = math.min(chaser.Pos + tier.GuardSpeed * step, carrier)
+				chaser.Pos = math.min(chaser.Pos + guardSpeed * step, carrier)
 			end
-			if t >= HeistConfig.TagGraceSeconds and chaser.Pos < quitAt and carrier - chaser.Pos <= HeistConfig.TagDistance then
+			if t >= grace and chaser.Pos < quitAt and carrier - chaser.Pos <= HeistConfig.TagDistance then
 				return false, t
 			end
 		end

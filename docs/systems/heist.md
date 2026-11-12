@@ -147,7 +147,18 @@ holds a number.
 - **Labs.** `MaxRivals = 4`, **one lab per difficulty**, in the free slots
   nearest the real players' labs (`RivalService.Step`, every `FillSeconds`;
   spawn order Insane, Hard, Medium, Easy, so when slots are short the labs that
-  exist are the ones the despawn order keeps). Built by
+  exist are the ones the despawn order keeps). **The nearest slots go to the
+  lowest difficulties** (retention fix): distances are gate to gate
+  (`PlotLayout.GetSlotGatePosition`, so the lab across the street is the
+  nearest), `RivalConfig.SortSlotsByDistance` orders the free slots and
+  `RivalConfig.SlotPickIndex` makes each lab skip one slot per lower difficulty
+  still to spawn, so the Easy lab is the one next to the players (across the
+  street, 36 studs gate to gate, in every slot; before, each lab took the
+  nearest free slot in spawn order, so Insane was next door and **Medium was
+  nearer than Easy for a player in any of the 12 slots**). A joining player's
+  plot goes in the free slot nearest the Easy lab's gate
+  (`TycoonService.SetSlotAnchor(RivalService.GetEasyGate)`; the lowest free slot
+  without one, as before). Built by
   `TycoonService.BuildRivalPlot(slot, id, name, difficulty)` = the player plot's
   code (`buildShell`, walls, `PlotKit.BuildSignGate`, `createPedestals`, no claim
   button or spawn) **plus the rest of a lab in decoration mode** (below): plot
@@ -336,6 +347,32 @@ holds a number.
   / 1.17 / 0.89 s**, so a skilled solo player has about 15-27 studs (roughly a
   second of running) to land the shot, and `/selftest` holds the 15-stud shot
   to at least 1 s of margin.
+- **A save's first rival steal** (retention fix, `RivalConfig.FirstSteal`;
+  `docs/RETENTION_FIX_REPORT.md`). The live funnel lost 30% of the players who
+  fused at FirstRivalSteal. Until the save has the `FirstRivalSteal` funnel mark
+  (`PlayerDataService.HasFunnelStep`; the snapshot's `RivalStealDone`):
+  - the steal arrow / mission box (`GoalMarkerController`'s
+    `NearestRivalPedestal`) and the coach (`GoalService.nearestRivalWithOrb`)
+    pick the **lowest difficulty** lab with a grabbable orb, then the nearest
+    (`RivalConfig.BetterTargetLab`); after it, the nearest as before. (They used
+    to send a Rebirth 0 player to Medium, whose guard at 13 outruns a carrier at
+    12.)
+  - the carry (`Carry.FirstSteal`, `RivalService.BeginCarry(.., firstSteal)`) has
+    **no guard tag for `FirstSteal.TagGraceSeconds` (10 s)** instead of
+    `HeistConfig.TagGraceSeconds` (2 s), and its chasers run at most
+    **`FirstSteal.MaxGuardSpeed` (11)**, below the carrier
+    (`RivalConfig.TagGraceFor`, `ChaseSpeedFor`; `SimulateEscape` takes
+    `FirstSteal`). 10 s at 12 studs/s is 120 studs: past Easy's and Medium's
+    leash (gate + 40 / 60 along the 34-stud route), so a guard that met the thief
+    head-on between the pedestal and the gate (what caught new players 2 s in,
+    even on Easy) has given up or fallen behind when it could tag. The client's
+    "RUN!" lasts the grace (`GraceEndsAt`).
+  - Later steals, the hold time, the hourly pools, the orbs and the economy are
+    unchanged (`/selftest retention` asserts the old grace and speeds).
+  - Analytics: `FirstRivalStealStarted` (value = the lab's rank, field = its
+    difficulty), `FirstRivalStealDelivered` (field = difficulty),
+    `FirstRivalStealFailed` (field = `RivalConfig.FirstStealFailReason`: Tagged,
+    Knocked, Timeout, Died, Failed).
 - **Teaching.** `tipRival` (`tutorial.md`). The red hand markers on
   grabbable pedestals work on rival pedestals too (a Locked prompt is not
   grabbable, so no hand); `stealHowTo` and the `first_steal` marker skip them.

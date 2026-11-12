@@ -126,3 +126,39 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   bar, a "This visit: 29:45" line, the footer "Gifts restart every time you
   join. Stay to open them all!" and a daily-reward strip on top). The client counts play time on
   from the snapshot (`TycoonController.GetGiftPlaySeconds`).
+- **The come-back card** (retention fix; `RetentionConfig.ComeBack`,
+  `ComeBackController` + `UI/ComeBackCard`; `docs/RETENTION_FIX_REPORT.md`). The
+  live Day 1 retention was ~2% with a 4.6-minute average session, and nothing in
+  the first session said what coming back gives. ONE card, **once per account,
+  in the first session** (`Shop.Sessions == 1`), never during the tutorial:
+  from `MinSeconds` (150 s) of this visit's play at the first natural pause (a
+  big fusion / pull card or the ×10 card closing: `ResultController.
+  SetMomentHook`; the daily reveal closing: `DailyController.OnRevealClosed`; a
+  delivered rival steal: `HeistController.SetDeliveryHook`), and from
+  `FallbackSeconds` (240 s) the next time the screen is quiet (no UIKit overlay
+  or shop side card, not carrying, not ragdolled / frozen). The pure rule is
+  `RetentionConfig.ShouldShowComeBack`. A `UIKit.Modal` (`FitContent`, 560 ×
+  392, the daily card's layer 125), centred in the card band: three rows from
+  `RetentionConfig.PlanComeBack` - "TOMORROW · DAY 2 / ×2 income for 15 min /
+  Then Day 3: 3 free pulls · Day 7: 1 Epic+ item" (the `DailyConfig` ladder,
+  `RewardConfig.GetTitle`), "WHILE YOU'RE AWAY / Your lab earns up to $X / 25%
+  of your income, for up to 4 h" (X = the snapshot's `OfflineMax`, the server's
+  `OfflineConfig.Compute(base income, MaxSeconds)`), and either "TODAY'S REWARD
+  IS READY / Day 1 · …" (the button then reads CLAIM TODAY'S REWARD and opens
+  the daily card) or "EVERY VISIT / 6 playtime gifts". No countdown, no pressure
+  copy, nothing sold. Opening fires `ComeBackShown { Event = "Shown" }`;
+  `RewardService.MarkComeBackShown` re-checks (`CanMarkComeBack`: first
+  session, not seen, tutorial done, `MinSeconds` of play), saves the
+  `comeBack` tip and logs `ComeBackShown` (value = minutes played, field
+  `DailyClaimed` / `NoDaily`). `/selftest` suppresses it with the daily card.
+- **Day 1-2 values checked, unchanged** (retention fix): every daily amount is
+  seconds of the player's own base income, so none is trivial at any income.
+  At a greedy player's ~4-5 minute income ($130-290/s, `tools/econ_sim.py`),
+  Day 1 (10 min of income, at least $2,500) is ~$78k-174k and Day 2's ×2
+  income for 15 min is worth another 15 min of income; offline earnings for a
+  night away (25% for 4 h = 1 h of income) are ~$0.5-1M, against a $5,000
+  first Multiplier level. No economy number changed.
+- **SessionMinutes** (analytics): `RewardService`'s play tick logs
+  `SessionMinutes` at 2, 5 and 10 minutes of each visit
+  (`RetentionConfig.CrossedMarks`; value = minutes, field `FirstSession` /
+  `Returning`).

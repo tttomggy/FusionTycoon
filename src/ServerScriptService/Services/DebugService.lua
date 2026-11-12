@@ -4178,7 +4178,17 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 		return
 	elseif only == "rivals" then
 		print("[SelfTest] == 16. rival labs ==")
+		-- The rival checks are about LATER steals (the old rules): the tester
+		-- counts as having delivered one; a first steal is section 18's.
+		local hadFirst = PlayerDataService.SelfTestSetFunnelStep(player, "FirstRivalSteal", true)
 		runRivalSelfTest(player, result)
+		PlayerDataService.SelfTestSetFunnelStep(player, "FirstRivalSteal", hadFirst)
+		return
+	elseif only == "retention" then
+		print("[SelfTest] == 18. retention ==")
+		local RetentionSelfTest = require(script.Parent.Parent.Modules.RetentionSelfTest) :: any
+		RetentionSelfTest.Run(player, result, { PlayerDataService = PlayerDataService, HeistService = HeistService, RivalService = RivalService, RewardService = RewardService })
+		tutorialProbe(player, { Kind = "ComeBack" }, result)
 		return
 	elseif only == "orbrush" then
 		print("[SelfTest] == 17. ORB RUSH ==")
@@ -4463,10 +4473,25 @@ local function runSelfTestBody(player: Player, result: (boolean, string, string?
 	-- 16. Rival labs: the fill, a real player's slot, the Rebirth rule, a
 	-- steal end to end, the limits, the rolls (also: /selftest rivals).
 	runSection("16. rival labs", result, function()
-		runRivalSelfTest(player, result)
+		-- The rival checks are about LATER steals (the old rules): the tester
+		-- counts as having delivered one; a first steal is section 18's.
+		local hadFirst = PlayerDataService.SelfTestSetFunnelStep(player, "FirstRivalSteal", true)
+		local ok, err = pcall(runRivalSelfTest, player, result)
+		PlayerDataService.SelfTestSetFunnelStep(player, "FirstRivalSteal", hadFirst)
+		if not ok then
+			error(err, 0)
+		end
 	end)
 	runSection("17. ORB RUSH", result, function()
 		runMinigameSelfTest(player, result)
+	end)
+	-- 18. The retention fix: the first rival steal (escape model, lab placement,
+	-- the arrow, a live first grab), the analytics rules, the come-back card
+	-- (also: /selftest retention).
+	runSection("18. retention", result, function()
+		local RetentionSelfTest = require(script.Parent.Parent.Modules.RetentionSelfTest) :: any
+		RetentionSelfTest.Run(player, result, { PlayerDataService = PlayerDataService, HeistService = HeistService, RivalService = RivalService, RewardService = RewardService })
+		tutorialProbe(player, { Kind = "ComeBack" }, result)
 	end)
 end
 

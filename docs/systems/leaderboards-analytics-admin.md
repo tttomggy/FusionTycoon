@@ -22,7 +22,9 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   via `SetFunnelStore` from PlayerDataService): Join, ClaimLab,
   FirstUpgrade, FirstPull, FirstDisplay, FirstFuse, FirstRivalSteal,
   FirstMultiplier, FirstEvent, FirstRebirth, FirstSteal, FirstOrbRush
-  (ORB RUSH; APPENDED at the end so the live funnel's indices do not move)
+  (ORB RUSH; APPENDED at the end so the live funnel's indices do not move),
+  Day2Return (the first join on a later UTC day than the first join,
+  `RetentionConfig.OnJoin`; APPENDED too)
   (FirstRivalSteal went
   in after FirstFuse with the rival labs, so every later step moved up one;
   fine pre-launch, and `PlayerData.Funnel` is keyed by name). `Source` / `Sink` →
@@ -40,6 +42,20 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   OrbRushPrize (field = tier), QuestClaimed (id),
   PowerUpUsed (key). Never call AnalyticsService
   directly.
+  **The first 5 minutes** (retention fix, `docs/RETENTION_FIX_REPORT.md`):
+  | Event | When | Value / field |
+  |---|---|---|
+  | `SessionMinutes` | 2, 5 and 10 minutes of each visit's play (`RewardService` tick, `RetentionConfig.CrossedMarks`) | minutes / `FirstSession` or `Returning` |
+  | `FirstRivalStealStarted` | a grab on a save's first rival steal (no FirstRivalSteal mark yet) | the lab's rank (1 Easy, 2 Medium) / difficulty |
+  | `FirstRivalStealDelivered` | that carry delivered (the funnel's FirstRivalSteal fires with it) | - / difficulty |
+  | `FirstRivalStealFailed` | that carry ended any other way | - / `Tagged` (a guard's touch), `Knocked`, `Timeout`, `Died`, `Failed` (the lab went / data); a player who leaves mid-carry logs nothing |
+  | `ComeBackShown` | the come-back card opened (server re-checked) | minutes played / `DailyClaimed` or `NoDaily` |
+  | `ReturnVisit` | the first join of each later UTC day | days since the first join / `NextDay` or `Later` |
+  | funnel `Day2Return` | the first such join ever (appended step 13) | |
+  Reading them: FirstRivalStealStarted / FirstRivalSteal (by user) is "found and
+  grabbed" vs "got home"; FirstRivalStealFailed's field says why; SessionMinutes
+  `FirstSession` 2 / 5 / 10 is the first-session length curve; ReturnVisit
+  `NextDay` over Join (by first day) is our own D1.
 - **Admin Abuse** (`AdminService`, numbers in `AdminConfig`): admins are
   `AdminConfig.AdminUserIds` plus the place owner (creator, or the group's
   owner). `/admin` opens the panel by sending `AdminOpen` to admins only;

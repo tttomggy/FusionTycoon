@@ -52,6 +52,7 @@ local REMOTE_EVENT_NAMES = {
 	"ClaimDaily", -- client -> server: no payload (RewardService decides the day and the reward)
 	"DailyResult", -- server -> client: { Result = "Granted" | "Refused", Day?, Streak?, UsedSkip?, Kind?, Lines?, Reason? } (the daily card's reveal)
 	"NotifyOptInAnalytics", -- client -> server: { Event = "Shown" | "Closed" } the Roblox notification opt-in prompt showed / was closed (analytics only; whitelisted, rate-limited)
+	"ComeBackShown", -- client -> server: { Event = "Shown" } the come-back card opened (RewardService re-checks RetentionConfig.CanMarkComeBack, saves the comeBack tip, logs ComeBackShown; rate-limited)
 	"ClaimGift", -- client -> server: { Index } (GiftConfig.Gifts index; the server checks this visit's play time and that it isn't claimed)
 	"GiftResult", -- server -> client: { Result = "Granted" | "Refused", Index?, Kind?, Lines?, Reason? } (the Gifts panel's reveal)
 	"FriendJoined", -- server -> one client: a Roblox friend joined your server and the boost grew; { Name (DisplayName), Percent, Friended } (the "👥 <Name> joined: +15% income!" line, or "👥 You and <Name> are friends: +15% income!" when Friended: they became friends mid-session; the count itself rides SyncTycoon.Friends)

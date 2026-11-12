@@ -100,6 +100,8 @@ local function fuzzCases(otherUserId: number): { [string]: { { any } } }
 		},
 		RequestShopPurchase = { {}, { "x" }, { { Key = 5 } }, { { Key = "NoSuchProduct" } }, { { Key = BIG_STRING } } },
 		NotifyOptInAnalytics = { {}, { "x" }, { { Event = "Nope" } }, { { Event = 5 } }, { { Event = BIG_STRING } } },
+		-- Never Event = "Shown" (that is the real report; the server re-checks it anyway).
+		ComeBackShown = { {}, { "x" }, { { Event = "Nope" } }, { { Event = 5 } }, { { Event = BIG_STRING } }, { { Event = { "Shown" } } } },
 		ShopAnalytics = { {}, { { Event = "Nope" } }, { { Event = "ShopOpened", Key = "NoSuchProduct" } }, { { Event = 5 } } },
 		ClaimGift = { {}, { "x" }, { { Index = 0 } }, { { Index = 99 } }, { { Index = "1" } } },
 		SetSetting = {
@@ -2280,6 +2282,7 @@ local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 	local TutorialCards = require(UI.TutorialCards) :: any
 	local TutorialExplain = require(UI.TutorialExplain) :: any
 	local DailyCard = require(UI.DailyCard) :: any
+	local ComeBackCard = require(UI.ComeBackCard) :: any
 	local EventInfoCard = require(UI.EventInfoCard) :: any
 	local ShopCards = require(UI.ShopCards) :: any
 	local ResultController = require(script.Parent.ResultController) :: any
@@ -2289,6 +2292,8 @@ local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 		local NotifyOptInController = require(script.Parent.NotifyOptInController) :: any
 		DailyController.SelfTestSuppress(suppressDaily)
 		NotifyOptInController.SelfTestSuppress(suppressDaily)
+		local ComeBackController = require(script.Parent.ComeBackController) :: any
+		ComeBackController.SelfTestSuppress(suppressDaily)
 	end
 	local found = UIKit.GetOpenOverlays()
 	if EventInfoCard.IsOpen() then
@@ -2305,6 +2310,7 @@ local function clearScreen(suppressDaily: boolean?): ({ string }, { string })
 	TutorialCards.Close()
 	TutorialExplain.Close()
 	DailyCard.Close()
+	ComeBackCard.Close()
 	EventInfoCard.Hide()
 	ShopCards.CloseSide()
 	ResultController.CloseCards()
@@ -5386,6 +5392,9 @@ local function probeTutorial(payload: any)
 			return probeFriendChip(if typeof(payload.Percent) == "number" then payload.Percent else 0)
 		elseif payload.Kind == "PassesCircle" then
 			return probePassesCircle()
+		elseif payload.Kind == "ComeBack" then
+			-- The come-back card: rules, placement, text (ComeBackController's own probe).
+			return (require(script.Parent.ComeBackController) :: any).SelfTestProbe()
 		elseif payload.Kind == "EffectsTray" then
 			return probeEffectsTray(if typeof(payload.Tokens) == "number" then payload.Tokens else 0)
 		elseif payload.Kind == "FuseMeter" then

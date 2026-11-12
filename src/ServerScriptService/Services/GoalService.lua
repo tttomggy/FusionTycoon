@@ -251,14 +251,19 @@ end
 --[[ Loop coach ------------------------------------------------------------ ]]
 
 -- The name of the rival lab nearest the player that holds an orb to grab
--- (the arrow's NearestRivalPedestal picks the same lab), or nil.
+-- (before their first delivered rival steal: the lowest difficulty one) - the
+-- arrow's NearestRivalPedestal picks the same lab - or nil.
 local function nearestRivalWithOrb(player: Player): (string?, number)
 	local character = player.Character
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	local best: string? = nil
 	local bestLeft = 0
 	local bestDistance = math.huge
+	local bestRank = math.huge
 	local rebirths = PlayerDataService.GetRebirths(player)
+	-- Until the first delivered rival steal the LOWEST difficulty lab wins (the
+	-- Easy lab), then the nearest (RivalConfig.BetterTargetLab; the arrow agrees).
+	local firstSteal = not PlayerDataService.HasFunnelStep(player, "FirstRivalSteal")
 	for _, rival in RivalService.GetRivals() do
 		-- Only a lab this player may rob (its difficulty's Rebirth gate) and still
 		-- has hourly steals for: the coach never sends a Rebirth 0 player to an Insane lab.
@@ -275,8 +280,9 @@ local function nearestRivalWithOrb(player: Player): (string?, number)
 		end
 		if hasOrb then
 			local distance = if root and root:IsA("BasePart") then (rival.Origin.Position - root.Position).Magnitude else 0
-			if distance < bestDistance then
-				best, bestDistance, bestLeft = rival.Name, distance, left
+			local rank = RivalConfig.GetTier(rival.Difficulty).Rank
+			if best == nil or RivalConfig.BetterTargetLab(firstSteal, rank, distance, bestRank, bestDistance) then
+				best, bestDistance, bestLeft, bestRank = rival.Name, distance, left, rank
 			end
 		end
 	end

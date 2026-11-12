@@ -109,6 +109,9 @@ local sunburstConnection: RBXScriptConnection? = nil
 -- The high moment the open big card stands for (NotifyOptInController asks
 -- for notifications when it closes): only while `Holder` is the open card.
 local bigMoment: { Holder: Frame, Kind: NotifyOptInController.Moment, Tier: string }? = nil
+-- A natural pause for the come-back card (ComeBackController.OnMoment, set
+-- through SetMomentHook so this module never requires it): a big card closed.
+local momentHook: () -> () = function() end
 
 local function closeBigCard()
 	if sunburstConnection then
@@ -122,6 +125,7 @@ local function closeBigCard()
 	bigMoment = nil
 	if holder and moment and moment.Holder == holder then
 		NotifyOptInController.OnMoment(moment.Kind, moment.Tier)
+		momentHook()
 	end
 	if holder then
 		local tween = UIKit.PopOut(holder)
@@ -652,6 +656,7 @@ local function closeMultiCard()
 	multiBestTier = nil
 	if holder and bestTier then
 		NotifyOptInController.OnMoment("Pull", bestTier)
+		momentHook()
 	end
 	if holder then
 		local tween = UIKit.PopOut(holder)
@@ -1113,6 +1118,12 @@ end
 
 -- The thief got home: the item is theirs.
 -- `subline`: an optional line under the item (default: where it went).
+-- ComeBackController registers its OnMoment: called when a big fusion / pull
+-- card or the x10 card closes (the same moments NotifyOptInController gets).
+function ResultController.SetMomentHook(hook: () -> ())
+	momentHook = hook
+end
+
 function ResultController.ShowHeistComplete(item: HeistItem, victimName: string, subline: string?)
 	showHeistCard(
 		"HEIST COMPLETE!",

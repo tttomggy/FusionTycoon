@@ -50,6 +50,7 @@ local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
 local ItemConfig = require(ReplicatedStorage.Shared.Config.ItemConfig)
 local PlotNaming = require(ReplicatedStorage.Shared.Config.PlotNaming)
 local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
+local RivalConfig = require(ReplicatedStorage.Shared.Config.RivalConfig)
 local UITheme = require(ReplicatedStorage.Shared.Modules.UITheme)
 local BillboardKit = require(ReplicatedStorage.Shared.Modules.BillboardKit)
 local UIKit = require(script.Parent.Parent.UI.UIKit)
@@ -143,14 +144,19 @@ local function resolveTarget(name: string): Instance?
 	if name == "NearestRivalPedestal" then
 		-- The best grabbable pedestal (highest tier, then nearest) in the
 		-- nearest rival lab that has one (WorldLabelController marks its
-		-- StealPrompt Mode "Steal"). tipRival's arrows and hand.
+		-- StealPrompt Mode "Steal"). Until the first delivered rival steal the
+		-- LOWEST difficulty lab with one wins (the Easy lab: its guard is slower
+		-- than a carrier), then the nearest (RivalConfig.BetterTargetLab; the
+		-- server's coach agrees). tipRival's arrows and hand, the mission box.
 		local folder = plot.Parent
 		local character = localPlayer.Character
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 		if not folder or not root or not root:IsA("BasePart") then
 			return nil
 		end
+		local firstSteal = not TycoonController.HasDeliveredRivalSteal()
 		local bestLabDistance = math.huge
+		local bestLabRank = math.huge
 		local bestPedestal: Instance? = nil
 		for _, other in folder:GetChildren() do
 			local pedestals = if other:GetAttribute("Rival") == true then other:FindFirstChild("Pedestals") else nil
@@ -171,8 +177,10 @@ local function resolveTarget(name: string): Instance?
 						end
 					end
 				end
-				if labBest and labDistance < bestLabDistance then
-					bestLabDistance, bestPedestal = labDistance, labBest
+				local difficulty = other:GetAttribute("RivalDifficulty")
+				local labRankOrder = RivalConfig.GetTier(if typeof(difficulty) == "string" then difficulty else "Easy").Rank
+				if labBest and (bestPedestal == nil or RivalConfig.BetterTargetLab(firstSteal, labRankOrder, labDistance, bestLabRank, bestLabDistance)) then
+					bestLabDistance, bestLabRank, bestPedestal = labDistance, labRankOrder, labBest
 				end
 			end
 		end

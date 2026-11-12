@@ -21,6 +21,12 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   three bots fill it) / `/orbrush call [seconds]` (open a call window) /
   `/orbrush abort` (end it, go home); `/selftest orbrush` runs the ORB RUSH
   checks alone (`docs/systems/minigames.md`),
+  `/selftest retention` (section 18 alone: the first rival steal's escape model
+  over every pair of slots, the lab placement, the steal arrow's lab, a live
+  first grab from the Easy lab, the analytics rules, the come-back card's rules /
+  placement / text; `docs/RETENTION_FIX_REPORT.md`; section 16 marks the tester
+  as having delivered a rival steal while it runs, so its checks keep the
+  later-steal rules),
   `/tips reset` (clears your seen one-time tips), `/tutorial reset` (also
   clears the tutorial-flow tips `tipRival` / `tipUpgrade` / `tipMultiplier` /
   `tipIndex` / `tipEvent` / `tipRebirth` and the `RivalSteals` hourly counter,

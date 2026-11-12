@@ -9,7 +9,10 @@
 
 	Labs
 	  * RivalConfig.MaxRivals (4), ONE per difficulty (Easy, Medium, Hard,
-	    Insane), in the free slots nearest to the real players' labs. Built by
+	    Insane), in the free slots nearest to the real players' labs, the
+	    nearest left to the LOWEST difficulty (RivalConfig.SlotPickIndex: the
+	    Easy lab is the one next to the players); a joining player's plot goes
+	    in the free slot nearest the Easy lab (TycoonService.SetSlotAnchor). Built by
 	    TycoonService.BuildRivalPlot (the player plot code: shell, walls, sign
 	    gate, pedestals, plus the Fusion Machine, stations, factory line and
 	    portal as decoration-mode pictures: no prompts, no labels, no owner).
@@ -106,6 +109,7 @@ type PedestalState = {
 	Orb: Orb?,
 	Carried: boolean,
 	Thief: Player?, -- who carries it
+	FirstSteal: boolean, -- the carrier's first rival steal (RivalConfig.FirstSteal: the chasers run at most MaxGuardSpeed)
 	RespawnAt: number?, -- RivalService clock time a stolen orb is back
 	Holders: { [Player]: boolean }, -- players holding this pedestal's StealPrompt
 }
@@ -813,6 +817,20 @@ local function startChase(rival: Rival, guard: Guard, target: Player)
 	end
 end
 
+-- Whether `player` carries an orb from this lab on their save's first rival
+-- steal (BeginCarry's flag): the chasers then never outrun them.
+local function isFirstStealCarrier(rival: Rival, player: Player?): boolean
+	if not player then
+		return false
+	end
+	for _, ped in rival.Pedestals do
+		if ped.Carried and ped.Thief == player and ped.FirstSteal then
+			return true
+		end
+	end
+	return false
+end
+
 local function guardStep(rival: Rival, guard: Guard)
 	if guard.Root.Parent == nil then
 		return
@@ -867,7 +885,7 @@ local function guardStep(rival: Rival, guard: Guard)
 			guard.Target = nil
 			guard.Waypoints = {}
 		else
-			humanoid.WalkSpeed = tier.GuardSpeed
+			humanoid.WalkSpeed = RivalConfig.ChaseSpeedFor(rival.Difficulty, isFirstStealCarrier(rival, target))
 			if t - guard.LastPathAt >= RivalConfig.GuardPathSeconds then
 				requestPath(guard, targetRoot.Position)
 			end
@@ -1003,8 +1021,10 @@ end
 -- the nearest (up to RivalConfig.MaxChasers) free guards chase the thief, the
 -- others hold the gate. A guard already chasing someone else stays on them,
 -- unless every guard is busy: then the nearest one switches to the new thief.
--- Returns the orb, or nil if there is nothing to grab.
-function RivalService.BeginCarry(rivalId: number, index: number, thief: Player): Orb?
+-- Returns the orb, or nil if there is nothing to grab. `firstSteal`: the thief's
+-- save has never delivered a rival steal (RivalConfig.FirstSteal: the chasers run
+-- at most MaxGuardSpeed for this carry).
+function RivalService.BeginCarry(rivalId: number, index: number, thief: Player, firstSteal: boolean?): Orb?
 	local rival = state.rivals[rivalId]
 	local ped = rival and rival.Pedestals[index]
 	if not rival or not ped or not ped.Orb or ped.Carried then
@@ -1012,6 +1032,7 @@ function RivalService.BeginCarry(rivalId: number, index: number, thief: Player):
 	end
 	ped.Carried = true
 	ped.Thief = thief
+	ped.FirstSteal = firstSteal == true
 	showPedestal(rival, index)
 	local thiefRoot = getRoot(thief)
 	local thiefPosition = if thiefRoot then thiefRoot.Position else rival.Origin.Position
@@ -1055,6 +1076,7 @@ function RivalService.EndCarry(rivalId: number, index: number, delivered: boolea
 	end
 	ped.Carried = false
 	ped.Thief = nil
+	ped.FirstSteal = false
 	if delivered then
 		ped.Orb = nil
 		ped.RespawnAt = now() + RivalConfig.GetTier(rival.Difficulty).RespawnSeconds
@@ -1215,29 +1237,45 @@ end
 
 --[[ Building and removing ------------------------------------------------------ ]]
 
--- The free slot nearest to a real player's lab (the labs people can see).
-local function pickSlot(): number?
-	local free = TycoonService.GetFreeSlots()
-	if #free == 0 then
-		return nil
-	end
+-- A slot's gate on the street (slot distances are measured gate to gate: the
+-- labs across the street are the nearest walk).
+local function slotGate(slot: number): Vector3
+	return PlotLayout.GetSlotGatePosition(slot)
+end
+
+-- The free slots, nearest-first to the real players' labs (gate to gate).
+local function freeSlotsByDistance(): { number }
 	local anchors: { Vector3 } = {}
 	for _, slot in TycoonService.GetPlayerSlots() do
-		table.insert(anchors, PlotLayout.GetSlotCFrame(slot).Position)
+		table.insert(anchors, slotGate(slot))
 	end
-	local best: number? = nil
-	local bestDistance = math.huge
-	for _, slot in free do
-		local position = PlotLayout.GetSlotCFrame(slot).Position
-		local nearest = math.huge
-		for _, anchor in anchors do
-			nearest = math.min(nearest, (position - anchor).Magnitude)
-		end
-		if nearest < bestDistance then
-			best, bestDistance = slot, nearest
+	if #anchors == 0 then
+		return {} -- nobody in yet: no labs (they fill around the first player)
+	end
+	return RivalConfig.SortSlotsByDistance(TycoonService.GetFreeSlots(), anchors, slotGate)
+end
+
+-- The slot a lab of `difficulty` takes: the lower difficulties still to spawn
+-- (`missing`, this one included) keep the nearer slots (RivalConfig.SlotPickIndex),
+-- so the Easy lab is the one nearest the players.
+local function pickSlot(difficulty: string, missing: { string }): number?
+	local sorted = freeSlotsByDistance()
+	if #sorted == 0 then
+		return nil
+	end
+	return sorted[RivalConfig.SlotPickIndex(difficulty, missing, #sorted)]
+end
+
+-- The Easy lab's gate (nil without one): a joining player's plot goes in the
+-- free slot nearest it (TycoonService's slot anchor), so a new player's first
+-- steal is a short run.
+function RivalService.GetEasyGate(): Vector3?
+	for _, rival in state.rivals do
+		if rival.Difficulty == "Easy" then
+			return slotGate(rival.SlotIndex)
 		end
 	end
-	return best
+	return nil
 end
 
 --[[ Rotation ------------------------------------------------------------------- ]]
@@ -1327,8 +1365,8 @@ local function missingDifficulties(): { string }
 	return missing
 end
 
-local function spawnRival(difficulty: string): Rival?
-	local slot = pickSlot()
+local function spawnRival(difficulty: string, missing: { string }): Rival?
+	local slot = pickSlot(difficulty, missing)
 	if not slot or not TycoonService.ReserveSlot(slot) then
 		return nil
 	end
@@ -1358,7 +1396,7 @@ local function spawnRival(difficulty: string): Rival?
 	end
 	state.rivals[id] = rival
 	for index = 1, RivalConfig.PedestalCount do
-		rival.Pedestals[index] = { Orb = nil, Carried = false, Thief = nil, RespawnAt = nil, Holders = {} }
+		rival.Pedestals[index] = { Orb = nil, Carried = false, Thief = nil, FirstSteal = false, RespawnAt = nil, Holders = {} }
 		fillPedestal(rival, index)
 		trackHolders(rival, index)
 	end
@@ -1453,14 +1491,16 @@ end
 -- time is up, re-roll the orbs of a lab whose rotation is due, all only while
 -- canRotate. Called every FillSeconds; /selftest calls it with its own clock.
 function RivalService.Step()
-	for _, difficulty in missingDifficulties() do
+	local missing = missingDifficulties()
+	while #missing > 0 do
 		local count = 0
 		for _ in state.rivals do
 			count += 1
 		end
-		if count >= RivalConfig.MaxRivals or not spawnRival(difficulty) then
+		if count >= RivalConfig.MaxRivals or not spawnRival(missing[1], missing) then
 			break
 		end
+		table.remove(missing, 1)
 	end
 	local t = now()
 	for _, rival in state.rivals do
@@ -1486,6 +1526,7 @@ function RivalService:Start()
 	TycoonService = require(script.Parent.TycoonService)
 
 	TycoonService.SetSlotReclaimer(RivalService.DespawnFarthest)
+	TycoonService.SetSlotAnchor(RivalService.GetEasyGate)
 
 	state.running = true
 	-- The fill / respawn loop. Deferred a moment so the world and the first
@@ -1530,6 +1571,7 @@ end
 function RivalService:Stop()
 	state.running = false
 	TycoonService.SetSlotReclaimer(nil)
+	TycoonService.SetSlotAnchor(nil)
 	for _, connection in state.connections do
 		connection:Disconnect()
 	end

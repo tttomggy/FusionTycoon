@@ -84,6 +84,9 @@ local ToastController = require(script.Parent.ToastController)
 local ResultController = require(script.Parent.ResultController)
 local GoalMarkerController = require(script.Parent.GoalMarkerController)
 local TycoonController = require(script.Parent.TycoonController)
+-- ComeBackController.OnMoment (SetDeliveryHook): a delivered rival steal is a
+-- natural pause for the come-back card. Registered, so this never requires it.
+local deliveryHook: () -> () = function() end
 local HudController = require(script.Parent.HudController)
 
 local HeistController = {}
@@ -798,6 +801,8 @@ local function onHeistEnded(payload: any)
 	if payload.Role == "Thief" then
 		if payload.Outcome == "Delivered" and payload.Rival == true then
 			TycoonController.NoteRivalDelivery()
+			-- A natural pause: the come-back card may follow once the card closes.
+			deliveryHook()
 		end
 		if payload.Outcome == "Delivered" then
 			ResultController.ShowHeistComplete(item, other)
@@ -1311,6 +1316,10 @@ local function pointAtConsole()
 			GoalMarkerController.SetOverride(nil)
 		end
 	end)
+end
+
+function HeistController.SetDeliveryHook(hook: () -> ())
+	deliveryHook = hook
 end
 
 function HeistController.Init()

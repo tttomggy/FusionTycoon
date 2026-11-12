@@ -49,6 +49,14 @@ local autoSuppressed = false -- /selftest: no card pops up by itself while a sec
 local lastCanClaim = false
 local launchedFromNotification = false -- joined from a DailyStreak notification: open without the wait
 local claimSentAt = 0
+-- Called after NotifyOptInController when the card closes after a granted claim
+-- (ComeBackController: a natural pause). Registered, so this never requires them.
+local revealClosedHooks: { () -> () } = {}
+
+-- Registers `callback` for the daily reveal closing (a granted claim seen).
+function DailyController.OnRevealClosed(callback: () -> ())
+	table.insert(revealClosedHooks, callback)
+end
 
 function DailyController.CanClaim(): boolean
 	return TycoonController.HasSynced() and TycoonController.GetDaily().CanClaim
@@ -145,7 +153,12 @@ function DailyController.Init()
 	DailyCard.Init({
 		OnClaim = claim,
 		BaseIncome = ShopController.GetBaseIncome,
-		OnRevealClosed = NotifyOptInController.OnDailyRevealClosed,
+		OnRevealClosed = function()
+			NotifyOptInController.OnDailyRevealClosed()
+			for _, hook in revealClosedHooks do
+				task.spawn(hook)
+			end
+		end,
 	})
 	RemoteEvents.DailyResult.OnClientEvent:Connect(onDailyResult)
 	TycoonController.TycoonChanged:Connect(tryAutoOpen)

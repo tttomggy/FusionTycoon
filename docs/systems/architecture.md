@@ -110,7 +110,9 @@ SfxVolume, SfxMuted, AutoFuse; SettingsConfig), `RequestShopPurchase` (C→S
 `{ Key }`), `ShopPurchased` (S→C), `ShopAnnouncement` (S→all, Overclock),
 `FriendJoined` (S→one client `{ Name, Percent, Friended }`: a Roblox friend joined (or, `Friended`, became a friend mid-session) and the friend boost grew; the count itself is `SyncTycoon.Friends`),
 `ShopAnalytics` (C→S `{ Event, Key? }`, analytics only),
-`NotifyOptInAnalytics` (C→S `{ Event = "Shown" | "Closed" }`, analytics only), `ClaimDaily`
+`NotifyOptInAnalytics` (C→S `{ Event = "Shown" | "Closed" }`, analytics only),
+`ComeBackShown` (C→S `{ Event = "Shown" }`: the come-back card opened; RewardService
+re-checks `RetentionConfig.CanMarkComeBack`, saves the `comeBack` tip, logs it), `ClaimDaily`
 (C→S, no payload) / `DailyResult` (S→C), `ClaimGift` (C→S `{ Index }`) /
 `GiftResult` (S→C), `SelfTest` / `SelfTestReport` (Studio `/selftest`
 only),

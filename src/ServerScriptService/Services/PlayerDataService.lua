@@ -44,6 +44,7 @@ local PlotLayout = require(ReplicatedStorage.Shared.Config.PlotLayout)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
+local RetentionConfig = require(ReplicatedStorage.Shared.Config.RetentionConfig)
 local EventState = require(ReplicatedStorage.Shared.Modules.EventState)
 local GoalSteps = require(ReplicatedStorage.Shared.Modules.GoalSteps)
 local LoopCoach = require(ReplicatedStorage.Shared.Config.LoopCoach)
@@ -142,6 +143,10 @@ export type PlayerData = {
 	Cosmetics: { [string]: boolean },
 	-- Times this profile has loaded (the Starter Pack offer: session 2).
 	Sessions: number,
+	-- Retention analytics (RetentionConfig.OnJoin): the UTC day of the first
+	-- join (0 = not recorded yet, -1 = an old save, unknown) and of the latest.
+	FirstUtcDay: number,
+	LastJoinUtcDay: number,
 	-- The deal slot (DealConfig slot start, UTC) whose "New deal!" card
 	-- already showed: once per deal, across rejoins. 0 = none yet.
 	DealPopupSlot: number,
@@ -230,6 +235,12 @@ export type TycoonSnapshot = {
 	-- Uids of this player's displayed items a thief is carrying right now:
 	-- they earn nothing until back (the client's income skips them too).
 	CarriedUids: { string },
+	-- What the lab would earn over OfflineConfig.MaxSeconds away at today's
+	-- base income (the come-back card's "while you're away" number).
+	OfflineMax: number,
+	-- The save delivered a rival steal (Funnel FirstRivalSteal): the steal arrow
+	-- stops preferring the Easy lab.
+	RivalStealDone: boolean,
 	-- Roblox friends in this server, 0..FriendConfig.MaxFriends (FriendService).
 	Friends: number,
 	-- One-time tips already seen (TipConfig ids), as a dense list.
@@ -281,6 +292,9 @@ type State = {
 	questStatus: { [number]: any },
 	-- Session-only: offline earnings computed on load, until claimed.
 	pendingOffline: { [number]: PendingOffline },
+	-- Session-only: days since the first join when this load is the first of a
+	-- later UTC day (Day2Return / ReturnVisit, logged once in onPlayerAdded).
+	returnDays: { [number]: number? },
 	-- Session-only heist flags HeistService sets (it owns the heist state;
 	-- these are the parts income, sync and other services' guards need):
 	-- each owner's displayed Uids being carried, and who is carrying.
@@ -429,6 +443,8 @@ local DEFAULT_DATA: PlayerData = {
 	StarterPackBought = false,
 	Cosmetics = {},
 	Sessions = 0,
+	FirstUtcDay = 0,
+	LastJoinUtcDay = 0,
 	DealPopupSlot = 0,
 	Weapons = {},
 	PowerUps = {},
@@ -466,6 +482,7 @@ local state: State = {
 	goalProgress = {},
 	questStatus = {},
 	pendingOffline = {},
+	returnDays = {},
 	carriedUids = {},
 	carrying = {},
 	inMinigame = {},
@@ -716,6 +733,13 @@ local function reconcile(raw: any): PlayerData
 	end
 	if typeof(raw.Sessions) == "number" and raw.Sessions >= 0 then
 		data.Sessions = math.floor(raw.Sessions)
+	end
+	local days = data :: any
+	for _, key in { "FirstUtcDay", "LastJoinUtcDay" } do
+		local value = raw[key]
+		if typeof(value) == "number" and value == value and value >= -1 and value < 1e7 then
+			days[key] = math.floor(value)
+		end
 	end
 	data.Tutorial = sanitizeTutorial(
 		raw.Tutorial,
@@ -1081,6 +1105,19 @@ local function loadData(player: Player): boolean
 	profile:Reconcile()
 	local data = reconcile(profile.Data)
 	data.Sessions += 1
+	-- Retention analytics: the first join's UTC day and a return on a later one
+	-- (logged in onPlayerAdded, once the funnel store can see this session).
+	local lastOnline = data.LastOnline
+	local join = RetentionConfig.OnJoin(
+		data.FirstUtcDay,
+		data.LastJoinUtcDay,
+		data.Sessions - 1,
+		RewardConfig.GetUtcDay(os.time()),
+		if typeof(lastOnline) == "number" and lastOnline > 0 then RewardConfig.GetUtcDay(lastOnline) else 0
+	)
+	data.FirstUtcDay = join.First
+	data.LastJoinUtcDay = join.Last
+	state.returnDays[userId] = join.ReturnDays
 	state.sessionCache[userId] = data
 	state.profiles[userId] = profile
 
@@ -2069,6 +2106,31 @@ function PlayerDataService.TakeTutorialFreeFuse(player: Player, fuseStep: number
 	return true
 end
 
+-- Whether an onboarding funnel step was ever logged for `player`
+-- (PlayerData.Funnel, saved; AnalyticsKit marks it). HeistService reads
+-- "FirstRivalSteal": a save's first rival steal gets RivalConfig.FirstSteal.
+-- False while the data is not loaded.
+function PlayerDataService.HasFunnelStep(player: Player, step: string): boolean
+	local data = state.sessionCache[player.UserId]
+	return data ~= nil and data.Funnel[step] == true
+end
+
+-- /selftest: sets or clears a funnel step (returns what it was), to drive a
+-- "first" rival steal on the tester and put their state back.
+function PlayerDataService.SelfTestSetFunnelStep(player: Player, step: string, on: boolean): boolean
+	local data = state.sessionCache[player.UserId]
+	if not data then
+		return false
+	end
+	local was = data.Funnel[step] == true
+	if on then
+		data.Funnel[step] = true
+	else
+		data.Funnel[step] = nil
+	end
+	return was
+end
+
 function PlayerDataService.GetSessions(player: Player): number
 	local data = state.sessionCache[player.UserId]
 	return if data then data.Sessions else 0
@@ -2160,6 +2222,8 @@ function PlayerDataService.GetTycoonSnapshot(player: Player): TycoonSnapshot
 		PendingOffline = if pending then pending.Amount else 0,
 		AwaySeconds = if pending then pending.AwaySeconds else 0,
 		CarriedUids = indexKeys(state.carriedUids[player.UserId] or {}),
+		OfflineMax = OfflineConfig.Compute(PlayerDataService.GetBasePassiveCashPerSecond(player), OfflineConfig.MaxSeconds),
+		RivalStealDone = data ~= nil and data.Funnel.FirstRivalSteal == true,
 		-- Roblox friends in this server (the friend boost; the chip's number).
 		Friends = PlayerDataService.GetFriendCount(player),
 		TipKeys = indexKeys(data and data.Tips or {}),
@@ -2313,6 +2377,8 @@ function PlayerDataService.ResetToNew(player: Player): boolean
 	fresh.Receipts = old.Receipts
 	fresh.Funnel = old.Funnel
 	fresh.Sessions = old.Sessions
+	fresh.FirstUtcDay = old.FirstUtcDay
+	fresh.LastJoinUtcDay = old.LastJoinUtcDay
 	state.sessionCache[userId] = fresh
 	state.pendingOffline[userId] = nil
 	state.lastOfflinePaid[userId] = nil
@@ -2443,6 +2509,14 @@ local function onPlayerAdded(player: Player)
 	RemoteEvents.SyncInventory:FireClient(player, PlayerDataService.GetInventory(player))
 	PlayerDataService.SyncTycoon(player)
 	AnalyticsKit.Funnel(player, "Join")
+	local returnDays = state.returnDays[player.UserId]
+	state.returnDays[player.UserId] = nil
+	if returnDays then
+		-- The first join on a later UTC day than the first one: Day2Return once
+		-- per player ever (funnel, appended), ReturnVisit on each such day.
+		AnalyticsKit.Funnel(player, "Day2Return")
+		AnalyticsKit.Custom(player, "ReturnVisit", returnDays, if returnDays == 1 then "NextDay" else "Later")
+	end
 	dataLoaded:Fire(player)
 end
 

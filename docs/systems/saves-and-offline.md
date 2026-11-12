@@ -31,6 +31,16 @@ Moved out of CLAUDE.md (verbatim). Read this file when a task touches this syste
   write it and `reconcile` ignores an old save's table with no error
   (`PlayerDataService.SelfTestOldGifts`). The visit's state is
   `RewardService`'s (see rewards.md).
+- **`FirstUtcDay` / `LastJoinUtcDay`** (numbers, default 0; retention
+  analytics): on load `RetentionConfig.OnJoin` records the UTC day of the first
+  join (a new save: today; an old save with exactly one earlier session: the
+  UTC day of its `LastOnline`, the ad-test players; older saves: -1, unknown)
+  and of the latest. The first join of each LATER UTC day logs the funnel step
+  `Day2Return` (once ever) and `ReturnVisit` (value = days since the first
+  join). `reconcile` keeps them in [-1, 1e7); `ResetToNew` keeps them.
+- **`OfflineMax`** (snapshot only): what the lab would earn over
+  `OfflineConfig.MaxSeconds` away at the current base income (the come-back
+  card's number; the same `OfflineConfig.Compute` the payout uses).
 - **`SecretPity`** (number, default 0): the Secret pity meter
   (`FusionConfig.SecretPityFull`; failed Mythic fusions fill it, see
   items-and-fusion.md). Saved with the profile (`toDisk` copies it,

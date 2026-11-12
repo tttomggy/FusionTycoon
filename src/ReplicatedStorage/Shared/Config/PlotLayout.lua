@@ -557,6 +557,13 @@ function PlotLayout.GetSlotCFrame(index: number): CFrame
 	return CFrame.new(x, 0, PlotLayout.SLOT_ROW_Z) * CFrame.Angles(0, math.pi, 0)
 end
 
+-- Slot `index`'s gate (the middle of the front wall's gap), world space: the
+-- slot-to-slot distance a player walks (RivalService / TycoonService place labs
+-- by it, so the labs across the street count as the nearest).
+function PlotLayout.GetSlotGatePosition(index: number): Vector3
+	return PlotLayout.GetSlotCFrame(index):PointToWorldSpace(Vector3.new(0, 0, PlotLayout.PLOT_HALF))
+end
+
 --[[ World: ground (the street and its belts are in StreetLayout) ------------------------ ]]
 
 PlotLayout.GROUND_SIZE = v3(900, 1, 600)

@@ -128,6 +128,9 @@ type Carry = {
 	ThiefName: string,
 	VictimName: string,
 	DiedConnection: RBXScriptConnection?,
+	-- A rival carry on the thief's save's first rival steal (no FirstRivalSteal
+	-- funnel mark yet): RivalConfig.FirstSteal's longer tag grace and slower chasers.
+	FirstSteal: boolean,
 }
 
 type State = {
@@ -609,6 +612,15 @@ local function endCarry(thiefUserId: number, outcome: Outcome)
 		-- A rival steal's outcome: Delivered / Tagged (the guard's touch or a
 		-- weapon hit sent it back) / Timeout. Left, Died and Failed are not
 		-- reported: the player or the lab went.
+		if thief and carry.FirstSteal then
+			-- FirstRivalStealDelivered, or FirstRivalStealFailed with the reason
+			-- (RivalConfig.FirstStealFailReason: Tagged / Knocked / Timeout / Died / Left / Failed).
+			if outcome == "Delivered" then
+				AnalyticsKit.Custom(thief, "FirstRivalStealDelivered", nil, carry.RivalOrb and carry.RivalOrb.Difficulty or nil)
+			else
+				AnalyticsKit.Custom(thief, "FirstRivalStealFailed", nil, RivalConfig.FirstStealFailReason(outcome))
+			end
+		end
 		if thief then
 			if outcome == "Delivered" then
 				AnalyticsKit.Funnel(thief, "FirstRivalSteal")
@@ -686,6 +698,16 @@ function HeistService.FailCarriesFor(player: Player, outcome: Outcome)
 end
 
 -- `player` is carrying a stolen item right now.
+-- /selftest: whether `player`'s open carry is a first rival steal, and its tag
+-- grace in seconds (nil without a carry).
+function HeistService.SelfTestCarryRules(player: Player): (boolean?, number?)
+	local carry = state.carries[player.UserId]
+	if not carry then
+		return nil, nil
+	end
+	return carry.FirstSteal, if carry.RivalId then RivalConfig.TagGraceFor(carry.FirstSteal) else HeistConfig.TagGraceSeconds
+end
+
 function HeistService.IsCarrying(player: Player): boolean
 	return state.carries[player.UserId] ~= nil
 end
@@ -742,6 +764,7 @@ startCarry = function(
 		ThiefName = thief.DisplayName,
 		VictimName = victim.DisplayName,
 		DiedConnection = nil,
+		FirstSteal = false, -- player vs player: never
 	}
 	state.carries[thief.UserId] = carry
 	state.carriedItems[uid] = thief.UserId
@@ -817,7 +840,10 @@ end
 -- chase); nothing is saved or changed until delivery.
 local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: number, humanoid: Humanoid): boolean
 	local rival = RivalService.GetRival(rivalId)
-	local orb = RivalService.BeginCarry(rivalId, pedestalIndex, thief)
+	-- The save's first rival steal: RivalConfig.FirstSteal (no guard tag for its
+	-- grace, the chasers below the carrier's speed). Later steals are unchanged.
+	local firstSteal = not PlayerDataService.HasFunnelStep(thief, "FirstRivalSteal")
+	local orb = RivalService.BeginCarry(rivalId, pedestalIndex, thief, firstSteal)
 	local pedestal = RivalService.GetPedestal(rivalId, pedestalIndex)
 	if not rival or not orb or not pedestal then
 		return false
@@ -844,6 +870,7 @@ local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: nu
 		ThiefName = thief.DisplayName,
 		VictimName = rival.Name,
 		DiedConnection = nil,
+		FirstSteal = firstSteal,
 	}
 	state.carries[thief.UserId] = carry
 	state.carriedItems[key] = thief.UserId
@@ -862,6 +889,10 @@ local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: nu
 
 	syncBoth(thief, nil, false)
 	AnalyticsKit.Custom(thief, "StealStarted", nil, info.Tier)
+	if firstSteal then
+		-- The first-5-minutes funnel: started vs delivered vs failed (with why).
+		AnalyticsKit.Custom(thief, "FirstRivalStealStarted", RivalConfig.GetTier(rival.Difficulty).Rank, rival.Difficulty)
+	end
 	RemoteEvents.HeistStarted:FireClient(thief, {
 		Role = "Thief",
 		Item = info,
@@ -869,7 +900,7 @@ local function startRivalCarry(thief: Player, rivalId: number, pedestalIndex: nu
 		OtherUserId = 0,
 		Rival = true,
 		EndsAt = carry.EndsAt,
-		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + HeistConfig.TagGraceSeconds,
+		GraceEndsAt = carry.EndsAt - HeistConfig.CarrySeconds + RivalConfig.TagGraceFor(firstSteal),
 	})
 	return true
 end
@@ -1088,7 +1119,8 @@ local function stepCarries()
 			end
 			local rivalThiefRoot = getRoot(thief)
 			if rivalThiefRoot then
-				local graceOver = os.clock() - carry.StartedAt >= HeistConfig.TagGraceSeconds
+				-- A save's first rival steal has the longer grace (RivalConfig.FirstSteal).
+				local graceOver = os.clock() - carry.StartedAt >= RivalConfig.TagGraceFor(carry.FirstSteal)
 				-- ANY guard's touch sends the orb back.
 				local tagged = false
 				if graceOver then

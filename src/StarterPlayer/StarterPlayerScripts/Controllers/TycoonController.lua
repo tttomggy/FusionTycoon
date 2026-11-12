@@ -35,6 +35,9 @@ local indexFound: { [string]: boolean } = {}
 local indexMultiplier = 1
 local friendCount = 0 -- Roblox friends in this server (the server's count, the snapshot's Friends)
 local pendingOffline = 0
+-- The retention fix's snapshot fields: OfflineMax (the come-back card's "while
+-- you're away" number) and RivalStealDone (the save delivered a rival steal).
+local retention = { OfflineMax = 0, RivalStealDone = false }
 -- Uids of displayed items a thief is carrying: they earn nothing meanwhile.
 local carriedUids: { [string]: boolean } = {}
 -- One-time tips/cards already seen (saved; TipConfig ids).
@@ -350,6 +353,19 @@ end
 
 function TycoonController.GetRivalDeliveries(): number
 	return rivalDeliveries
+end
+
+-- Whether this save ever delivered a rival steal (the server's FirstRivalSteal
+-- funnel mark, or one this session): until then the steal arrow prefers the
+-- Easy lab (RivalConfig.BetterTargetLab).
+function TycoonController.HasDeliveredRivalSteal(): boolean
+	return retention.RivalStealDone or rivalDeliveries > 0
+end
+
+-- Cash the lab earns over OfflineConfig.MaxSeconds away at today's base income
+-- (the server's number, snapshot OfflineMax).
+function TycoonController.GetOfflineMax(): number
+	return retention.OfflineMax
 end
 
 function TycoonController.HasSeenTip(id: string): boolean
@@ -751,6 +767,8 @@ local function onSyncTycoon(snapshot: any)
 	musicVolume = if pendingMusicVolume ~= nil then pendingMusicVolume else settings.MusicVolume
 	musicOn = if pendingMusicOn ~= nil then pendingMusicOn else settings.MusicOn
 	pendingOffline = if typeof(snapshot.PendingOffline) == "number" then snapshot.PendingOffline else 0
+	retention.OfflineMax = if typeof(snapshot.OfflineMax) == "number" then snapshot.OfflineMax else 0
+	retention.RivalStealDone = snapshot.RivalStealDone == true
 	awaySeconds = if typeof(snapshot.AwaySeconds) == "number" then snapshot.AwaySeconds else 0
 	local rawShop = snapshot.Shop
 	if typeof(rawShop) == "table" then

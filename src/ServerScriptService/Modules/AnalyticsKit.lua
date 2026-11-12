@@ -22,9 +22,10 @@
 
 	Funnel steps (in order): Join, ClaimLab, FirstUpgrade, FirstPull,
 	FirstDisplay, FirstFuse, FirstRivalSteal, FirstMultiplier, FirstEvent,
-	FirstRebirth, FirstSteal. (FirstRivalSteal went in after FirstFuse with the
-	rival labs: every later step moved up one. Pre-launch, so fine; a saved
-	Funnel set is keyed by NAME and unaffected.)
+	FirstRebirth, FirstSteal, then APPENDED (never reordered: the live funnel's
+	step numbers must not move) FirstOrbRush, Day2Return. (FirstRivalSteal went
+	in after FirstFuse with the rival labs: every later step moved up one.
+	Pre-launch, so fine; a saved Funnel set is keyed by NAME and unaffected.)
 
 	Not a service: services and PlayerDataService require it directly.
 ]]
@@ -50,6 +51,7 @@ AnalyticsKit.FunnelSteps = {
 	"FirstRebirth",
 	"FirstSteal",
 	"FirstOrbRush", -- first ORB RUSH round played (MinigameService); APPENDED, so the live funnel's step numbers do not move
+	"Day2Return", -- the first join on a LATER UTC day than the first join (PlayerDataService, RetentionConfig.OnJoin); APPENDED
 }
 
 export type FunnelStore = {

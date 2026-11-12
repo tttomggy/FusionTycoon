@@ -30,6 +30,7 @@ TipConfig.Ids = {
 	tipRival = true, -- ~20 s after "You're ready!": arrows to the nearest rival lab's best pedestal (steal from it)
 	earnBoth = true, -- the first time an orb sits on a pedestal AND a generator was upgraded: "Machines AND orbs both earn cash!"
 	rivalStealDone = true, -- the first delivered rival steal: the steal mission box (MissionBanner) never shows again
+	comeBack = true, -- the "come back tomorrow" card (RetentionConfig.ComeBack): once per account, first session; set by the server on ComeBackShown
 } :: { [string]: boolean }
 
 -- The earnBoth announce and the HUD breakdown's split line (LoopCoachController, HudController).

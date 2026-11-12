@@ -32,6 +32,7 @@ local RunService = game:GetService("RunService")
 local DailyConfig = require(ReplicatedStorage.Shared.Config.DailyConfig)
 local GiftConfig = require(ReplicatedStorage.Shared.Config.GiftConfig)
 local RewardConfig = require(ReplicatedStorage.Shared.Config.RewardConfig)
+local RetentionConfig = require(ReplicatedStorage.Shared.Config.RetentionConfig)
 local ShopConfig = require(ReplicatedStorage.Shared.Config.ShopConfig)
 local NumberFormat = require(ReplicatedStorage.Shared.Modules.NumberFormat)
 local RemoteEvents = require(ReplicatedStorage.Shared.Network.RemoteEvents)
@@ -196,9 +197,16 @@ local function onPlayTick(dt: number)
 	local elapsed = state.tickElapsed
 	state.tickElapsed = 0
 	for _, player in Players:GetPlayers() do
-		if PlayerDataService.GetData(player) then
+		local data = PlayerDataService.GetData(player)
+		if data then
 			local gifts = giftState(player)
+			local before = gifts.PlaySeconds
 			gifts.PlaySeconds += elapsed
+			-- The first minutes, measured: SessionMinutes at 2 / 5 / 10 minutes of
+			-- this visit (value = minutes; field = the player's first session or not).
+			for _, mark in RetentionConfig.CrossedMarks(before, gifts.PlaySeconds) do
+				AnalyticsKit.Custom(player, "SessionMinutes", mark // 60, if data.Sessions <= 1 then "FirstSession" else "Returning")
+			end
 		end
 	end
 end
@@ -310,9 +318,37 @@ local function onNotifyOptInAnalytics(player: Player, payload: unknown)
 	end
 end
 
+-- ComeBackShown { Event = "Shown" } (C→S): the come-back card opened
+-- (ComeBackController). Re-checked (RetentionConfig.CanMarkComeBack: first
+-- session, not seen, tutorial over, MinSeconds into the visit), then the
+-- comeBack tip is saved (never shown again on this account) and logged.
+-- Returns whether it was accepted (/selftest).
+function RewardService.MarkComeBackShown(player: Player): boolean
+	local data = PlayerDataService.GetData(player)
+	if not data then
+		return false
+	end
+	local tipId = RetentionConfig.ComeBack.TipId
+	local playSeconds = giftState(player).PlaySeconds
+	if not RetentionConfig.CanMarkComeBack(data.Tips[tipId] == true, data.Sessions, data.Tutorial.Done, playSeconds) then
+		return false
+	end
+	PlayerDataService.MarkTipSeen(player, tipId)
+	AnalyticsKit.Custom(player, "ComeBackShown", math.floor(playSeconds / 60), if data.Daily.LastClaimUtcDay >= 0 then "DailyClaimed" else "NoDaily")
+	return true
+end
+
+local function onComeBackShown(player: Player, payload: unknown)
+	if typeof(payload) ~= "table" or (payload :: any).Event ~= "Shown" or not RemoteGuard.Allow(player, "ComeBack", 0.2, 1) then
+		return
+	end
+	RewardService.MarkComeBackShown(player)
+end
+
 --[[ Lifecycle ------------------------------------------------------------ ]]
 
 function RewardService:Init()
+	table.insert(state.connections, RemoteEvents.ComeBackShown.OnServerEvent:Connect(onComeBackShown))
 	table.insert(state.connections, RemoteEvents.NotifyOptInAnalytics.OnServerEvent:Connect(onNotifyOptInAnalytics))
 	table.insert(state.connections, RemoteEvents.ClaimDaily.OnServerEvent:Connect(onClaimDaily))
 	table.insert(state.connections, RemoteEvents.ClaimGift.OnServerEvent:Connect(onClaimGift))

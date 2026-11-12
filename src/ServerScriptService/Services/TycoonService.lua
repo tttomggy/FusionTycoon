@@ -134,6 +134,8 @@ local occupiedSlots: { [number]: boolean } = {}
 -- RivalService's "free a slot": despawns the rival lab farthest from every
 -- player and returns true. Registered, never required (it requires us).
 local slotReclaimer: (() -> boolean)? = nil
+-- RivalService: where a joining player's plot should go near (the Easy lab's gate).
+local slotAnchor: (() -> Vector3?)? = nil
 local slotByUserId: { [number]: number } = {}
 local plotByUserId: { [number]: Model } = {}
 local originByUserId: { [number]: CFrame } = {}
@@ -343,9 +345,20 @@ local function claimSlotIndex(): number?
 	return nil
 end
 
--- A slot for a real player: the first free one, else the slot of the rival
--- lab RivalService gives up. A rival never costs a player their plot.
+-- A slot for a real player: the free one nearest the slot anchor (RivalService:
+-- the Easy lab's gate, so a new player's first rival steal is a short run; the
+-- lowest free slot without one), else the slot of the rival lab RivalService
+-- gives up. A rival never costs a player their plot.
 local function takeSlot(): number?
+	local anchor = if slotAnchor then slotAnchor() else nil
+	if anchor then
+		local sorted = RivalConfig.SortSlotsByDistance(TycoonService.GetFreeSlots(), { anchor }, PlotLayout.GetSlotGatePosition)
+		local nearest = sorted[1]
+		if nearest and not occupiedSlots[nearest] then
+			occupiedSlots[nearest] = true
+			return nearest
+		end
+	end
 	local index = claimSlotIndex()
 	if index then
 		return index
@@ -1717,6 +1730,12 @@ end
 -- RivalService registers how to free a slot for a real player.
 function TycoonService.SetSlotReclaimer(reclaimer: (() -> boolean)?)
 	slotReclaimer = reclaimer
+end
+
+-- RivalService registers the point a joining player's plot goes nearest to
+-- (the Easy lab's gate; nil: the lowest free slot, as before).
+function TycoonService.SetSlotAnchor(anchor: (() -> Vector3?)?)
+	slotAnchor = anchor
 end
 
 -- Slots nobody (player or rival) holds, lowest first.

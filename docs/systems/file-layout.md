@@ -19,6 +19,9 @@ src/ReplicatedStorage/Shared/
                  RivalConfig — rival (NPC) labs: the four difficulties' table
                  (orb weights, guards, speed, leash, stun, Rebirth gate, hourly
                  pool, respawn), rotation, guard constants, the escape model,
+                 the first rival steal's rules (FirstSteal) and lab placement,
+                 RetentionConfig — the come-back card and the first-minutes
+                 analytics rules (session marks, join days),
                  MinigameConfig — ORB RUSH: schedule, orbs, prizes, bots, the
                  headless round model; ArenaLayout — the ORB RUSH arena,
                  GoalConfig — the ordered onboarding goals,
@@ -62,6 +65,8 @@ src/ServerScriptService/
                            service; required directly)
     Modules/RemoteGuard.lua    remote arg checks (`Int`: finite whole numbers
                            in range) and the per-player rate limit (`Allow`)
+    Modules/RetentionSelfTest.lua  /selftest section 18 (the retention fix;
+                           required inside DebugService's run)
     Services/              one ModuleScript per service (GoalService pays
                            and advances goals from PlayerDataService.OnSync;
                            WorldService builds ground, street, Event Boards
@@ -99,7 +104,9 @@ src/StarterPlayer/StarterPlayerScripts/
                   Boards), AdminController (admin panel + broadcasts),
                   ShopController, DailyController (when the daily card
                   opens, ClaimDaily), NotifyOptInController (the Roblox
-                  notification opt-in ask after the daily reveal)…
+                  notification opt-in ask after the daily reveal),
+                  ComeBackController (when the "come back tomorrow" card
+                  opens)…
     Effects/      RevealEffects, WeaponPose, WeaponFx (weapon feel)
     UI/           WeaponViewport (turning weapon model in a ViewportFrame),
                   UIKit (Panel/Button/Pill/Badge/TierOrb/ProgressBar/
@@ -112,7 +119,8 @@ src/StarterPlayer/StarterPlayerScripts/
                   deal side cards), DealParts (part tiles + YOU GET list),
                   EffectsTray (active effects as cartoon badges + tooltips, with the always-on Friends chip; bottom-right row on desktop and tablet, top-right on a phone),
                   PurchaseCelebration (the reveal after a purchase),
-                  DailyCard (the daily reward card), GiftsPanel (the GIFTS
+                  DailyCard (the daily reward card), ComeBackCard (the
+                  "come back tomorrow" card), GiftsPanel (the GIFTS
                   button's panel),
                   HowToHeistPanel + HeistScenes (the 3D heist clips),
                   EventInfoCard (what the HUD event chip opens),
