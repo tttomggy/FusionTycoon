@@ -245,7 +245,12 @@ function ComeBackCard.GetShown(): { Main: { string }, Button: string }?
 	for _, row in rows do
 		table.insert(mains, row.Main.Text)
 	end
-	return { Main = mains, Button = actionButton.Text }
+	-- A UIKit.Button's text is on Content.TextColumn.Label, not on the button.
+	local content = actionButton:FindFirstChild("Content")
+	local column = content and content:FindFirstChild("TextColumn")
+	local label = column and column:FindFirstChild("Label")
+	local buttonText = if label and label:IsA("TextLabel") then label.Text else actionButton.Text
+	return { Main = mains, Button = buttonText }
 end
 
 -- /selftest: every row label's text fits its box (TextFits) while open.
